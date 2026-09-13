@@ -75,7 +75,7 @@ aiscan agent --server-url http://change-me@server.example:8080 \
 
 > 同一个 Hub 可以管理不同节点、不同工具集。工具名称、用途和调用方式统一进入注册表，Agent 与使用者都能按需发现。
 
-原生 Tool 的最小扩展模型也很直接：实现 `core/tool.Tool`，再显式注册到 `CommandRegistry`。只有在需要扫描引擎、IOA Client、Provider 或工作目录等共享运行时依赖时，才需要使用 Factory。
+原生 Tool 的最小扩展模型也很直接：实现 `core/tool.Tool`，再由 profile 显式注册到自己的 `tool.Executor`。需要扫描引擎、IOA Client、Provider 或工作目录等依赖时，直接通过构造参数传入。
 
 ```go
 type Tool struct{}
@@ -83,7 +83,7 @@ type Tool struct{}
 func (Tool) Name() string        { return "echo" }
 func (Tool) Description() string { return "Return text unchanged." }
 
-func Register(reg *commands.CommandRegistry) {
+func Register(reg tool.Executor) {
     reg.RegisterTool(Tool{})
 }
 ```

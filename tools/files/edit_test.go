@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	corehooks "github.com/chainreactors/aiscan/core/hooks"
+	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 )
 
 func TestEditsUseOriginalAndRejectAmbiguousChanges(t *testing.T) {
@@ -39,7 +41,8 @@ func TestEditsUseOriginalAndRejectAmbiguousChanges(t *testing.T) {
 }
 
 func TestEditBoundPreservesFileAndReportsOneOperation(t *testing.T) {
-	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 8})
+	registry := corehooks.New()
+	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 8}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +54,17 @@ func TestEditBoundPreservesFileAndReportsOneOperation(t *testing.T) {
 	if err := f.Write(t.Context(), "note", []byte("aa")); err != nil {
 		t.Fatal(err)
 	}
-	var observed []observation
-	sub, err := f.Subscribe(func(ctx context.Context, op filepb.AccessOp, path string, data []byte, size int64, err error, edits uint32) {
-		observed = append(observed, observation{op: op, data: append([]byte(nil), data...), err: err, edits: edits})
+	var observed []toolhooks.FileEvent
+	sub := toolhooks.FileAccessObserved.On(registry, "test", func(_ context.Context, event toolhooks.FileEvent) (struct{}, error) {
+		event.Data = append([]byte(nil), event.Data...)
+		observed = append(observed, event)
+		return struct{}{}, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer sub.Close(context.Background())
 	if err := f.Edit(t.Context(), "note", []EditPatch{{OldText: "a", NewText: strings.Repeat("x", 8), ReplaceAll: true}}); err == nil {
 		t.Fatal("accepted oversized replacement")
 	}
-	if len(observed) != 1 || observed[0].op != filepb.AccessOp_ACCESS_OP_EDIT || observed[0].err == nil || observed[0].edits != 1 {
+	if len(observed) != 1 || observed[0].Op != filepb.AccessOp_ACCESS_OP_EDIT || observed[0].Err == nil || observed[0].Edits != 1 {
 		t.Fatalf("failed edit observation: %+v", observed)
 	}
 	data, err := os.ReadFile(f.config.Directory + string(os.PathSeparator) + "note")
@@ -73,10 +75,10 @@ func TestEditBoundPreservesFileAndReportsOneOperation(t *testing.T) {
 	if err := f.Edit(t.Context(), "note", []EditPatch{{OldText: "aa", NewText: "done"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(observed) != 1 || observed[0].op != filepb.AccessOp_ACCESS_OP_EDIT || observed[0].err != nil || string(observed[0].data) != "done" {
+	if len(observed) != 1 || observed[0].Op != filepb.AccessOp_ACCESS_OP_EDIT || observed[0].Err != nil || string(observed[0].Data) != "done" {
 		t.Fatalf("successful edit observation: %+v", observed)
 	}
-	ro, _ := New(Config{Directory: f.config.Directory, ReadOnly: true})
+	ro, _ := New(Config{Directory: f.config.Directory, ReadOnly: true}, nil)
 	roSet := filesystemSet(t, ro)
 	if err := roSet.Load(t.Context()); err != nil {
 		t.Fatal(err)

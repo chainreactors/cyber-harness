@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,11 +24,16 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	"github.com/chainreactors/aiscan/core/tool"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
+	toolset "github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -37,6 +43,18 @@ import (
 type webSocketEnvelopeStream struct {
 	conn *websocket.Conn
 	json bool
+}
+
+func attachToolProgress(progressBus *eventbus.Bus[*toolpb.Progress], send func(string, protobuf.Message)) *eventbus.Subscription[*toolpb.Progress] {
+	if progressBus == nil {
+		return nil
+	}
+	unsubscribe := progressBus.Subscribe(func(progress *toolpb.Progress) {
+		if progress != nil && progress.Text != "" {
+			send(progress.CallId, &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Progress{Progress: protobuf.CloneOf(progress)}})
+		}
+	})
+	return unsubscribe
 }
 
 const (
@@ -191,16 +209,15 @@ func nextEnvelopeID(prefix string) string {
 }
 
 func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telemetry.Logger, stream aop.EnvelopeStream) error {
-	if cc.Registry == nil {
-		return fmt.Errorf("command registry is nil")
-	}
-	// Every connection gets one event endpoint. Tool-only callers may provide
-	// their own event bus; a missing endpoint is backed by a private bus so
-	// successful tool results never need a second direct-delivery path.
 	if cc.Agent == nil {
-		cc.Agent = newEventBusEndpoint(nil)
+		return fmt.Errorf("agent event endpoint is required")
 	}
-	hello, err := BuildHello(cc.Name, cc.Registry, cc.NodeID, cc.Runtime)
+	executor := connectionExecutor(cc)
+	if executor == nil {
+		return fmt.Errorf("tool executor is nil")
+	}
+	cc.Executor = executor
+	hello, err := BuildHello(cc.Name, cc.Executor, cc.NodeID, cc.Runtime)
 	if err != nil {
 		return err
 	}
@@ -208,6 +225,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		hello.Capabilities = append([]string(nil), cc.Capabilities...)
 	} else if cc.Chat == nil {
 		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
+	}
+	if cc.RegisterResourceNamespaces != nil && !slices.Contains(hello.Capabilities, "traffic") {
+		hello.Capabilities = append(hello.Capabilities, "traffic")
 	}
 	helloEnvelope, err := aop.Wrap(nextEnvelopeID("hello"), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
 	if err != nil {
@@ -297,42 +317,41 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	sealed := make(map[string]time.Time)
 
 	stats := NewAgentStatsTracker()
-	if cc.Agent != nil {
-		unsubscribe := cc.Agent.Subscribe(func(event *aop.Event) {
-			if next, changed := stats.Observe(event); changed {
-				send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
+	unsubscribe := cc.Agent.Subscribe(func(event *aop.Event) {
+		if next, changed := stats.Observe(event); changed {
+			send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
+		}
+		replyTo := ""
+		isArtifact := false
+		if event.GetToolResult() != nil {
+			replyTo = event.GetToolResult().GetCallId()
+		} else if extension := event.GetExtension(); extension != nil {
+			artifact := new(toolpb.Artifact)
+			isArtifact = extension.MessageIs(artifact)
+			ref := new(operationpb.Ref)
+			if found, err := aop.FindTypedExtension(event, ref); err == nil && found {
+				replyTo = ref.GetCallId()
 			}
-			replyTo := ""
-			isArtifact := false
-			if event.GetToolResult() != nil {
-				replyTo = event.GetToolResult().GetCallId()
-			} else if extension := event.GetExtension(); extension != nil {
-				artifact := new(toolpb.Artifact)
-				if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
-					replyTo = artifact.CallId
-					isArtifact = true
-				}
-			}
-			// A streaming tool (katana) keeps emitting artifacts from background
-			// workers after its terminal has been sent, and keeps crawling after its
-			// call was canceled. Each such trailing artifact earns an "after terminal
-			// barrier" rejection on the control plane; at scale that floods a server
-			// core and the logs. Drop them at the source once the call is sealed.
-			// Only ids this connection sealed are dropped: artifacts from calls it
-			// never dispatched (the node's own agent loop, standalone scans) carry
-			// call ids it has never seen and must still reach the hub.
-			if isArtifact && replyTo != "" && callIsSealed(&operationsMu, sealed, replyTo) {
-				return
-			}
-			send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
-		})
-		defer unsubscribe()
+		}
+		// A streaming tool (katana) keeps emitting artifacts from background
+		// workers after its terminal has been sent, and keeps crawling after its
+		// call was canceled. Each such trailing artifact earns an "after terminal
+		// barrier" rejection on the control plane; at scale that floods a server
+		// core and the logs. Drop them at the source once the call is sealed.
+		// Only ids this connection sealed are dropped: artifacts from calls it
+		// never dispatched (the node's own agent loop, standalone scans) carry
+		// call ids it has never seen and must still reach the hub.
+		if isArtifact && replyTo != "" && callIsSealed(&operationsMu, sealed, replyTo) {
+			return
+		}
+		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
+	})
+	if unsubscribe == nil {
+		return fmt.Errorf("agent event subscription is required")
 	}
+	defer unsubscribe.Cancel()
 	if detach := attachToolProgress(cc.Progress, send); detach != nil {
-		defer detach()
-	}
-	if detach := attachFileAccess(cc.FileAudit, send); detach != nil {
-		defer detach()
+		defer detach.Close(context.Background())
 	}
 	// The catalog is the first post-handshake message the hub treats as a
 	// readiness signal. Attach event and progress subscribers before publishing
@@ -366,15 +385,17 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	var router *terminal.Router
 	if cc.PTYRouter != nil {
 		router, err = cc.PTYRouter()
-	} else {
-		router = NewPTYRouter(cc.Registry)
+	} else if cc.Bash != nil {
+		router = NewPTYRouter(cc.Bash)
 	}
 	if err != nil {
 		return err
 	}
-	defer router.Close()
-	if cc.PTYRouter == nil {
-		if manager := RegistryPTYManager(cc.Registry); manager != nil {
+	if router != nil {
+		defer router.Close()
+	}
+	if cc.PTYRouter == nil && cc.Bash != nil {
+		if manager := RegistryPTYManager(cc.Bash); manager != nil {
 			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(message *ptypb.ProtocolMessage) {
 				send("", message)
 			})
@@ -391,10 +412,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		case <-connectionCtx.Done():
 		}
 	}
-	namespaceMux, err := newAgentConnectionNamespaceMux(cc, router, send, sendEnvelope, &operationsMu, operations, sealed)
+	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, router, send, sendEnvelope, &operationsMu, operations, sealed)
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
+	defer func() {
+		cancelConnection()
+		_ = namespaceMux.Close(context.Background())
+	}()
 	// The existing connection owns IO and cancellation. Register the same
 	// business handlers as embedded Host without another connection wrapper.
 	reply := func(envelope *aop.Envelope) error {
@@ -411,7 +436,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			}
 			return err
 		}
-		handled, err := namespaceMux.Dispatch(connectionCtx, envelope, reply)
+		handled, err := namespaceMux.Dispatch(envelope, reply)
 		if err != nil {
 			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
 			continue
@@ -430,6 +455,7 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 }
 
 func newAgentConnectionNamespaceMux(
+	connectionCtx context.Context,
 	cc connectionConfig,
 	router *terminal.Router,
 	send func(string, protobuf.Message),
@@ -438,8 +464,14 @@ func newAgentConnectionNamespaceMux(
 	operations map[string]context.CancelFunc,
 	sealed map[string]time.Time,
 ) (*aop.NamespaceMux, error) {
-	mux := aop.NewNamespaceMux()
-	if err := mux.Register(&aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	mux := aop.NewNamespaceMux(connectionCtx)
+	ok := false
+	defer func() {
+		if !ok {
+			_ = mux.Close(context.Background())
+		}
+	}()
+	if err := mux.Register("agent-connection", &aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*aop.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected core namespace message %T", message)
@@ -448,7 +480,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		if cc.Control != nil {
 			return cc.Control.HandleCommandNamespace(ctx, envelope, message, func(response *aop.Envelope) error {
 				sendEnvelope(response)
@@ -460,7 +492,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*toolpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected tool namespace message %T", message)
@@ -470,17 +502,17 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*filepb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected file namespace message %T", message)
 		}
-		handleAgentFileMessage(cc, envelope, value, send)
+		handleAgentFileMessage(ctx, cc, envelope, value, send)
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*execpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected exec namespace message %T", message)
@@ -490,7 +522,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*types.ReloadProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected reload namespace message %T", message)
@@ -500,7 +532,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-connection", &ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*ptypb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected PTY namespace message %T", message)
@@ -510,9 +542,12 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := registerExtraNamespaces(mux, cc.ExtraNamespaces); err != nil {
-		return nil, err
+	if cc.RegisterResourceNamespaces != nil {
+		if err := cc.RegisterResourceNamespaces(mux); err != nil {
+			return nil, err
+		}
 	}
+	ok = true
 	return mux, nil
 }
 
@@ -520,7 +555,7 @@ func newAgentConnectionNamespaceMux(
 // payload, then calls the same session handler registered for stdio/inline.
 func handleAgentCoreMessage(
 	ctx context.Context,
-	control *runtimepkg.AgentRuntime,
+	control *sessionext.Manager,
 	envelope *aop.Envelope,
 	value *aop.ProtocolMessage,
 	send func(string, protobuf.Message),
@@ -591,7 +626,14 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 			}
 		}()
 		defer finishOperation(operationsMu, operations, operationID, taskCancel)
-		event, err := runtimepkg.ExecuteToolRequest(taskCtx, operationID, request, cc.Registry, cc.Progress)
+		taskCtx = operation.ContextWithInvocation(taskCtx, operation.Invocation{Emitter: cc.Name})
+		executor := connectionExecutor(cc)
+		if executor == nil {
+			seal()
+			fail("tool executor is unavailable")
+			return
+		}
+		event, err := toolset.ExecuteToolRequest(taskCtx, operationID, request, executor, cc.Progress)
 		if err != nil {
 			seal()
 			fail(err.Error())
@@ -600,31 +642,46 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 		// The endpoint is the single event source for the connection. Its
 		// subscriber forwards the terminal to the wire; do not send a second copy.
 		seal()
-		if cc.Agent == nil {
-			fail("agent event endpoint is unavailable")
-			return
-		}
 		cc.Agent.EmitEvent(event)
 	}()
 }
 
-func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *filepb.ProtocolMessage, send func(string, protobuf.Message)) {
+func connectionExecutor(cc connectionConfig) tool.Executor {
+	if cc.Executor != nil {
+		return cc.Executor
+	}
+	return tool.EmptyExecutor()
+}
+
+func handleAgentFileMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *filepb.ProtocolMessage, send func(string, protobuf.Message)) {
 	replyTo := envelope.GetId()
 	fail := func(message string) { send(replyTo, protocolFailure("OPERATION_FAILED", message)) }
 	switch payload := value.Message.(type) {
 	case *filepb.ProtocolMessage_ReadRequest:
+		if !cc.RunnerFileRPC {
+			fail("file read is unavailable")
+			return
+		}
 		go func() {
 			base := workingDir(cc.Runtime)
+			accessCtx, finish := operation.Begin(operation.ContextWithInvocation(ctx, operation.Invocation{CallID: replyTo, WorkDir: base}), "file", "read")
 			value := fileRead(payload.ReadRequest, base)
+			observeControlAccess(cc.Hooks, accessCtx, filepb.AccessOp_ACCESS_OP_READ, base, payload.ReadRequest.GetPath(), &value)
 			sendFileResult(replyTo, value, send)
-			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_READ, base, payload.ReadRequest.GetPath(), value)
+			finish(value.err)
 		}()
 	case *filepb.ProtocolMessage_WriteRequest:
+		if !cc.RunnerFileRPC {
+			fail("file write is unavailable")
+			return
+		}
 		go func() {
 			base := workingDir(cc.Runtime)
+			accessCtx, finish := operation.Begin(operation.ContextWithInvocation(ctx, operation.Invocation{CallID: replyTo, WorkDir: base}), "file", "write")
 			value := fileWrite(payload.WriteRequest, base)
+			observeControlAccess(cc.Hooks, accessCtx, filepb.AccessOp_ACCESS_OP_WRITE, base, payload.WriteRequest.GetPath(), &value)
 			sendFileResult(replyTo, value, send)
-			auditControlAccess(cc.FileAudit, filepb.AccessOp_ACCESS_OP_WRITE, base, payload.WriteRequest.GetPath(), value)
+			finish(value.err)
 		}()
 	case *filepb.ProtocolMessage_ListRequest:
 		if !cc.RunnerFileRPC {
@@ -638,9 +695,6 @@ func handleAgentFileMessage(cc connectionConfig, envelope *aop.Envelope, value *
 			return
 		}
 		go sendFileResult(replyTo, fileMkdir(payload.MkdirRequest, workingDir(cc.Runtime)), send)
-	case *filepb.ProtocolMessage_Configure:
-		cc.FileAudit.Configure(payload.Configure.GetWatch())
-		send(replyTo, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_State{State: cc.FileAudit.State()}})
 	case *filepb.ProtocolMessage_UploadRequest:
 		go func() {
 			if cc.Chat == nil {

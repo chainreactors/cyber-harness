@@ -6,23 +6,23 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	"github.com/chainreactors/aiscan/core/tool"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 // BuildHello builds the AOP core agent registration message.
-func BuildHello(name string, reg *commands.CommandRegistry, nodeID string, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
+func BuildHello(name string, executor tool.Executor, nodeID string, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return nil, fmt.Errorf("node_id is required")
 	}
 	if runtimeInfo == nil || runtimeInfo.Os == "" {
-		runtimeInfo = runtimepkg.DefaultRuntimeInfo()
+		runtimeInfo = sessionext.DefaultRuntimeInfo()
 	}
 	hello := &aop.AgentHello{
 		NodeId: nodeID, Name: name,
 		Capabilities: []string{"repl", "pty", "tmux", "ioa", "file", "exec", "sco"},
-		Runtime:      runtimeInfo, Tools: reg.ToolDefinitions(),
+		Runtime:      runtimeInfo, Tools: executor.ToolDefinitions(),
 	}
 	return hello, nil
 }

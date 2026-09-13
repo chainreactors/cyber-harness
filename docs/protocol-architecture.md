@@ -1,6 +1,6 @@
 # AIScan 协议与传输架构
 
-本文定义 AIScan 的目标协议职责，以及当前迁移边界。ConnectRPC 承担产品管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
+本文定义 AIScan 的协议职责。ConnectRPC 承担产品管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
 
 ## 1. 唯一真相
 
@@ -135,8 +135,8 @@ AOP 应用面只额外暴露一个双向流服务：
 
 - Session 和 Scan 以 protobuf 为存储真相；
 - AOP 历史只存 `aop.Event` ProtoJSON；
-- CLI `-f` 将 agent、scan 和 scanner-native artifact 统一写入同一个 append-only `aop.Event` ProtoJSONL；
-- `-r`、`/resume` 和 `-F` 直接读取该事件流，不保留 checkpoint/snapshot 文件、Record/Timeline 双写或 replay/fallback 管线。
+- CLI `-o/--output` 通过 `eventoutput` Extension 将 agent、scan、观测和 scanner-native artifact 写入一个新建的 `aop.Event` ProtoJSONL；
+- `-r`、`/resume` 和 `-F` 只读取事件流，不修改恢复源，也不隐式开启输出；系统不保留 checkpoint/snapshot 文件、Record/Timeline 双写或 replay/fallback 管线。
 
 历史读取是纯查询，不派发 Agent frame、不收敛 operation，也不复制 terminal event。
 
@@ -179,7 +179,7 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - EnvelopeStream transport 适配：`pkg/web/transport.go`
 - Application 业务语义（envelope 路由）：`pkg/web/api/envelope.go`
 - Agent 节点连接（AgentPool 拥有）：`pkg/web/agents_stream.go`
-- Runtime loop：`pkg/runtime/runtime_protocol.go`
+- Session protocol loop：`pkg/exts/session/protocol.go`
 - stdio framing：`pkg/host/stdio.go`；入口组合：`pkg/runner/stdio.go`
 - Browser client：`web/frontend/cyber-ui/packages/aop/src/client.ts`
 - Connect boundary：`pkg/web/connect.go`

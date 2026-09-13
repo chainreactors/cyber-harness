@@ -8,7 +8,7 @@ import (
 	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -22,17 +22,17 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *runtimepkg.AgentRuntime, option *cfg.Option) (*REPL, error) {
+func StartPersistent(rt *sessionext.Manager, option *cfg.Option) (*REPL, error) {
 	if rt == nil || rt.App() == nil {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
-	manager := bashManager(rt.App().Commands)
+	manager := bashManager(rt.App().Bash)
 	if manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
 	ctx, cancel := context.WithCancel(rt.Context())
 	r := &REPL{cancel: cancel, done: make(chan struct{})}
-	session, err := rt.OpenSession(ctx, runtimepkg.SessionOptions{ID: MainREPLName})
+	session, err := rt.OpenSession(ctx, sessionext.SessionOptions{ID: MainREPLName})
 	if err != nil {
 		cancel()
 		return nil, err
@@ -45,7 +45,7 @@ func StartPersistent(rt *runtimepkg.AgentRuntime, option *cfg.Option) (*REPL, er
 		Timeout: 0, StripANSI: false, Resize: control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		defer close(r.done)
-		defer rt.CloseSession(context.Background(), MainREPLName, runtimepkg.SessionCloseCompleted)
+		defer rt.CloseSession(context.Background(), MainREPLName, sessionext.SessionCloseCompleted)
 		for {
 			err := runRemoteConsole(replCtx, rt, session, option, input, output, control)
 			if replCtx.Err() != nil {
@@ -58,7 +58,7 @@ func StartPersistent(rt *runtimepkg.AgentRuntime, option *cfg.Option) (*REPL, er
 	})
 	if err != nil {
 		cancel()
-		_ = rt.CloseSession(context.Background(), MainREPLName, runtimepkg.SessionCloseError)
+		_ = rt.CloseSession(context.Background(), MainREPLName, sessionext.SessionCloseError)
 		return nil, err
 	}
 	manager.SetKind(info.ID, "repl")
@@ -73,16 +73,8 @@ func (r *REPL) Close() {
 	<-r.done
 }
 
-func bashManager(reg *commands.CommandRegistry) *tmuxpkg.Manager {
-	if reg == nil {
-		return nil
-	}
-	tool, ok := reg.GetTool("bash")
-	if !ok {
-		return nil
-	}
-	bash, ok := tool.(*commands.BashTool)
-	if !ok {
+func bashManager(bash *commands.BashTool) *tmuxpkg.Manager {
+	if bash == nil {
 		return nil
 	}
 	return bash.Manager()

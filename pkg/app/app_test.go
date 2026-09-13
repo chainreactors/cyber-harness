@@ -5,8 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
+	"github.com/chainreactors/aiscan/pkg/commands"
+	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,37 +22,23 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/chainreactors/utils/parsers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-func TestAppBorrowsOneSharedProxyInfrastructure(t *testing.T) {
-	infra, err := proxytool.NewHub(t.TempDir(), "", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	infraSet := extensiontest.Set(t, extension.Entry{ID: "infra", Extension: infra})
-	if err := infraSet.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = infraSet.Close(context.Background()) })
-	app := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, infra)
-
-	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
-	if err := appSet.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	defer appSet.Close(context.Background())
-	if app.proxyHub == nil {
-		t.Fatal("application proxy infrastructure is incomplete")
-	}
-	if app.proxyURL != app.proxyHub.ProxyURL() {
-		t.Fatalf("scanner proxy = %q, hub = %q", app.proxyURL, app.proxyHub.ProxyURL())
+func TestAppBorrowsProfileRegistries(t *testing.T) {
+	hookRegistry := hooks.New()
+	commandRegistry := commands.NewRegistry(hookRegistry)
+	toolRegistry := toolset.NewRegistry(hookRegistry)
+	application := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
+		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
+	})
+	if application.Commands != commandRegistry || application.Tools != toolRegistry || application.Hooks != hookRegistry {
+		t.Fatal("application replaced profile-owned registries")
 	}
 }
 
@@ -137,11 +129,16 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	app := New(Config{
-		RecordFile: path, SkipEngines: true, Logger: telemetry.NopLogger(),
-	}, nil, nil)
-
-	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
+	events := coreevents.New()
+	recorder, err := eventoutput.New(events, eventoutput.Options{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
+	appSet := extensiontest.Set(t,
+		extension.Entry{ID: "output", Extension: recorder},
+		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: app},
+	)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -157,17 +154,21 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	extension, err := anypb.New(&toolpb.Artifact{
+	artifactEvent := &aop.Event{
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+	}
+	artifactExtension, err := anypb.New(&toolpb.Artifact{
 		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: gogoResult.GetTarget(), Data: raw,
-		MediaType: aop.JSONMediaType, CallId: "call-1",
+		MediaType: aop.JSONMediaType,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	app.Emit(&aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
-		Payload: &aop.Event_Extension{Extension: extension},
-	})
+	artifactEvent.Payload = &aop.Event_Extension{Extension: artifactExtension}
+	if err := aop.SetTypedExtension(artifactEvent, &operationpb.Ref{CallId: "call-1"}); err != nil {
+		t.Fatal(err)
+	}
+	app.Emit(artifactEvent)
 	app.Emit(&aop.Event{
 		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
@@ -183,6 +184,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	defer file.Close()
 	counts := map[string]int{}
 	var artifact toolpb.Artifact
+	var artifactRef operationpb.Ref
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -198,6 +200,9 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 			if err := extension.UnmarshalTo(&artifact); err != nil {
 				t.Fatalf("decode artifact: %v", err)
 			}
+			if found, err := aop.FindTypedExtension(event, &artifactRef); err != nil || !found {
+				t.Fatalf("decode artifact correlation: found=%v err=%v", found, err)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -206,7 +211,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if counts["tool.call"] != 1 || counts["tool.result"] != 1 || counts["aop.tool.Artifact"] != 1 {
 		t.Fatalf("event counts = %#v", counts)
 	}
-	if artifact.Tool != "gogo" || artifact.Kind != toolpb.ArtifactKindService || artifact.Target != "127.0.0.1:443" || artifact.CallId != "call-1" {
+	if artifact.Tool != "gogo" || artifact.Kind != toolpb.ArtifactKindService || artifact.Target != "127.0.0.1:443" || artifactRef.GetCallId() != "call-1" {
 		t.Fatalf("artifact = %#v", &artifact)
 	}
 	var decoded parsers.GOGOResult

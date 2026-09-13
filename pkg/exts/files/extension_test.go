@@ -14,16 +14,21 @@ import (
 
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 )
 
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 	t.Helper()
-	f, err := fileext.New(cfg)
+	registry := toolset.NewRegistry(nil)
+	f, err := fileext.New(registry, nil, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "files", Extension: f})
+	set, err := extension.New(
+		extension.Entry{ID: "files", Extension: f},
+		extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: registry},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +37,7 @@ func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 			t.Error(err)
 		}
 	})
-	return set.Executor(), set
+	return registry, set
 }
 
 func args(t *testing.T, value any) string {
@@ -73,7 +78,7 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 	if len(r.ToolDefinitions()) != 0 {
 		t.Fatal("file definitions survived instance close")
 	}
-	if _, err := r.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, extension.ErrToolsUnavailable) {
+	if _, err := r.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, toolset.ErrUnavailable) {
 		t.Fatalf("closed tool remained callable: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -89,6 +94,21 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 	}
 }
 
+func TestFilesDoesNotExposeLifecycle(t *testing.T) {
+	registry := toolset.NewRegistry(nil)
+	adapter, err := fileext.New(registry, nil, files.Config{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filesystem := adapter.Files()
+	if _, ok := any(filesystem).(interface{ Close(context.Context) error }); ok {
+		t.Fatal("file access exposes Close")
+	}
+	if _, ok := any(filesystem).(interface{ Open(context.Context) error }); ok {
+		t.Fatal("file access exposes Open")
+	}
+}
+
 func TestConstructionDoesNotOpenOrCreateDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "not-created")
 	r, set := fileSet(t, files.Config{Directory: dir})
@@ -101,7 +121,7 @@ func TestConstructionDoesNotOpenOrCreateDirectory(t *testing.T) {
 	if len(r.ToolDefinitions()) != 0 {
 		t.Fatal("partial startup published tools")
 	}
-	if _, err := r.ExecuteTool(t.Context(), "read", "{}"); !errors.Is(err, extension.ErrToolsUnavailable) {
+	if _, err := r.ExecuteTool(t.Context(), "read", "{}"); !errors.Is(err, toolset.ErrUnavailable) {
 		t.Fatalf("startup rollback did not close newly loaded dependency: %v", err)
 	}
 }
@@ -156,7 +176,7 @@ func TestReadLimitsAndReadOnlyDiscovery(t *testing.T) {
 	if defs := r.ToolDefinitions(); len(defs) != 3 || defs[0].Name != "read" {
 		t.Fatalf("read-only discovery: %v", defs)
 	}
-	if _, err := r.ExecuteTool(t.Context(), "write", `{"path":"valid","content":"x"}`); !errors.Is(err, extension.ErrUnknownTool) {
+	if _, err := r.ExecuteTool(t.Context(), "write", `{"path":"valid","content":"x"}`); !errors.Is(err, toolset.ErrUnknown) {
 		t.Fatalf("read-only write: %v", err)
 	}
 	for _, name := range []string{"large", "binary", "..", "missing"} {
@@ -225,7 +245,10 @@ func TestProductionDependenciesStayIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dependency inspection: %v\n%s", err, output)
 	}
-	allowed := []string{"aop", "core/capability", "core/eventbus", "core/extension", "core/tool", "pkg/exts/files", "tools/files"}
+	allowed := []string{
+		"aop", "core/capability", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry",
+		"core/tool", "core/tool/hooks", "pkg/exts/files", "pkg/toolset", "tools/files",
+	}
 	for _, dep := range strings.Fields(string(output)) {
 		if !strings.HasPrefix(dep, prefix) {
 			continue

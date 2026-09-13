@@ -22,15 +22,18 @@ import (
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/internal/applicationtest"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -68,6 +71,18 @@ func (e *trackingAgentEndpoint) Subscribe(fn func(*aop.Event)) *eventbus.Subscri
 
 func (e *trackingAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) }
 
+type silentAgentEndpoint struct{ bus *eventbus.Bus[*aop.Event] }
+
+func newSilentAgentEndpoint() *silentAgentEndpoint {
+	return &silentAgentEndpoint{bus: eventbus.New[*aop.Event]()}
+}
+
+func (e *silentAgentEndpoint) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
+	return e.bus.Subscribe(fn)
+}
+
+func (e *silentAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) }
+
 type panicAgentEndpoint struct{}
 
 func (panicAgentEndpoint) Subscribe(func(*aop.Event)) *eventbus.Subscription[*aop.Event] { return nil }
@@ -100,7 +115,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 	cc := connectionConfig{
 		Name:     "runner-1",
 		NodeID:   "runner-1",
-		Registry: commands.NewRegistry(),
+		Registry: commands.NewRegistry(nil),
 		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
@@ -137,7 +152,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
+		connectionConfig{Registry: commands.NewRegistry(nil), Logger: logger, Agent: panicAgentEndpoint{}},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
 		send, &operationsMu, operations, make(map[string]time.Time),
@@ -193,19 +208,16 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 	}
 }
 
-func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
+func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
 	app := apppkg.New(apppkg.Config{
 		SkipEngines: true,
 		Logger:      telemetry.NopLogger(),
-	}, nil, nil)
+	}, apppkg.Dependencies{})
 
-	appSet := extensiontest.Set(t, extension.Entry{ID: "app", Extension: app})
-	if err := appSet.Load(ctx); err != nil {
-		t.Fatal(err)
-	}
+	appSet := loadNodeTestApplication(t, ctx, app)
 	defer appSet.Close(context.Background())
-	rt, err := runtimepkg.New(app, nil, &cfg.Option{}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{})
+	rt, err := sessionext.New(app.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +259,7 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 		connectionConfig{
 			Executor: registry,
 			Logger:   telemetry.NopLogger(),
-			Agent:    rt,
+			Agent:    rt.Manager,
 		},
 		&aop.Envelope{Id: "single-delivery-op"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
@@ -272,45 +284,6 @@ func TestAgentRuntimeToolResultUsesSingleDeliveryPath(t *testing.T) {
 	}
 	if got := runtimeToolCalls.Load(); got != 0 {
 		t.Fatalf("remote tool request unexpectedly emitted %d tool.call events; the hub is the canonical source", got)
-	}
-}
-
-func TestToolOnlyNodeToolResultUsesEndpointDelivery(t *testing.T) {
-	registry := testToolExecutor(t, singleDeliveryProbeTool{})
-	wireEvents := make(chan *aop.Event, 1)
-	directMessages := make(chan protobuf.Message, 1)
-	endpoint := newEventBusEndpoint(nil)
-	endpoint.Subscribe(func(event *aop.Event) {
-		wireEvents <- event
-	})
-	arguments, err := aop.JSONValue(map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	handleAgentToolMessage(
-		context.Background(),
-		connectionConfig{Executor: registry, Logger: telemetry.NopLogger(), Agent: endpoint},
-		&aop.Envelope{Id: "tool-only-op"},
-		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{Call: &aop.ToolCall{
-			Id: "tool-only-op", Name: "single_delivery_probe", Arguments: arguments,
-		}}}},
-		func(_ string, message protobuf.Message) { directMessages <- message },
-		&sync.Mutex{},
-		make(map[string]context.CancelFunc),
-		make(map[string]time.Time),
-	)
-	select {
-	case event := <-wireEvents:
-		if event.GetToolResult() == nil || event.GetToolResult().GetName() != "single_delivery_probe" {
-			t.Fatalf("endpoint tool result = %+v", event)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for endpoint tool result")
-	}
-	select {
-	case message := <-directMessages:
-		t.Fatalf("tool result bypassed the endpoint: %T", message)
-	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -346,7 +319,7 @@ func TestExecRequestReportsExitCode(t *testing.T) {
 	}
 }
 
-func TestDefaultAgentRuntimeDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
+func TestDefaultManagerDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
 	hello, err := BuildHello("agent", coretool.EmptyExecutor(), "agent", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -526,7 +499,8 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 		done <- serveAgentConnection(context.Background(), connectionConfig{
 			Name:     "runner-1",
 			NodeID:   "runner-1",
-			Registry: commands.NewRegistry(),
+			Registry: commands.NewRegistry(nil),
+			Agent:    newSilentAgentEndpoint(),
 			Menu:     func() []*types.CommandSpec { return nil },
 		}, telemetry.NopLogger(), stream)
 	}()
@@ -648,5 +622,126 @@ func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 	var netErr net.Error
 	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		t.Fatalf("Recv error = %v, want timeout", err)
+	}
+}
+
+func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
+	return applicationtest.Load(t, ctx, application)
+}
+
+func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
+	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	appSet := loadNodeTestApplication(t, t.Context(), app)
+	defer appSet.Close(context.Background())
+	rt, err := sessionext.New(app.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	if err := rtSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer rtSet.Close(context.Background())
+	stream := &namespaceReplyStream{
+		sent: make(chan *aop.Envelope, 32),
+		payload: aop.MustWrap("open-embedded", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{
+			OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "embedded"},
+		}}),
+	}
+	err = serveAgentConnection(context.Background(), connectionConfig{
+		Name: "embedded", NodeID: "embedded", Registry: app.App.Commands, Agent: rt.Manager, Control: rt.Manager,
+	}, telemetry.NopLogger(), stream)
+	if err != io.EOF {
+		t.Fatalf("connection: %v", err)
+	}
+	for len(stream.sent) > 0 {
+		envelope := <-stream.sent
+		if envelope.ReplyTo != "open-embedded" {
+			continue
+		}
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, ok := message.(*aop.ProtocolMessage)
+		if !ok || response.GetOpenSessionResponse().GetAccepted().GetId() != "embedded" {
+			t.Fatalf("runtime control was not connected: %v", message)
+		}
+		return
+	}
+	t.Fatal("runtime control response never reached the connection")
+}
+
+type namespaceReplyStream struct {
+	helloID string
+	recvs   int
+	sent    chan *aop.Envelope
+	payload *aop.Envelope
+}
+
+func (s *namespaceReplyStream) Send(envelope *aop.Envelope) error {
+	if s.helloID == "" {
+		s.helloID = envelope.GetId()
+	}
+	select {
+	case s.sent <- envelope:
+	default:
+	}
+	return nil
+}
+
+func (s *namespaceReplyStream) Recv() (*aop.Envelope, error) {
+	s.recvs++
+	switch s.recvs {
+	case 1:
+		return aop.MustWrap("accepted", s.helloID, &aop.ProtocolMessage{
+			Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}},
+		}), nil
+	case 2:
+		return s.payload, nil
+	}
+	time.Sleep(200 * time.Millisecond)
+	return nil, io.EOF
+}
+
+func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
+	stream := &namespaceReplyStream{
+		sent: make(chan *aop.Envelope, 16),
+		payload: aop.MustWrap("query-1", "", &trafficpb.ProtocolMessage{
+			Message: &trafficpb.ProtocolMessage_Query{Query: &trafficpb.Query{State: true}},
+		}),
+	}
+	hub := proxytool.NewProxyHub(proxytool.NewState(""), proxytool.NewFlowStore(8), t.TempDir(), false, nil)
+	defer hub.Close(context.Background())
+	cc := connectionConfig{
+		Name: "runner-1", NodeID: "runner-1",
+		Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint(),
+		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
+			return proxytool.RegisterTrafficNamespace(mux, hub.ProxyHub)
+		},
+	}
+	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {
+		t.Fatalf("serveAgentConnection error = %v, want EOF", err)
+	}
+	for {
+		select {
+		case envelope := <-stream.sent:
+			message, err := aop.Unwrap(envelope)
+			if err != nil {
+				continue
+			}
+			value, ok := message.(*trafficpb.ProtocolMessage)
+			if !ok {
+				continue
+			}
+			if value.GetState().GetCapture().GetMode() == trafficpb.CaptureMode_CAPTURE_MODE_RELAY {
+				if envelope.GetReplyTo() != "query-1" {
+					t.Fatalf("reply_to = %q, want query-1", envelope.GetReplyTo())
+				}
+				return
+			}
+		default:
+			t.Fatal("the namespace handler's reply never reached the wire")
+		}
 	}
 }

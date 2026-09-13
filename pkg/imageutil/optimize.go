@@ -42,14 +42,10 @@ func Optimize(r io.Reader, srcMime string) (*Optimized, error) {
 	if err != nil {
 		return passthrough(raw, srcMime)
 	}
-	return optimizeImage(img)
+	return OptimizeImage(img)
 }
 
 func OptimizeImage(img image.Image) (*Optimized, error) {
-	return optimizeImage(img)
-}
-
-func optimizeImage(img image.Image) (*Optimized, error) {
 	bounds := img.Bounds()
 	origW, origH := bounds.Dx(), bounds.Dy()
 	img = ResizeIfNeeded(img, origW, origH)

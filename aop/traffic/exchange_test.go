@@ -51,8 +51,7 @@ func TestExchangeFromHTTPAddsHost(t *testing.T) {
 
 func TestFlowExchangeRoundTrip(t *testing.T) {
 	flow := &Flow{
-		Id:     "flow-1",
-		ToolId: "call-9",
+		Id: "flow-1",
 		Request: &HttpRequest{
 			Method:   "POST",
 			Url:      "https://example.test/login",
@@ -81,9 +80,6 @@ func TestFlowExchangeRoundTrip(t *testing.T) {
 	}
 
 	back := exchange.Proto()
-	if back.GetToolId() != "" {
-		t.Fatal("attribution must not cross into the exchange model")
-	}
 	if back.GetId() != flow.GetId() || back.GetResponse().GetReasonPhrase() != "Found" || len(back.GetRequest().GetHeaders()) != 3 {
 		t.Fatalf("proto round-trip mismatch: %#v", back)
 	}
@@ -118,16 +114,16 @@ func TestExchangeNilSafety(t *testing.T) {
 	}
 }
 
-// TestExchangeJSONMatchesV1EvidenceShape pins the persisted form: the flow
-// element of an http.exchange.v1 payload, headers as a name→values map.
-func TestExchangeJSONMatchesV1EvidenceShape(t *testing.T) {
-	const v1 = `{"id":"flow-1","request":{"method":"GET","url":"https://example.test/",` +
-		`"headers":{"Accept":["text/html"],"X-Trace-Id":["a","b"]}},` +
+// TestExchangeJSONUsesCanonicalHeaderPairs pins direct persistence of the
+// canonical exchange without a second JSON-only transport shape.
+func TestExchangeJSONUsesCanonicalHeaderPairs(t *testing.T) {
+	const encoded = `{"id":"flow-1","request":{"method":"GET","url":"https://example.test/",` +
+		`"headers":[{"name":"Accept","value":"text/html"},{"name":"X-Trace-Id","value":"a"},{"name":"X-Trace-Id","value":"b"}]},` +
 		`"response":{"status_code":200,"body":"aGVsbG8="},"complete":true}`
 
 	var exchange Exchange
-	if err := json.Unmarshal([]byte(v1), &exchange); err != nil {
-		t.Fatalf("decode v1 flow: %v", err)
+	if err := json.Unmarshal([]byte(encoded), &exchange); err != nil {
+		t.Fatalf("decode flow: %v", err)
 	}
 	if len(exchange.Request.Headers) != 3 {
 		t.Fatalf("headers did not unfold to pairs: %#v", exchange.Request.Headers)
@@ -140,8 +136,8 @@ func TestExchangeJSONMatchesV1EvidenceShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != v1 {
-		t.Fatalf("persisted shape drifted:\n got %s\nwant %s", data, v1)
+	if string(data) != encoded {
+		t.Fatalf("persisted shape drifted:\n got %s\nwant %s", data, encoded)
 	}
 }
 

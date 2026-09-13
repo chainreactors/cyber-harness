@@ -12,11 +12,10 @@ import (
 	"github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 func TestRetryOnTransientError(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	callCount := 0
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
@@ -28,7 +27,7 @@ func TestRetryOnTransientError(t *testing.T) {
 		},
 	}
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Tools:      tools,
 		Model:      "test",
@@ -86,7 +85,7 @@ func TestAgentRejectsExhaustedContextBeforeProviderCall(t *testing.T) {
 		},
 	}
 
-	_, err := NewAgent(Config{
+	_, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:      llm,
 		Model:         "test",
 		ContextWindow: ContextSafetyTokens,
@@ -111,7 +110,7 @@ func TestAgentRequestUsesConfiguredAndRemainingContextLimits(t *testing.T) {
 	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
 		chatResponse(NewTextMessage("assistant", "done")),
 	}}
-	ag := NewAgent(Config{
+	ag := NewAgent(Config{Loop: StandardLoop{},
 		Provider:      llm,
 		Model:         "custom",
 		MaxTokens:     20000,
@@ -132,7 +131,7 @@ func TestAgentRequestUsesConfiguredAndRemainingContextLimits(t *testing.T) {
 }
 
 func TestNoRetryOnAuthError(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	callCount := 0
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
@@ -141,7 +140,7 @@ func TestNoRetryOnAuthError(t *testing.T) {
 		},
 	}
 
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Tools:      tools,
 		Model:      "test",
@@ -156,7 +155,7 @@ func TestNoRetryOnAuthError(t *testing.T) {
 }
 
 func TestRetryExhaustedReturnsLastError(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	callCount := 0
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
@@ -165,7 +164,7 @@ func TestRetryExhaustedReturnsLastError(t *testing.T) {
 		},
 	}
 
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Tools:      tools,
 		Model:      "test",
@@ -231,7 +230,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 func TestImageErrorAutoRecovery(t *testing.T) {
 	imgProvider := &imageErrorProvider{}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   imgProvider,
 		Model:      "test",
 		MaxRetries: 0,
@@ -271,7 +270,7 @@ func TestImageErrorAutoRecovery(t *testing.T) {
 func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
 	imgProvider := &imageErrorProvider{}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   imgProvider,
 		Model:      "test",
 		MaxRetries: 0,
@@ -314,7 +313,7 @@ func TestImageErrorRecoveryWithRealRetryPath(t *testing.T) {
 func TestMultiTurnAfterImageError(t *testing.T) {
 	imgProvider := &imageErrorProvider{}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   imgProvider,
 		Model:      "test",
 		MaxRetries: 0,

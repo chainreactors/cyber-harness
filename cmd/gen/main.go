@@ -26,6 +26,7 @@ var aopProtos = []string{
 	"aop/event.proto",
 	"aop/chat.proto",
 	"aop/envelope.proto",
+	"aop/operation/protocol.proto",
 	"aop/protocol.proto",
 	"aop/file/protocol.proto",
 	"aop/exec/protocol.proto",

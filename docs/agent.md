@@ -51,6 +51,19 @@ One-shot 模式接收一次性任务，agent 执行完成后自动退出。
 
 输入可以组合使用。仅提供 `-i` 时，agent 会自动生成扫描任务。
 
+### 输出与观测
+
+`--output-format=text|json|stream-json` 只控制 One-shot 的 stdout：`json` 是单个结果对象，
+`stream-json` 是逐事件的 typed AOP JSONL。`--observe=tools,commands,processes,files,http`
+选择要安装的观测处理器；`-o/--output <path>` 独立地把完整 canonical AOP 事件流持久化到
+新文件。`--resume` 只读历史，不会修改历史文件或隐式开启输出。
+
+```bash
+aiscan agent -p "检查目标" -i http://target.example --output-format json
+aiscan agent -p "检查目标" -i http://target.example --observe=files,http -o run.jsonl
+aiscan agent -p "继续分析" --resume run.jsonl -o continuation.jsonl
+```
+
 ### 示例
 
 ```bash

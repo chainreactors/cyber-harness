@@ -14,7 +14,6 @@ type Config struct {
 	Tools         ToolConfig
 	Logger        telemetry.Logger
 	CLISkillPaths []string
-	RecordFile    string
 	SkipEngines   bool
 }
 

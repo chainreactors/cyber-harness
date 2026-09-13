@@ -17,12 +17,22 @@ import (
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/console"
+	"github.com/chainreactors/aiscan/pkg/edition"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
 )
 
 const runModeWeb cfg.RunMode = "web"
+
+func cliCommandSummary() string {
+	base := "agent, web, serve"
+	summaries := edition.Catalog().Summaries()
+	if len(summaries) == 0 {
+		return base
+	}
+	return base + ", " + strings.Join(summaries, ", ")
+}
 
 // webServeFunc is set via init() in web_full.go (full build only).
 var webServeFunc func(ctx context.Context, option, explicitOption *cfg.Option, web webCommand, logger telemetry.Logger) error
@@ -67,6 +77,7 @@ type serveCommand struct {
 
 type ioaCommand struct {
 	cfg.IOAOptions `group:"Server Options"`
+	QueryJSON      bool           `long:"json" description:"Output query results in JSON format"`
 	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
 	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
 	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
@@ -125,7 +136,7 @@ func aiscan() {
 		return
 	}
 	if option.ViewFile != "" {
-		if err := output.RenderEventFile(option.ViewFile, option.ViewFormat, option.OutputFile); err != nil {
+		if err := output.RenderEventFile(option.ViewFile, option.ViewFormat, option.ViewOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
@@ -135,7 +146,7 @@ func aiscan() {
 		return
 	}
 	if parsed.Mode == cfg.RunModeNoCommand {
-		fmt.Fprintf(os.Stderr, "error: missing subcommand: use %s\n", cfg.CLICommandSummary())
+		fmt.Fprintf(os.Stderr, "error: missing subcommand: use %s\n", cliCommandSummary())
 		os.Exit(1)
 	}
 
@@ -231,7 +242,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
 	}
-	if err := validateSessionFileFlags(option); err != nil {
+	if err := validateOutputFlags(&option); err != nil {
 		return parsedCLI{}, err
 	}
 
@@ -313,7 +324,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	if boolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
 	}
-	if err := validateSessionFileFlags(option); err != nil {
+	if err := validateOutputFlags(&option); err != nil {
 		return parsedCLI{}, err
 	}
 	return parsedCLI{
@@ -323,10 +334,21 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}, nil
 }
 
-func validateSessionFileFlags(option cfg.Option) error {
-	if strings.TrimSpace(option.Resume) != "" && strings.TrimSpace(option.OutputFile) != "" {
-		return fmt.Errorf("--resume/-r and --file/-f are mutually exclusive")
+func validateOutputFlags(option *cfg.Option) error {
+	format := strings.TrimSpace(option.OutputFormat)
+	if option.JSON {
+		format = "json"
 	}
+	if format == "" {
+		format = "text"
+	}
+	if format != "text" && format != "json" && format != "stream-json" {
+		return fmt.Errorf("unsupported --output-format %q: use text, json, or stream-json", format)
+	}
+	if strings.TrimSpace(option.ViewOutput) != "" && strings.TrimSpace(option.ViewFile) == "" {
+		return fmt.Errorf("--file/-f is only valid with --view/-F")
+	}
+	option.OutputFormat = format
 	return nil
 }
 
@@ -336,7 +358,7 @@ func applyScannerPersistenceArgs(args []string, option *cfg.Option) ([]string, e
 		arg := args[i]
 		key, value, hasValue := strings.Cut(arg, "=")
 		switch key {
-		case "--file", "-f":
+		case "--output", "-o":
 			resolved, err := flagValue(arg, hasValue, value, args, &i)
 			if err != nil {
 				return nil, err
@@ -359,6 +381,10 @@ func applyScannerPersistenceArgs(args []string, option *cfg.Option) ([]string, e
 
 func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.OutputFile = cfg.ResolveString(manual.OutputFile, option.OutputFile)
+	option.OutputFormat = cfg.ResolveString(manual.OutputFormat, option.OutputFormat)
+	option.Observe = cfg.ResolveString(manual.Observe, option.Observe)
+	option.JSON = option.JSON || manual.JSON
+	option.Ephemeral = option.Ephemeral || manual.Ephemeral
 	option.Provider = cfg.ResolveString(manual.Provider, option.Provider)
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
@@ -420,6 +446,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 		opt.ReconOptions = cli.Web.ReconOptions
 	case "ioa":
 		opt.IOAOptions = cli.IOA.IOAOptions
+		opt.IOAJSON = cli.IOA.QueryJSON
 	}
 
 	return opt
@@ -452,7 +479,7 @@ Examples:
   aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan web --addr 0.0.0.0:8080
-  aiscan serve --token mykey --addr 0.0.0.0:8765`, cfg.ScannerUsageLines())
+  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(edition.Catalog().UsageLines(), "\n"))
 	return parser
 }
 
@@ -562,19 +589,25 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--resume"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"-r"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"--save-session"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.SaveSession = true }},
-	{names: []string{"--file", "-f"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
+	{names: []string{"--output", "-o"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
+	{names: []string{"--output-format"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFormat = v }},
+	{names: []string{"--json"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.JSON = true }},
+	{names: []string{"--observe"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Observe = v }},
+	{names: []string{"--ephemeral"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.Ephemeral = true }},
 }
 
 var rootOnlyFlagValueArity = map[string]int{
-	"--input":   1,
-	"-i":        1,
-	"--view":    1,
-	"-F":        1,
-	"--output":  1,
-	"-o":        1,
-	"--file":    1,
-	"-f":        1,
-	"--timeout": 1,
+	"--input":         1,
+	"-i":              1,
+	"--view":          1,
+	"-F":              1,
+	"--output":        1,
+	"-o":              1,
+	"--output-format": 1,
+	"--observe":       1,
+	"--file":          1,
+	"-f":              1,
+	"--timeout":       1,
 }
 
 var rootFlagValueArity = buildRootFlagValueArity()
@@ -602,7 +635,7 @@ func argsAfterCommand(args []string, command string) []string {
 }
 
 func isScannerCommandName(name string) bool {
-	return cfg.ScannerCommandAvailable(name)
+	return edition.Catalog().CLIAvailable(name)
 }
 
 func selectedMode(parser *goflags.Parser) cfg.RunMode {
@@ -632,7 +665,7 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	case "serve":
 		return cfg.RunModeIOAServe
 	default:
-		if cfg.ScannerCommandAvailable(active.Name) {
+		if edition.Catalog().CLIAvailable(active.Name) {
 			return cfg.RunModeScanner
 		}
 	}
@@ -644,7 +677,7 @@ func selectedScanner(parser *goflags.Parser) string {
 	if active == nil {
 		return ""
 	}
-	if cfg.ScannerCommandAvailable(active.Name) {
+	if edition.Catalog().CLIAvailable(active.Name) {
 		return active.Name
 	}
 	return ""
@@ -679,7 +712,10 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 			if !slices.Contains(f.names, key) {
 				continue
 			}
-			if scannerName == "scan" && key == "--ai" {
+			// scan owns --ai and --json as native scanner flags. Root forms
+			// before the command remain AIScan options; forms after the command
+			// must reach the scan command unchanged.
+			if scannerName == "scan" && (key == "--ai" || key == "--json") {
 				break
 			}
 			matched = true

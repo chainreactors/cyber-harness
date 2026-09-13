@@ -6,12 +6,12 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/aiscan/pkg/edition"
 )
 
 func TestDefaultCapabilitySet(t *testing.T) {
 	want := []string{"arsenal", "core", "curl", "gogo", "ioa", "neutron", "proton", "proxy", "scan", "search", "spray", "zombie"}
-	if got := capability.IDsSorted(); !slices.Equal(got, want) {
+	if got := edition.Catalog().IDsSorted(); !slices.Equal(got, want) {
 		t.Fatalf("default capabilities = %#v, want %#v", got, want)
 	}
 }

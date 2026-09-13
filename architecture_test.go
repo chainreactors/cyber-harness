@@ -52,9 +52,20 @@ func TestRunnerDoesNotDependOnWeb(t *testing.T) {
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/rpc")
 }
 
+func TestExtensionGraphIsIndependentOfProductCatalog(t *testing.T) {
+	assertNoImportPrefix(t, filepath.Join(repositoryRoot(t), "core", "extension"), modulePath)
+}
+
+func TestConfigAPIHasNoProfileOwnership(t *testing.T) {
+	dir := filepath.Join(repositoryRoot(t), "pkg", "web", "api")
+	for _, forbidden := range []string{"pkg/profile", "pkg/app", "pkg/runtime", "pkg/web/service", "core/extension"} {
+		assertNoImportPrefix(t, dir, modulePath+"/"+forbidden)
+	}
+}
+
 func TestToolsDoNotDependOnHostsOrPresentation(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, forbidden := range []string{"pkg/app", "pkg/runtime", "pkg/console", "pkg/host", "pkg/runner", "pkg/tui", "pkg/web", "pkg/node", "cmd"} {
+	for _, forbidden := range []string{"core/extension", "pkg/app", "pkg/runtime", "pkg/console", "pkg/exts", "pkg/host", "pkg/runner", "pkg/tui", "pkg/web", "pkg/node", "cmd"} {
 		assertNoImportPrefix(t, filepath.Join(root, "tools"), modulePath+"/"+forbidden)
 	}
 }
@@ -90,10 +101,10 @@ func TestConsoleHasNoLegacyTUIBoundary(t *testing.T) {
 	}
 }
 
-func TestRuntimeAndReplayDoNotImportPresentation(t *testing.T) {
+func TestSessionRuntimeDoesNotImportPresentation(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
-		assertNoImportPrefix(t, filepath.Join(root, "pkg", "runtime"), modulePath+"/"+forbidden)
+		assertNoImportPrefix(t, filepath.Join(root, "pkg", "exts", "session"), modulePath+"/"+forbidden)
 	}
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/tui")
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "console"), modulePath+"/pkg/runner")
@@ -101,9 +112,9 @@ func TestRuntimeAndReplayDoNotImportPresentation(t *testing.T) {
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "web"), modulePath+"/pkg/tui")
 }
 
-func TestRuntimeDependencyClosureIsHeadless(t *testing.T) {
+func TestSessionRuntimeDependencyClosureIsHeadless(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.Command("go", "list", "-deps", "./pkg/runtime")
+	cmd := exec.Command("go", "list", "-deps", "./pkg/exts/session")
 	cmd.Dir = root
 	data, err := cmd.CombinedOutput()
 	if err != nil {
@@ -119,9 +130,353 @@ func TestRuntimeDependencyClosureIsHeadless(t *testing.T) {
 	}
 }
 
+func TestAgentFreeToolSurfaceHasNoProductDependencies(t *testing.T) {
+	root := repositoryRoot(t)
+	packages := []string{
+		"./core/registry",
+		"./pkg/toolset",
+		"./tools/files",
+		"./pkg/exts/files",
+		"./pkg/toolnode",
+		"./pkg/profile/files",
+	}
+	for _, pkg := range packages {
+		t.Run(strings.TrimPrefix(pkg, "./"), func(t *testing.T) {
+			cmd := exec.Command("go", "list", "-deps", pkg)
+			cmd.Dir = root
+			data, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("dependencies: %v\n%s", err, data)
+			}
+			for _, dep := range strings.Fields(string(data)) {
+				for _, forbidden := range []string{"agent", "pkg/app", "pkg/runtime", "pkg/console", "pkg/host", "pkg/runner", "pkg/web", "pkg/node", "cmd"} {
+					prefix := modulePath + "/" + forbidden
+					if dep == prefix || strings.HasPrefix(dep, prefix+"/") {
+						t.Errorf("transitively depends on %s", dep)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestToolAndCommandRegistriesShareOnlyTheLifecycleKernel(t *testing.T) {
+	root := repositoryRoot(t)
+	commandRegistry := readRepositoryFile(t, root, filepath.Join("pkg", "commands", "registry.go"))
+	toolRegistry := readRepositoryFile(t, root, filepath.Join("pkg", "toolset", "registry.go"))
+	for path, source := range map[string]string{
+		"pkg/commands/registry.go": commandRegistry,
+		"pkg/toolset/registry.go":  toolRegistry,
+	} {
+		if !strings.Contains(source, modulePath+"/core/registry") {
+			t.Errorf("%s must use the shared registry lifecycle kernel", path)
+		}
+	}
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "commands"), modulePath+"/pkg/toolset")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "toolset"), modulePath+"/pkg/commands")
+	assertNoImportPrefix(t, filepath.Join(root, "core", "registry"), modulePath+"/core/extension")
+}
+
+func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
+	root := repositoryRoot(t)
+	stream := readRepositoryFile(t, root, filepath.Join("core", "events", "stream.go"))
+	if strings.Contains(stream, "Bus *eventbus.Bus") {
+		t.Fatal("canonical event stream exposes its writable bus")
+	}
+	for _, rel := range []string{
+		filepath.Join("pkg", "exts", "files", "extension.go"),
+		filepath.Join("pkg", "exts", "ioa", "extension.go"),
+		filepath.Join("pkg", "exts", "proxy", "extension.go"),
+	} {
+		source := readRepositoryFile(t, root, rel)
+		if strings.Contains(source, "struct {\n\t*") {
+			t.Errorf("extension embeds and exposes its owned resource: %s", filepath.ToSlash(rel))
+		}
+	}
+	resources := map[string][]string{
+		filepath.Join("tools", "files", "fs.go"):    {"type Resource struct {\n\t*Files", "func (r *Resource) Open", "func (r *Resource) Close"},
+		filepath.Join("tools", "ioa", "service.go"): {"type Resource struct {\n\t*Runtime", "func (r *Resource) Start", "func (r *Resource) Close"},
+		filepath.Join("tools", "proxy", "hub.go"):   {"type Resource struct {\n\t*ProxyHub", "func (r *Resource) Start", "func (r *Resource) Close"},
+	}
+	for rel, required := range resources {
+		source := readRepositoryFile(t, root, rel)
+		for _, value := range required {
+			if !strings.Contains(source, value) {
+				t.Errorf("resource/capability split is missing: %s missing %q", filepath.ToSlash(rel), value)
+			}
+		}
+	}
+	for rel, forbidden := range map[string][]string{
+		filepath.Join("tools", "files", "fs.go"):    {"func (f *Files) Open", "func (f *Files) Close"},
+		filepath.Join("tools", "ioa", "service.go"): {"func (m *Runtime) Start", "func (m *Runtime) Close"},
+		filepath.Join("tools", "proxy", "hub.go"):   {"func (h *ProxyHub) Start", "func (h *ProxyHub) Close"},
+	} {
+		source := readRepositoryFile(t, root, rel)
+		for _, value := range forbidden {
+			if strings.Contains(source, value) {
+				t.Errorf("business capability owns lifecycle: %s contains %q", filepath.ToSlash(rel), value)
+			}
+		}
+	}
+	for _, rel := range []string{
+		filepath.Join("tools", "files", "mount.go"),
+		filepath.Join("tools", "ioa", "service.go"),
+		filepath.Join("tools", "proxy", "config.go"),
+	} {
+		if source := readRepositoryFile(t, root, rel); strings.Contains(source, "func Borrow") {
+			t.Errorf("capability is still fabricated through Borrow: %s", filepath.ToSlash(rel))
+		}
+	}
+	extRoot := filepath.Join(root, "pkg", "exts")
+	entries, err := os.ReadDir(extRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			assertNoImportPrefix(t, filepath.Join(extRoot, entry.Name()), modulePath+"/pkg/exts")
+		}
+	}
+	forbidden := "extension.ErrCloseIncomplete"
+	err = filepath.WalkDir(extRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(content, []byte(forbidden)) {
+			t.Errorf("extension duplicates Set cleanup classification: %s", relative(root, path))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAIScanProfileIsOnlyApplicationCompositionRoot(t *testing.T) {
+	root := repositoryRoot(t)
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "app"), modulePath+"/pkg/exts")
+	err := filepath.WalkDir(filepath.Join(root, "pkg", "app"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, forbidden := range []string{
+			"extension.New(", "*extension.Set", "func (a *App) Entries(",
+			"buildExtensions(", "editionToolEntries(", "editionExtensionEntries(",
+		} {
+			if bytes.Contains(content, []byte(forbidden)) {
+				t.Errorf("App must not own a nested lifecycle graph: %s contains %q", relative(root, path), forbidden)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := readRepositoryFile(t, root, filepath.Join("pkg", "profile", "aiscan", "application.go"))
+	for _, required := range []string{"newApplicationAssembly(", "func (a *applicationAssembly) graph("} {
+		if !strings.Contains(profile, required) {
+			t.Errorf("AIScan Profile is not the application composition root: missing %q", required)
+		}
+	}
+}
+
+func TestTemporaryToolExecutionAdaptersAreAbsent(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, forbidden := range []string{
+		"ProgressExecutor",
+		"runnerProgress",
+		"invocationAwareForegroundTool",
+		"SetErrorSink",
+		"AddCleanup",
+		"httpExchangeProducer",
+		"evidence.Emitter",
+		"Command.Close",
+	} {
+		for _, tree := range []string{"agent", "core", "pkg", "tools", "cmd"} {
+			err := filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "architecture_test.go") {
+					return nil
+				}
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					return readErr
+				}
+				if bytes.Contains(content, []byte(forbidden)) {
+					t.Errorf("temporary execution adapter %q remains in %s", forbidden, relative(root, path))
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestExtensionMigrationBoundaries(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, rel := range []string{
+		filepath.Join("pkg", "commands", "register.go"),
+		filepath.Join("pkg", "commands", "read.go"),
+		filepath.Join("pkg", "commands", "write.go"),
+		filepath.Join("pkg", "commands", "glob.go"),
+		filepath.Join("pkg", "commands", "list.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			t.Errorf("legacy production entry must stay removed: %s", filepath.ToSlash(rel))
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "toolset"), modulePath+"/core/capability")
+	for _, tree := range []string{"agent", "core", "pkg", "tools", "cmd", "skills"} {
+		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, forbidden := range []string{"platform" + "Tools", "capability.Register("} {
+				if bytes.Contains(content, []byte(forbidden)) {
+					t.Errorf("removed extension migration boundary %q returned in %s", forbidden, relative(root, path))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRemovedRegistryAndObservationAbstractionsStayAbsent(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, tree := range []string{"agent", "core", "pkg", "tools", "cmd", "skills"} {
+		err := filepath.WalkDir(filepath.Join(root, tree), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			for _, forbidden := range []string{
+				"ExecutionOutcome",
+				"ExtraNamespaces",
+				"newEventBusEndpoint",
+				"NewWithBus(",
+				"NewTraffic(",
+				"TrafficHandler",
+				"SubscribeFlows(",
+				"ErrConnectionCleanup",
+				"request_body_ref",
+				"response_body_ref",
+				"\"tool_id\"",
+				"toolset.New" + "Catalog(",
+				"commands.New" + "Catalog(",
+				modulePath + "/pkg/toolset/registry",
+				modulePath + "/pkg/toolset/filetools",
+				modulePath + "/pkg/toolset/workspacefiles",
+				modulePath + "/pkg/exts/journal",
+				modulePath + "/pkg/exts/fileaccess",
+			} {
+				if bytes.Contains(content, []byte(forbidden)) {
+					t.Errorf("removed architecture boundary %q remains in %s", forbidden, relative(root, path))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	appDir := filepath.Join(root, "pkg", "app")
+	err := filepath.WalkDir(appDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(content, []byte("EventBus")) {
+			t.Errorf("App must not expose a second writable event bus: %s", relative(root, path))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	toolNode := readRepositoryFile(t, root, filepath.Join("pkg", "toolnode", "node.go"))
+	// A connection-owned protocol mux is not a resource lifecycle graph.
+	// Reconnects may register borrowed protocols, but must not own extensions.
+	for _, forbidden := range []string{"core/extension", "Extensions func"} {
+		if strings.Contains(toolNode, forbidden) {
+			t.Errorf("ToolNode must not own product extension lifecycles: found %q", forbidden)
+		}
+	}
+}
+
+func TestObservationProtocolsDoNotOwnLiveSubscriptionLifecycles(t *testing.T) {
+	root := repositoryRoot(t)
+	checks := map[string][]string{
+		filepath.Join("web", "frontend", "cyber-ui", "packages", "aop", "proto", "aop", "file", "protocol.proto"): {
+			"message WatchConfig", "message WatchState", "Configure configure = 21",
+		},
+		filepath.Join("web", "frontend", "cyber-ui", "packages", "aop", "proto", "aop", "traffic", "protocol.proto"): {
+			"bool stream = 4",
+		},
+		filepath.Join("tools", "proxy", "traffic_handler.go"): {
+			"SubscribeFlows(", "startStream(", "stopStreaming(",
+		},
+		filepath.Join("pkg", "node", "connection.go"): {
+			"ConfigureFileObservation",
+		},
+	}
+	for path, forbidden := range checks {
+		source := readRepositoryFile(t, root, path)
+		for _, value := range forbidden {
+			if strings.Contains(source, value) {
+				t.Errorf("live observation lifecycle %q remains in %s", value, filepath.ToSlash(path))
+			}
+		}
+	}
+}
+
 func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("pkg", "runtime"), filepath.Join("pkg", "console"), filepath.Join("cmd", "runner")} {
+	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("pkg", "exts", "session"), filepath.Join("pkg", "console"), filepath.Join("cmd", "runner")} {
 		dir := filepath.Join(root, rel)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -293,12 +648,26 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	// one-to-one production source file. They exercise a package boundary or a
 	// resource lifetime assembled from several files.
 	standalone := map[string]bool{
-		"architecture_test.go":       true,
-		"pkg/app/ownership_test.go":  true,
-		"pkg/host/example_test.go":   true,
-		"pkg/host/lifecycle_test.go": true,
-		"pkg/host/process_test.go":   true,
-		"pkg/runtime/stdio_test.go":  true,
+		"architecture_test.go":                     true,
+		"cmd/aiscan/imports_default_test.go":       true,
+		"cmd/aiscan/imports_full_test.go":          true,
+		"cmd/aiscan/imports_record_full_test.go":   true,
+		"core/extension/resource_test.go":          true,
+		"core/extension/subscription_test.go":      true,
+		"agent/hooks/hooks_test.go":                true,
+		"agent/tool_registry_test.go":              true,
+		"pkg/commands/command_lifecycle_test.go":   true,
+		"pkg/app/ownership_test.go":                true,
+		"pkg/host/example_test.go":                 true,
+		"pkg/host/lifecycle_test.go":               true,
+		"pkg/host/process_test.go":                 true,
+		"cmd/runner/wire_test.go":                  true,
+		"pkg/exts/session/stdio_test.go":           true,
+		"tools/files/lifecycle_test.go":            true,
+		"tools/proxy/capture_lifecycle_test.go":    true,
+		"tools/proxy/flow_store_lifecycle_test.go": true,
+		"tools/proxy/hub_lifecycle_test.go":        true,
+		"tools/record/register_test.go":            true,
 	}
 	allowedSuffixes := map[string]bool{
 		"default": true, "e2e": true, "full": true, "integration": true,

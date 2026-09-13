@@ -1,21 +1,23 @@
-// Package workspace assembles explicitly selected file tools, audit journaling,
+// Package workspace assembles explicitly selected file tools, event output,
 // and read-only instruction mounts for the runner entrypoint.
 package workspace
 
 import (
 	"context"
 	"fmt"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
-	files "github.com/chainreactors/aiscan/tools/files"
 	"slices"
 	"sync"
 
-	filepb "github.com/chainreactors/aiscan/aop/file"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	"github.com/chainreactors/aiscan/pkg/recording"
+	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	skillmount "github.com/chainreactors/aiscan/pkg/exts/skills"
+	"github.com/chainreactors/aiscan/pkg/toolset"
+	files "github.com/chainreactors/aiscan/tools/files"
 )
 
 type Config struct {
@@ -23,19 +25,21 @@ type Config struct {
 	// installed implicitly. Restart with a new profile to change selection.
 	Extensions      []string
 	Files           files.Config
-	AuditLog        string
+	Output          string
 	SkillsDirectory string
 }
 
 type Profile struct {
 	mu              sync.RWMutex
 	set             *extension.Set
+	registry        *toolset.Registry
+	events          *coreevents.Stream
 	selected        []string
 	skills          *skillmount.Extension
 	active, closing bool
 }
 
-func Available() []string { return []string{"files", "file-audit", "skills"} }
+func Available() []string { return []string{"files", "observe", "skills"} }
 
 func New(config Config) (*Profile, error) {
 	selected := slices.Clone(config.Extensions)
@@ -55,46 +59,44 @@ func New(config Config) (*Profile, error) {
 	if !seen["files"] {
 		return nil, fmt.Errorf("workspace selection requires files")
 	}
-	if seen["file-audit"] && config.AuditLog == "" {
-		return nil, fmt.Errorf("file-audit requires a journal path")
-	}
-	if !seen["file-audit"] && config.AuditLog != "" {
-		return nil, fmt.Errorf("audit journal configured without file-audit extension")
-	}
 	if !seen["skills"] && config.SkillsDirectory != "" {
 		return nil, fmt.Errorf("skills directory configured without skills extension")
 	}
-	p := &Profile{selected: selected}
+	hookRegistry := hooks.New()
+	events := coreevents.New()
+	p := &Profile{selected: selected, registry: toolset.NewRegistry(hookRegistry), events: events}
 	entries := []extension.Entry{}
 	dependencies := []string{}
 	fileConfig := config.Files
-	if seen["file-audit"] {
-		audit := fileaudit.New()
-		journal := recording.NewFileLog(audit, config.AuditLog)
-		entries = append(entries,
-			extension.Entry{ID: "file-journal", Extension: journal},
-			extension.Entry{ID: "file-audit", DependsOn: []string{"file-journal"}, Extension: audit})
-		dependencies = append(dependencies, "file-audit")
-		previous := fileConfig.Observe
-		fileConfig.Observe = func(ctx context.Context, op filepb.AccessOp, path string, data []byte, size int64, err error, edits uint32) {
-			if previous != nil {
-				previous(ctx, op, path, data, size, err, edits)
-			}
-			audit.ObserveFile(ctx, op, path, data, size, err, edits)
+	if config.Output != "" {
+		output, outputErr := eventoutput.New(events, eventoutput.Options{Path: config.Output})
+		if outputErr != nil {
+			return nil, outputErr
 		}
+		entries = append(entries, extension.Entry{ID: "event-output", Extension: output})
+		dependencies = append(dependencies, "event-output")
 	}
-	f, err := fileext.New(fileConfig)
+	if seen["observe"] {
+		observer, observeErr := observeext.New(hookRegistry, events, observeext.Options{Kinds: []observeext.Kind{observeext.Tools, observeext.Files}})
+		if observeErr != nil {
+			return nil, observeErr
+		}
+		entries = append(entries, extension.Entry{ID: "observe", DependsOn: append([]string(nil), dependencies...), Extension: observer})
+		dependencies = append(dependencies, "observe")
+	}
+	f, err := fileext.New(p.registry, hookRegistry, fileConfig)
 	if err != nil {
 		return nil, err
 	}
 	entries = append(entries, extension.Entry{ID: "files", DependsOn: dependencies, Extension: f})
 	if seen["skills"] {
-		p.skills, err = skillmount.New(f, config.SkillsDirectory)
+		p.skills, err = skillmount.New(f.Files(), config.SkillsDirectory)
 		if err != nil {
 			return nil, err
 		}
 		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"files"}, Extension: p.skills})
 	}
+	entries = append(entries, extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: p.registry})
 	p.set, err = extension.New(entries...)
 	if err != nil {
 		return nil, err
@@ -102,12 +104,20 @@ func New(config Config) (*Profile, error) {
 	return p, nil
 }
 
+// Events is the canonical stream produced by selected observers.
+func (p *Profile) Events() *coreevents.Stream {
+	if p == nil || p.events == nil {
+		return nil
+	}
+	return p.events
+}
+
 func (p *Profile) Load(ctx context.Context) error {
 	p.mu.RLock()
 	closing := p.closing
 	p.mu.RUnlock()
 	if closing {
-		return extension.ErrToolsUnavailable
+		return toolset.ErrUnavailable
 	}
 	if err := p.set.Load(ctx); err != nil {
 		return err
@@ -115,7 +125,7 @@ func (p *Profile) Load(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closing {
-		return extension.ErrToolsUnavailable
+		return toolset.ErrUnavailable
 	}
 	p.active = true
 	return nil
@@ -125,9 +135,9 @@ func (p *Profile) Executor() (tool.Executor, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if !p.active || p.closing {
-		return nil, extension.ErrToolsUnavailable
+		return nil, toolset.ErrUnavailable
 	}
-	return p.set.Executor(), nil
+	return p.registry, nil
 }
 
 // Installed reports the complete selection only while the entire composition

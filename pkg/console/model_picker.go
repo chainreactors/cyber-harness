@@ -38,8 +38,6 @@ type choicePicker struct {
 	canceled bool
 }
 
-type modelPicker = choicePicker
-
 func newChoicePicker(title string, choices []choiceItem, current string, width, height int) choicePicker {
 	items := make([]list.Item, 0, len(choices))
 	selected := 0
@@ -81,7 +79,7 @@ func newChoicePicker(title string, choices []choiceItem, current string, width, 
 	return choicePicker{list: m}
 }
 
-func newModelPicker(models []string, current string, width, height int) modelPicker {
+func newModelPicker(models []string, current string, width, height int) choicePicker {
 	choices := make([]choiceItem, 0, len(models))
 	for _, model := range models {
 		choices = append(choices, choiceItem{value: model, title: model})

@@ -11,13 +11,14 @@ import (
 )
 
 type testExtension struct {
-	name     string
-	events   *[]string
-	loadErr  error
-	closeErr error
-	started  chan struct{}
-	release  chan struct{}
-	mu       sync.Mutex
+	name                  string
+	events                *[]string
+	loadErr               error
+	closeErr              error
+	started               chan struct{}
+	release               chan struct{}
+	mu                    sync.Mutex
+	loadPanic, closePanic any
 }
 
 func (m *testExtension) record(event string) {
@@ -26,9 +27,12 @@ func (m *testExtension) record(event string) {
 	*m.events = append(*m.events, event)
 }
 
-func (m *testExtension) Load(scope *extension.Context) error {
+func (m *testExtension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.record("load:" + m.name)
+	if m.loadPanic != nil {
+		panic(m.loadPanic)
+	}
 	if m.started != nil {
 		close(m.started)
 		select {
@@ -42,6 +46,9 @@ func (m *testExtension) Load(scope *extension.Context) error {
 
 func (m *testExtension) Close(context.Context) error {
 	m.record("close:" + m.name)
+	if m.closePanic != nil {
+		panic(m.closePanic)
+	}
 	return m.closeErr
 }
 
@@ -111,6 +118,35 @@ func TestGraphValidationPrecedesSideEffects(t *testing.T) {
 	assertEvents(t, events, nil)
 }
 
+func TestRejectsTypedNilAndConcurrentInstanceReuse(t *testing.T) {
+	var typedNil *testExtension
+	if _, err := extension.New(extension.Entry{ID: "nil", Extension: typedNil}); err == nil {
+		t.Fatal("accepted typed nil")
+	}
+	var events []string
+	value := &testExtension{name: "shared", events: &events}
+	first := newSet(t, entry(value))
+	second, err := extension.New(extension.Entry{ID: "other", Extension: value})
+	if err != nil {
+		t.Fatalf("construction claimed instance: %v", err)
+	}
+	if err := first.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Load(t.Context()); err == nil {
+		t.Fatal("accepted an instance already owned by another set")
+	}
+	if err := first.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Load(t.Context()); err != nil {
+		t.Fatalf("closed set retained its instance claim: %v", err)
+	}
+	if err := second.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStartupFailureRollsBackAndSealsComposition(t *testing.T) {
 	var events []string
 	loadErr := errors.New("load failed")
@@ -124,6 +160,34 @@ func TestStartupFailureRollsBackAndSealsComposition(t *testing.T) {
 	if err := set.Load(t.Context()); err == nil {
 		t.Fatal("failed composition loaded again")
 	}
+}
+
+func TestLifecyclePanicsStayInsideOwningSet(t *testing.T) {
+	var events []string
+	resource := &testExtension{name: "resource", events: &events}
+	broken := &testExtension{name: "broken", events: &events, loadPanic: "load failed"}
+	set := newSet(t, entry(resource), entry(broken, "resource"))
+	if err := set.Load(t.Context()); err == nil {
+		t.Fatal("Load panic escaped as success")
+	}
+	assertEvents(t, events, []string{"load:resource", "load:broken", "close:broken", "close:resource"})
+
+	events = nil
+	broken = &testExtension{name: "broken", events: &events, closePanic: "close failed"}
+	resource = &testExtension{name: "resource", events: &events}
+	set = newSet(t, entry(broken, "resource"), entry(resource))
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(t.Context()); !errors.Is(err, extension.ErrCloseIncomplete) {
+		t.Fatalf("Close panic = %v", err)
+	}
+	assertEvents(t, events, []string{"load:resource", "load:broken", "close:broken"})
+	broken.closePanic = nil
+	if err := set.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertEvents(t, events, []string{"load:resource", "load:broken", "close:broken", "close:broken", "close:resource"})
 }
 
 func TestCloseFailureRetainsDependenciesUntilRetry(t *testing.T) {
@@ -145,6 +209,25 @@ func TestCloseFailureRetainsDependenciesUntilRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertEvents(t, events, []string{"load:c", "load:a", "load:b", "close:b", "close:c", "close:b", "close:a"})
+}
+
+func TestCloseContextErrorIsAutomaticallyIncomplete(t *testing.T) {
+	var events []string
+	resource := &testExtension{name: "resource", events: &events}
+	consumer := &testExtension{name: "consumer", events: &events, closeErr: context.DeadlineExceeded}
+	set := newSet(t, entry(consumer, "resource"), entry(resource))
+	if err := set.Load(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(t.Context()); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close = %v", err)
+	}
+	assertEvents(t, events, []string{"load:resource", "load:consumer", "close:consumer"})
+	consumer.closeErr = nil
+	if err := set.Close(nil); err != nil {
+		t.Fatal(err)
+	}
+	assertEvents(t, events, []string{"load:resource", "load:consumer", "close:consumer", "close:consumer", "close:resource"})
 }
 
 func TestCanceledLifecycleWaiterDoesNotMutateComposition(t *testing.T) {
@@ -204,7 +287,7 @@ func TestNestedSetPropagatesCompletionAndRetainsBorrowedResource(t *testing.T) {
 			resource := &testExtension{name: "resource", events: &events}
 			parent := newSet(t, entry(resource), extension.Entry{
 				ID: "child", DependsOn: []string{"resource"}, Extension: extension.Func{
-					LoadFunc:  func(scope *extension.Context) error { return child.Load(scope.Init()) },
+					LoadFunc:  func(scope *extension.Scope) error { return child.Load(scope.Init()) },
 					CloseFunc: child.Close,
 				},
 			})

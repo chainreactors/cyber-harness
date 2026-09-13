@@ -15,8 +15,12 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/tmux"
+	"github.com/chainreactors/aiscan/core/hooks"
+	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/aiscan/core/output"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/aiscan/pkg/types"
 )
 
 const (
@@ -42,50 +46,70 @@ type BashExecOptions struct {
 	Stderr     io.Writer
 }
 
+// ProcessContainment is a process resource supplied by profiles that require
+// a stronger descendant boundary than the host shell provides. Bash invokes it
+// only for paths that actually start a shell. The profile that constructs the
+// resource remains responsible for closing it.
+type ProcessContainment interface {
+	Prepare(string, BashExecOptions) (BashExecOptions, func(), error)
+}
+
 type BashTool struct {
+	hooks          *hooks.Registry
+	processMu      sync.Mutex
+	processClosed  bool
+	processWG      sync.WaitGroup
 	workDir        string
 	timeout        int
 	scannerProxy   string
 	scannerProxyCA string
-	egressResolver func(callID string) (proxyURL, caPath string)
+	egressResolver func(context.Context) (proxyURL, caPath string, release func())
 	tasks          *tmux.Manager
-	commandNames   func() []string
-	resolveCommand func(string) (Command, bool)
-	shellRegistry  *CommandRegistry
+	registry       *Registry
+	shellCommands  bool
+	hiddenCommands map[string]struct{}
 	adapterMu      sync.Mutex
 	shellAdapter   *shellCommandAdapter
+	containment    ProcessContainment
+	maxTimeout     time.Duration
 	closeOnce      sync.Once
-	audit          *FileAudit
 }
 
-func NewBashTool(workDir string, timeout int) *BashTool {
+func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashTool {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &BashTool{workDir: workDir, timeout: timeout, tasks: tmux.NewManager()}
-}
-
-// WithAudit attaches the file-access audit trail. Shell commands are the one
-// place the runtime cannot observe a file access directly, so what this buys is
-// the work dir diff taken around every execution.
-func (t *BashTool) WithAudit(audit *FileAudit) *BashTool {
-	t.audit = audit
-	return t
+	return &BashTool{workDir: workDir, timeout: timeout, hooks: registry, tasks: tmux.NewManager()}
 }
 
 func (t *BashTool) Manager() *tmux.Manager          { return t.tasks }
 func (t *BashTool) SetScannerProxy(proxy string)    { t.scannerProxy = proxy }
 func (t *BashTool) SetScannerProxyCA(caPath string) { t.scannerProxyCA = caPath }
-func (t *BashTool) SetEgressResolver(fn func(callID string) (string, string)) {
+func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, func())) {
 	t.egressResolver = fn
 }
-func (t *BashTool) SetCommandNames(fn func() []string) { t.commandNames = fn }
-func (t *BashTool) SetCommandResolver(fn func(string) (Command, bool)) {
-	t.resolveCommand = fn
+
+// SetCommandRegistry supplies the profile-owned command boundary before use.
+func (t *BashTool) SetCommandRegistry(registry *Registry) {
+	t.registry = registry
 }
+
+func (t *BashTool) WithProcessContainment(containment ProcessContainment) *BashTool {
+	t.containment = containment
+	return t
+}
+
+func (t *BashTool) WithForegroundTimeoutCeiling(max time.Duration) *BashTool {
+	t.maxTimeout = max
+	return t
+}
+
 func (t *BashTool) Name() string { return "bash" }
 func (t *BashTool) Close() {
 	t.closeOnce.Do(func() {
+		t.processMu.Lock()
+		t.processClosed = true
+		t.processMu.Unlock()
 		t.adapterMu.Lock()
 		adapter := t.shellAdapter
 		if adapter != nil {
@@ -93,35 +117,72 @@ func (t *BashTool) Close() {
 		}
 		t.adapterMu.Unlock()
 		t.tasks.Shutdown()
+		t.processWG.Wait()
 		if adapter != nil {
 			adapter.cleanup()
 		}
 	})
 }
 
-func (t *BashTool) attachShellCommands(registry *CommandRegistry) {
-	t.shellRegistry = registry
+func (t *BashTool) attachShellCommands(registry *Registry) {
+	t.registry = registry
+	t.shellCommands = true
+}
+
+// EnableShellCommands binds the pseudo-command registry used when a shell line
+// composes registered commands. Product profiles call this before publication.
+func (t *BashTool) EnableShellCommands(registry *Registry) {
+	t.attachShellCommands(registry)
+}
+
+// HideCommands removes control-only commands from Bash discovery and shell
+// aliases while leaving direct, policy-checked registry execution available.
+// Product profiles configure this before publishing the Bash tool.
+func (t *BashTool) HideCommands(names ...string) {
+	if t.hiddenCommands == nil {
+		t.hiddenCommands = make(map[string]struct{}, len(names))
+	}
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			t.hiddenCommands[name] = struct{}{}
+		}
+	}
+}
+
+func (t *BashTool) commandNames() []string {
+	if t.registry == nil {
+		return nil
+	}
+	names := t.registry.Names()
+	if len(t.hiddenCommands) == 0 {
+		return names
+	}
+	visible := names[:0]
+	for _, name := range names {
+		if _, hidden := t.hiddenCommands[name]; !hidden {
+			visible = append(visible, name)
+		}
+	}
+	return visible
 }
 
 func (t *BashTool) ensureShellCommands() (*shellCommandAdapter, error) {
-	if t.shellRegistry == nil {
+	if !t.shellCommands || t.registry == nil {
 		return nil, nil
 	}
 	t.adapterMu.Lock()
 	defer t.adapterMu.Unlock()
 	if t.shellAdapter == nil {
-		adapter, err := newShellCommandAdapter(t.shellRegistry)
+		adapter, err := newShellCommandAdapter(t.registry)
 		if err != nil {
 			return nil, err
 		}
 		t.shellAdapter = adapter
 	}
-	if t.commandNames != nil {
-		if err := t.shellAdapter.syncAliases(t.commandNames()); err != nil {
-			t.shellAdapter.close()
-			t.shellAdapter = nil
-			return nil, err
-		}
+	if err := t.shellAdapter.syncAliases(t.commandNames()); err != nil {
+		t.shellAdapter.close()
+		t.shellAdapter = nil
+		return nil, err
 	}
 	return t.shellAdapter, nil
 }
@@ -136,14 +197,14 @@ func (t *BashTool) WithScannerProxyCA(caPath string) *BashTool {
 	return t
 }
 
-func (t *BashTool) WithEgressResolver(fn func(callID string) (string, string)) *BashTool {
+func (t *BashTool) WithEgressResolver(fn func(context.Context) (string, string, func())) *BashTool {
 	t.egressResolver = fn
 	return t
 }
 
 func (t *BashTool) Description() string {
 	desc := "Execute a shell command and return its output."
-	if t.commandNames != nil {
+	if t.registry != nil {
 		if names := t.commandNames(); len(names) > 0 {
 			desc += " IMPORTANT: This tool also handles pseudo-commands (" + strings.Join(names, ", ") + "). Pass them as the command parameter."
 		}
@@ -214,25 +275,25 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 	if isOnlyCommentsOrBlank(command) {
 		return coretool.TextResult("ok"), nil
 	}
+	if progress := operation.InvocationFromContext(ctx).Progress; progress != nil {
+		options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, ""), OnOutput: progress}
+		if args.TimeoutSpecified() {
+			options.Timeout = time.Duration(args.Timeout) * time.Second
+			options.TimeoutSet = true
+		}
+		return t.RunForegroundTool(ctx, command, options)
+	}
 
-	options := BashExecOptions{WorkDir: coretool.WorkDirFromContext(ctx, "")}
+	options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, "")}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
 	}
-	var result *coretool.Result
-	err = t.audit.Around(ctx, options.WorkDir, func() error {
-		execution, startErr := t.Start(ctx, command, options)
-		if startErr != nil {
-			return startErr
-		}
-		result = t.waitOrBackground(execution, ctx, inbox.FromContext(ctx), time.Duration(args.Wait)*time.Second)
-		return nil
-	})
+	execution, err := t.Start(ctx, command, options)
 	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	return t.waitOrBackground(execution, ctx, inbox.FromContext(ctx), time.Duration(args.Wait)*time.Second), nil
 }
 
 // RunForeground executes command through the same tmux/registered-command
@@ -240,32 +301,18 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 // final session state. Non-zero exits are represented by Info.ExitCode rather
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
-	workDir := options.WorkDir
-	if workDir == "" {
-		workDir = coretool.WorkDirFromContext(ctx, t.workDir)
-	}
-	var execution *Execution
-	err := t.audit.Around(ctx, workDir, func() error {
-		var runErr error
-		execution, runErr = t.runForeground(ctx, command, options)
-		return runErr
-	})
-	return execution, err
-}
-
-func (t *BashTool) runForeground(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil, fmt.Errorf("empty command")
 	}
 	if options.WorkDir == "" {
-		options.WorkDir = coretool.WorkDirFromContext(ctx, "")
+		options.WorkDir = operation.WorkDirFromContext(ctx, "")
 	}
 	if isOnlyCommentsOrBlank(command) {
 		if options.OnOutput != nil {
 			options.OnOutput([]byte("ok"))
 		}
-		return &Execution{Command: command, State: tmux.StateCompleted}, nil
+		return &Execution{Command: command}, nil
 	}
 
 	execution, err := t.Start(ctx, command, options)
@@ -299,7 +346,9 @@ func (t *BashTool) runForeground(ctx context.Context, command string, options Ba
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			execution.refresh()
+			if err := execution.WaitProcessCompletion(ctx); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		case <-ctx.Done():
 			_ = execution.Kill()
@@ -307,7 +356,9 @@ func (t *BashTool) runForeground(ctx context.Context, command string, options Ba
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			execution.refresh()
+			if err := execution.WaitProcessCompletion(context.WithoutCancel(ctx)); err != nil {
+				return nil, err
+			}
 			return execution, nil
 		case <-ticker.C:
 			if err := flush(); err != nil {
@@ -322,16 +373,20 @@ func (t *BashTool) runForeground(ctx context.Context, command string, options Ba
 // output through options.OnOutput. Transports that must remain foreground
 // (AOP tool.call) use this instead of Execute.
 func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (*coretool.Result, error) {
+	if t.maxTimeout > 0 && options.Timeout > t.maxTimeout {
+		return nil, fmt.Errorf("foreground bash timeout %s exceeds runner ceiling %s", options.Timeout, t.maxTimeout)
+	}
 	execution, err := t.RunForeground(ctx, command, options)
 	if err != nil {
 		return nil, err
 	}
-	return t.collectResult(execution), nil
+	result := t.collectResult(execution)
+	return result, nil
 }
 
 // Start resolves command through the built-in registry or the system shell and
 // always returns an Execution backed by one PTY session.
-func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
+func (t *BashTool) start(ctx context.Context, command string, options BashExecOptions) (*Execution, error) {
 	command = stripCommentsAndBlanks(command)
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
@@ -370,19 +425,26 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 		return nil, err
 	}
 	if adapter != nil {
+		var cleanup func()
+		options, cleanup, err = t.prepareShell(command, options)
+		if err != nil {
+			return nil, err
+		}
 		contextID := adapter.retainContext(ctx)
 		env := t.runEnv(ctx, options.Env, adapter, contextID)
 		execution := newExecution(t.tasks, command, nil, workDir, env)
 		info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
 		if err != nil {
 			adapter.releaseContext(contextID)
+			cleanup()
 			return nil, err
 		}
-		execution.bind(info)
+		execution.bindSession(info.ID)
 		go func() {
 			<-t.tasks.Done(execution.ID)
 			adapter.releaseContext(contextID)
 		}()
+		t.releaseProcess(cleanup, execution)
 		return execution, nil
 	}
 	env := t.runEnv(ctx, options.Env, nil, "")
@@ -397,7 +459,18 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 		}
 		args = normalizeNoColor(cmd.Name, args)
 		if hasPipe && right != "" {
-			return t.startBuiltinToShell(ctx, cmd, args, right, timeout, workDir, env, options)
+			options, cleanup, err := t.prepareShell(command, options)
+			if err != nil {
+				return nil, err
+			}
+			env = t.runEnv(ctx, options.Env, nil, "")
+			execution, err := t.startBuiltinToShell(ctx, cmd, args, right, timeout, workDir, env, options)
+			if err != nil {
+				cleanup()
+				return nil, err
+			}
+			t.releaseProcess(cleanup, execution)
+			return execution, nil
 		}
 		return t.startBuiltin(ctx, cmd, args, timeout, workDir, env, options)
 	}
@@ -413,28 +486,70 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 				return nil, err
 			}
 			args = normalizeNoColor(cmd.Name, args)
-			return t.startShellToBuiltin(ctx, left, cmd, args, timeout, workDir, env, options)
+			options, cleanup, err := t.prepareShell(command, options)
+			if err != nil {
+				return nil, err
+			}
+			env = t.runEnv(ctx, options.Env, nil, "")
+			execution, err := t.startShellToBuiltin(ctx, left, cmd, args, timeout, workDir, env, options)
+			if err != nil {
+				cleanup()
+				return nil, err
+			}
+			t.releaseProcess(cleanup, execution)
+			return execution, nil
 		}
 	}
-	execution := newExecution(t.tasks, command, nil, workDir, env)
-	info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+	options, cleanup, err := t.prepareShell(command, options)
 	if err != nil {
 		return nil, err
 	}
-	execution.bind(info)
+	env = t.runEnv(ctx, options.Env, nil, "")
+	execution := newExecution(t.tasks, command, nil, workDir, env)
+	info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	execution.bindSession(info.ID)
+	t.releaseProcess(cleanup, execution)
 	return execution, nil
 }
 
-func (t *BashTool) resolve(name string) (Command, bool) {
-	if t.resolveCommand == nil || name == "" {
-		return Command{}, false
+func (t *BashTool) prepareShell(command string, options BashExecOptions) (BashExecOptions, func(), error) {
+	if t.containment == nil {
+		return options, func() {}, nil
 	}
-	return t.resolveCommand(name)
+	prepared, cleanup, err := t.containment.Prepare(command, options)
+	if cleanup == nil {
+		cleanup = func() {}
+	}
+	return prepared, cleanup, err
+}
+
+func (t *BashTool) releaseProcess(cleanup func(), execution *Execution) {
+	if cleanup == nil || execution == nil || execution.ID == "" {
+		if cleanup != nil {
+			cleanup()
+		}
+		return
+	}
+	go func(id string) {
+		<-t.tasks.Done(id)
+		cleanup()
+	}(execution.ID)
+}
+
+func (t *BashTool) resolve(name string) (*types.CommandSpec, bool) {
+	if t.registry == nil || name == "" {
+		return nil, false
+	}
+	return t.registry.Get(name)
 }
 
 func (t *BashTool) startBuiltin(
 	ctx context.Context,
-	command Command,
+	command *types.CommandSpec,
 	args []string,
 	timeout time.Duration,
 	workDir string,
@@ -450,23 +565,20 @@ func (t *BashTool) startBuiltin(
 		stdout := joinedWriter(session, options.Stdout)
 		stderr := joinedWriter(session, options.Stderr)
 		execution.setIO(options.Stdin, stdout, stderr)
-		if command.Run == nil {
-			return fmt.Errorf("command %s has no runner", command.Name)
-		}
-		details, runErr := command.Run(runCtx, execution)
+		details, runErr := t.registry.Execute(runCtx, command.Name, execution)
 		execution.setDetails(details)
 		return runErr
 	})
 	if err != nil {
 		return nil, err
 	}
-	execution.bind(info)
+	execution.bindSession(info.ID)
 	return execution, nil
 }
 
 func (t *BashTool) startBuiltinToShell(
 	ctx context.Context,
-	command Command,
+	command *types.CommandSpec,
 	args []string,
 	pipeline string,
 	timeout time.Duration,
@@ -493,12 +605,7 @@ func (t *BashTool) startBuiltinToShell(
 		}()
 
 		execution.setIO(options.Stdin, writer, joinedWriter(session, options.Stderr))
-		if command.Run == nil {
-			_ = writer.Close()
-			<-shellDone
-			return fmt.Errorf("command %s has no runner", command.Name)
-		}
-		details, commandErr := command.Run(runCtx, execution)
+		details, commandErr := t.registry.Execute(runCtx, command.Name, execution)
 		execution.setDetails(details)
 		_ = writer.CloseWithError(commandErr)
 		shellErr := <-shellDone
@@ -510,14 +617,14 @@ func (t *BashTool) startBuiltinToShell(
 	if err != nil {
 		return nil, err
 	}
-	execution.bind(info)
+	execution.bindSession(info.ID)
 	return execution, nil
 }
 
 func (t *BashTool) startShellToBuiltin(
 	ctx context.Context,
 	shellLine string,
-	command Command,
+	command *types.CommandSpec,
 	args []string,
 	timeout time.Duration,
 	workDir string,
@@ -544,12 +651,7 @@ func (t *BashTool) startShellToBuiltin(
 		}()
 
 		execution.setIO(reader, joinedWriter(session, options.Stdout), joinedWriter(session, options.Stderr))
-		if command.Run == nil {
-			_ = reader.Close()
-			<-shellDone
-			return fmt.Errorf("command %s has no runner", command.Name)
-		}
-		details, commandErr := command.Run(runCtx, execution)
+		details, commandErr := t.registry.Execute(runCtx, command.Name, execution)
 		execution.setDetails(details)
 		_ = reader.Close()
 		shellErr := <-shellDone
@@ -561,7 +663,7 @@ func (t *BashTool) startShellToBuiltin(
 	if err != nil {
 		return nil, err
 	}
-	execution.bind(info)
+	execution.bindSession(info.ID)
 	return execution, nil
 }
 
@@ -592,12 +694,10 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, t
 	}
 	select {
 	case <-done:
-		execution.refresh()
 		return t.collectResult(execution)
 	case <-waitDone:
 		info, ok := t.tasks.Get(execution.ID)
 		if !ok {
-			execution.refresh()
 			return t.collectResult(execution)
 		}
 		t.startMonitor(info, targetInbox)
@@ -607,14 +707,23 @@ func (t *BashTool) waitOrBackground(execution *Execution, ctx context.Context, t
 	case <-ctx.Done():
 		_ = execution.Kill()
 		<-done
-		execution.refresh()
 		return t.collectResult(execution)
 	}
 }
 
 func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
+	fullCapture := execution != nil && execution.Command == "tmux" && len(execution.Args) >= 2 &&
+		(execution.Args[0] == "capture-pane" || execution.Args[0] == "peek") && contains(execution.Args[1:], "--full")
 	raw := t.tasks.PeekOrEmpty(execution.ID, truncate.DefaultMaxLines)
-	r := truncate.Tail(raw, truncate.Options{})
+	truncateOptions := truncate.Options{}
+	if fullCapture {
+		const markerHeadroom = 8 * 1024
+		if data, _, err := t.tasks.SnapshotBytes(execution.ID, 512*1024+markerHeadroom); err == nil {
+			raw = string(data)
+		}
+		truncateOptions = truncate.Options{MaxLines: 1 << 30, MaxBytes: 512*1024 + markerHeadroom}
+	}
+	r := truncate.Tail(output.StripANSI(raw), truncateOptions)
 	text := r.Content
 	if r.Truncated {
 		startLine := r.TotalLines - r.OutputLines + 1
@@ -630,7 +739,17 @@ func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
 	result := coretool.TextResult(text)
+	result.IsError = info.KillCause != "" || (info.ExitCode != 0 && info.State != tmux.StateRunning)
 	return result
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
@@ -669,15 +788,6 @@ func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adap
 
 func (t *BashTool) proxyEnv(ctx context.Context) []string {
 	proxy, ca := t.scannerProxy, t.scannerProxyCA
-	// When an egress resolver is wired, it supersedes the static values: it tags
-	// the proxy URL with this execution's tool-call id (so the hub attributes
-	// captured flows to it) and returns the CA path from live hub state — empty
-	// while the hub is not intercepting, so a relaying child is not handed a
-	// CA-only bundle that would reject the real server certificate.
-	if t.egressResolver != nil {
-		callID := coretool.InvocationFromContext(ctx).CallID
-		proxy, ca = t.egressResolver(callID)
-	}
 	// Point the same common proxy/CA surface at child processes that built-in
 	// tools consume through Execution.Env.
 	return EgressEnvironment(proxy, ca)

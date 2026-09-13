@@ -575,13 +575,10 @@ func (x *Result) GetEof() bool {
 
 // Access is one observed file access.
 type Access struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// tool_id is the AOP tool-call id whose execution produced this access, empty
-	// when it happened outside one (a control request, a detached session).
-	ToolId string       `protobuf:"bytes,2,opt,name=tool_id,json=toolId,proto3" json:"tool_id,omitempty"`
-	Op     AccessOp     `protobuf:"varint,3,opt,name=op,proto3,enum=aop.file.AccessOp" json:"op,omitempty"`
-	Source AccessSource `protobuf:"varint,4,opt,name=source,proto3,enum=aop.file.AccessSource" json:"source,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Op     AccessOp               `protobuf:"varint,3,opt,name=op,proto3,enum=aop.file.AccessOp" json:"op,omitempty"`
+	Source AccessSource           `protobuf:"varint,4,opt,name=source,proto3,enum=aop.file.AccessSource" json:"source,omitempty"`
 	// path is absolute; work_dir is the execution's working directory, carried so
 	// a consumer can present the path relative to it without guessing.
 	Path          string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
@@ -629,13 +626,6 @@ func (*Access) Descriptor() ([]byte, []int) {
 func (x *Access) GetId() string {
 	if x != nil {
 		return x.Id
-	}
-	return ""
-}
-
-func (x *Access) GetToolId() string {
-	if x != nil {
-		return x.ToolId
 	}
 	return ""
 }
@@ -710,169 +700,6 @@ func (x *Access) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
-// WatchConfig steers observation. Disabling it stops the node reporting, which
-// is the only way a peer can opt out of the stream it would otherwise receive.
-type WatchConfig struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	// ignore holds path substrings excluded from snapshot diffing; empty leaves
-	// the node's own defaults (VCS metadata, dependency trees) in place.
-	Ignore []string `protobuf:"bytes,2,rep,name=ignore,proto3" json:"ignore,omitempty"`
-	// max_entries bounds one snapshot. A work dir over it is not diffed at all,
-	// and the node says so through an Access carrying error rather than
-	// reporting a silently partial diff.
-	MaxEntries    uint32 `protobuf:"varint,3,opt,name=max_entries,json=maxEntries,proto3" json:"max_entries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WatchConfig) Reset() {
-	*x = WatchConfig{}
-	mi := &file_aop_file_protocol_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WatchConfig) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WatchConfig) ProtoMessage() {}
-
-func (x *WatchConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_file_protocol_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WatchConfig.ProtoReflect.Descriptor instead.
-func (*WatchConfig) Descriptor() ([]byte, []int) {
-	return file_aop_file_protocol_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *WatchConfig) GetEnabled() bool {
-	if x != nil {
-		return x.Enabled
-	}
-	return false
-}
-
-func (x *WatchConfig) GetIgnore() []string {
-	if x != nil {
-		return x.Ignore
-	}
-	return nil
-}
-
-func (x *WatchConfig) GetMaxEntries() uint32 {
-	if x != nil {
-		return x.MaxEntries
-	}
-	return 0
-}
-
-type Configure struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Watch         *WatchConfig           `protobuf:"bytes,1,opt,name=watch,proto3" json:"watch,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Configure) Reset() {
-	*x = Configure{}
-	mi := &file_aop_file_protocol_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Configure) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Configure) ProtoMessage() {}
-
-func (x *Configure) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_file_protocol_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Configure.ProtoReflect.Descriptor instead.
-func (*Configure) Descriptor() ([]byte, []int) {
-	return file_aop_file_protocol_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *Configure) GetWatch() *WatchConfig {
-	if x != nil {
-		return x.Watch
-	}
-	return nil
-}
-
-type WatchState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Watching      bool                   `protobuf:"varint,1,opt,name=watching,proto3" json:"watching,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WatchState) Reset() {
-	*x = WatchState{}
-	mi := &file_aop_file_protocol_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WatchState) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WatchState) ProtoMessage() {}
-
-func (x *WatchState) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_file_protocol_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WatchState.ProtoReflect.Descriptor instead.
-func (*WatchState) Descriptor() ([]byte, []int) {
-	return file_aop_file_protocol_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *WatchState) GetWatching() bool {
-	if x != nil {
-		return x.Watching
-	}
-	return false
-}
-
-func (x *WatchState) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
 type ProtocolMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Message:
@@ -883,9 +710,6 @@ type ProtocolMessage struct {
 	//	*ProtocolMessage_MkdirRequest
 	//	*ProtocolMessage_UploadRequest
 	//	*ProtocolMessage_Result
-	//	*ProtocolMessage_Configure
-	//	*ProtocolMessage_State
-	//	*ProtocolMessage_Access
 	Message       isProtocolMessage_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -893,7 +717,7 @@ type ProtocolMessage struct {
 
 func (x *ProtocolMessage) Reset() {
 	*x = ProtocolMessage{}
-	mi := &file_aop_file_protocol_proto_msgTypes[11]
+	mi := &file_aop_file_protocol_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -905,7 +729,7 @@ func (x *ProtocolMessage) String() string {
 func (*ProtocolMessage) ProtoMessage() {}
 
 func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_file_protocol_proto_msgTypes[11]
+	mi := &file_aop_file_protocol_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -918,7 +742,7 @@ func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolMessage.ProtoReflect.Descriptor instead.
 func (*ProtocolMessage) Descriptor() ([]byte, []int) {
-	return file_aop_file_protocol_proto_rawDescGZIP(), []int{11}
+	return file_aop_file_protocol_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProtocolMessage) GetMessage() isProtocolMessage_Message {
@@ -982,33 +806,6 @@ func (x *ProtocolMessage) GetResult() *Result {
 	return nil
 }
 
-func (x *ProtocolMessage) GetConfigure() *Configure {
-	if x != nil {
-		if x, ok := x.Message.(*ProtocolMessage_Configure); ok {
-			return x.Configure
-		}
-	}
-	return nil
-}
-
-func (x *ProtocolMessage) GetState() *WatchState {
-	if x != nil {
-		if x, ok := x.Message.(*ProtocolMessage_State); ok {
-			return x.State
-		}
-	}
-	return nil
-}
-
-func (x *ProtocolMessage) GetAccess() *Access {
-	if x != nil {
-		if x, ok := x.Message.(*ProtocolMessage_Access); ok {
-			return x.Access
-		}
-	}
-	return nil
-}
-
 type isProtocolMessage_Message interface {
 	isProtocolMessage_Message()
 }
@@ -1037,18 +834,6 @@ type ProtocolMessage_Result struct {
 	Result *Result `protobuf:"bytes,20,opt,name=result,proto3,oneof"`
 }
 
-type ProtocolMessage_Configure struct {
-	Configure *Configure `protobuf:"bytes,21,opt,name=configure,proto3,oneof"`
-}
-
-type ProtocolMessage_State struct {
-	State *WatchState `protobuf:"bytes,22,opt,name=state,proto3,oneof"`
-}
-
-type ProtocolMessage_Access struct {
-	Access *Access `protobuf:"bytes,23,opt,name=access,proto3,oneof"`
-}
-
 func (*ProtocolMessage_ReadRequest) isProtocolMessage_Message() {}
 
 func (*ProtocolMessage_WriteRequest) isProtocolMessage_Message() {}
@@ -1060,12 +845,6 @@ func (*ProtocolMessage_MkdirRequest) isProtocolMessage_Message() {}
 func (*ProtocolMessage_UploadRequest) isProtocolMessage_Message() {}
 
 func (*ProtocolMessage_Result) isProtocolMessage_Message() {}
-
-func (*ProtocolMessage_Configure) isProtocolMessage_Message() {}
-
-func (*ProtocolMessage_State) isProtocolMessage_Message() {}
-
-func (*ProtocolMessage_Access) isProtocolMessage_Message() {}
 
 var File_aop_file_protocol_proto protoreflect.FileDescriptor
 
@@ -1103,10 +882,9 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\n" +
 	"media_type\x18\x06 \x01(\tR\tmediaType\x12\x16\n" +
 	"\x06offset\x18\a \x01(\x03R\x06offset\x12\x10\n" +
-	"\x03eof\x18\b \x01(\bR\x03eof\"\xdc\x02\n" +
+	"\x03eof\x18\b \x01(\bR\x03eof\"\xc9\x02\n" +
 	"\x06Access\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
-	"\atool_id\x18\x02 \x01(\tR\x06toolId\x12\"\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\"\n" +
 	"\x02op\x18\x03 \x01(\x0e2\x12.aop.file.AccessOpR\x02op\x12.\n" +
 	"\x06source\x18\x04 \x01(\x0e2\x16.aop.file.AccessSourceR\x06source\x12\x12\n" +
 	"\x04path\x18\x05 \x01(\tR\x04path\x12\x19\n" +
@@ -1117,18 +895,7 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\x06digest\x18\n" +
 	" \x01(\tR\x06digest\x12\x14\n" +
 	"\x05error\x18\v \x01(\tR\x05error\x128\n" +
-	"\ttimestamp\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"`\n" +
-	"\vWatchConfig\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06ignore\x18\x02 \x03(\tR\x06ignore\x12\x1f\n" +
-	"\vmax_entries\x18\x03 \x01(\rR\n" +
-	"maxEntries\"8\n" +
-	"\tConfigure\x12+\n" +
-	"\x05watch\x18\x01 \x01(\v2\x15.aop.file.WatchConfigR\x05watch\">\n" +
-	"\n" +
-	"WatchState\x12\x1a\n" +
-	"\bwatching\x18\x01 \x01(\bR\bwatching\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x8f\x04\n" +
+	"\ttimestamp\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampJ\x04\b\x02\x10\x03\"\x86\x03\n" +
 	"\x0fProtocolMessage\x12:\n" +
 	"\fread_request\x18\n" +
 	" \x01(\v2\x15.aop.file.ReadRequestH\x00R\vreadRequest\x12=\n" +
@@ -1136,11 +903,8 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\flist_request\x18\f \x01(\v2\x15.aop.file.ListRequestH\x00R\vlistRequest\x12=\n" +
 	"\rmkdir_request\x18\r \x01(\v2\x16.aop.file.MkdirRequestH\x00R\fmkdirRequest\x12@\n" +
 	"\x0eupload_request\x18\x0e \x01(\v2\x17.aop.file.UploadRequestH\x00R\ruploadRequest\x12*\n" +
-	"\x06result\x18\x14 \x01(\v2\x10.aop.file.ResultH\x00R\x06result\x123\n" +
-	"\tconfigure\x18\x15 \x01(\v2\x13.aop.file.ConfigureH\x00R\tconfigure\x12,\n" +
-	"\x05state\x18\x16 \x01(\v2\x14.aop.file.WatchStateH\x00R\x05state\x12*\n" +
-	"\x06access\x18\x17 \x01(\v2\x10.aop.file.AccessH\x00R\x06accessB\t\n" +
-	"\amessage*\x8e\x01\n" +
+	"\x06result\x18\x14 \x01(\v2\x10.aop.file.ResultH\x00R\x06resultB\t\n" +
+	"\amessageJ\x04\b\x15\x10\x18*\x8e\x01\n" +
 	"\bAccessOp\x12\x19\n" +
 	"\x15ACCESS_OP_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eACCESS_OP_READ\x10\x01\x12\x13\n" +
@@ -1167,7 +931,7 @@ func file_aop_file_protocol_proto_rawDescGZIP() []byte {
 }
 
 var file_aop_file_protocol_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_aop_file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_aop_file_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_aop_file_protocol_proto_goTypes = []any{
 	(AccessOp)(0),                 // 0: aop.file.AccessOp
 	(AccessSource)(0),             // 1: aop.file.AccessSource
@@ -1179,32 +943,25 @@ var file_aop_file_protocol_proto_goTypes = []any{
 	(*Entry)(nil),                 // 7: aop.file.Entry
 	(*Result)(nil),                // 8: aop.file.Result
 	(*Access)(nil),                // 9: aop.file.Access
-	(*WatchConfig)(nil),           // 10: aop.file.WatchConfig
-	(*Configure)(nil),             // 11: aop.file.Configure
-	(*WatchState)(nil),            // 12: aop.file.WatchState
-	(*ProtocolMessage)(nil),       // 13: aop.file.ProtocolMessage
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*ProtocolMessage)(nil),       // 10: aop.file.ProtocolMessage
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
 }
 var file_aop_file_protocol_proto_depIdxs = []int32{
 	7,  // 0: aop.file.Result.entries:type_name -> aop.file.Entry
 	0,  // 1: aop.file.Access.op:type_name -> aop.file.AccessOp
 	1,  // 2: aop.file.Access.source:type_name -> aop.file.AccessSource
-	14, // 3: aop.file.Access.timestamp:type_name -> google.protobuf.Timestamp
-	10, // 4: aop.file.Configure.watch:type_name -> aop.file.WatchConfig
-	2,  // 5: aop.file.ProtocolMessage.read_request:type_name -> aop.file.ReadRequest
-	3,  // 6: aop.file.ProtocolMessage.write_request:type_name -> aop.file.WriteRequest
-	4,  // 7: aop.file.ProtocolMessage.list_request:type_name -> aop.file.ListRequest
-	5,  // 8: aop.file.ProtocolMessage.mkdir_request:type_name -> aop.file.MkdirRequest
-	6,  // 9: aop.file.ProtocolMessage.upload_request:type_name -> aop.file.UploadRequest
-	8,  // 10: aop.file.ProtocolMessage.result:type_name -> aop.file.Result
-	11, // 11: aop.file.ProtocolMessage.configure:type_name -> aop.file.Configure
-	12, // 12: aop.file.ProtocolMessage.state:type_name -> aop.file.WatchState
-	9,  // 13: aop.file.ProtocolMessage.access:type_name -> aop.file.Access
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 3: aop.file.Access.timestamp:type_name -> google.protobuf.Timestamp
+	2,  // 4: aop.file.ProtocolMessage.read_request:type_name -> aop.file.ReadRequest
+	3,  // 5: aop.file.ProtocolMessage.write_request:type_name -> aop.file.WriteRequest
+	4,  // 6: aop.file.ProtocolMessage.list_request:type_name -> aop.file.ListRequest
+	5,  // 7: aop.file.ProtocolMessage.mkdir_request:type_name -> aop.file.MkdirRequest
+	6,  // 8: aop.file.ProtocolMessage.upload_request:type_name -> aop.file.UploadRequest
+	8,  // 9: aop.file.ProtocolMessage.result:type_name -> aop.file.Result
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_aop_file_protocol_proto_init() }
@@ -1212,16 +969,13 @@ func file_aop_file_protocol_proto_init() {
 	if File_aop_file_protocol_proto != nil {
 		return
 	}
-	file_aop_file_protocol_proto_msgTypes[11].OneofWrappers = []any{
+	file_aop_file_protocol_proto_msgTypes[8].OneofWrappers = []any{
 		(*ProtocolMessage_ReadRequest)(nil),
 		(*ProtocolMessage_WriteRequest)(nil),
 		(*ProtocolMessage_ListRequest)(nil),
 		(*ProtocolMessage_MkdirRequest)(nil),
 		(*ProtocolMessage_UploadRequest)(nil),
 		(*ProtocolMessage_Result)(nil),
-		(*ProtocolMessage_Configure)(nil),
-		(*ProtocolMessage_State)(nil),
-		(*ProtocolMessage_Access)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1229,7 +983,7 @@ func file_aop_file_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aop_file_protocol_proto_rawDesc), len(file_aop_file_protocol_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

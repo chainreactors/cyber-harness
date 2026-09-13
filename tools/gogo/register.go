@@ -1,32 +1,22 @@
 package gogo
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/deps"
+	"fmt"
+
+	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
-func init() {
-	capability.Register(capability.Descriptor{
-		ID: "gogo", Kind: capability.KindScanner, Group: "scanner",
-		CLIName: "gogo", Summary: "gogo", UsageLine: "  gogo           Run gogo directly",
-		Usage: func() string { return New(nil).Usage() }, Requires: []string{"scan.engine.Set.Gogo"},
-	})
-	commands.RegisterFactory(commands.Factory{
-		Capability: "gogo",
-		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
-			es, ok := deps.Get(d.Bag, engine.SetKey)
-			if !ok || es == nil || es.Gogo == nil {
-				d.Skip("gogo", deps.Name(engine.SetKey)+".Gogo")
-				return
-			}
-			impl := New(es.Gogo).WithLogger(d.GetLogger()).WithProxy(d.ScannerProxy).WithEvents(d.Events)
-			reg.Register(commands.Command{
-				Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
-				DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
-				Run:             impl.Run,
-			}, "scanner")
-		},
-	})
+func NewCommand(engines *engine.Set, logger telemetry.Logger, proxy string, events aop.EventEmitter) (commands.Command, error) {
+	if engines == nil || engines.Gogo == nil {
+		return commands.Command{}, fmt.Errorf("gogo engine is unavailable")
+	}
+	impl := New(engines.Gogo).WithLogger(logger).WithProxy(proxy).WithEvents(events)
+	return commands.Command{
+		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
+		DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
+		Run:             impl.Run,
+	}, nil
 }

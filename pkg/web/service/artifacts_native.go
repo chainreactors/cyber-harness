@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cstx "github.com/chainreactors/libcstx/go"
 )
 
@@ -36,14 +35,6 @@ func NewArtifactIngestor(store SCOStore) (ArtifactIngestor, error) {
 		return nil, fmt.Errorf("list CSTX EASM artifacts: %w", err)
 	}
 	return &cstxArtifactIngestor{store: store, runtime: runtime, artifacts: artifacts}, nil
-}
-
-func (i *cstxArtifactIngestor) IngestArtifact(ctx context.Context, artifact *toolpb.Artifact) error {
-	if artifact == nil {
-		return nil
-	}
-	_, _, err := i.NormalizeArtifact(ctx, artifact.CallId, artifact.Tool, artifact.Data)
-	return err
 }
 
 func (i *cstxArtifactIngestor) NormalizeArtifact(ctx context.Context, operationID, artifact string, data []byte) (uint64, uint64, error) {

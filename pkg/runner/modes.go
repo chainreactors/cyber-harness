@@ -11,12 +11,14 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/console"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	"github.com/chainreactors/aiscan/pkg/edition"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -32,6 +34,9 @@ func RunAgentMode(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		si = setInterrupt[0]
 	}
 	if !cfg.HasAgentOneShotInput(option) {
+		if option != nil && option.OutputFormat != "" && option.OutputFormat != "text" {
+			return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
+		}
 		return runInteractiveMode(ctx, option, logger, si)
 	}
 	return runOneShotMode(ctx, option, logger)
@@ -47,11 +52,11 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	rt, err := runtimepkg.New(ctx, option, logger, &runtimepkg.RuntimeConfig{})
+	product, rt, err := loadAgentProfile(ctx, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
-	defer rt.Close()
+	defer product.Close(context.Background())
 
 	task = skills.ExpandCommand(task, rt.App().Skills)
 	task, err = cfg.ApplySelectedSkills(task, option.Skills, rt.App().Skills)
@@ -59,7 +64,7 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	return console.RunTask(ctx, rt, option, "task", "task", task, runtimepkg.RunInput{
+	return console.RunTask(ctx, rt, option, "task", "task", task, sessionext.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 }
@@ -70,13 +75,14 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 
 func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
 	option.SaveSession = true
-	rt, err := runtimepkg.New(ctx, option, logger, &runtimepkg.RuntimeConfig{
+	product, rt, err := loadAgentProfile(ctx, option, logger, &sessionext.Config{
 		PrimarySessionID: console.MainREPLName,
+		Loop:             agent.StandardLoop{},
 	})
 	if err != nil {
 		return err
 	}
-	defer rt.Close()
+	defer product.Close(context.Background())
 
 	if _, err := cfg.ApplySelectedSkills("", option.Skills, rt.App().Skills); err != nil {
 		return err
@@ -108,7 +114,7 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 		features.AIEnabled = true
 	}
 	if cfg.IsScannerHelpRequest(scannerArgs) {
-		if usage, ok := cfg.StaticScannerUsage(scannerArgs[0]); ok {
+		if usage, ok := edition.Catalog().Usage(scannerArgs[0]); ok {
 			fmt.Print(usage)
 			if !strings.HasSuffix(usage, "\n") {
 				fmt.Println()
@@ -116,10 +122,6 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 			return nil
 		}
 	}
-	if recordPath := runtimepkg.ResolveJSONLRecordPath(option); recordPath != "" {
-		option.OutputFile = recordPath
-	}
-
 	scannerLogger := logger
 	if !directScannerDebugEnabled(option, scannerArgs) {
 		scannerLogger = telemetry.ErrorOnlyLogger(logger)
@@ -127,11 +129,18 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 		defer restoreLogs()
 	}
 
-	application, err := apppkg.New(ctx, apppkg.AppConfig(option, features, scannerLogger))
+	product, err := profile.New(profile.FromOption(option, features, nil, scannerLogger))
 	if err != nil {
-		return fmt.Errorf("init app: %w", err)
+		return fmt.Errorf("construct scanner profile: %w", err)
 	}
-	defer application.Close()
+	if err := product.Load(ctx); err != nil {
+		return fmt.Errorf("load scanner profile: %w", err)
+	}
+	defer product.Close(context.Background())
+	application, err := product.App()
+	if err != nil {
+		return err
+	}
 	if err := application.WaitEngines(ctx); err != nil {
 		return fmt.Errorf("engine init: %w", err)
 	}
@@ -155,16 +164,12 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	sessionID := fmt.Sprintf("scan-%d", time.Now().UnixNano())
 	turnID := sessionID + "-run"
 	emitter := scannerArgs[0]
-	tool, ok := application.Commands.GetTool("bash")
-	if !ok {
+	bash := application.Bash
+	if bash == nil {
 		return fmt.Errorf("bash tool is not registered")
 	}
-	bash, ok := tool.(*cmdpkg.BashTool)
-	if !ok {
-		return fmt.Errorf("registered bash tool has unexpected type")
-	}
 	callID := turnID + "-call"
-	ctx = coretool.ContextWithInvocation(ctx, coretool.Invocation{
+	ctx = operation.ContextWithInvocation(ctx, operation.Invocation{
 		CallID: callID, SessionID: sessionID, TurnID: turnID, Emitter: emitter,
 	})
 	arguments, err := aop.JSONValue(map[string]any{"args": scannerArgs[1:]})
@@ -172,44 +177,42 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 		return fmt.Errorf("encode scanner arguments: %w", err)
 	}
 	startedAt := time.Now()
-	if application.EventBus != nil {
-		emitSessionStarted(application, sessionID, emitter, &aop.SessionStarted{}, types.SessionHistory_MODE_INHERIT)
+	emitSessionStarted(application, sessionID, emitter, &aop.SessionStarted{}, types.SessionHistory_MODE_INHERIT)
+	application.Emit(&aop.Event{
+		SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+		Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}},
+	})
+	application.Emit(&aop.Event{
+		SessionId: sessionID, TurnId: turnID, Emitter: emitter,
+		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: callID, Name: emitter, Arguments: arguments}},
+	})
+	defer func() {
+		isCanceled := errors.Is(runErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)
+		result := &aop.ToolResult{
+			CallId: callID, Name: emitter, IsError: runErr != nil,
+			DurationMs: uint64(time.Since(startedAt).Milliseconds()),
+		}
+		stopReason := string(agent.StopReasonCompleted)
+		closeReason := sessionext.SessionCloseCompleted
+		if runErr != nil {
+			result.Output = []*aop.Content{aop.Text(runErr.Error())}
+			stopReason = string(agent.StopReasonError)
+			closeReason = sessionext.SessionCloseError
+		}
+		if isCanceled {
+			stopReason = string(agent.StopReasonCanceled)
+			closeReason = sessionext.SessionCloseCanceled
+		}
 		application.Emit(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
-			Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}},
+			Payload: &aop.Event_ToolResult{ToolResult: result},
 		})
 		application.Emit(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
-			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: callID, Name: emitter, Arguments: arguments}},
+			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stopReason}},
 		})
-		defer func() {
-			isCanceled := errors.Is(runErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)
-			result := &aop.ToolResult{
-				CallId: callID, Name: emitter, IsError: runErr != nil,
-				DurationMs: uint64(time.Since(startedAt).Milliseconds()),
-			}
-			stopReason := string(agent.StopReasonCompleted)
-			closeReason := runtimepkg.SessionCloseCompleted
-			if runErr != nil {
-				result.Output = []*aop.Content{aop.Text(runErr.Error())}
-				stopReason = string(agent.StopReasonError)
-				closeReason = runtimepkg.SessionCloseError
-			}
-			if isCanceled {
-				stopReason = string(agent.StopReasonCanceled)
-				closeReason = runtimepkg.SessionCloseCanceled
-			}
-			application.Emit(&aop.Event{
-				SessionId: sessionID, TurnId: turnID, Emitter: emitter,
-				Payload: &aop.Event_ToolResult{ToolResult: result},
-			})
-			application.Emit(&aop.Event{
-				SessionId: sessionID, TurnId: turnID, Emitter: emitter,
-				Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stopReason}},
-			})
-			emitSessionEnded(application, sessionID, emitter, string(closeReason))
-		}()
-	}
+		emitSessionEnded(application, sessionID, emitter, string(closeReason))
+	}()
 	streaming := ShouldStreamScannerOutput(scannerArgs)
 	var captured strings.Builder
 	execution, err := bash.RunForeground(ctx, cmdpkg.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), cmdpkg.BashExecOptions{
@@ -230,8 +233,12 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 	if !streaming {
 		fmt.Print(captured.String())
 	}
-	if execution.ExitCode != 0 {
-		return fmt.Errorf("%s exited with code %d", scannerArgs[0], execution.ExitCode)
+	info, retained := execution.Session()
+	if !retained && execution.ID != "" {
+		return fmt.Errorf("command session %s is no longer available", execution.ID)
+	}
+	if info.ExitCode != 0 {
+		return fmt.Errorf("%s exited with code %d", scannerArgs[0], info.ExitCode)
 	}
 	return nil
 }

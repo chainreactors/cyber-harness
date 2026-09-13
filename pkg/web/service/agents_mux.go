@@ -7,6 +7,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
@@ -25,9 +26,9 @@ func namespaceMessage[T protobuf.Message](message protobuf.Message) (T, error) {
 	return value, nil
 }
 
-func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux, error) {
-	mux := aop.NewNamespaceMux()
-	if err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent) (*aop.NamespaceMux, error) {
+	mux := aop.NewNamespaceMux(ctx)
+	if err := mux.Register("agent-pool", &aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*aop.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -37,7 +38,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.CommandProtocolMessage](message)
 		if err != nil {
 			return err
@@ -47,7 +48,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*filepb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -57,7 +58,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*execpb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -67,7 +68,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.ReloadProtocolMessage](message)
 		if err != nil {
 			return err
@@ -77,7 +78,7 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*ptypb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -87,16 +88,13 @@ func (p *AgentPool) newAgentNamespaceMux(agent *remoteAgent) (*aop.NamespaceMux,
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent-pool", &toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*toolpb.ProtocolMessage](message)
 		if err != nil {
 			return err
 		}
 		if progress := value.GetProgress(); progress != nil {
 			p.handleToolProgress(envelope.ReplyTo, progress)
-		}
-		if artifact := value.GetArtifact(); artifact != nil {
-			p.handleToolArtifact(ctx, envelope, artifact)
 		}
 		return nil
 	}); err != nil {
@@ -247,21 +245,6 @@ func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *types.Re
 	agent.mu.Unlock()
 }
 
-func (p *AgentPool) handleToolArtifact(ctx context.Context, envelope *aop.Envelope, value *toolpb.Artifact) {
-	if envelope == nil || value == nil || p.artifacts == nil || len(value.Data) == 0 {
-		return
-	}
-	operationID := envelope.ReplyTo
-	if operationID == "" {
-		operationID = envelope.Id
-	}
-	if value.CallId == "" {
-		value = protobuf.CloneOf(value)
-		value.CallId = operationID
-	}
-	_ = p.artifacts.IngestArtifact(ctx, value)
-}
-
 func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result taskResult) {
 	if agent == nil {
 		return
@@ -304,10 +287,12 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 	if extension := event.GetExtension(); extension != nil && p.artifacts != nil {
 		artifact := new(toolpb.Artifact)
 		if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
-			if artifact.CallId == "" {
-				artifact.CallId = correlationID
+			operationID := correlationID
+			ref := new(operationpb.Ref)
+			if found, err := aop.FindTypedExtension(event, ref); err == nil && found && ref.GetCallId() != "" {
+				operationID = ref.GetCallId()
 			}
-			_ = p.artifacts.IngestArtifact(context.Background(), artifact)
+			_, _, _ = p.artifacts.NormalizeArtifact(context.Background(), operationID, artifact.GetTool(), artifact.GetData())
 		}
 	}
 	switch event.Payload.(type) {

@@ -4,14 +4,15 @@ import (
 	"context"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/chainreactors/aiscan/agent/tmux"
+	"github.com/chainreactors/utils/pty"
 )
 
-// Execution is one shell or built-in command invocation. Its ID is always the
-// ID of the underlying PTY session, so existing tmux attach/read/write/kill
-// operations continue to address the same runtime object.
+// Execution contains one invocation's arguments, streams and command details.
+// When backed by a terminal, ID addresses the manager's session. In-process
+// invocations may instead carry a call ID and have no terminal session.
+// Process state belongs to the manager and is read through Session.
 type Execution struct {
 	ID      string
 	Command string
@@ -23,15 +24,106 @@ type Execution struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	State     tmux.State
-	ExitCode  int
-	StartedAt time.Time
-	EndedAt   time.Time
-	KillCause string
-	Details   any
+	Details any
 
 	manager *tmux.Manager
 	mu      sync.RWMutex
+
+	cancelProcess context.CancelCauseFunc
+	detachParent  func() bool
+	stopCancel    func() bool
+	releaseEgress func()
+	processDone   chan struct{}
+	processOnce   sync.Once
+}
+
+// bindProcessControl connects the local operation cancellation scope to the
+// actual managed session. These handles stay process-local and never enter tool
+// arguments or the AOP protocol.
+func (e *Execution) bindProcessControl(ctx context.Context, cancel context.CancelCauseFunc, detachParent func() bool, releaseEgress func()) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.cancelProcess = cancel
+	e.detachParent = detachParent
+	e.stopCancel = context.AfterFunc(ctx, func() { _ = e.Kill() })
+	e.releaseEgress = releaseEgress
+	e.processDone = make(chan struct{})
+	e.mu.Unlock()
+}
+
+// DetachParent transfers a still-running execution to the process manager.
+// It is used only after the caller explicitly chooses background execution.
+func (e *Execution) DetachParent() bool {
+	if e == nil {
+		return false
+	}
+	e.mu.Lock()
+	stop := e.detachParent
+	e.detachParent = nil
+	e.mu.Unlock()
+	return stop == nil || stop()
+}
+
+func (e *Execution) finishProcess(cause error) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	stopCancel := e.stopCancel
+	stopParent := e.detachParent
+	cancel := e.cancelProcess
+	releaseEgress := e.releaseEgress
+	e.stopCancel = nil
+	e.detachParent = nil
+	e.cancelProcess = nil
+	e.releaseEgress = nil
+	e.mu.Unlock()
+	if stopCancel != nil {
+		stopCancel()
+	}
+	if stopParent != nil {
+		stopParent()
+	}
+	if cancel != nil {
+		cancel(cause)
+	}
+	if releaseEgress != nil {
+		releaseEgress()
+	}
+	e.processOnce.Do(func() {
+		e.mu.RLock()
+		done := e.processDone
+		e.mu.RUnlock()
+		if done != nil {
+			close(done)
+		}
+	})
+}
+
+// WaitProcessCompletion waits for the real process boundary, including its
+// completion hooks and call-scoped egress drain. A foreground caller uses this
+// after the native session exits; explicitly backgrounded callers do not.
+func (e *Execution) WaitProcessCompletion(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	done := e.processDone
+	e.mu.RUnlock()
+	if done == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func newExecution(manager *tmux.Manager, command string, args []string, dir string, env []string) *Execution {
@@ -43,16 +135,14 @@ func newExecution(manager *tmux.Manager, command string, args []string, dir stri
 		Stdin:   nil,
 		Stdout:  io.Discard,
 		Stderr:  io.Discard,
-		State:   tmux.StateRunning,
 		manager: manager,
 	}
 }
 
-func (e *Execution) bind(info tmux.Info) {
+func (e *Execution) bindSession(id string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.ID = info.ID
-	e.applyInfoLocked(info)
+	e.ID = id
 }
 
 func (e *Execution) setIO(stdin io.Reader, stdout, stderr io.Writer) {
@@ -69,26 +159,19 @@ func (e *Execution) setDetails(details any) {
 	e.Details = details
 }
 
-func (e *Execution) applyInfoLocked(info tmux.Info) {
-	e.State = info.State
-	e.ExitCode = info.ExitCode
-	e.StartedAt = info.StartedAt
-	e.EndedAt = info.EndedAt
-	e.KillCause = info.KillCause
-}
-
-func (e *Execution) refresh() {
+// Session returns the manager's current native snapshot. false means there is
+// no retained terminal session; a call ID alone does not imply a process.
+func (e *Execution) Session() (pty.Info, bool) {
+	if e == nil {
+		return pty.Info{}, false
+	}
 	e.mu.RLock()
 	id := e.ID
 	e.mu.RUnlock()
 	if id == "" || e.manager == nil {
-		return
+		return pty.Info{}, false
 	}
-	if info, ok := e.manager.Get(id); ok {
-		e.mu.Lock()
-		e.applyInfoLocked(info)
-		e.mu.Unlock()
-	}
+	return e.manager.Get(id)
 }
 
 // Wait waits for the PTY session. Canceling the wait also kills the session,
@@ -103,12 +186,10 @@ func (e *Execution) Wait(ctx context.Context) error {
 	done := e.manager.Done(id)
 	select {
 	case <-done:
-		e.refresh()
 		return nil
 	case <-ctx.Done():
 		_ = e.manager.Kill(id)
 		<-done
-		e.refresh()
 		return ctx.Err()
 	}
 }
@@ -121,16 +202,4 @@ func (e *Execution) Kill() error {
 		return nil
 	}
 	return e.manager.Kill(id)
-}
-
-func (e *Execution) Duration() time.Duration {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.StartedAt.IsZero() {
-		return 0
-	}
-	if !e.EndedAt.IsZero() {
-		return e.EndedAt.Sub(e.StartedAt)
-	}
-	return time.Since(e.StartedAt)
 }

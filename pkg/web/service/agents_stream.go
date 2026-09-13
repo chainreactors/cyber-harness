@@ -62,10 +62,14 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		stats:        &aop.AgentStats{},
 		done:         make(chan struct{}),
 	}
-	namespaceMux, err := p.newAgentNamespaceMux(agent)
+	namespaceMux, err := p.newAgentNamespaceMux(ctx, agent)
 	if err != nil {
 		return fmt.Errorf("register node namespaces: %w", err)
 	}
+	defer func() {
+		connection.Close()
+		_ = namespaceMux.Close(context.Background())
+	}()
 	accepted, err := aop.Wrap(generateID(), first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{
 		AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId, Capabilities: append([]string(nil), hello.Capabilities...)},
 	}})
@@ -93,7 +97,7 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 	}()
 
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, send aop.SendFunc) error {
-		handled, dispatchErr := namespaceMux.Dispatch(dispatchCtx, envelope, send)
+		handled, dispatchErr := namespaceMux.Dispatch(envelope, send)
 		if dispatchErr != nil {
 			return dispatchErr
 		}

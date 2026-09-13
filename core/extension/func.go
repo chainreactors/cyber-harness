@@ -4,11 +4,11 @@ import "context"
 
 // Func installs and closes a contribution expressed by callbacks.
 type Func struct {
-	LoadFunc  func(*Context) error
+	LoadFunc  func(*Scope) error
 	CloseFunc func(context.Context) error
 }
 
-func (f Func) Load(scope *Context) error {
+func (f Func) Load(scope *Scope) error {
 	if f.LoadFunc != nil {
 		return f.LoadFunc(scope)
 	}

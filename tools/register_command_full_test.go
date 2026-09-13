@@ -11,11 +11,10 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	_ "github.com/chainreactors/aiscan/tools/katana"
+	"github.com/chainreactors/aiscan/tools/katana"
 	passivecmd "github.com/chainreactors/aiscan/tools/passive"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/sdk/gogo"
@@ -30,7 +29,7 @@ func TestRegisterAllRegistersKatanaInFullBuild(t *testing.T) {
 		Gogo:  gogoEng,
 		Spray: sprayEng,
 	}
-	reg := buildRegistry(engineSet)
+	reg := registerTestScanners(t, engineSet, t.TempDir(), nil, telemetry.NopLogger(), katana.NewCommand(telemetry.NopLogger(), "", nil))
 
 	if !reg.Has("katana") {
 		t.Fatal("expected katana to be registered in full build")
@@ -42,7 +41,7 @@ func TestRegisterAllRegistersPassiveWithUncover(t *testing.T) {
 	engineSet.SetupUncover(engine.ReconOptions{
 		FofaKey: "deadbeef",
 	}, nil)
-	reg := buildRegistry(engineSet)
+	reg := registerTestScanners(t, engineSet, t.TempDir(), nil, telemetry.NopLogger(), passivecmd.NewCommand(engineSet, telemetry.NopLogger()))
 
 	if !reg.Has("passive") {
 		t.Fatal("expected passive to be registered when engineSet.Uncover is non-nil")
@@ -53,19 +52,13 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
 	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
-	registry := commands.NewRegistry()
 	engineSet := &engine.Set{}
-	deps := &commands.Deps{
-		WorkDir: t.TempDir(),
-		Events:  bus,
-		Logger:  telemetry.NopLogger(),
-	}
-	commands.Provide(deps, engine.SetKey, engineSet)
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
-
 	passiveEngine := &functionalPassiveEngine{}
 	passive := passivecmd.New(passiveEngine).WithLogger(telemetry.NopLogger())
-	registry.Register(commands.Command{Name: passive.Name(), Usage: passive.Usage(), Run: passive.Run}, "")
+	registry := registerTestScanners(t, engineSet, t.TempDir(), bus, telemetry.NopLogger(),
+		katana.NewCommand(telemetry.NopLogger(), "", bus),
+		commands.Command{Name: passive.Name(), Usage: passive.Usage(), Run: passive.Run},
+	)
 
 	for _, name := range []string{"katana", "passive"} {
 		if !registry.Has(name) {
@@ -97,7 +90,7 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 			},
 		},
 	}
-	requireFunctionalCoverage(t, registry, cases, "scan", "gogo", "spray", "zombie", "neutron", "proton")
+	requireFunctionalCoverage(t, registry, cases, "curl", "scan", "gogo", "spray", "zombie", "neutron", "proton")
 	runFunctionalCases(t, registry, recorder, cases)
 }
 

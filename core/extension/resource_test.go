@@ -23,7 +23,7 @@ type fileExtension struct {
 	cleanupReady <-chan struct{}
 }
 
-func (m *fileExtension) Load(scope *extension.Context) error {
+func (m *fileExtension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -79,7 +79,7 @@ func newWriterExtension(file *fileExtension) *writerExtension {
 	return &writerExtension{file: file, drained: make(chan struct{}), stopped: make(chan struct{})}
 }
 
-func (m *writerExtension) Load(scope *extension.Context) error {
+func (m *writerExtension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	if _, err := m.file.file.Stat(); err != nil {
 		return err

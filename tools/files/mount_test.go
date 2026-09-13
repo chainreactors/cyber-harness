@@ -20,7 +20,7 @@ func (g gatedMount) Open(name string) (fs.File, error) {
 }
 
 func TestUnmountRevokesAndRetainsInFlightSource(t *testing.T) {
-	f, _ := New(Config{Directory: t.TempDir()})
+	f, _ := New(Config{Directory: t.TempDir()}, nil)
 	fSet := filesystemSet(t, f)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestUnmountRevokesAndRetainsInFlightSource(t *testing.T) {
 }
 
 func TestMountedReadsRespectPolicyAndLifetime(t *testing.T) {
-	f, _ := New(Config{Directory: t.TempDir(), MaxBytes: 4})
+	f, _ := New(Config{Directory: t.TempDir(), MaxBytes: 4}, nil)
 	fSet := filesystemSet(t, f)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)

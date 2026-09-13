@@ -81,10 +81,10 @@ func NewManager() *Manager {
 	return m
 }
 
-// Subscribe registers an event listener and returns an unsubscribe function.
-func (m *Manager) Subscribe(fn func(Event)) func() {
+// Subscribe registers an event listener owned by the returned subscription.
+func (m *Manager) Subscribe(fn func(Event)) *eventbus.Subscription[Event] {
 	if fn == nil {
-		return func() {}
+		return nil
 	}
 	return m.events.Subscribe(fn)
 }

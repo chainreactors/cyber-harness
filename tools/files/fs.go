@@ -1,6 +1,6 @@
 // Package files owns bounded filesystem operations under one directory.
-// Construction is inert. Load opens the root; Close stops admission and waits
-// for operations before closing it. Callers borrow filesystem without owning its root.
+// Construction is inert. Resource owns the root lifetime; Files exposes only
+// filesystem behavior.
 package files
 
 import (
@@ -16,7 +16,8 @@ import (
 	"sync"
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	corehooks "github.com/chainreactors/aiscan/core/hooks"
+	"github.com/chainreactors/aiscan/core/operation"
 )
 
 var ErrUnavailable = errors.New("file service is not active")
@@ -26,29 +27,34 @@ type Config struct {
 	// MaxBytes bounds each read and write; zero means 1 MiB.
 	MaxBytes int64
 	ReadOnly bool
-	// Observe runs synchronously before an admitted operation is released.
-	// Its owner must outlive this extension and must not close it from here.
-	Observe func(context.Context, filepb.AccessOp, string, []byte, int64, error, uint32)
 }
 
-// Files owns the file resource and the read/write/ls/glob tools. Its Config is immutable after construction.
-// Open and Close own its resource lifetime; host adaptation lives in pkg/exts/files.
+// Files exposes bounded filesystem behavior. Its Config is immutable after
+// construction. Lifecycle is intentionally absent; Resource is the only owner
+// that can open or close the underlying root.
 type Files struct {
-	config       Config
-	mu           sync.Mutex
-	mutation     sync.Mutex
-	root         *os.Root
-	attempted    bool
-	stopping     bool
-	active       int
-	done         chan struct{}
-	lifetime     context.Context
-	cancel       context.CancelFunc
-	observations eventbus.Bus[observation]
-	mounts       map[string]*mount
+	config    Config
+	mu        sync.Mutex
+	mutation  sync.Mutex
+	root      *os.Root
+	attempted bool
+	stopping  bool
+	active    int
+	done      chan struct{}
+	lifetime  context.Context
+	cancel    context.CancelFunc
+	hooks     *corehooks.Registry
+	mounts    map[string]*mount
 }
 
-func New(config Config) (*Files, error) {
+// Resource is the construction result held by the files extension. Embedding
+// keeps low-level use convenient while allowing the extension to publish the
+// lifecycle-free Files field.
+type Resource struct {
+	*Files
+}
+
+func New(config Config, registry *corehooks.Registry) (*Resource, error) {
 	if !filepath.IsAbs(config.Directory) {
 		return nil, fmt.Errorf("file service requires an absolute directory")
 	}
@@ -58,10 +64,14 @@ func New(config Config) (*Files, error) {
 	if config.MaxBytes == 0 {
 		config.MaxBytes = 1 << 20
 	}
-	return &Files{config: config, done: make(chan struct{})}, nil
+	return &Resource{Files: &Files{config: config, hooks: registry, done: make(chan struct{})}}, nil
 }
 
-func (f *Files) Open(ctx context.Context) error {
+func (r *Resource) Open(ctx context.Context) error {
+	if r == nil || r.Files == nil {
+		return ErrUnavailable
+	}
+	f := r.Files
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.stopping || f.attempted && f.root == nil {
@@ -122,6 +132,8 @@ func (f *Files) release() {
 // Read returns owned bytes from a regular file. Filesystem policy lives here;
 // text encoding and presentation belong to the consumer.
 func (f *Files) Read(ctx context.Context, path string) (result []byte, err error) {
+	ctx, cancel := operation.Begin(ctx, "file", "read")
+	defer cancel(nil)
 	return f.read(ctx, path, true)
 }
 
@@ -152,7 +164,7 @@ func (f *Files) read(ctx context.Context, path string, observed bool) (result []
 	}
 	defer func() {
 		if observed {
-			f.observe(ctx, filepb.AccessOp_ACCESS_OP_READ, path, data, size, err, 0)
+			err = errors.Join(err, f.observe(ctx, filepb.AccessOp_ACCESS_OP_READ, path, data, size, err, 0))
 		}
 	}()
 	if f.lifetime.Err() != nil {
@@ -194,6 +206,8 @@ func (f *Files) read(ctx context.Context, path string, observed bool) (result []
 // before rename. Context cancellation cannot preempt a filesystem syscall or
 // undo a successful rename. Concurrent writes use last successful rename.
 func (f *Files) Write(ctx context.Context, path string, data []byte) (err error) {
+	ctx, cancel := operation.Begin(ctx, "file", "write")
+	defer cancel(nil)
 	f.mutation.Lock()
 	defer f.mutation.Unlock()
 	return f.writeBytes(ctx, path, data, filepb.AccessOp_ACCESS_OP_WRITE, 0)
@@ -214,12 +228,12 @@ func (f *Files) writeBytes(ctx context.Context, path string, data []byte, op fil
 		// Temporary writes are implementation details. Only a successful
 		// commit reports destination bytes and exposes the committed content.
 		if err != nil {
-			f.observe(ctx, op, path, nil, 0, err, edits)
+			err = errors.Join(err, f.observe(ctx, op, path, nil, 0, err, edits))
 		} else {
 			if created && op == filepb.AccessOp_ACCESS_OP_WRITE {
 				op = filepb.AccessOp_ACCESS_OP_CREATE
 			}
-			f.observe(ctx, op, path, data, int64(len(data)), nil, edits)
+			err = errors.Join(err, f.observe(ctx, op, path, data, int64(len(data)), nil, edits))
 		}
 	}()
 	if f.lifetime.Err() != nil {
@@ -241,7 +255,11 @@ func (f *Files) writeBytes(ctx context.Context, path string, data []byte, op fil
 // Close retains the root on timeout. A later Close with a fresh context waits
 // for the same operations and releases the same resource. Closed filesystem instances
 // cannot be loaded again.
-func (f *Files) Close(ctx context.Context) error {
+func (r *Resource) Close(ctx context.Context) error {
+	if r == nil || r.Files == nil {
+		return nil
+	}
+	f := r.Files
 	f.mu.Lock()
 	if !f.stopping {
 		f.stopping = true

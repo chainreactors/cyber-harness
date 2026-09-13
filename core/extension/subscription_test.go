@@ -13,10 +13,10 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 )
 
-// journalExtension is a test-only consumer of an actual borrowed file. Callback
+// outputConsumer is a test-only consumer of an actual borrowed file. Callback
 // admission and completion belong entirely to Subscription, with no second
 // inflight counter or completion channel in the extension.
-type journalExtension struct {
+type outputConsumer struct {
 	file         *fileExtension
 	bus          *eventbus.Bus[string]
 	subscription *eventbus.Subscription[string]
@@ -26,7 +26,7 @@ type journalExtension struct {
 	asyncError   error
 }
 
-func (m *journalExtension) Load(*extension.Context) error {
+func (m *outputConsumer) Load(*extension.Scope) error {
 	if m.asyncError != nil {
 		var err error
 		m.subscription, err = m.bus.SubscribeAsync(eventbus.SubscribeOptions[string]{}, func(value string) error {
@@ -43,7 +43,7 @@ func (m *journalExtension) Load(*extension.Context) error {
 	return nil
 }
 
-func (m *journalExtension) Close(ctx context.Context) error {
+func (m *outputConsumer) Close(ctx context.Context) error {
 	if err := m.subscription.Close(ctx); err != nil {
 		return errors.Join(extension.ErrCloseIncomplete, err)
 	}
@@ -51,12 +51,12 @@ func (m *journalExtension) Close(ctx context.Context) error {
 }
 
 func TestAsyncProcessingFailureDoesNotRetainBorrowedExtensionResource(t *testing.T) {
-	file := &fileExtension{path: filepath.Join(t.TempDir(), "journal.txt")}
+	file := &fileExtension{path: filepath.Join(t.TempDir(), "events.txt")}
 	want := errors.New("processing failed after writing")
 	bus := eventbus.New[string]()
-	journal := &journalExtension{file: file, bus: bus, asyncError: want}
+	output := &outputConsumer{file: file, bus: bus, asyncError: want}
 	set := newSet(t,
-		extension.Entry{ID: "journal", DependsOn: []string{"file"}, Extension: journal},
+		extension.Entry{ID: "output", DependsOn: []string{"file"}, Extension: output},
 		extension.Entry{ID: "file", Extension: file},
 	)
 	if err := set.Load(t.Context()); err != nil {
@@ -70,7 +70,7 @@ func TestAsyncProcessingFailureDoesNotRetainBorrowedExtensionResource(t *testing
 	assertClosed(t, file)
 	data, err := os.ReadFile(file.path)
 	if err != nil || string(data) != "accepted" {
-		t.Fatalf("journal = %q, %v", data, err)
+		t.Fatalf("output = %q, %v", data, err)
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatalf("retry repeated terminal error: %v", err)
@@ -78,17 +78,17 @@ func TestAsyncProcessingFailureDoesNotRetainBorrowedExtensionResource(t *testing
 }
 
 func TestSubscriptionTimeoutRetainsBorrowedExtensionResource(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "journal.txt")
+	path := filepath.Join(t.TempDir(), "events.txt")
 	synctest.Test(t, func(t *testing.T) {
 		bus := eventbus.New[string]()
 		file := &fileExtension{path: path}
-		journal := &journalExtension{file: file, bus: bus, entered: make(chan struct{}), release: make(chan struct{})}
+		output := &outputConsumer{file: file, bus: bus, entered: make(chan struct{}), release: make(chan struct{})}
 		set := newSet(t,
-			extension.Entry{ID: "journal", DependsOn: []string{"file"}, Extension: journal},
+			extension.Entry{ID: "output", DependsOn: []string{"file"}, Extension: output},
 			extension.Entry{ID: "file", Extension: file},
 		)
 		defer func() {
-			close(journal.release)
+			close(output.release)
 			if err := set.Close(context.Background()); err != nil {
 				t.Error(err)
 			}
@@ -97,7 +97,7 @@ func TestSubscriptionTimeoutRetainsBorrowedExtensionResource(t *testing.T) {
 			t.Fatal(err)
 		}
 		go bus.Emit("accepted")
-		<-journal.entered
+		<-output.entered
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		if err := set.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -107,7 +107,7 @@ func TestSubscriptionTimeoutRetainsBorrowedExtensionResource(t *testing.T) {
 			t.Fatalf("dependency released before callback completed: %v", err)
 		}
 		bus.Emit("rejected")
-		journal.release <- struct{}{}
+		output.release <- struct{}{}
 		if err := set.Close(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -120,6 +120,6 @@ func TestSubscriptionTimeoutRetainsBorrowedExtensionResource(t *testing.T) {
 	})
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "accepted" {
-		t.Fatalf("journal = %q, error = %v", data, err)
+		t.Fatalf("output = %q, error = %v", data, err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/tool"
 )
 
@@ -80,7 +81,7 @@ func normalizeCaptureArgs(args Args) (captureRequest, error) {
 func (t *Tool) outputPath(ctx context.Context, requested, base, ext string) (string, error) {
 	path := strings.TrimSpace(requested)
 	if path == "" {
-		if invocationDir := tool.InvocationFromContext(ctx).WorkDir; invocationDir != "" {
+		if invocationDir := operation.InvocationFromContext(ctx).WorkDir; invocationDir != "" {
 			path = filepath.Join(invocationDir, ".aiscan", "record", base+ext)
 		} else {
 			path = filepath.Join(t.outputDir, base+ext)
@@ -92,7 +93,7 @@ func (t *Tool) outputPath(ctx context.Context, requested, base, ext string) (str
 			return "", fmt.Errorf("output must use %s extension", ext)
 		}
 		if !filepath.IsAbs(path) {
-			path = filepath.Join(tool.WorkDirFromContext(ctx, t.workDir), path)
+			path = filepath.Join(operation.WorkDirFromContext(ctx, t.workDir), path)
 		}
 	}
 	abs, err := filepath.Abs(filepath.Clean(path))
@@ -103,7 +104,7 @@ func (t *Tool) outputPath(ctx context.Context, requested, base, ext string) (str
 }
 
 func (t *Tool) mediaURI(ctx context.Context, path string) string {
-	base := tool.WorkDirFromContext(ctx, t.workDir)
+	base := operation.WorkDirFromContext(ctx, t.workDir)
 	if base != "" {
 		if relative, err := filepath.Rel(base, path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return filepath.ToSlash(relative)

@@ -64,11 +64,11 @@ func NewCyberhubSearch(index *association.Index) *CyberhubSearch {
 }
 
 func cyberhubUsage() string {
-	return `search cyberhub - Search and list loaded fingerprints and POC templates
+	return `cyberhub - Search and list loaded fingerprints and POC templates
 Usage:
-  search cyberhub list [finger|poc|all] [options]
-  search cyberhub search [finger|poc|all] <query> [options]
-  search cyberhub id <name-or-id>
+  cyberhub list [finger|poc|all] [options]
+  cyberhub search [finger|poc|all] <query> [options]
+  cyberhub id <name-or-id>
 
 Options:
   -t, --type       Resource type: finger, poc, or all.
@@ -85,14 +85,14 @@ Options:
   -j, --json       Output JSON Lines.
 
 Examples:
-  search cyberhub search --finger tomcat
-  search cyberhub search --finger shiro --severity critical,high
-  search cyberhub search --cve CVE-2021-44228
-  search cyberhub search --vendor apache --product tomcat
-  search cyberhub search finger --poc
-  search cyberhub id tomcat
-  search cyberhub list poc --severity critical --limit 10
-  search cyberhub search poc seeyon`
+  cyberhub search --finger tomcat
+  cyberhub search --finger shiro --severity critical,high
+  cyberhub search --cve CVE-2021-44228
+  cyberhub search --vendor apache --product tomcat
+  cyberhub search finger --poc
+  cyberhub id tomcat
+  cyberhub list poc --severity critical --limit 10
+  cyberhub search poc seeyon`
 }
 
 func (c *CyberhubSearch) Name() string  { return "cyberhub" }
@@ -101,7 +101,7 @@ func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 func (c *CyberhubSearch) Run(_ context.Context, execution *commands.Execution) (any, error) {
 	args := execution.Args
 	if c.index == nil {
-		return nil, fmt.Errorf("search cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (AISCAN_CYBERHUB_URL, AISCAN_CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
+		return nil, fmt.Errorf("cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (AISCAN_CYBERHUB_URL, AISCAN_CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")
 	}
 
 	var opts cyberhubFlags
@@ -112,10 +112,10 @@ func (c *CyberhubSearch) Run(_ context.Context, execution *commands.Execution) (
 			fmt.Fprint(execution.Stdout, cyberhubUsage()+"\n")
 			return nil, nil
 		}
-		return nil, fmt.Errorf("search cyberhub: %w", err)
+		return nil, fmt.Errorf("cyberhub: %w", err)
 	}
 	if opts.Limit < 0 {
-		return nil, fmt.Errorf("search cyberhub: --limit cannot be negative")
+		return nil, fmt.Errorf("cyberhub: --limit cannot be negative")
 	}
 
 	action, typ, query, err := parseCyberhubAction(rest, opts.Type, opts.Query)
@@ -221,7 +221,7 @@ func (c *CyberhubSearch) resultToItems(result *association.QueryResult, typ stri
 // executeID looks up a single entity by name/id and shows detail + associations.
 func (c *CyberhubSearch) executeID(name string, jsonOutput bool) (string, error) {
 	if name == "" {
-		return "", fmt.Errorf("search cyberhub id: name or id required")
+		return "", fmt.Errorf("cyberhub id: name or id required")
 	}
 
 	if f := c.index.Finger(name); f != nil {
@@ -233,7 +233,7 @@ func (c *CyberhubSearch) executeID(name string, jsonOutput bool) (string, error)
 	if a := c.index.Alias(name); a != nil {
 		return c.renderAliasDetail(a, jsonOutput)
 	}
-	return "", fmt.Errorf("search cyberhub id: %q not found", name)
+	return "", fmt.Errorf("cyberhub id: %q not found", name)
 }
 
 type detailResult struct {
@@ -367,7 +367,7 @@ func parseCyberhubAction(rest []string, flagType, flagQuery string) (string, str
 			rest = rest[1:]
 			name := strings.TrimSpace(strings.Join(rest, " "))
 			if name == "" {
-				return "", "", "", fmt.Errorf("search cyberhub id: name or id required")
+				return "", "", "", fmt.Errorf("cyberhub id: name or id required")
 			}
 			return action, "", name, nil
 		}
@@ -375,7 +375,7 @@ func parseCyberhubAction(rest []string, flagType, flagQuery string) (string, str
 
 	typ := normalizeCyberhubType(flagType)
 	if strings.TrimSpace(flagType) != "" && typ == "" {
-		return "", "", "", fmt.Errorf("search cyberhub: invalid type %q", flagType)
+		return "", "", "", fmt.Errorf("cyberhub: invalid type %q", flagType)
 	}
 	if typ == "" {
 		typ = typeAll

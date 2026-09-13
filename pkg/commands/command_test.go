@@ -1,10 +1,45 @@
 package commands
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
+	"context"
+	"errors"
 	"testing"
+
+	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/tool"
 )
+
+func TestRegistryRejectsDuplicateCommands(t *testing.T) {
+	registry := NewRegistry(nil)
+	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return registry.Register(scope, "one", Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+	}}
+	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return registry.Register(scope, "two",
+			Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
+			Command{Name: "scan", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
+		)
+	}}
+	set, err := extension.New(
+		extension.Entry{ID: "one", Extension: first},
+		extension.Entry{ID: "two", DependsOn: []string{"one"}, Extension: duplicate},
+		extension.Entry{ID: "registry", DependsOn: []string{"two"}, Extension: registry},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Load(t.Context()); !errors.Is(err, ErrDuplicateCommand) {
+		t.Fatalf("duplicate load = %v", err)
+	}
+	defer set.Close(context.Background())
+	if registry.Has("fresh") {
+		t.Fatal("failed command group was partially published")
+	}
+	if names := registry.GroupNames("two"); len(names) != 0 {
+		t.Fatalf("failed registration acquired group ownership: %v", names)
+	}
+}
 
 type testReadArgs struct {
 	Path   string `json:"path"            jsonschema:"description=File path to read"`

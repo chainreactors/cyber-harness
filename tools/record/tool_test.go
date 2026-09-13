@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/operation"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
@@ -162,7 +163,7 @@ func TestValidation(t *testing.T) {
 func TestRelativeOutputUsesInvocationWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	tool := New("ignored", filepath.Join(dir, "default"), 4, &fakeBackend{})
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{WorkDir: dir})
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{WorkDir: dir})
 	result, err := tool.Execute(ctx, `{"action":"screenshot","output":"shots/test.png"}`)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +182,7 @@ func TestRelativeOutputUsesInvocationWorkDir(t *testing.T) {
 func TestDefaultOutputUsesInvocationRecordDir(t *testing.T) {
 	dir := t.TempDir()
 	tool := New("ignored", filepath.Join(t.TempDir(), "fallback"), 4, &fakeBackend{})
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{WorkDir: dir})
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{WorkDir: dir})
 	result, err := tool.Execute(ctx, `{"action":"screenshot"}`)
 	if err != nil {
 		t.Fatal(err)

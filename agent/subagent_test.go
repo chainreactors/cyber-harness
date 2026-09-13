@@ -9,21 +9,21 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/operation"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
 func TestSubAgentSyncReturnsResult(t *testing.T) {
-	parent := NewAgent(Config{
+	parent := NewAgent(Config{Loop: StandardLoop{},
 		Provider:  &scriptedProvider{responses: []*ChatCompletionResponse{chatResponse(NewTextMessage("assistant", "child result"))}},
-		Tools:     commands.NewRegistry(),
+		Tools:     newTestTools(t),
 		Model:     "test-model",
 		SessionID: "parent-session",
 	})
 	tool := NewSubAgentTool(nil)
 
-	ctx := coretool.ContextWithInvocation(withToolAgentConfig(context.Background(), parent.Cfg), coretool.Invocation{CallID: "spawn-sync"})
+	ctx := operation.ContextWithInvocation(withToolAgentConfig(context.Background(), parent.Cfg), operation.Invocation{CallID: "spawn-sync"})
 	result, err := tool.Execute(ctx, `{"action":"create","mode":"sync","name":"worker","prompt":"do the work"}`)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -45,9 +45,9 @@ func TestSubAgentCreateRequiresExecutingAgentContext(t *testing.T) {
 }
 
 func TestSubAgentCreateRequiresSpawningToolCallID(t *testing.T) {
-	parent := NewAgent(Config{
+	parent := NewAgent(Config{Loop: StandardLoop{},
 		Provider: &scriptedProvider{},
-		Tools:    commands.NewRegistry(),
+		Tools:    newTestTools(t),
 		Model:    "test-model",
 	})
 	tool := NewSubAgentTool(nil)
@@ -73,16 +73,16 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		events = append(events, event)
 		mu.Unlock()
 	})
-	active := NewAgent(Config{
+	active := NewAgent(Config{Loop: StandardLoop{},
 		Provider:  provider,
-		Tools:     commands.NewRegistry(),
+		Tools:     newTestTools(t),
 		Model:     "test-model",
 		SessionID: "active-session",
 		Inbox:     activeInbox,
 		Bus:       bus,
 	})
 
-	ctx := coretool.ContextWithInvocation(withToolAgentConfig(context.Background(), active.Cfg), coretool.Invocation{CallID: "spawn-context"})
+	ctx := operation.ContextWithInvocation(withToolAgentConfig(context.Background(), active.Cfg), operation.Invocation{CallID: "spawn-context"})
 	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","name":"context-worker","prompt":"work"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

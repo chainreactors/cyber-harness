@@ -10,6 +10,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	corehooks "github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -68,25 +69,11 @@ const (
 
 type TransformContextFunc func([]*aop.Message) []*aop.Message
 
-type BeforeToolCallContext struct {
-	AssistantMessage *aop.Message
-	ToolCall         *aop.ToolCall
-	SystemPrompt     string
-	Messages         []*aop.Message
-}
-
-type BeforeToolCallResult struct {
-	Block  bool
-	Reason string
-}
-
-type AfterToolCallContext struct {
-	AssistantMessage *aop.Message
-	ToolCall         *aop.ToolCall
-	Result           string
-	IsError          bool
-	SystemPrompt     string
-	Messages         []*aop.Message
+// Loop is the replaceable reasoning algorithm used by an Agent. Config is the
+// Agent's actual run snapshot; implementations return the canonical Result.
+// A nil Loop disables reasoning and never falls back to StandardLoop.
+type Loop interface {
+	Run(context.Context, Config) (*Result, error)
 }
 
 type ToolFlowDecision int
@@ -95,12 +82,6 @@ const (
 	ToolFlowContinue ToolFlowDecision = iota
 	ToolFlowTerminate
 )
-
-type AfterToolCallResult struct {
-	Result  *string
-	IsError *bool
-	Flow    ToolFlowDecision
-}
 
 // SystemPromptFunc is called at the start of each turn to produce the system prompt.
 // Receives the current config context so it can adapt to active tools, model, etc.
@@ -117,6 +98,7 @@ type CompactionSettings struct {
 }
 
 type Config struct {
+	Loop             Loop
 	Provider         Provider
 	Tools            tool.Executor
 	Model            string
@@ -135,9 +117,7 @@ type Config struct {
 	Bus              aop.EventEmitter
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
-	Hooks            *hooks.Registry
-	BeforeToolCall   func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error)
-	AfterToolCall    func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error)
+	Hooks            *corehooks.Registry
 	MaxTurns         int
 	LoopScheduler    *LoopScheduler
 	Inbox            inbox.Inbox
@@ -165,6 +145,7 @@ type Config struct {
 // Builder methods — each returns a modified copy (Config is a value type).
 
 func (c Config) WithProvider(p Provider) Config          { c.Provider = p; return c }
+func (c Config) WithLoop(loop Loop) Config               { c.Loop = loop; return c }
 func (c Config) WithTools(t tool.Executor) Config        { c.Tools = t; return c }
 func (c Config) WithModel(m string) Config               { c.Model = m; return c }
 func (c Config) WithSystemPrompt(s string) Config        { c.SystemPrompt = s; return c }
@@ -187,7 +168,7 @@ func (c Config) WithCacheRetention(r CacheRetention) Config { c.CacheRetention =
 func (c Config) WithSessionID(id string) Config             { c.SessionID = id; return c }
 func (c Config) WithTurnID(id string) Config                { c.TurnID = id; return c }
 func (c Config) WithAgentName(name string) Config           { c.AgentName = name; return c }
-func (c Config) WithHooks(r *hooks.Registry) Config         { c.Hooks = r; return c }
+func (c Config) WithHooks(r *corehooks.Registry) Config     { c.Hooks = r; return c }
 func (c Config) WithLoopScheduler(s *LoopScheduler) Config {
 	c.LoopScheduler = s
 	return c
@@ -245,7 +226,8 @@ func randomID() string {
 	return hex.EncodeToString(b)
 }
 
-// NewAgent creates an Agent from a Config.
+// NewAgent creates an Agent with exactly the configured Loop. A nil Loop keeps
+// state and tools usable while Run reports that reasoning is unavailable.
 func NewAgent(cfg Config) *Agent {
 	cfg = cfg.init()
 	return &Agent{

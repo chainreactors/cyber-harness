@@ -4,36 +4,50 @@ package files
 import (
 	"context"
 	"errors"
+
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 )
 
-// Extension is the only files plugin. Files is the borrowed raw implementation.
-type Extension struct{ *files.Files }
+// Extension is the only files plugin and the sole lifecycle owner of Files.
+type Extension struct {
+	resource *files.Resource
+	registry *toolset.Registry
+}
 
-func New(config files.Config) (*Extension, error) {
-	value, err := files.New(config)
+func New(registry *toolset.Registry, hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
+	if registry == nil {
+		return nil, errors.New("files extension requires a tool registry")
+	}
+	value, err := files.New(config, hookRegistry)
 	if err != nil {
 		return nil, err
 	}
-	return &Extension{Files: value}, nil
+	return &Extension{resource: value, registry: registry}, nil
 }
 
-func (e *Extension) Load(scope *extension.Context) error {
-	if err := e.Files.Open(scope.Init()); err != nil {
+// Files returns the filesystem behavior. Its concrete type has no lifecycle
+// methods; only this extension retains Resource.
+func (e *Extension) Files() *files.Files {
+	if e == nil || e.resource == nil {
+		return nil
+	}
+	return e.resource.Files
+}
+
+func (e *Extension) Load(scope *extension.Scope) error {
+	if err := e.resource.Open(scope.Init()); err != nil {
 		return err
 	}
-	tools, err := e.Files.Tools()
+	tools, err := e.resource.Files.Tools()
 	if err != nil {
 		return err
 	}
-	return scope.RegisterTools(tools...)
+	return e.registry.Register(scope, tools...)
 }
 
 func (e *Extension) Close(ctx context.Context) error {
-	err := e.Files.Close(ctx)
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return errors.Join(extension.ErrCloseIncomplete, err)
-	}
-	return err
+	return e.resource.Close(ctx)
 }

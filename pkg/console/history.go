@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 func listSavedSessions(dir string) ([]SavedSession, error) {
@@ -25,7 +25,7 @@ func listSavedSessions(dir string) ([]SavedSession, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		state, err := runtimepkg.ReadHistory(path)
+		state, err := sessionext.ReadHistory(path)
 		if err != nil {
 			continue
 		}

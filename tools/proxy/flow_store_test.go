@@ -30,22 +30,36 @@ func TestStorageConfigValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
+func TestFlowStoreRejectsIndexRecordsWithoutBodyOwnership(t *testing.T) {
 	dir := t.TempDir()
-	hub := NewProxyHub(nil, nil, dir, true)
-	if err := hub.Start(dir); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "body"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	defer hub.Shutdown(context.Background())
+	if err := os.WriteFile(filepath.Join(dir, "flows.jsonl"), []byte("{\"id\":\"1\",\"exchange\":{}}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewFlowStore(8).SetBodyDir(dir); err == nil || !strings.Contains(err.Error(), "invalid metadata index record") {
+		t.Fatalf("non-canonical index error = %v", err)
+	}
+}
+
+func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
+	dir := t.TempDir()
+	resource := NewProxyHub(nil, nil, dir, true, nil)
+	hub := resource.ProxyHub
+	if err := resource.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer resource.Close(context.Background())
 	target := startTestTarget(maxBodySnip * 32)
 	defer target.Close()
 	getThrough(t, hubClient(t, hub, ""), target.URL)
-	flows := waitForFlows(t, hub.Store(), 1)
+	flows := waitForFlows(t, hub.store, 1)
 	if len(flows) != 1 {
 		t.Fatalf("flows=%d", len(flows))
 	}
 	f := flows[0]
-	if hub.Store().files[f.ID][1] >= 0 || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
+	if hub.store.files[f.ID][1] >= 0 || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
 		t.Fatalf("unexpected preview: %+v", f)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "capture")); !os.IsNotExist(err) {
@@ -59,19 +73,20 @@ func TestFileConsumerOwnsChunksAndClosesBeforePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	hub := NewProxyHub(nil, store, "", true)
+	hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
 	hub.storage.BodyMaxBytes = 8
 	stream := &bodyStream{}
-	finish, release, err := hub.recordBody(stream)
+	body, err := hub.recordBody(stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
+	defer body.release()
 	p := []byte("abcdefghijk")
 	_, _ = stream.Write(p)
 	p[0] = 'X'
 	stream.Close()
-	file, err := finish(false)
+	err = body.finish(false)
+	file := body.file
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +97,8 @@ func TestFileConsumerOwnsChunksAndClosesBeforePublication(t *testing.T) {
 	if _, err = file.Write([]byte("x")); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("file is not closed: %v", err)
 	}
-	again, err := finish(false)
-	if err != nil || file != again {
+	err = body.finish(false)
+	if err != nil || file != body.file {
 		t.Fatal("finalization is not idempotent")
 	}
 	removeCaptureFiles([2]*os.File{nil, file})
@@ -112,39 +127,13 @@ func TestBodySubscriberOverflowDoesNotBlockWriter(t *testing.T) {
 	}
 	close(gate)
 	stream.Close()
-	err = sub.Close(context.Background())
+	if err := sub.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err = sub.Err()
 	preview, size := stream.snapshot()
 	if !errors.Is(err, eventbus.ErrOverflow) || size != 1+2<<20 || len(preview) != maxBodySnip {
 		t.Fatalf("size=%d preview=%d, %v", size, len(preview), err)
-	}
-}
-
-func TestFlowSubscriptionFiltersBeforeReadingBodies(t *testing.T) {
-	hub := NewProxyHub(nil, NewFlowStore(8), "", true)
-	delivered := make(chan Flow, 1)
-	sub, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{
-		Buffer: 1, Filter: func(f Flow) bool { return f.ToolID == "selected" },
-	}, func(f Flow) error { delivered <- f; return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sub.Cancel()
-	for i := 0; i < 10; i++ {
-		hub.ingest(Flow{ToolID: "ignored", Exchange: traffic.Exchange{
-			Response: &traffic.Response{},
-		}})
-	}
-	hub.ingest(Flow{ToolID: "selected"})
-	select {
-	case flow := <-delivered:
-		if flow.ToolID != "selected" {
-			t.Fatalf("flow=%v", flow)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("filtered subscription did not deliver")
-	}
-	if err := sub.Err(); err != nil {
-		t.Fatal(err)
 	}
 }
 

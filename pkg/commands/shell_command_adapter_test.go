@@ -13,7 +13,8 @@ import (
 	"testing"
 	"time"
 
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/utils/pty"
 )
 
 type adapterTestExitError struct{ code int }
@@ -27,47 +28,51 @@ type adapterTestCommands struct {
 	once     sync.Once
 }
 
-func newAdapterTestBash(t *testing.T) (*BashTool, *CommandRegistry, *adapterTestCommands) {
+func newAdapterTestBash(t *testing.T) (*BashTool, *Registry, *adapterTestCommands) {
 	t.Helper()
 	state := &adapterTestCommands{started: make(chan struct{}), canceled: make(chan struct{})}
-	registry := NewRegistry()
-	registry.Register(Command{Name: "memory_echo", Run: func(_ context.Context, execution *Execution) (any, error) {
-		fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
-		return nil, nil
-	}}, "test")
-	registry.Register(Command{Name: "memory_upper", Run: func(_ context.Context, execution *Execution) (any, error) {
-		data, err := io.ReadAll(execution.Stdin)
-		if err != nil {
+	registry, _ := loadTestRegistry(t, commandGroup("adapter-commands", "test",
+		Command{Name: "memory_echo", Run: func(_ context.Context, execution *Execution) (any, error) {
+			fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
+			return nil, nil
+		}},
+		Command{Name: "memory_upper", Run: func(_ context.Context, execution *Execution) (any, error) {
+			data, err := io.ReadAll(execution.Stdin)
+			if err != nil {
+				return nil, err
+			}
+			_, err = execution.Stdout.Write(bytes.ToUpper(data))
 			return nil, err
-		}
-		_, err = execution.Stdout.Write(bytes.ToUpper(data))
-		return nil, err
-	}}, "test")
-	registry.Register(Command{Name: "memory_fail", Run: func(context.Context, *Execution) (any, error) {
-		return nil, adapterTestExitError{code: 7}
-	}}, "test")
-	registry.Register(Command{Name: "memory_context", Run: func(ctx context.Context, execution *Execution) (any, error) {
-		invocation := coretool.InvocationFromContext(ctx)
-		fmt.Fprintf(execution.Stdout, "dir=%s call=%s session=%s turn=%s emitter=%s\n",
-			execution.Dir, invocation.CallID, invocation.SessionID, invocation.TurnID, invocation.Emitter)
-		return nil, nil
-	}}, "test")
-	registry.Register(Command{Name: "memory_wait", Run: func(ctx context.Context, _ *Execution) (any, error) {
-		state.once.Do(func() { close(state.started) })
-		<-ctx.Done()
-		close(state.canceled)
-		return nil, ctx.Err()
-	}}, "test")
+		}},
+		Command{Name: "memory_fail", Run: func(context.Context, *Execution) (any, error) {
+			return nil, adapterTestExitError{code: 7}
+		}},
+		Command{Name: "memory_context", Run: func(ctx context.Context, execution *Execution) (any, error) {
+			invocation := operation.InvocationFromContext(ctx)
+			fmt.Fprintf(execution.Stdout, "dir=%s call=%s session=%s turn=%s emitter=%s\n",
+				execution.Dir, invocation.CallID, invocation.SessionID, invocation.TurnID, invocation.Emitter)
+			return nil, nil
+		}},
+		Command{Name: "memory_wait", Run: func(ctx context.Context, _ *Execution) (any, error) {
+			state.once.Do(func() { close(state.started) })
+			<-ctx.Done()
+			close(state.canceled)
+			return nil, ctx.Err()
+		}},
+		Command{Name: "scan", Run: func(_ context.Context, execution *Execution) (any, error) {
+			fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
+			return nil, nil
+		}},
+	))
 
-	bash := NewBashTool(t.TempDir(), 10)
-	bash.SetCommandNames(registry.Names)
-	bash.SetCommandResolver(registry.Get)
+	bash := NewBashTool(t.TempDir(), 10, nil)
+	bash.SetCommandRegistry(registry)
 	bash.attachShellCommands(registry)
 	t.Cleanup(bash.Close)
 	return bash, registry, state
 }
 
-func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, command string, workDir string) (*Execution, string) {
+func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, command string, workDir string) (pty.Info, string) {
 	t.Helper()
 	var output strings.Builder
 	execution, err := bash.RunForeground(ctx, command, BashExecOptions{
@@ -79,14 +84,18 @@ func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, comman
 	if err != nil {
 		t.Fatalf("RunForeground(%q): %v", command, err)
 	}
-	return execution, output.String()
+	info, ok := execution.Session()
+	if !ok {
+		t.Fatalf("RunForeground(%q) has no retained session", command)
+	}
+	return info, output.String()
 }
 
 func TestShellCommandAdapterIsLazy(t *testing.T) {
 	bash, _, _ := newAdapterTestBash(t)
-	execution, output := runAdapterCommand(t, bash, context.Background(), "memory_echo direct", t.TempDir())
-	if execution.ExitCode != 0 || !strings.Contains(output, "direct") {
-		t.Fatalf("direct command exit=%d output=%q", execution.ExitCode, output)
+	session, output := runAdapterCommand(t, bash, context.Background(), "memory_echo direct", t.TempDir())
+	if session.ExitCode != 0 || !strings.Contains(output, "direct") {
+		t.Fatalf("direct command exit=%d output=%q", session.ExitCode, output)
 	}
 	if bash.shellAdapter != nil {
 		t.Fatal("simple registered command allocated shell runtime state")
@@ -105,37 +114,37 @@ func TestShellCommandComposition(t *testing.T) {
 	bash, _, _ := newAdapterTestBash(t)
 	workDir := t.TempDir()
 
-	execution, output := runAdapterCommand(t, bash, context.Background(), "memory_echo one && memory_echo two", workDir)
-	if execution.ExitCode != 0 || !strings.Contains(output, "one") || !strings.Contains(output, "two") {
-		t.Fatalf("and composition exit=%d output=%q", execution.ExitCode, output)
+	session, output := runAdapterCommand(t, bash, context.Background(), "memory_echo one && memory_echo two", workDir)
+	if session.ExitCode != 0 || !strings.Contains(output, "one") || !strings.Contains(output, "two") {
+		t.Fatalf("and composition exit=%d output=%q", session.ExitCode, output)
 	}
 
-	execution, output = runAdapterCommand(t, bash, context.Background(), "memory_fail || memory_echo recovered", workDir)
-	if execution.ExitCode != 0 || !strings.Contains(output, "recovered") {
-		t.Fatalf("or composition exit=%d output=%q", execution.ExitCode, output)
+	session, output = runAdapterCommand(t, bash, context.Background(), "memory_fail || memory_echo recovered", workDir)
+	if session.ExitCode != 0 || !strings.Contains(output, "recovered") {
+		t.Fatalf("or composition exit=%d output=%q", session.ExitCode, output)
 	}
 
-	execution, output = runAdapterCommand(t, bash, context.Background(), "memory_echo hello | memory_upper", workDir)
-	if execution.ExitCode != 0 || !strings.Contains(output, "HELLO") {
-		t.Fatalf("pipeline exit=%d output=%q", execution.ExitCode, output)
+	session, output = runAdapterCommand(t, bash, context.Background(), "memory_echo hello | memory_upper", workDir)
+	if session.ExitCode != 0 || !strings.Contains(output, "HELLO") {
+		t.Fatalf("pipeline exit=%d output=%q", session.ExitCode, output)
 	}
 
-	execution, _ = runAdapterCommand(t, bash, context.Background(), "memory_fail && memory_echo unreachable", workDir)
-	if execution.ExitCode != 7 {
-		t.Fatalf("short-circuit exit code = %d, want 7", execution.ExitCode)
+	session, _ = runAdapterCommand(t, bash, context.Background(), "memory_fail && memory_echo unreachable", workDir)
+	if session.ExitCode != 7 {
+		t.Fatalf("short-circuit exit code = %d, want 7", session.ExitCode)
 	}
 }
 
 func TestShellCommandRedirectionAndInvocationContext(t *testing.T) {
 	bash, _, _ := newAdapterTestBash(t)
 	workDir := t.TempDir()
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
 		WorkDir: workDir, CallID: "call-1", SessionID: "session-1", TurnID: "turn-1", Emitter: "runner",
 	})
 
-	execution, _ := runAdapterCommand(t, bash, ctx, "memory_context > adapter-context.txt", workDir)
-	if execution.ExitCode != 0 {
-		t.Fatalf("redirection exit code = %d", execution.ExitCode)
+	session, _ := runAdapterCommand(t, bash, ctx, "memory_context > adapter-context.txt", workDir)
+	if session.ExitCode != 0 {
+		t.Fatalf("redirection exit code = %d", session.ExitCode)
 	}
 	data, err := os.ReadFile(filepath.Join(workDir, "adapter-context.txt"))
 	if err != nil {
@@ -149,16 +158,12 @@ func TestShellCommandRedirectionAndInvocationContext(t *testing.T) {
 	}
 }
 
-func TestShellCommandAdapterFindsCommandsRegisteredLater(t *testing.T) {
-	bash, registry, _ := newAdapterTestBash(t)
-	registry.Register(Command{Name: "scan", Run: func(_ context.Context, execution *Execution) (any, error) {
-		fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
-		return nil, nil
-	}}, "test")
+func TestShellCommandAdapterUsesSealedRegistry(t *testing.T) {
+	bash, _, _ := newAdapterTestBash(t)
 	command := "scan -i http://127.0.0.1:1 --timeout 1 --no-color && memory_echo ready"
-	execution, output := runAdapterCommand(t, bash, context.Background(), command, t.TempDir())
-	if execution.ExitCode != 0 || !strings.Contains(output, "http://127.0.0.1:1") || !strings.Contains(output, "ready") {
-		t.Fatalf("late alias exit=%d output=%q", execution.ExitCode, output)
+	session, output := runAdapterCommand(t, bash, context.Background(), command, t.TempDir())
+	if session.ExitCode != 0 || !strings.Contains(output, "http://127.0.0.1:1") || !strings.Contains(output, "ready") {
+		t.Fatalf("late alias exit=%d output=%q", session.ExitCode, output)
 	}
 }
 

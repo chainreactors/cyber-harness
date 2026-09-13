@@ -121,8 +121,10 @@ scan 提供 `quick` 和 `full` 两种预设模式，通过 `--mode` 参数选择
 | `--deep` | 对发现的 Web 资产进行 AI 动态测试 | |
 | `-j, --json` | JSON Lines 输出 | |
 | `--report` | Markdown 报告输出 | |
-| `-f, --file` | 将 scan、agent 与结构化 tool artifact 事件流式追加为 AOP ProtoJSONL | |
-| `-F, --view` | 按需格式化同一份 AOP ProtoJSONL（`-o terminal\|markdown`，可用 `-f` 指定展示输出文件） | |
+| `-o, --output` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件 | |
+| `-F, --view` | 读取并渲染 AOP ProtoJSONL | |
+| `--view-format` | `--view` 的渲染格式：`terminal` 或 `markdown` | `terminal` |
+| `-f, --file` | `--view` 的渲染文件；不参与实时事件持久化 | |
 | `--trace` | 显示内部 pipeline 事件流（调试用） | |
 | `--no-color` | 禁用终端颜色 | |
 | `--debug` | 启用 trace + 底层扫描器 debug 日志 | |
@@ -198,19 +200,19 @@ scan 提供三种 AI 增强能力，均需要配置 LLM Provider（参考 [参�
 
 生成结构化的 Markdown 报告，包含扫描摘要、发现列表和风险评估。同样等待扫描完成后一次性输出。
 
-### 文件输出（-f）
+### 事件输出（-o/--output）
 
-将输出写入文件，自动去除 ANSI 颜色转义符。
+将 Agent、Scan、观测和结构化 tool artifact 的 canonical AOP 事件流写入一个新建的 ProtoJSONL 文件。该文件不会覆盖已有文件。终端文本、scan 原生 `-j` 输出和 AOP 事件持久化是不同输出面。
 
 ### 回放扫描记录（-F/--view）
 
-使用 `-f` 保存的 JSONL 扫描记录可以通过 `-F` 回放：
+使用 `-o` 保存的 JSONL 扫描记录可以通过 `-F` 回放：
 
 ```bash
-aiscan scan -i 192.168.1.0/24 -f scan_result.jsonl   # 保存
-aiscan -F scan_result.jsonl                            # 终端回放
-aiscan -F scan_result.jsonl -o markdown                # 转 Markdown
-aiscan -F scan_result.jsonl -o markdown -f report.md   # 输出到文件
+aiscan scan -i 192.168.1.0/24 -o scan_result.jsonl          # 保存事件
+aiscan -F scan_result.jsonl                                # 终端回放
+aiscan -F scan_result.jsonl --view-format markdown          # 转 Markdown 到 stdout
+aiscan -F scan_result.jsonl --view-format markdown -f report.md
 ```
 
 ---
@@ -240,9 +242,9 @@ aiscan scan -i http://target.example --max-neutron-per-finger 50
 
 # 输出与回放
 aiscan scan -i 10.0.0.0/24 -j
-aiscan scan -i 10.0.0.0/24 -f result.jsonl
+aiscan scan -i 10.0.0.0/24 -o result.jsonl
 aiscan -F result.jsonl
-aiscan -F result.jsonl -o markdown -f report.md
+aiscan -F result.jsonl --view-format markdown -f report.md
 
 # 并发与超时
 aiscan scan -i 10.0.0.0/16 --thread 200
@@ -251,7 +253,7 @@ aiscan scan -i 10.0.0.0/24 --timeout 10
 # 调试
 aiscan scan -i 192.168.1.1 --trace
 aiscan scan -i 192.168.1.1 --debug
-aiscan scan -i 192.168.1.0/24 --no-color -f scan.log
+aiscan scan -i 192.168.1.0/24 --no-color > scan.log
 
 # AI 增强组合
 aiscan scan -i http://target.example --mode full --verify=high --sniper --deep --report

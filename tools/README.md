@@ -1,28 +1,12 @@
-# Extending AIScan with a tool
+# Extending AIScan
 
-Native tools implement `core/tool.Tool` and are registered explicitly by the
-profile that owns them. A tool does not need an Agent, Runtime, Console, or
-model provider.
+Agent 工具实现 `core/tool.Tool`；Bash 原生命令使用 `pkg/commands.Command`。二者是不同
+调用协议，不应通过适配器伪装成一个万能抽象。
 
-```go
-type Args struct { Text string `json:"text"` }
-
-type Echo struct{}
-func (Echo) Name() string { return "echo" }
-func (Echo) Description() string { return "Return text unchanged." }
-func (Echo) Definition() *aop.ToolDefinition {
-    return tool.Def("echo", "Return text unchanged.", Args{})
-}
-func (Echo) Execute(ctx context.Context, raw string) (*tool.Result, error) {
-    args, err := tool.ParseArgs[Args](raw)
-    if err != nil { return nil, err }
-    if err := ctx.Err(); err != nil { return nil, err }
-    return tool.TextResult(args.Text), nil
-}
-```
-
-The profile constructs the owning module; the module registers its tools during Load. For a standalone tool profile use `pkg/toolset/registry`; for the
-minimal file runner use `pkg/profile/files`:
+Tool Extension 在 Load 时调用 `pkg/toolset.Registry.Register(scope, tools...)`，Command
+Extension 调用 `pkg/commands.Registry.Register(scope, group, commands...)`。注册批次由
+Registry 原子完成，Scope 只记录失败回滚所需的撤销动作。Profile 让 Registry 依赖所有
+贡献者，因此 Registry 先关闭并 drain，贡献者随后释放其资源。
 
 ```go
 profile, err := filesprofile.New(files.Config{Directory: workDir})
@@ -30,29 +14,11 @@ if err != nil { return err }
 if err := profile.Load(ctx); err != nil { return err }
 defer profile.Close(context.Background())
 executor, err := profile.Executor()
-if err != nil { return err }
 ```
 
-`Registry.Register(owner, tools...)` publishes a complete owner group.
-`ExecuteTool` preserves the caller context and Invocation, rejects new calls
-after owner removal, waits for accepted calls during `UnregisterOwner`, and
-returns structured tool results. `Close` is the final registry lifecycle
-operation. Modules unregister their owner before closing resources borrowed by
-their tools.
+工具使用 `tool.TextResult` 返回文本，使用 `tool.Result.Details` 返回结构化数据；真实执行
+失败返回 Go error，并遵守 context 取消。构造函数显式接收 scanner、proxy、IOA 或工作
+目录等依赖。不要增加全局 Registry、factory 清单、依赖 bag、兼容 wrapper 或第二套 DTO。
 
-Use `tool.TextResult` for normal text, `tool.ErrorResult` for a model-visible
-tool failure, and `Result.Details` for structured domain data. Return a Go
-error when execution itself failed, and honor cancellation and deadlines.
-
-Tools with scanner, proxy, IOA, or working-directory dependencies receive those
-objects in their constructors. Product profiles own the composition; do not
-add a global registry, factory list, dependency bag, Sink, or DTO to avoid an
-explicit constructor.
-
-Pseudo-commands exposed through `bash` retain their command-specific
-registration APIs and are documented in [`docs/development.md`](../docs/development.md).
-
-
-## 插件边界
-
-`tools` 只提供工具和资源的原始实现。生命周期、工具发布和依赖顺序由 `pkg/exts` 中的适配器交给 `core/extension.Set` 管理。新工具应实现 `tool.Tool`，由对应的 `pkg/exts/<name>` 插件在 Load 时通过 `Context.RegisterTools` 声明。
+`tools/*` 保存原始领域实现与 Tool/Command 声明，`pkg/exts/*` 适配 Profile 生命周期和
+Registry 贡献，`pkg/profile/*` 是组合根。

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -11,7 +12,7 @@ import (
 
 func TestAgentTokenRequiresAuthenticatedSessionAndDisablesCaching(t *testing.T) {
 	service := NewService(ServiceConfig{AccessKey: "test-token"})
-	defer service.Close()
+	defer service.Close(context.Background())
 	server := httptest.NewServer(newHandler(service, nil, nil))
 	defer server.Close()
 
@@ -78,7 +79,7 @@ func TestAccessKeyAuthBrowserSession(t *testing.T) {
 
 func TestServiceOwnsHandlerAuthentication(t *testing.T) {
 	service := NewService(ServiceConfig{AccessKey: "test-token"})
-	defer service.Close()
+	defer service.Close(context.Background())
 	server := httptest.NewServer(newHandler(service, nil, nil))
 	defer server.Close()
 

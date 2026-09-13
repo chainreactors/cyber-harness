@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
+	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
@@ -158,20 +160,6 @@ func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 	return f
 }
 
-func (s *FlowStore) after(id int) []Flow {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Flow, 0, s.size)
-	for n := 0; n < s.size; n++ {
-		f := s.flows[(s.head+n)%s.cap]
-		if flowSequence(f.ID) > id {
-			result = append(result, cloneFlowMetadata(f))
-		}
-	}
-	return result
-}
-func (s *FlowStore) After(id int) []Flow { return s.after(id) }
-
 func (s *FlowStore) Query(opts QueryOpts) []Flow {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -292,10 +280,11 @@ func (s *FlowStore) appendIndex(f Flow) error {
 	if f.Response != nil {
 		f.Response.Body = nil
 	}
-	record := map[string]any{
-		"id": f.ID, "tool_id": f.ToolID, "timestamp": f.Timestamp, "host": f.Host,
-		"content_type": f.ContentType, "duration": int64(f.Duration), "tls": f.TLS,
-		"exchange": f.Exchange, "body_sizes": sizes, "oldest_id": oldest,
+	exchange := f.Exchange
+	record := flowIndexRecord{
+		ID: f.ID, Operation: f.Ref, Timestamp: f.Timestamp, Host: f.Host,
+		ContentType: f.ContentType, Duration: int64(f.Duration), TLS: f.TLS,
+		Exchange: &exchange, BodySizes: &sizes, OldestID: oldest,
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -394,33 +383,18 @@ func (s *FlowStore) SetBodyDir(dir string) error {
 	return s.subscribeIndex()
 }
 
-func decodeIndexRecord(record map[string]json.RawMessage, flow *Flow) error {
-	decode := func(key string, dst any) error {
-		raw, ok := record[key]
-		if !ok {
-			return fmt.Errorf("missing %s", key)
-		}
-		return json.Unmarshal(raw, dst)
-	}
-	if err := decode("exchange", &flow.Exchange); err != nil {
-		return err
-	}
-	if err := decode("id", &flow.ID); err != nil {
-		return err
-	}
-	if flowSequence(flow.ID) <= 0 {
-		return errors.New("invalid flow id")
-	}
-	_ = decode("tool_id", &flow.ToolID)
-	_ = decode("timestamp", &flow.Timestamp)
-	_ = decode("host", &flow.Host)
-	_ = decode("content_type", &flow.ContentType)
-	_ = decode("tls", &flow.TLS)
-	var duration int64
-	if decode("duration", &duration) == nil {
-		flow.Duration = time.Duration(duration)
-	}
-	return nil
+type flowIndexRecord struct {
+	Sequence    *int              `json:"sequence,omitempty"`
+	ID          string            `json:"id,omitempty"`
+	Operation   *operationpb.Ref  `json:"operation,omitempty"`
+	Timestamp   time.Time         `json:"timestamp,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	ContentType string            `json:"content_type,omitempty"`
+	Duration    int64             `json:"duration,omitempty"`
+	TLS         bool              `json:"tls,omitempty"`
+	Exchange    *traffic.Exchange `json:"exchange,omitempty"`
+	BodySizes   *[2]int64         `json:"body_sizes,omitempty"`
+	OldestID    string            `json:"oldest_id,omitempty"`
 }
 
 func (s *FlowStore) loadIndex(path string) error {
@@ -434,7 +408,7 @@ func (s *FlowStore) loadIndex(path string) error {
 	decoder := json.NewDecoder(file)
 	var validEnd int64
 	for {
-		var record map[string]json.RawMessage
+		var record flowIndexRecord
 		err = decoder.Decode(&record)
 		if err == io.EOF {
 			break
@@ -449,80 +423,36 @@ func (s *FlowStore) loadIndex(path string) error {
 			return fmt.Errorf("traffic: invalid metadata index: %w", err)
 		}
 		validEnd = decoder.InputOffset()
-		if raw, ok := record["sequence"]; ok {
-			var seq int
-			if err := json.Unmarshal(raw, &seq); err != nil {
-				_ = file.Close()
-				return err
-			}
+		if record.Sequence != nil {
 			s.mu.Lock()
-			s.seq = max(s.seq, seq)
+			s.seq = max(s.seq, *record.Sequence)
 			s.mu.Unlock()
-		}
-		var f Flow
-		if err := decodeIndexRecord(record, &f); err != nil {
+			if record.ID != "" {
+				_ = file.Close()
+				return errors.New("traffic: index sequence record contains a flow")
+			}
 			continue
 		}
-		var oldest string
-		if raw, ok := record["oldest_id"]; ok {
-			if err := json.Unmarshal(raw, &oldest); err != nil {
-				_ = file.Close()
-				return err
-			}
+		if flowSequence(record.ID) <= 0 || record.Exchange == nil || record.BodySizes == nil {
+			_ = file.Close()
+			return errors.New("traffic: invalid metadata index record")
 		}
+		f := Flow{
+			Ref: record.Operation, Timestamp: record.Timestamp, Host: record.Host,
+			ContentType: record.ContentType, Duration: time.Duration(record.Duration),
+			TLS: record.TLS, Exchange: *record.Exchange,
+		}
+		f.ID = record.ID
 		s.mu.Lock()
-		for s.size > 0 && flowSequence(s.flows[s.head].ID) < flowSequence(oldest) {
+		for s.size > 0 && flowSequence(s.flows[s.head].ID) < flowSequence(record.OldestID) {
 			s.evictLocked()
 		}
 		s.mu.Unlock()
-		sizes := [2]int64{-1, -1}
-		if raw, ok := record["body_sizes"]; ok {
-			if err := json.Unmarshal(raw, &sizes); err != nil {
+		sizes := *record.BodySizes
+		for _, size := range sizes {
+			if size < -1 {
 				_ = file.Close()
-				return err
-			}
-			for _, size := range sizes {
-				if size < -1 {
-					_ = file.Close()
-					return errors.New("invalid stored body size")
-				}
-			}
-		} else {
-			// Legacy compatibility is confined to this boundary, not a runtime type.
-			for side, key := range []string{"request_body_ref", "response_body_ref"} {
-				raw, ok := record[key]
-				if !ok {
-					continue
-				}
-				var fields map[string]json.RawMessage
-				if err := json.Unmarshal(raw, &fields); err != nil {
-					_ = file.Close()
-					return err
-				}
-				var source string
-				if err := json.Unmarshal(fields["path"], &source); err != nil {
-					_ = file.Close()
-					return err
-				}
-				resolved, ok := resolveBodyPath(s.bodyDir, source)
-				if !ok {
-					_ = file.Close()
-					return errors.New("legacy body path outside capture directory")
-				}
-				destination := s.bodyPath(f.ID, side)
-				info, statErr := os.Stat(destination)
-				if os.IsNotExist(statErr) {
-					info, statErr = os.Stat(resolved)
-					if statErr == nil {
-						statErr = os.Rename(resolved, destination)
-					}
-				}
-				if statErr != nil {
-					f.Complete = false
-					f.Error = strings.TrimPrefix(f.Error+"; legacy body unavailable: "+statErr.Error(), "; ")
-				} else {
-					sizes[side] = info.Size()
-				}
+				return errors.New("traffic: invalid stored body size")
 			}
 		}
 		s.mu.Lock()
@@ -530,39 +460,6 @@ func (s *FlowStore) loadIndex(path string) error {
 		s.mu.Unlock()
 	}
 	return file.Close()
-}
-
-// Only the legacy decoder accepts a path. Reject lexical and symlink escapes.
-func resolveBodyPath(root, raw string) (string, bool) {
-	if root == "" || raw == "" {
-		return "", false
-	}
-	bodyRoot, err := filepath.Abs(filepath.Join(root, "body"))
-	if err != nil {
-		return "", false
-	}
-	path := raw
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return "", false
-	}
-	rel, err := filepath.Rel(bodyRoot, path)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	actual, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		rel, err = filepath.Rel(bodyRoot, actual)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", false
-		}
-	} else if !os.IsNotExist(err) {
-		return "", false
-	}
-	return path, true
 }
 
 func (s *FlowStore) Clear() {
@@ -621,12 +518,22 @@ func (s *FlowStore) closeContext(ctx context.Context) error {
 	s.publishMu.Unlock()
 	var err error
 	if sub != nil {
-		err = sub.Close(ctx)
-		if ctx.Err() != nil {
-			sub.Cancel()
-			go func() { <-sub.Done(); _ = s.closeIndex() }()
+		if err := sub.Close(ctx); err != nil {
 			return err
 		}
+	}
+	// Only the caller that takes the drained subscription reports its terminal
+	// processing error. A timed-out caller leaves ownership here for retry.
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if sub != nil && s.indexSub == sub {
+		err = sub.Err()
+		s.indexSub = nil
+		s.indexMu.Lock()
+		if s.indexErr == nil {
+			s.indexErr = err
+		}
+		s.indexMu.Unlock()
 	}
 	return errors.Join(err, s.closeIndex())
 }

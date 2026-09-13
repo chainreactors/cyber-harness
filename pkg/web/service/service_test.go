@@ -2,16 +2,19 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"sync"
 	"testing"
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/aiscan/aop"
+	configpkg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -250,39 +253,96 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 	}
 }
 
-type recordingCloser struct {
-	once sync.Once
-	done chan struct{}
-}
-
-func newRecordingApp() (*apppkg.App, <-chan struct{}) {
-	closer := &recordingCloser{done: make(chan struct{})}
-	return &apppkg.App{Engines: closer}, closer.done
-}
-
-func (c *recordingCloser) Close() {
-	c.once.Do(func() { close(c.done) })
+func newRecordingProfile(t *testing.T) (*profile.Profile, *apppkg.App, func() bool) {
+	t.Helper()
+	p, err := profile.New(profile.Config{Option: &configpkg.Option{}, Application: apppkg.Config{SkipEngines: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close(context.Background()) })
+	if err := p.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	app, err := p.App()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, app, func() bool {
+		return app.Closed()
+	}
 }
 
 func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
-	oldApp, oldClosed := newRecordingApp()
-	nextApp, _ := newRecordingApp()
-	svc := NewService(ServiceConfig{App: oldApp})
+	old, oldApp, oldClosed := newRecordingProfile(t)
+	next, _, _ := newRecordingProfile(t)
+	svc := NewService(ServiceConfig{Profile: old})
+	defer svc.Close(context.Background())
 
 	leased, release := svc.acquireApp()
 	if leased != oldApp {
 		t.Fatal("acquireApp() returned the wrong app")
 	}
-	svc.swapApp(nextApp)
-	select {
-	case <-oldClosed:
+	if err := svc.swapProfile(next); err != nil {
+		t.Fatal(err)
+	}
+	if oldClosed() {
 		t.Fatal("old app closed while a scan still held a lease")
-	default:
 	}
 	release()
-	select {
-	case <-oldClosed:
-	default:
+	if !oldClosed() {
 		t.Fatal("old app remained open after the final lease released")
+	}
+}
+
+func TestServiceCloseRetainsLeasedProfileAndRetries(t *testing.T) {
+	p, app, closed := newRecordingProfile(t)
+	svc := NewService(ServiceConfig{Profile: p})
+	leased, release := svc.acquireApp()
+	defer release()
+	if leased != app {
+		t.Fatal("wrong borrowed app")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := svc.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Close = %v", err)
+	}
+	if closed() {
+		t.Fatal("profile closed while leased")
+	}
+	if next, done := svc.acquireApp(); next != nil {
+		done()
+		t.Fatal("service admitted work after closing")
+	}
+	release()
+	release() // A request can only release its lease once.
+	if err := svc.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !closed() {
+		t.Fatal("profile remained open after release")
+	}
+	if len(svc.profiles) != 0 {
+		t.Fatal("completed profiles remained owned")
+	}
+}
+
+func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
+	svc := NewService(ServiceConfig{})
+	if err := svc.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	candidate, _, closed := newRecordingProfile(t)
+	if err := svc.swapProfile(candidate); err == nil {
+		t.Fatal("closing service accepted a profile")
+	}
+	if _, err := candidate.App(); err != nil {
+		t.Fatalf("rejected candidate was closed by service: %v", err)
+	}
+	if closed() {
+		t.Fatal("service released a candidate it did not own")
+	}
+	if len(svc.profiles) != 0 {
+		t.Fatal("service retained rejected candidate")
 	}
 }

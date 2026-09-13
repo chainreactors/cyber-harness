@@ -2,31 +2,30 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/operation"
 )
 
-// hubClient builds an HTTP client that routes through the hub with callID as the
-// proxy username, mirroring how bash injects the tool-call id as proxy userinfo.
+// hubClient builds an HTTP client through an opaque operation-correlation lease.
 func hubClient(t *testing.T, hub *ProxyHub, callID string) *http.Client {
 	t.Helper()
-	u, err := url.Parse(hub.ProxyURL())
+	ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{CallID: callID})
+	ctx, cancel := operation.Begin(ctx, "test", "http")
+	proxyURL, _, release := hub.Egress(ctx)
+	t.Cleanup(func() { release(); cancel(nil) })
+	u, err := url.Parse(proxyURL)
 	if err != nil {
 		t.Fatalf("parse hub url: %v", err)
-	}
-	if callID != "" {
-		u.User = url.User(callID)
 	}
 	return &http.Client{
 		Transport: &http.Transport{Proxy: http.ProxyURL(u), DisableKeepAlives: true},
@@ -59,12 +58,13 @@ func waitForFlows(t *testing.T, store *FlowStore, want int) []Flow {
 func startHub(t *testing.T, capture bool) *ProxyHub {
 	t.Helper()
 	caRoot := t.TempDir()
-	hub := NewProxyHub(NewState(""), NewFlowStore(1000), caRoot, capture)
+	resource := NewProxyHub(NewState(""), NewFlowStore(1000), caRoot, capture, nil)
+	hub := resource.ProxyHub
 	hub.storage = cfg.TrafficOptions{BodyStorage: "disk"}
-	if err := hub.Start(caRoot); err != nil {
+	if err := resource.Start(t.Context()); err != nil {
 		t.Fatalf("start hub: %v", err)
 	}
-	t.Cleanup(func() { hub.Shutdown(context.Background()) })
+	t.Cleanup(func() { resource.Close(context.Background()) })
 	return hub
 }
 
@@ -77,12 +77,12 @@ func TestHubStampsToolID(t *testing.T) {
 
 	getThrough(t, hubClient(t, hub, "tool-abc"), target.URL)
 
-	flows := waitForFlows(t, hub.Store(), 1)
+	flows := waitForFlows(t, hub.store, 1)
 	if len(flows) == 0 {
 		t.Fatal("no flow captured")
 	}
-	if flows[0].ToolID != "tool-abc" {
-		t.Fatalf("ToolID = %q, want %q", flows[0].ToolID, "tool-abc")
+	if flows[0].Ref.GetCallId() != "tool-abc" {
+		t.Fatalf("call id = %q, want %q", flows[0].Ref.GetCallId(), "tool-abc")
 	}
 }
 
@@ -96,7 +96,7 @@ func TestHubCaptureToggle(t *testing.T) {
 
 	getThrough(t, hubClient(t, hub, "tool-1"), target.URL)
 	time.Sleep(100 * time.Millisecond)
-	if n := hub.Store().Count(); n != 0 {
+	if n := hub.store.Count(); n != 0 {
 		t.Fatalf("relay mode recorded %d flows, want 0", n)
 	}
 
@@ -105,100 +105,8 @@ func TestHubCaptureToggle(t *testing.T) {
 		t.Fatalf("hub address changed on capture toggle: %q != %q", hub.ProxyURL(), addr)
 	}
 	getThrough(t, hubClient(t, hub, "tool-2"), target.URL)
-	if flows := waitForFlows(t, hub.Store(), 1); len(flows) == 0 {
+	if flows := waitForFlows(t, hub.store, 1); len(flows) == 0 {
 		t.Fatal("no flow captured after enabling capture")
-	}
-}
-
-// TestHubSubscribe verifies captured flows fan out to subscribers as protocol
-// messages carrying the tool-call id.
-func TestHubSubscribe(t *testing.T) {
-	target := startTestTarget(64)
-	defer target.Close()
-	hub := startHub(t, true)
-
-	ch, cancel := hub.Subscribe(16)
-	defer cancel()
-
-	getThrough(t, hubClient(t, hub, "tool-xyz"), target.URL)
-
-	select {
-	case flow := <-ch:
-		if flow.GetToolId() != "tool-xyz" {
-			t.Fatalf("streamed ToolId = %q, want %q", flow.GetToolId(), "tool-xyz")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no flow received on subscription")
-	}
-}
-
-func TestHubSlowSubscriberStopsWithoutAffectingHealthySubscriber(t *testing.T) {
-	hub := NewProxyHub(NewState(""), NewFlowStore(128), "", true)
-	gate := make(chan struct{})
-	slow, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 1}, func(Flow) error { <-gate; return nil })
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer slow.Cancel()
-	healthyFlows := make(chan *traffic.Flow, 128)
-	healthy, err := hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{Buffer: 128}, func(f Flow) error {
-		healthyFlows <- flowToProto(&f)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer healthy.Cancel()
-
-	// Both queues are bounded. A consumer that cannot keep up is explicitly
-	// terminated rather than silently skipping observations.
-	for i := 1; i <= 64; i++ {
-		hub.ingest(Flow{Exchange: traffic.Exchange{
-			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200},
-		}, ToolID: "tool"})
-	}
-	close(gate)
-	select {
-	case <-slow.Done():
-	case <-time.After(2 * time.Second):
-		t.Fatal("slow subscriber did not stop")
-	}
-	if !errors.Is(slow.Err(), eventbus.ErrOverflow) {
-		t.Fatalf("slow error = %v", slow.Err())
-	}
-
-	for i := 1; i <= 64; i++ {
-		select {
-		case got := <-healthyFlows:
-			if got == nil || got.GetId() != strconv.Itoa(i) {
-				t.Fatalf("flow %d = %#v, want sequential id %d", i, got, i)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for flow %d", i)
-		}
-	}
-}
-
-func TestHubSubscribeFromReplaysRetainedFlows(t *testing.T) {
-	hub := NewProxyHub(NewState(""), NewFlowStore(8), "", true)
-	for i := 1; i <= 3; i++ {
-		hub.ingest(Flow{Exchange: traffic.Exchange{
-			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200},
-		}})
-	}
-	ch, cancel := hub.SubscribeFrom(1, 2)
-	defer cancel()
-	for want := 2; want <= 3; want++ {
-		select {
-		case got := <-ch:
-			if got == nil || got.GetId() != strconv.Itoa(want) {
-				t.Fatalf("replayed flow = %#v, want id %d", got, want)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for replayed flow %d", want)
-		}
 	}
 }
 
@@ -213,7 +121,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	addTestBody(t, first, Flow{
-		ToolID: "call-1", Host: "example.test", ContentType: "text/plain",
+		Ref: &operationpb.Ref{CallId: "call-1"}, Host: "example.test", ContentType: "text/plain",
 		Exchange: traffic.Exchange{
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
@@ -229,7 +137,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	}
 	defer second.Close()
 	flows := second.Query(QueryOpts{})
-	if len(flows) != 1 || flows[0].ToolID != "call-1" {
+	if len(flows) != 1 || flows[0].Ref.GetCallId() != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}
 	if flows[0].Response == nil || second.files[flows[0].ID][1] != 10 || len(flows[0].Response.Body) != 0 {

@@ -16,7 +16,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	tmux "github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/tool"
 )
 
@@ -93,75 +93,20 @@ func (c *outputCommand) Run(_ context.Context, execution *Execution) (any, error
 	return nil, err
 }
 
-// panicTool is a test tool that always panics.
-type panicTool struct{ msg string }
-
-func (t *panicTool) Name() string                 { return "panic_tool" }
-func (t *panicTool) Description() string          { return "always panics" }
-func (t *panicTool) Definition() *tool.Definition { return &tool.Definition{} }
-func (t *panicTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
-	panic(t.msg)
-}
-
-// normalTool returns a result without panicking.
-type normalTool struct{}
-
-func (t *normalTool) Name() string                 { return "normal_tool" }
-func (t *normalTool) Description() string          { return "works fine" }
-func (t *normalTool) Definition() *tool.Definition { return &tool.Definition{} }
-func (t *normalTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
-	return tool.TextResult("hello"), nil
-}
-
-type testLogger struct{}
-
-func (*testLogger) Debugf(string, ...any)     {}
-func (*testLogger) Infof(string, ...any)      {}
-func (*testLogger) Warnf(string, ...any)      {}
-func (*testLogger) Errorf(string, ...any)     {}
-func (*testLogger) Importantf(string, ...any) {}
-
-type loggerAwareTool struct {
-	name   string
-	logger telemetry.Logger
-}
-
-func (t *loggerAwareTool) Name() string                 { return t.name }
-func (t *loggerAwareTool) Description() string          { return t.name }
-func (t *loggerAwareTool) Definition() *tool.Definition { return &tool.Definition{} }
-func (t *loggerAwareTool) Execute(_ context.Context, _ string) (*tool.Result, error) {
-	return tool.TextResult("ok"), nil
-}
-func (t *loggerAwareTool) InitLogger(logger telemetry.Logger) {
-	t.logger = logger
-}
-
 func bashArgs(cmd string) string {
 	data, _ := json.Marshal(map[string]string{"command": cmd})
 	return string(data)
 }
 
-func newBashWithPseudo(dir string, cmds ...*outputCommand) *BashTool {
-	registry := NewRegistry()
+func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTool {
+	commands := make([]Command, 0, len(cmds))
 	for _, c := range cmds {
-		registry.Register(Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run}, "")
+		commands = append(commands, Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run})
 	}
-	bash := NewBashTool(dir, 10)
-	bash.SetCommandResolver(registry.Get)
+	registry, _ := loadTestRegistry(t, commandGroup("commands", "test", commands...))
+	bash := NewBashTool(dir, 10, nil)
+	bash.SetCommandRegistry(registry)
 	return bash
-}
-
-func TestCommandRegistrySetLoggerRebindsTools(t *testing.T) {
-	reg := NewRegistry()
-	tool := &loggerAwareTool{name: "sample_tool"}
-	logger := &testLogger{}
-
-	reg.RegisterTool(tool)
-	reg.SetLogger(logger)
-
-	if tool.logger != logger {
-		t.Fatalf("tool logger not rebound")
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -169,11 +114,10 @@ func TestCommandRegistrySetLoggerRebindsTools(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
-	registry := NewRegistry()
 	impl := &simpleCommand{name: "spray"}
-	registry.Register(Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}, "")
-	bash := NewBashTool(t.TempDir(), 5)
-	bash.SetCommandResolver(registry.Get)
+	registry, _ := loadTestRegistry(t, commandGroup("spray", "test", Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
+	bash := NewBashTool(t.TempDir(), 5, nil)
+	bash.SetCommandRegistry(registry)
 
 	// Single pipe (|) is now supported — pseudo-command output is piped
 	// through a shell pipeline. Only ||, redirections, and chaining are
@@ -210,7 +154,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 		t.Skip("unix-only test")
 	}
 	proxy := "socks5://127.0.0.1:1080"
-	bash := NewBashTool(t.TempDir(), 5).WithScannerProxy(proxy)
+	bash := NewBashTool(t.TempDir(), 5, nil).WithScannerProxy(proxy)
 
 	res, err := bash.Execute(context.Background(), bashArgs(
 		`env | grep -E '^(ALL_PROXY|all_proxy|HTTP_PROXY|http_proxy|HTTPS_PROXY|https_proxy)='`,
@@ -230,7 +174,7 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only test")
 	}
-	bash := NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5, nil)
 
 	res, err := bash.Execute(context.Background(), bashArgs("env"))
 	if err != nil {
@@ -246,9 +190,8 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNormalizeNoColorInjectForScan(t *testing.T) {
-	reg := NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg, _ := loadTestRegistry(t, commandGroup("scan", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
@@ -264,9 +207,8 @@ func TestNormalizeNoColorInjectForScan(t *testing.T) {
 }
 
 func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
-	reg := NewRegistry()
 	cmd := &argsCapture{name: "scan"}
-	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg, _ := loadTestRegistry(t, commandGroup("scan", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &Execution{Stdout: &output, Stderr: &output})
@@ -285,9 +227,8 @@ func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 }
 
 func TestNormalizeNoColorSkipsNonScan(t *testing.T) {
-	reg := NewRegistry()
 	cmd := &argsCapture{name: "gogo"}
-	reg.Register(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "")
+	reg, _ := loadTestRegistry(t, commandGroup("gogo", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
@@ -316,7 +257,7 @@ func TestPseudoPipeGrep(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | grep critical`))
 	if err != nil {
@@ -340,7 +281,7 @@ func TestPseudoPipeHead(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | head -2`))
 	if err != nil {
@@ -359,7 +300,7 @@ func TestPseudoPipeWc(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | wc -l`))
 	if err != nil {
@@ -377,7 +318,7 @@ func TestPseudoPipeChain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | grep -v info | wc -l`))
 	if err != nil {
@@ -395,7 +336,7 @@ func TestPseudoPipeAwk(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i . | awk '{print $1}' | sort | uniq -c | sort -rn`))
 	if err != nil {
@@ -416,7 +357,7 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: sampleOutput})
 
 	// The regex "critical|high" is inside quotes — the | in the regex should not
 	// be treated as a pipe delimiter.
@@ -434,7 +375,7 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 }
 
 func TestDoublesPipeStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
 	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . || echo fallback`))
 	if err == nil {
@@ -444,7 +385,7 @@ func TestDoublesPipeStillRejected(t *testing.T) {
 }
 
 func TestChainStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
 	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . && echo next`))
 	if err == nil {
@@ -454,7 +395,7 @@ func TestChainStillRejected(t *testing.T) {
 }
 
 func TestRedirectionStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "ok"})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
 	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . > out.txt`))
 	if err == nil {
@@ -464,7 +405,7 @@ func TestRedirectionStillRejected(t *testing.T) {
 }
 
 func TestNoPipeStillWorks(t *testing.T) {
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "all findings here\n"})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "all findings here\n"})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`sample -i .`))
 	if err != nil {
@@ -486,7 +427,7 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bash := NewBashTool(root, 5)
+	bash := NewBashTool(root, 5, nil)
 	defer bash.Close()
 
 	results := make([]*Execution, 2)
@@ -526,11 +467,11 @@ func TestBashRunForegroundHonorsInvocationWorkDir(t *testing.T) {
 	}
 	defaultDir := t.TempDir()
 	invocationDir := t.TempDir()
-	bash := NewBashTool(defaultDir, 5)
+	bash := NewBashTool(defaultDir, 5, nil)
 	defer bash.Close()
 
 	var output bytes.Buffer
-	ctx := tool.ContextWithInvocation(context.Background(), tool.Invocation{WorkDir: invocationDir})
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{WorkDir: invocationDir})
 	_, err := bash.RunForeground(ctx, "pwd", BashExecOptions{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
@@ -548,11 +489,9 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 		"one": {Name: "one", Usage: "one", Run: (&stagedOutputCommand{name: "one", value: "one"}).Run},
 		"two": {Name: "two", Usage: "two", Run: (&stagedOutputCommand{name: "two", value: "two"}).Run},
 	}
-	bash := NewBashTool(root, 5)
-	bash.SetCommandResolver(func(name string) (Command, bool) {
-		command, ok := commandsByName[name]
-		return command, ok
-	})
+	bash := NewBashTool(root, 5, nil)
+	registry, _ := loadTestRegistry(t, commandGroup("commands", "test", commandsByName["one"], commandsByName["two"]))
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	var outputs [2]bytes.Buffer
@@ -580,18 +519,16 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 }
 
 func TestBuiltinExecutionReturnsDetails(t *testing.T) {
-	registry := NewRegistry()
 	want := map[string]any{"targets": 2}
-	registry.Register(Command{
-		Name:  "details",
+	registry, _ := loadTestRegistry(t, commandGroup("details", "test", Command{Name: "details",
 		Usage: "details",
 		Run: func(_ context.Context, execution *Execution) (any, error) {
 			fmt.Fprint(execution.Stdout, "done")
 			return want, nil
 		},
-	}, "")
-	bash := NewBashTool(t.TempDir(), 5)
-	bash.SetCommandResolver(registry.Get)
+	}))
+	bash := NewBashTool(t.TempDir(), 5, nil)
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	execution, err := bash.RunForeground(context.Background(), "details", BashExecOptions{})
@@ -605,15 +542,14 @@ func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 		t.Fatalf("details = %#v", execution.Details)
 	}
 	info, ok := bash.Manager().Get(execution.ID)
-	if !ok || info.ID != execution.ID || info.State != execution.State {
+	session, retained := execution.Session()
+	if !ok || !retained || info.ID != execution.ID || info.State != session.State {
 		t.Fatalf("execution/session mismatch: execution=%+v info=%+v", execution, info)
 	}
 }
 
 func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
-	registry := NewRegistry()
-	registry.Register(Command{
-		Name:  "consume",
+	registry, _ := loadTestRegistry(t, commandGroup("consume", "test", Command{Name: "consume",
 		Usage: "consume",
 		Run: func(_ context.Context, execution *Execution) (any, error) {
 			data, err := io.ReadAll(execution.Stdin)
@@ -623,9 +559,9 @@ func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
 			_, err = execution.Stdout.Write(bytes.ToUpper(data))
 			return nil, err
 		},
-	}, "")
-	bash := NewBashTool(t.TempDir(), 5)
-	bash.SetCommandResolver(registry.Get)
+	}))
+	bash := NewBashTool(t.TempDir(), 5, nil)
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	var output bytes.Buffer
@@ -644,7 +580,7 @@ func TestBashRunForegroundStreams(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	var stream bytes.Buffer
 	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, BashExecOptions{
@@ -656,7 +592,8 @@ func TestBashRunForegroundStreams(t *testing.T) {
 	if got := stream.String(); !strings.Contains(got, "first") || !strings.Contains(got, "second") {
 		t.Fatalf("stream = %q", got)
 	}
-	if result.ExitCode != 0 || result.State != tmux.StateCompleted {
+	session, retained := result.Session()
+	if !retained || session.ExitCode != 0 || session.State != tmux.StateCompleted {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -665,7 +602,7 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := NewBashTool(t.TempDir(), 300)
+	bash := NewBashTool(t.TempDir(), 300, nil)
 	defer bash.Close()
 	started := time.Now()
 	res, err := bash.Execute(context.Background(), `{"command": "sleep 30", "timeout": 1}`)
@@ -699,11 +636,10 @@ func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
 }
 
 func TestBashWaitZeroStaysForeground(t *testing.T) {
-	registry := NewRegistry()
 	delayed := &delayedCommand{name: "delayed", delay: 200 * time.Millisecond, output: "finished"}
-	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
-	bash := NewBashTool(t.TempDir(), 2)
-	bash.SetCommandResolver(registry.Get)
+	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	bash := NewBashTool(t.TempDir(), 2, nil)
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	started := time.Now()
@@ -720,11 +656,10 @@ func TestBashWaitZeroStaysForeground(t *testing.T) {
 }
 
 func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
-	registry := NewRegistry()
 	delayed := &delayedCommand{name: "delayed", delay: 1500 * time.Millisecond, output: "finished"}
-	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
-	bash := NewBashTool(t.TempDir(), 3)
-	bash.SetCommandResolver(registry.Get)
+	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	bash := NewBashTool(t.TempDir(), 3, nil)
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	scoped := inbox.NewBuffered(8)
@@ -769,11 +704,10 @@ func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 }
 
 func TestBashExplicitZeroTimeoutIsUnlimited(t *testing.T) {
-	registry := NewRegistry()
 	delayed := &delayedCommand{name: "delayed", delay: 1200 * time.Millisecond, output: "finished"}
-	registry.Register(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}, "")
-	bash := NewBashTool(t.TempDir(), 1)
-	bash.SetCommandResolver(registry.Get)
+	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	bash := NewBashTool(t.TempDir(), 1, nil)
+	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
 	started := time.Now()
@@ -793,7 +727,7 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	started := time.Now()
 	result, err := bash.RunForeground(context.Background(), "sleep 5", BashExecOptions{
@@ -805,7 +739,8 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 	if time.Since(started) > 2*time.Second {
 		t.Fatal("timeout did not stop the session promptly")
 	}
-	if result.State != tmux.StateKilled || result.KillCause == "" {
+	session, retained := result.Session()
+	if !retained || session.State != tmux.StateKilled || session.KillCause == "" {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -814,7 +749,7 @@ func TestBashRunReportsNonZeroExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell assertions are unix-only")
 	}
-	bash := NewBashTool(t.TempDir(), 5)
+	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	var output bytes.Buffer
 	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, BashExecOptions{
@@ -823,7 +758,8 @@ func TestBashRunReportsNonZeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "failure") || result.ExitCode != 7 {
+	session, retained := result.Session()
+	if !retained || !strings.Contains(output.String(), "failure") || session.ExitCode != 7 {
 		t.Fatalf("result=%+v output=%q", result, output.String())
 	}
 }
@@ -832,7 +768,7 @@ func TestShellPipeStillWorks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")
 	}
-	bash := newBashWithPseudo(t.TempDir(), &outputCommand{name: "sample", output: "x"})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "x"})
 
 	res, err := bash.Execute(context.Background(), bashArgs(`echo -e "line1\nline2\nline3" | wc -l`))
 	if err != nil {
@@ -849,7 +785,7 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 		t.Skip("unix-only")
 	}
 	cmd := &outputCommand{name: "sample", output: "match\n"}
-	bash := newBashWithPseudo(t.TempDir(), cmd)
+	bash := newBashWithPseudo(t, t.TempDir(), cmd)
 
 	// -e "a|b" — the | inside quotes is part of the regex, not a pipe.
 	// This should run without pipe splitting.
@@ -862,87 +798,8 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Panic recovery tests (from recover_test.go)
-// ---------------------------------------------------------------------------
-
-func TestExecuteTool_RecoversPanic(t *testing.T) {
-	reg := NewRegistry()
-	var logs bytes.Buffer
-	reg.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs}))
-	reg.RegisterTool(&panicTool{msg: "boom"})
-
-	ctx := tool.ContextWithInvocation(context.Background(), tool.Invocation{CallID: "call-panic"})
-	result, err := reg.ExecuteTool(ctx, "panic_tool", "{}")
-	if err == nil {
-		t.Fatal("expected error from panicking tool, got nil")
-	}
-	if strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "goroutine") {
-		t.Fatalf("external error leaked panic details: %s", err.Error())
-	}
-	if !strings.Contains(err.Error(), "panic_tool") || !strings.Contains(err.Error(), "call-panic") {
-		t.Fatalf("error should identify the tool call, got: %s", err.Error())
-	}
-	if got := logs.String(); !strings.Contains(got, "boom") || !strings.Contains(got, "goroutine") || !strings.Contains(got, "call-panic") {
-		t.Fatalf("panic log missing details: %s", got)
-	}
-	if tool.ResultText(result) != "" {
-		t.Fatalf("result should be empty on panic, got: %s", tool.ResultText(result))
-	}
-}
-
-func TestExecuteTool_NormalToolUnaffected(t *testing.T) {
-	reg := NewRegistry()
-	reg.RegisterTool(&normalTool{})
-
-	result, err := reg.ExecuteTool(context.Background(), "normal_tool", "{}")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if tool.ResultText(result) != "hello" {
-		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
-	}
-}
-
-func TestExecuteTool_PanicDoesNotAffectSubsequentCalls(t *testing.T) {
-	reg := NewRegistry()
-	reg.RegisterTool(&panicTool{msg: "crash"})
-	reg.RegisterTool(&normalTool{})
-
-	// Call 1: panics — should be recovered and returned as error.
-	_, err := reg.ExecuteTool(context.Background(), "panic_tool", "{}")
-	if err == nil {
-		t.Fatal("expected error from panicking tool")
-	}
-	t.Logf("call 1 (panic_tool): recovered panic → err=%v", err)
-
-	// Call 2: normal tool after the panic — must succeed.
-	result, err := reg.ExecuteTool(context.Background(), "normal_tool", "{}")
-	if err != nil {
-		t.Fatalf("normal tool failed after panic recovery: %v", err)
-	}
-	if tool.ResultText(result) != "hello" {
-		t.Fatalf("expected 'hello', got: %s", tool.ResultText(result))
-	}
-	t.Logf("call 2 (normal_tool): succeeded after panic → result=%q", tool.ResultText(result))
-
-	// Call 3: panic again — still recoverable.
-	_, err = reg.ExecuteTool(context.Background(), "panic_tool", "{}")
-	if err == nil {
-		t.Fatal("expected error from second panicking call")
-	}
-	t.Logf("call 3 (panic_tool): recovered again → err=%v", err)
-
-	// Call 4: normal tool still works after repeated panics.
-	result, err = reg.ExecuteTool(context.Background(), "normal_tool", "{}")
-	if err != nil {
-		t.Fatalf("normal tool failed after second panic: %v", err)
-	}
-	t.Logf("call 4 (normal_tool): still works → result=%q", tool.ResultText(result))
-}
-
 func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
-	tool := NewBashTool(t.TempDir(), 5)
+	tool := NewBashTool(t.TempDir(), 5, nil)
 	defer tool.Close()
 	scoped := inbox.NewBuffered(1)
 	defer scoped.Close()
@@ -985,7 +842,7 @@ func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 }
 
 func TestBashBackgroundMonitorDeliversConcurrentCompletions(t *testing.T) {
-	tool := NewBashTool(t.TempDir(), 5)
+	tool := NewBashTool(t.TempDir(), 5, nil)
 	defer tool.Close()
 	scoped := inbox.NewBuffered(64)
 	defer scoped.Close()

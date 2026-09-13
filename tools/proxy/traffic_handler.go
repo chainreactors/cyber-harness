@@ -5,39 +5,32 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"sync"
 	"sync/atomic"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-// TrafficHandler bridges the AOP traffic namespace to the runner's traffic
+// trafficHandler bridges the AOP traffic namespace to the runner's traffic
 // infrastructure: it applies Configure (routing + capture) against State/Hub,
-// answers Query with a State snapshot or recorded flows, and streams captured
-// flows back while a stream is requested. One handler is created per connection
-// so its stream lifecycle is tied to that connection.
-type TrafficHandler struct {
-	infra *Infra
-
-	mu         sync.Mutex
-	stopStream func() // cancels the active flow stream, nil when none
+// and answers Query with a State snapshot or recorded flows. Live completed
+// flows are published only by the observe extension as typed AOP events.
+type trafficHandler struct {
+	hub *ProxyHub
 }
 
-// NewTrafficHandler returns a handler backed by infra. infra must be non-nil and
-// fully started (hub listening).
-func NewTrafficHandler(infra *Infra) *TrafficHandler {
-	return &TrafficHandler{infra: infra}
-}
-
-// Register installs the traffic namespace on mux. The returned mux routes
-// traffic.ProtocolMessage envelopes to this handler.
-func (h *TrafficHandler) Register(mux *aop.NamespaceMux) error {
-	return mux.Register(&traffic.ProtocolMessage{}, func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
+// RegisterTrafficNamespace installs the proxy control surface directly on a
+// connection-owned mux. The mux is the sole owner of admission and draining;
+// the profile-owned hub has no lifecycle API to transfer.
+func RegisterTrafficNamespace(mux *aop.NamespaceMux, hub *ProxyHub) error {
+	if mux == nil || hub == nil || hub.store == nil || hub.state == nil {
+		return fmt.Errorf("traffic namespace requires a mux and proxy hub")
+	}
+	h := &trafficHandler{hub: hub}
+	return mux.Register("traffic", &traffic.ProtocolMessage{}, func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
 		pm, ok := msg.(*traffic.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("traffic: unexpected message %T", msg)
@@ -46,10 +39,7 @@ func (h *TrafficHandler) Register(mux *aop.NamespaceMux) error {
 	})
 }
 
-// Close tears down any active stream. Call when the connection ends.
-func (h *TrafficHandler) Close() { h.stopStreaming() }
-
-func (h *TrafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traffic.ProtocolMessage, send aop.SendFunc) error {
+func (h *trafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traffic.ProtocolMessage, send aop.SendFunc) error {
 	switch m := pm.Message.(type) {
 	case *traffic.ProtocolMessage_Configure:
 		return h.handleConfigure(ctx, env, m.Configure, send)
@@ -61,31 +51,26 @@ func (h *TrafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traf
 	}
 }
 
-func (h *TrafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope, cfg *traffic.Configure, send aop.SendFunc) error {
+func (h *trafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope, cfg *traffic.Configure, send aop.SendFunc) error {
 	var errMsg string
 	if rc := cfg.GetRouting(); rc != nil {
-		if err := applyRouting(h.infra.State, rc); err != nil {
+		if err := applyRouting(h.hub.state, rc); err != nil {
 			errMsg = err.Error()
 		}
 	}
 	if cap := cfg.GetCapture(); cap != nil && cap.GetMode() != traffic.CaptureMode_CAPTURE_MODE_UNSPECIFIED {
 		record := cap.GetMode() == traffic.CaptureMode_CAPTURE_MODE_RECORD
-		h.infra.Hub.SetCapture(record, cap.GetDecryptHttps())
-		h.infra.Hub.SetCaptureFilter(cap.GetFilter())
-		if record && cap.GetStream() {
-			h.startStream(ctx, env.Id, send)
-		} else {
-			h.stopStreaming()
-		}
+		h.hub.SetCapture(record, cap.GetDecryptHttps())
+		h.hub.SetCaptureFilter(cap.GetFilter())
 	}
 	return h.replyState(env.Id, send, errMsg)
 }
 
-func (h *TrafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send aop.SendFunc) error {
+func (h *trafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send aop.SendFunc) error {
 	if q.GetFlows() {
-		for _, f := range h.infra.Store.Query(queryOptsFromFilter(q.GetFilter())) {
+		for _, f := range h.hub.store.Query(queryOptsFromFilter(q.GetFilter())) {
 			flow := f
-			if err := h.sendFlow(env.Id, send, h.infra.Store.flowToProto(&flow)); err != nil {
+			if err := h.sendFlow(env.Id, send, flow); err != nil {
 				return err
 			}
 		}
@@ -97,59 +82,12 @@ func (h *TrafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send a
 	return nil
 }
 
-// startStream subscribes to the hub and forwards captured flows as Flow messages
-// correlated to replyTo until the connection context ends or capture is
-// reconfigured. A prior stream is replaced.
-func (h *TrafficHandler) startStream(ctx context.Context, replyTo string, send aop.SendFunc) {
-	streamCtx, cancel := context.WithCancel(ctx)
-	sub, err := h.infra.Hub.SubscribeFlows(-1, eventbus.SubscribeOptions[Flow]{
-		Buffer: 256,
-		OnError: func(err error) {
-			if streamCtx.Err() == nil {
-				_ = h.replyState(replyTo, send, fmt.Sprintf("traffic stream stopped: %v", err))
-			}
-		},
-	}, func(flow Flow) error {
-		select {
-		case <-streamCtx.Done():
-			return nil
-		default:
-		}
-		return h.sendFlow(replyTo, send, h.infra.Store.flowToProto(&flow))
-	})
-	if err != nil {
-		cancel()
-		_ = h.replyState(replyTo, send, err.Error())
-		return
-	}
-	h.mu.Lock()
-	if h.stopStream != nil {
-		h.stopStream()
-	}
-	h.stopStream = func() { cancel(); sub.Cancel() }
-	h.mu.Unlock()
-	go func() {
-		defer cancel()
-		select {
-		case <-streamCtx.Done():
-			sub.Cancel()
-		case <-sub.Done():
-		}
-	}()
-}
-
-func (h *TrafficHandler) stopStreaming() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.stopStream != nil {
-		h.stopStream()
-		h.stopStream = nil
-	}
-}
-
-func (h *TrafficHandler) sendFlow(replyTo string, send aop.SendFunc, flow *traffic.Flow) error {
+func (h *trafficHandler) sendFlow(replyTo string, send aop.SendFunc, flow Flow) error {
 	env, err := aop.Wrap(trafficEnvID(), replyTo, &traffic.ProtocolMessage{
-		Message: &traffic.ProtocolMessage_Flow{Flow: flow},
+		Message: &traffic.ProtocolMessage_FlowRecord{FlowRecord: &traffic.FlowRecord{
+			Operation: flow.Ref,
+			Flow:      h.hub.store.flowToProto(&flow),
+		}},
 	})
 	if err != nil {
 		return err
@@ -157,7 +95,7 @@ func (h *TrafficHandler) sendFlow(replyTo string, send aop.SendFunc, flow *traff
 	return send(env)
 }
 
-func (h *TrafficHandler) replyState(replyTo string, send aop.SendFunc, errMsg string) error {
+func (h *trafficHandler) replyState(replyTo string, send aop.SendFunc, errMsg string) error {
 	env, err := aop.Wrap(trafficEnvID(), replyTo, &traffic.ProtocolMessage{
 		Message: &traffic.ProtocolMessage_State{State: h.snapshot(errMsg)},
 	})
@@ -167,16 +105,16 @@ func (h *TrafficHandler) replyState(replyTo string, send aop.SendFunc, errMsg st
 	return send(env)
 }
 
-func (h *TrafficHandler) snapshot(errMsg string) *traffic.State {
-	if err := h.infra.Store.IndexError(); err != nil {
+func (h *trafficHandler) snapshot(errMsg string) *traffic.State {
+	if err := h.hub.store.IndexError(); err != nil {
 		if errMsg != "" {
 			errMsg += "; "
 		}
 		errMsg += "traffic metadata recorder stopped: " + err.Error()
 	}
-	s := h.infra.State
+	s := h.hub.state
 	mode := traffic.CaptureMode_CAPTURE_MODE_RELAY
-	if h.infra.Hub.Capturing() {
+	if h.hub.Capturing() {
 		mode = traffic.CaptureMode_CAPTURE_MODE_RECORD
 	}
 	return &traffic.State{
@@ -185,7 +123,7 @@ func (h *TrafficHandler) snapshot(errMsg string) *traffic.State {
 			EgressUrl:  s.ActiveProxy(),
 			Auto:       s.IsAutoMode(),
 		},
-		Capture: &traffic.CaptureState{Mode: mode, Capturing: h.infra.Hub.Capturing()},
+		Capture: &traffic.CaptureState{Mode: mode, Capturing: h.hub.Capturing()},
 		Error:   errMsg,
 	}
 }

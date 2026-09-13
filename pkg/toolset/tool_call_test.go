@@ -3,7 +3,6 @@ package toolset
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/core/extension"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +11,10 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/tool"
+	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	toolregistry "github.com/chainreactors/aiscan/pkg/toolset/registry"
 )
 
 type aopTestExecutor struct{}
@@ -107,7 +107,7 @@ func (b *recordingBash) Execute(ctx context.Context, arguments string) (*tool.Re
 	if err != nil {
 		return nil, err
 	}
-	options := commands.BashExecOptions{OnOutput: tool.InvocationFromContext(ctx).Progress}
+	options := commands.BashExecOptions{OnOutput: operation.InvocationFromContext(ctx).Progress}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
@@ -258,19 +258,20 @@ func (invalidTextResultExecutor) Definition() *tool.Definition {
 	return tool.Def("scan", "test", struct{}{})
 }
 
-func testRegistry(t testing.TB, value tool.Tool) *toolregistry.Registry {
+func testRegistry(t testing.TB, value tool.Tool) tool.Executor {
 	t.Helper()
-	reg := toolregistry.New()
-	set, err := extension.New(extension.Entry{ID: "registry", Extension: reg})
-	if err != nil {
-		t.Fatal(err)
+	return singleToolExecutor{value: value}
+}
+
+type singleToolExecutor struct{ value tool.Tool }
+
+func (e singleToolExecutor) ToolDefinitions() []*tool.Definition {
+	return []*tool.Definition{e.value.Definition()}
+}
+
+func (e singleToolExecutor) ExecuteTool(ctx context.Context, name, arguments string) (*tool.Result, error) {
+	if name != e.value.Name() {
+		return nil, errors.New("unknown tool")
 	}
-	if err := set.Load(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reg.Register("test", value); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = set.Close(context.Background()) })
-	return reg
+	return toolhooks.Execute(ctx, nil, name, arguments, e.value.Execute)
 }

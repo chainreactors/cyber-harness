@@ -9,9 +9,10 @@ import (
 	"unicode/utf8"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -212,20 +213,26 @@ func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
 	}
 	wantID := ArtifactResultID("katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
 	var artifact *toolpb.Artifact
+	var ref *operationpb.Ref
 	unsubscribe := bus.Subscribe(func(event *aop.Event) {
 		decoded := new(toolpb.Artifact)
 		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
 			artifact = decoded
+			correlation := new(operationpb.Ref)
+			if found, err := aop.FindTypedExtension(event, correlation); err == nil && found {
+				ref = correlation
+			}
 		}
 	})
-	defer unsubscribe()
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{CallID: "call-1"})
+	defer unsubscribe.Cancel()
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{CallID: "call-1"})
 
 	base.EmitArtifactCtx(ctx, "katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
 
 	require.NotNil(t, artifact)
 	assert.Equal(t, wantID, artifact.GetResultId())
-	assert.Equal(t, "call-1", artifact.GetCallId())
+	require.NotNil(t, ref)
+	assert.Equal(t, "call-1", ref.GetCallId())
 	require.LessOrEqual(t, len(artifact.GetData()), maxArtifactDataBytes)
 	assert.True(t, json.Valid(artifact.GetData()))
 }

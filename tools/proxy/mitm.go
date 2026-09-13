@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	traffic "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
@@ -28,17 +30,16 @@ type MitmCommand struct {
 	store       *FlowStore
 	hub         *ProxyHub
 	execCommand CommandExecutor
-	registry    *commands.CommandRegistry
 }
 
 // NewMitmCommand wires the mitm verbs to the long-lived hub's shared FlowStore
 // so `mitm flows/analyze/flow` query traffic captured from every tool, not just
 // a per-invocation proxy.
-func NewMitmCommand(reg *commands.CommandRegistry, store *FlowStore, hub *ProxyHub) *MitmCommand {
+func NewMitmCommand(store *FlowStore, hub *ProxyHub) *MitmCommand {
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
-	return &MitmCommand{store: store, hub: hub, registry: reg}
+	return &MitmCommand{store: store, hub: hub}
 }
 
 func (c *MitmCommand) SetCommandExecutor(fn CommandExecutor) {
@@ -188,10 +189,7 @@ type captureAddon struct {
 	pending sync.Map // map[proxy flow id]*captureState
 }
 
-// toolIDOf returns the AOP tool-call id that opened this flow's connection, read
-// from the per-connection proxy-auth username the client injected. Empty when no
-// identity was presented (e.g. relay use or a non-Cairn client).
-func toolIDOf(f *mitmproxy.Flow) string {
+func correlationTokenOf(f *mitmproxy.Flow) string {
 	if f != nil && f.ConnContext != nil {
 		return f.ConnContext.ProxyAuthUser
 	}
@@ -251,6 +249,7 @@ func (a *captureAddon) StreamResponseModifier(f *mitmproxy.Flow, in io.Reader) i
 	}
 	return in
 }
+
 func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 	if f == nil {
 		return nil
@@ -263,18 +262,21 @@ func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 }
 
 type captureState struct {
-	hub          *ProxyHub
-	mu           sync.Mutex
-	finished     bool
-	flow         Flow
-	bodies       [2]*bodyStream
-	finishFiles  [2]func(bool) (*os.File, error)
-	releaseFiles [2]func()
-	captureErr   error
+	hub        *ProxyHub
+	mu         sync.Mutex
+	finished   bool
+	flow       Flow
+	bodies     [2]*bodyStream
+	files      [2]*bodyFile
+	captureErr error
 }
 
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
-	flow := Flow{Timestamp: f.StartTime, ToolID: toolIDOf(f)}
+	correlation := hub.resolveCorrelation(correlationTokenOf(f))
+	flow := Flow{
+		Timestamp: f.StartTime, Ref: correlation.ref, Invocation: correlation.invocation,
+		cancel: correlation.cancel, release: correlation.finish,
+	}
 	if f.ConnContext != nil && f.ConnContext.ClientConn != nil {
 		flow.TLS = f.ConnContext.ClientConn.Tls
 	}
@@ -310,14 +312,14 @@ func (s *captureState) bodyReader(in io.Reader, side string) io.Reader {
 	if s.bodies[i] == nil {
 		s.bodies[i] = &bodyStream{}
 		var err error
-		s.finishFiles[i], s.releaseFiles[i], err = s.hub.recordBody(s.bodies[i])
+		s.files[i], err = s.hub.recordBody(s.bodies[i])
 		s.captureErr = errors.Join(s.captureErr, err)
 	}
 	return io.TeeReader(in, s.bodies[i])
 }
 
-// finish freezes observation on the MITM callback. Only the AIScan adapter
-// waits for file consumers; the native Flow lifecycle never waits for them.
+// finish freezes observation at the engine completion callback and publishes
+// the completed flow. Reading response EOF is not a publication barrier.
 func (s *captureState) finish(err error) { s.finishCapture(err, false) }
 func (s *captureState) discard()         { s.finishCapture(nil, true) }
 
@@ -336,24 +338,22 @@ func (s *captureState) finishCapture(err error, discard bool) {
 	if !s.flow.Timestamp.IsZero() {
 		s.flow.Duration = time.Since(s.flow.Timestamp)
 	}
-	hasFiles := s.finishFiles[0] != nil || s.finishFiles[1] != nil
 	s.mu.Unlock()
-	finish := func(err error) { s.completeCapture(err, discard) }
-	if hasFiles {
-		s.hub.finalize(finish, err)
-	} else {
-		finish(err)
-	}
+	s.completeCapture(err, discard)
 }
 
 func (s *captureState) completeCapture(err error, discard bool) {
-	for _, release := range s.releaseFiles {
-		if release != nil {
-			defer release()
+	for _, file := range s.files {
+		if file != nil {
+			defer file.release()
 		}
 	}
 	err = errors.Join(err, s.captureErr)
 	flow := s.flow
+	if flow.release != nil {
+		defer flow.release()
+		flow.release = nil
+	}
 	var files [2]*os.File
 	for i, stream := range s.bodies {
 		if stream == nil {
@@ -361,8 +361,9 @@ func (s *captureState) completeCapture(err error, discard bool) {
 		}
 		preview, observed := stream.snapshot()
 		stored := int64(len(preview))
-		if finish := s.finishFiles[i]; finish != nil {
-			file, fileErr := finish(discard)
+		if body := s.files[i]; body != nil {
+			fileErr := body.finish(discard)
+			file := body.file
 			files[i] = file
 			err = errors.Join(err, fileErr)
 			stored = 0
@@ -388,7 +389,7 @@ func (s *captureState) completeCapture(err error, discard bool) {
 				side = "response"
 			}
 			notice := fmt.Sprintf("%s body truncated (%d/%d bytes retained)", side, stored, observed)
-			if s.finishFiles[i] == nil {
+			if s.files[i] == nil {
 				notice += " (preview only; local storage disabled or unavailable)"
 			}
 			err = errors.Join(err, errors.New(notice))
@@ -421,15 +422,18 @@ func appendPreview(dst, src []byte, max int) []byte {
 
 // Flow is the hub's stored capture: the canonical exchange plus the hub-only
 // metadata (attribution, timing, TLS) the mitm query verbs filter and format
-// on. The wire view is Exchange.Proto with ToolID/Timestamp stamped.
+// on. Ref is the sole wire correlation authority.
 type Flow struct {
 	traffic.Exchange
-	ToolID      string
+	Ref         *operationpb.Ref
+	Invocation  operation.Invocation
 	Timestamp   time.Time
 	Host        string
 	ContentType string
 	Duration    time.Duration
 	TLS         bool
+	cancel      func(error) bool
+	release     func()
 }
 
 type QueryOpts struct {

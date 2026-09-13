@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -75,20 +75,21 @@ func TestRenderEventFileFormatsTheSameAOPJSONLStream(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "session.jsonl")
 	outputPath := filepath.Join(dir, "session.md")
-	bus := eventbus.New[*aop.Event]()
-	writer, err := NewJSONLRecorder(bus, inputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	events := []*aop.Event{
 		renderEvent(&aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}}),
 		renderEvent(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("rendered prompt")}}}}),
 		renderEvent(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("rendered answer")}}}}),
 	}
+	var stream bytes.Buffer
 	for _, event := range events {
-		bus.Emit(event)
+		line, err := protojson.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Write(line)
+		stream.WriteByte('\n')
 	}
-	if err := writer.Close(); err != nil {
+	if err := os.WriteFile(inputPath, stream.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := RenderEventFile(inputPath, "markdown", outputPath); err != nil {

@@ -65,7 +65,7 @@ func TestStreamDeltasAndFinalMessageShareMessageID(t *testing.T) {
 	collector := &streamEventCollector{}
 	llm := &scriptedProvider{streamEvents: reasoningStreamEvents()}
 
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Model:    "test",
 		Stream:   true,
@@ -150,7 +150,7 @@ func TestMessageIDStableAcrossStreamRetry(t *testing.T) {
 	collector := &streamEventCollector{}
 	llm := &flakyStreamProvider{events: reasoningStreamEvents()}
 
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Model:      "test",
 		Stream:     true,
@@ -246,7 +246,7 @@ func TestProviderFrameCapturePreservesExactBytesAndIsOptIn(t *testing.T) {
 	}
 
 	var frames []*aop.ProviderFrame
-	_, err := NewAgent(Config{
+	_, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: newProvider(), Model: "test", CaptureProviderFrames: true,
 		Bus: testBus(func(event *aop.Event) {
 			if frame := event.GetProviderFrame(); frame != nil {
@@ -272,7 +272,7 @@ func TestProviderFrameCapturePreservesExactBytesAndIsOptIn(t *testing.T) {
 	}
 
 	frames = nil
-	_, err = NewAgent(Config{
+	_, err = NewAgent(Config{Loop: StandardLoop{},
 		Provider: newProvider(), Model: "test", CaptureProviderFrames: false,
 		Bus: testBus(func(event *aop.Event) {
 			if frame := event.GetProviderFrame(); frame != nil {
@@ -306,7 +306,7 @@ func TestAnthropicProviderFrameCapturePreservesExactBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var frames []*aop.ProviderFrame
-	_, err = NewAgent(Config{
+	_, err = NewAgent(Config{Loop: StandardLoop{},
 		Provider: provider, Model: "claude-test", CaptureProviderFrames: true,
 		Bus: testBus(func(event *aop.Event) {
 			if frame := event.GetProviderFrame(); frame != nil {
@@ -343,7 +343,7 @@ func TestProviderFrameCapturePreservesSSEFrameOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	var frames []*aop.ProviderFrame
-	_, err = NewAgent(Config{
+	_, err = NewAgent(Config{Loop: StandardLoop{},
 		Provider: provider, Model: "test", Stream: true, CaptureProviderFrames: true,
 		Bus: testBus(func(event *aop.Event) {
 			if frame := event.GetProviderFrame(); frame != nil {

@@ -98,6 +98,13 @@
     "reason": "The tmux command integration requires Unix PTY and signal semantics."
   },
   {
+    "path": "pkg/exts/files/extension_test.go",
+    "format": "Windows symlink permission unavailable: %v",
+    "count": 1,
+    "category": "platform",
+    "reason": "Creating symlinks can require an elevated Windows token; Linux CI covers the containment assertion."
+  },
+  {
     "path": "pkg/headless/engine_test.go",
     "format": "skip: requires runtime DSL variables",
     "count": 1,
