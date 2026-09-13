@@ -3,13 +3,14 @@ package terminal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
 type Config struct {
@@ -17,7 +18,7 @@ type Config struct {
 	Timeout        int
 	Proxy          string
 	ProxyCA        string
-	Egress         func(string) (string, string)
+	Egress         func(context.Context) (string, string, func())
 	Containment    commands.ProcessContainment
 	MaximumTimeout time.Duration
 	// Tmux constructs the terminal command published by this extension. Nil
@@ -29,19 +30,20 @@ type Config struct {
 	HiddenCommands []string
 }
 type Extension struct {
-	mu                                    sync.Mutex
-	commands                              *commands.Registry
-	bash                                  *commands.BashTool
-	tmux                                  commands.Command
-	registered, commandRegistered, closed bool
-	done                                  chan struct{}
+	mu                 sync.Mutex
+	tools              *toolset.Registry
+	commands           *commands.Registry
+	bash               *commands.BashTool
+	tmux               commands.Command
+	registered, closed bool
+	done               chan struct{}
 }
 
-func New(c *commands.Registry, config Config) (*Extension, error) {
-	if c == nil || config.Directory == "" {
+func New(registry *hooks.Registry, tools *toolset.Registry, c *commands.Registry, config Config) (*Extension, error) {
+	if tools == nil || c == nil || config.Directory == "" {
 		return nil, fmt.Errorf("terminal requires commands and a working directory")
 	}
-	bash := commands.NewBashTool(config.Directory, config.Timeout).
+	bash := commands.NewBashTool(config.Directory, config.Timeout, registry).
 		WithScannerProxy(config.Proxy).
 		WithScannerProxyCA(config.ProxyCA).
 		WithProcessContainment(config.Containment).
@@ -56,15 +58,15 @@ func New(c *commands.Registry, config Config) (*Extension, error) {
 	if tmux.Name != "tmux" || tmux.Run == nil {
 		return nil, fmt.Errorf("terminal tmux command must be named tmux and executable")
 	}
-	return &Extension{commands: c, bash: bash, tmux: tmux}, nil
+	return &Extension{tools: tools, commands: c, bash: bash, tmux: tmux}, nil
 }
 func (m *Extension) Bash() *commands.BashTool { return m.bash }
-func (m *Extension) Load(scope *extension.Context) error {
+func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return extension.ErrToolsUnavailable
+		return toolset.ErrUnavailable
 	}
 	if m.registered {
 		return nil
@@ -72,11 +74,10 @@ func (m *Extension) Load(scope *extension.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := m.commands.Register("terminal", "terminal", m.tmux); err != nil {
+	if err := m.commands.Register(scope, "terminal", m.tmux); err != nil {
 		return err
 	}
-	m.commandRegistered = true
-	if err := scope.RegisterTools(m.bash); err != nil {
+	if err := m.tools.Register(scope, m.bash); err != nil {
 		return err
 	}
 	m.registered = true
@@ -87,13 +88,6 @@ func (m *Extension) Close(ctx context.Context) error {
 	if m.closed {
 		m.mu.Unlock()
 		return nil
-	}
-	if m.commandRegistered {
-		if err := m.commands.UnregisterOwner(ctx, "terminal"); err != nil {
-			m.mu.Unlock()
-			return errors.Join(extension.ErrCloseIncomplete, err)
-		}
-		m.commandRegistered = false
 	}
 	if m.done == nil {
 		m.done = make(chan struct{})
@@ -110,7 +104,7 @@ func (m *Extension) Close(ctx context.Context) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+			return ctx.Err()
 		}
 	}
 	m.mu.Lock()

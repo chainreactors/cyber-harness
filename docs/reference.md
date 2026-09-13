@@ -164,6 +164,12 @@ misc:
 | `--heartbeat <分钟>` | heartbeat 间隔（0 表示关闭，默认 0） |
 | `--timeout <秒>` | 整体超时（默认 3600） |
 | `-e, --eval` | 目标评估标准 — 独立 LLM 判断任务是否达成 |
+| `--observe <列表>` | 安装指定观测处理器：`tools,commands,processes,files,http` |
+| `-o, --output <路径>` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件 |
+| `--output-format <格式>` | One-shot stdout：`text`、`json` 或 `stream-json` |
+| `--json` | One-shot `--output-format=json` 的别名 |
+| `-r, --resume <路径>` | 只读 AOP 历史并创建 continuation，不修改源文件或隐式开启输出 |
+| `--ephemeral` | 不自动持久化交互会话；显式 `--output` 仍然生效 |
 
 `context_window` 使用真实整数，例如 128K 窗口填写 `128000`，不是 `128K`。所有正整数都可保存；Web 设置页会对小于 8192 的值显示非阻塞风险提示。
 
@@ -348,7 +354,7 @@ aiscan neutron -u http://target.example -t ./pocs --id shiro-detect -j
 | `--tags` | 按 tag 过滤 |
 | `-s, --severity` | 按严重性过滤 |
 | `-j, --json` | JSON Lines 输出 |
-| `-o, --output` | 输出结果到文件 |
+| `-o, --output` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件；原生结果文件请使用 stdout 重定向 |
 | `--template-list` | 列出匹配规则（不执行） |
 
 ```bash

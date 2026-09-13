@@ -8,7 +8,6 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 func msg(role, content string) *aop.Message {
@@ -225,9 +224,9 @@ func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
 		chatResponse(NewTextMessage("assistant", "turn-prefix checkpoint")),
 		chatResponse(NewTextMessage("assistant", "final answer")),
 	}}
-	agent := NewAgent(Config{
+	agent := NewAgent(Config{Loop: StandardLoop{},
 		Provider:      llm,
-		Tools:         commands.NewRegistry(),
+		Tools:         newTestTools(t),
 		Model:         "custom",
 		MaxTokens:     64,
 		ContextWindow: 8192,
@@ -283,9 +282,9 @@ func TestRunRecoversFromContextOverflowOnce(t *testing.T) {
 			return chatResponse(NewTextMessage("assistant", "recovered")), nil
 		}
 	}}
-	agent := NewAgent(Config{
+	agent := NewAgent(Config{Loop: StandardLoop{},
 		Provider:      llm,
-		Tools:         commands.NewRegistry(),
+		Tools:         newTestTools(t),
 		Model:         "custom",
 		MaxTokens:     64,
 		ContextWindow: 1000000,

@@ -12,9 +12,9 @@ import (
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
-// their router directly from AgentRuntime and do not inspect the bash tool.
-func NewPTYRouter(reg *commands.CommandRegistry) *terminal.Router {
-	mgr := RegistryPTYManager(reg)
+// their router directly from Manager and do not inspect the bash tool.
+func NewPTYRouter(bash *commands.BashTool) *terminal.Router {
+	mgr := RegistryPTYManager(bash)
 	if mgr == nil {
 		return terminal.NewRuntimeRouter(nil)
 	}
@@ -23,21 +23,11 @@ func NewPTYRouter(reg *commands.CommandRegistry) *terminal.Router {
 
 // RegistryPTYManager extracts the tmux Manager from the "bash" tool in the
 // command registry, if available.
-func RegistryPTYManager(reg *commands.CommandRegistry) *tmux.Manager {
-	if reg == nil {
+func RegistryPTYManager(bash *commands.BashTool) *tmux.Manager {
+	if bash == nil {
 		return nil
 	}
-	tool, ok := reg.GetTool("bash")
-	if !ok {
-		return nil
-	}
-	manager, ok := tool.(interface {
-		Manager() *tmux.Manager
-	})
-	if !ok {
-		return nil
-	}
-	return manager.Manager()
+	return bash.Manager()
 }
 
 // SubscribePTYSessions subscribes to PTY session changes and broadcasts
@@ -85,7 +75,7 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *termin
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			unsub()
+			unsub.Cancel()
 			close(stop)
 		})
 	}

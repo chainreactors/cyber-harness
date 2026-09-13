@@ -1,44 +1,29 @@
 package tools
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/deps"
+	"fmt"
+
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
-func init() {
-	capability.Register(capability.Descriptor{
-		ID: "scan", Kind: capability.KindScanner, Group: "scanner",
-		CLIName: "scan", Summary: "scan", Usage: scan.Usage,
-		Requires: []string{"scan.engine.Set.Gogo", "scan.engine.Set.Spray"},
-	})
-	commands.RegisterFactory(commands.Factory{
-		Capability: "scan",
-		Build: func(d *commands.Deps, reg *commands.CommandRegistry) {
-			es, ok := deps.Get(d.Bag, engine.SetKey)
-			if !ok || es == nil || es.Gogo == nil || es.Spray == nil {
-				d.Skip("scan", deps.Name(engine.SetKey)+".Gogo+.Spray")
-				return
-			}
-
-			// copy: the bag's slice is shared with every other build
-			stored, _ := deps.Get(d.Bag, scan.OptsKey)
-			scanOpts := append([]scan.Option(nil), stored...)
-			if d.ScannerProxy != "" {
-				scanOpts = append(scanOpts, scan.WithProxy(d.ScannerProxy))
-			}
-			if d.Events != nil {
-				scanOpts = append(scanOpts, scan.WithEvents(d.Events))
-			}
-
-			impl := scan.New(es, scanOpts...)
-			reg.Register(commands.Command{
-				Name: impl.Name(), Usage: impl.Usage(),
-				DescriptionPath: "aiscan://skills/aiscan/okf/easm/scan.md",
-				Run:             impl.Run,
-			}, "scanner")
-		},
-	})
+func NewScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventEmitter) (commands.Command, error) {
+	if engines == nil || engines.Gogo == nil || engines.Spray == nil {
+		return commands.Command{}, fmt.Errorf("scan engines are unavailable")
+	}
+	scanOptions := append([]scan.Option(nil), options...)
+	if proxy != "" {
+		scanOptions = append(scanOptions, scan.WithProxy(proxy))
+	}
+	if events != nil {
+		scanOptions = append(scanOptions, scan.WithEvents(events))
+	}
+	impl := scan.New(engines, scanOptions...)
+	return commands.Command{
+		Name: impl.Name(), Usage: impl.Usage(),
+		DescriptionPath: "aiscan://skills/aiscan/okf/easm/scan.md",
+		Run:             impl.Run,
+	}, nil
 }

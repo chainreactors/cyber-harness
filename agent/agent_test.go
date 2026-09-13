@@ -20,19 +20,20 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
 
 func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "done")),
 		},
 	}
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        tools,
 		Model:        "test",
@@ -54,9 +55,8 @@ func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
 }
 
 func TestRunExecutesToolLoop(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "tool output"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -75,7 +75,7 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	}
 
 	var events []string
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -102,9 +102,21 @@ func TestRunExecutesToolLoop(t *testing.T) {
 	}
 }
 
+func TestRunNilLoopDoesNotEnqueueInbox(t *testing.T) {
+	ib := inbox.NewBuffered(4)
+	a := NewAgent(Config{Provider: &scriptedProvider{}, Inbox: ib})
+	_, err := a.Run(context.Background(), TextInput("hello"))
+	if err == nil || !strings.Contains(err.Error(), "agent loop is not configured") {
+		t.Fatalf("Run() error = %v, want unavailable loop", err)
+	}
+	if ib.Len() != 0 || len(a.MessagesSnapshot()) != 0 {
+		t.Fatal("missing loop changed history or queued input")
+	}
+}
+
 func TestRunNilProviderDoesNotEnqueueInbox(t *testing.T) {
 	ib := inbox.NewBuffered(4)
-	a := NewAgent(Config{Inbox: ib})
+	a := NewAgent(Config{Loop: StandardLoop{}, Inbox: ib})
 	_, err := a.Run(context.Background(), TextInput("hello"))
 	if err == nil || !strings.Contains(err.Error(), "provider is nil") {
 		t.Fatalf("Run() error = %v, want provider is nil", err)
@@ -115,9 +127,9 @@ func TestRunNilProviderDoesNotEnqueueInbox(t *testing.T) {
 }
 
 func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{}
-	a := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
+	a := NewAgent(Config{Loop: StandardLoop{}, Provider: llm, Tools: tools, Model: "test"})
 
 	if _, err := a.Continue(context.Background()); err == nil || !strings.Contains(err.Error(), "no messages") {
 		t.Fatalf("Continue() error = %v, want no messages", err)
@@ -130,14 +142,14 @@ func TestContinueRequiresNonAssistantLastMessage(t *testing.T) {
 }
 
 func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "first")),
 			chatResponse(NewTextMessage("assistant", "second")),
 		},
 	}
-	a := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
+	a := NewAgent(Config{Loop: StandardLoop{}, Provider: llm, Tools: tools, Model: "test"})
 	if _, err := a.Run(context.Background(), TextInput("one")); err != nil {
 		t.Fatalf("first prompt error = %v", err)
 	}
@@ -157,13 +169,13 @@ func TestAgentReusesConversationAcrossPrompts(t *testing.T) {
 }
 
 func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "next")),
 		},
 	}
-	ag := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
+	ag := NewAgent(Config{Loop: StandardLoop{}, Provider: llm, Tools: tools, Model: "test"})
 	ag.state.Messages = []*aop.Message{textMessage("user", "base")}
 	result, err := ag.Run(context.Background(), TextInput("prompt"))
 	if err != nil {
@@ -178,10 +190,10 @@ func TestAgentPromptReturnsRunScopedNewMessages(t *testing.T) {
 }
 
 func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{err: fmt.Errorf("boom")}
 	var events []*aop.Event
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -227,9 +239,9 @@ func TestProviderErrorEmitsAgentEndAndUpdatesState(t *testing.T) {
 }
 
 func TestResetDoesNotAllowConcurrentPrompt(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &blockingProvider{started: make(chan struct{}), release: make(chan struct{})}
-	a := NewAgent(Config{Provider: llm, Tools: tools, Model: "test"})
+	a := NewAgent(Config{Loop: StandardLoop{}, Provider: llm, Tools: tools, Model: "test"})
 
 	done := make(chan error, 1)
 	go func() {
@@ -266,7 +278,7 @@ func TestSessionContinuesAfterLLMError(t *testing.T) {
 		},
 	}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Model:      "test",
 		MaxRetries: 0,
@@ -304,7 +316,7 @@ func TestNoEmptyAssistantMessageInStateAfterError(t *testing.T) {
 		},
 	}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Model:      "test",
 		MaxRetries: 0,
@@ -335,16 +347,15 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 
 	dir := t.TempDir()
 
-	registry := commands.NewRegistry()
 	stub := &stubPseudoCommand{name: "scan", output: scanOutput}
-	registry.Register(commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run}, "")
-
-	bash := commands.NewBashTool(dir, 5)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
-
+	bash := commands.NewBashTool(dir, 5, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	registry.Register(tmuxCmd, "core")
+	commandRegistry := extensiontest.Commands(t, "core",
+		commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
+		tmuxCmd,
+	)
+	bash.SetCommandRegistry(commandRegistry)
+	tools := newTestTools(t, bash)
 
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -365,11 +376,11 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 		},
 	}
 
-	systemPrompt := buildTestSystemPrompt(registry, nil)
+	systemPrompt := buildTestSystemPrompt(tools, commandRegistry, nil)
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
-		Tools:        registry,
+		Tools:        tools,
 		SystemPrompt: systemPrompt,
 		Model:        "test-model",
 	})).Run(context.Background(), TextInput("scan 127.0.0.1"))
@@ -390,22 +401,21 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 }
 
 func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
-	registry := commands.NewRegistry()
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
-	registry.RegisterTool(commands.NewReadTool(t.TempDir(), store))
+	registry := newTestTools(t, &recordingTool{name: "read", output: "skill content"})
 
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "done")),
 		},
 	}
-	systemPrompt := buildTestSystemPrompt(registry, store.Skills)
+	systemPrompt := buildTestSystemPrompt(registry, nil, store.Skills)
 	task := skills.ExpandCommand("/skill:aiscan scan 127.0.0.1", store)
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        registry,
 		SystemPrompt: systemPrompt,
@@ -439,12 +449,11 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(dir, 30)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
+	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	registry.Register(tmuxCmd, "core")
+	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	bash.SetCommandRegistry(commandRegistry)
+	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
 
 	var capturedRequests []*ChatCompletionRequest
@@ -570,9 +579,9 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
-		Tools:    registry,
+		Tools:    tools,
 		Model:    "test",
 	}).Run(context.Background(), TextInput("Start an interactive shell session using tmux, test multi-round interaction"))
 	if err != nil {
@@ -594,12 +603,11 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(dir, 30)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
+	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	registry.Register(tmuxCmd, "core")
+	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	bash.SetCommandRegistry(commandRegistry)
+	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
 
 	turnIndex := 0
@@ -676,9 +684,9 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
-		Tools:    registry,
+		Tools:    tools,
 		Model:    "test",
 	}).Run(context.Background(), TextInput("Test Ctrl-C interrupt in tmux session"))
 	if err != nil {
@@ -699,12 +707,11 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(dir, 30)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
+	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	registry.Register(tmuxCmd, "core")
+	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	bash.SetCommandRegistry(commandRegistry)
+	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
 
 	turnIndex := 0
@@ -793,9 +800,9 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
-		Tools:    registry,
+		Tools:    tools,
 		Model:    "test",
 	}).Run(context.Background(), TextInput("Use python3 REPL via tmux to do calculations"))
 	if err != nil {
@@ -831,15 +838,14 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	registry := commands.NewRegistry()
-	bash := commands.NewBashTool(dir, 60)
-	bash.SetCommandResolver(registry.Get)
-	registry.RegisterTool(bash)
+	bash := commands.NewBashTool(dir, 60, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	registry.Register(tmuxCmd, "core")
+	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	bash.SetCommandRegistry(commandRegistry)
+	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
 
-	systemPrompt := buildTmuxTestPrompt(registry)
+	systemPrompt := buildTmuxTestPrompt(tools, commandRegistry)
 
 	var events []string
 	handleEvent := func(event *aop.Event) {
@@ -862,9 +868,9 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
-		Tools:        registry,
+		Tools:        tools,
 		Model:        model,
 		SystemPrompt: systemPrompt,
 		Bus:          testBus(handleEvent),
@@ -928,8 +934,9 @@ func TestCacheConfigInheritance(t *testing.T) {
 	}
 
 	parentCfg := Config{
+		Loop:           StandardLoop{},
 		Provider:       llm,
-		Tools:          commands.NewRegistry(),
+		Tools:          newTestTools(t),
 		Model:          "test",
 		SystemPrompt:   "sys",
 		CacheRetention: CacheShort,
@@ -998,7 +1005,7 @@ func TestMultiTurnContextInheritanceAndCache(t *testing.T) {
 		events = append(events, e)
 	}
 
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 
 	agentCfg := Config{
 		Provider:       prov,
@@ -1087,7 +1094,7 @@ func TestMultiTurnStreamingCache(t *testing.T) {
 	systemPrompt := "You are a translator. " +
 		strings.Repeat("You translate English to French. Always respond with just the translation, nothing else. ", 30)
 
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 
 	agentCfg := Config{
 		Provider:       prov,
@@ -1139,9 +1146,8 @@ func TestMultiTurnWithToolCallsCache(t *testing.T) {
 	systemPrompt := "You are a calculator agent. " +
 		strings.Repeat("When asked to compute something, use the calculate tool. Always call the tool, never compute yourself. ", 25)
 
-	tools := commands.NewRegistry()
 	calcTool := &recordingTool{name: "calculate", output: "42"}
-	tools.RegisterTool(calcTool)
+	tools := newTestTools(t, calcTool)
 
 	var usageEvents []*aop.Event
 	handler := func(e *aop.Event) {
@@ -1217,7 +1223,7 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 		return chatResponse(NewTextMessage("assistant", "from-B")), nil
 	}}
 
-	ag := NewAgent(Config{Provider: provA, Model: "model-a"})
+	ag := NewAgent(Config{Loop: StandardLoop{}, Provider: provA, Model: "model-a"})
 
 	res, err := ag.Run(context.Background(), TextInput("hi"))
 	if err != nil {
@@ -1249,7 +1255,7 @@ func TestSetProviderHotSwapsNextRun(t *testing.T) {
 
 func TestSetProviderConfigHotSwapsModelLimits(t *testing.T) {
 	provider := &scriptedProvider{}
-	ag := NewAgent(Config{MaxTokens: 1024, ContextWindow: 8192})
+	ag := NewAgent(Config{Loop: StandardLoop{}, MaxTokens: 1024, ContextWindow: 8192})
 	ag.SetProviderConfig(provider, ProviderConfig{
 		Model: "glm-5.2[1m]", MaxTokens: 32768, ContextWindow: 1000000,
 	})
@@ -1265,7 +1271,7 @@ func TestSetProviderRaceWithRun(t *testing.T) {
 	prov := &callbackProvider{fn: func(_ context.Context, _ *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 		return chatResponse(NewTextMessage("assistant", "ok")), nil
 	}}
-	ag := NewAgent(Config{Provider: prov, Model: "m"})
+	ag := NewAgent(Config{Loop: StandardLoop{}, Provider: prov, Model: "m"})
 
 	done := make(chan struct{})
 	go func() {
@@ -1672,14 +1678,16 @@ func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, cont
 	}
 }
 
-func buildTestSystemPrompt(tools *commands.CommandRegistry, ss []skills.Skill) string {
+func buildTestSystemPrompt(tools tool.Executor, commandRegistry *commands.Registry, ss []skills.Skill) string {
 	var sb strings.Builder
 	sb.WriteString("You are a test agent.\n\n## Available Tools\n\n")
 	if tools != nil {
-		for _, t := range tools.Tools() {
-			sb.WriteString("### " + t.Name() + "\n" + t.Description() + "\n\n")
+		for _, definition := range tools.ToolDefinitions() {
+			sb.WriteString("### " + definition.Name + "\n" + definition.Description + "\n\n")
 		}
-		if docs := tools.UsageDocs(); docs != "" {
+	}
+	if commandRegistry != nil {
+		if docs := commandRegistry.UsageDocs(); docs != "" {
 			sb.WriteString("## Pseudo-Commands\n\n" + docs + "\n\n")
 		}
 	}
@@ -1690,16 +1698,16 @@ func buildTestSystemPrompt(tools *commands.CommandRegistry, ss []skills.Skill) s
 	return sb.String()
 }
 
-func buildTmuxTestPrompt(registry *commands.CommandRegistry) string {
+func buildTmuxTestPrompt(tools tool.Executor, commandRegistry *commands.Registry) string {
 	var sb strings.Builder
 	sb.WriteString("You are a test agent. You have one tool: bash.\n\n## Tool: bash\n")
-	for _, tool := range registry.Tools() {
-		sb.WriteString(tool.Description())
+	for _, definition := range tools.ToolDefinitions() {
+		sb.WriteString(definition.Description)
 		sb.WriteString("\n\n")
 	}
 
 	sb.WriteString("## Pseudo-Commands (use via bash tool)\n\ntmux is a pseudo-command built into the bash tool. Call it like:\n  bash tool call with {\"command\": \"tmux new -d -s myname \\\"sh\\\"\"}\n  bash tool call with {\"command\": \"tmux send -t myname \\\"echo hi\\\" Enter\"}\n  bash tool call with {\"command\": \"tmux capture-pane -t myname --new\"}\n  bash tool call with {\"command\": \"tmux ls\"}\n  bash tool call with {\"command\": \"tmux kill -t myname\"}\n\ntmux usage:\n")
-	sb.WriteString(registry.UsageDocs())
+	sb.WriteString(commandRegistry.UsageDocs())
 
 	sb.WriteString("\n## Rules\n\n1. Execute ONE bash call per step. Do not combine multiple steps.\n2. After send-keys, always sleep briefly (sleep 0.3) before capture-pane.\n3. Use capture-pane with --new for incremental output.\n4. Report observations at the end.\n")
 	return sb.String()

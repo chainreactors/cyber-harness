@@ -5,110 +5,76 @@ import (
 	"testing"
 )
 
-func TestRegisterFirstWinsAndRecordsConflict(t *testing.T) {
-	reset()
-	Register(Descriptor{ID: "gogo", Kind: KindScanner, CLIName: "gogo", Summary: "gogo"})
-	Register(Descriptor{ID: "gogo", Kind: KindScanner, CLIName: "shadow"})
-
-	d, ok := Get("gogo")
-	if !ok || d.CLIName != "gogo" {
-		t.Fatalf("first registration should win, got %#v (ok=%v)", d, ok)
+func TestCatalogRejectsAmbiguousIdentity(t *testing.T) {
+	if _, err := New(Descriptor{ID: "gogo"}, Descriptor{ID: "gogo"}); err == nil {
+		t.Fatal("duplicate ID was accepted")
 	}
-	if got := Conflicts(); len(got) != 1 || got[0].ID != "gogo" {
-		t.Fatalf("conflicts = %#v, want one entry for gogo", got)
+	if _, err := New(
+		Descriptor{ID: "gogo", CLIName: "scan"},
+		Descriptor{ID: "spray", CLIName: "scan"},
+	); err == nil {
+		t.Fatal("duplicate CLI command was accepted")
 	}
 }
 
-func TestGroupDefaultsToID(t *testing.T) {
-	reset()
-	Register(Descriptor{ID: "arsenal"})
-	d, _ := Get("arsenal")
-	if d.Group != "arsenal" {
-		t.Fatalf("group = %q, want arsenal", d.Group)
-	}
-}
-
-func TestQueriesOnlySeeLinkedCapabilities(t *testing.T) {
-	reset()
-	Register(Descriptor{
-		ID: "gogo", Kind: KindScanner, Group: "scanner",
-		CLIName: "gogo", Summary: "gogo", UsageLine: "  gogo   Run gogo directly",
-		Usage: func() string { return "gogo help" },
+func TestCatalogIsExplicitAndImmutable(t *testing.T) {
+	skills := []string{"katana"}
+	catalog := Must(Descriptor{
+		ID: "katana", Kind: KindScanner, Group: "scanner", CLIName: "katana",
+		Summary: "katana", UsageLine: "  katana   crawl", Usage: func() string { return "katana help" }, Skills: skills,
 	})
-
-	if !CLIAvailable("gogo") {
-		t.Fatal("gogo should be CLI-available")
+	skills[0] = "changed"
+	all := catalog.All()
+	all[0].Skills[0] = "also changed"
+	descriptor, ok := catalog.Get("katana")
+	if !ok || !reflect.DeepEqual(descriptor.Skills, []string{"katana"}) {
+		t.Fatalf("catalog changed through caller-owned data: %#v", descriptor)
 	}
-	if CLIAvailable("katana") {
-		t.Fatal("katana is not linked and must not be CLI-available")
+	if !catalog.CLIAvailable("katana") || catalog.CLIAvailable("passive") {
+		t.Fatal("CLI discovery did not follow the explicit catalog")
 	}
-	if got := Summaries(); !reflect.DeepEqual(got, []string{"gogo"}) {
-		t.Fatalf("summaries = %#v", got)
+	if usage, ok := catalog.Usage("katana"); !ok || usage != "katana help" {
+		t.Fatalf("usage = %q, %v", usage, ok)
 	}
-	if got := UsageLines(); !reflect.DeepEqual(got, []string{"  gogo   Run gogo directly"}) {
-		t.Fatalf("usage lines = %#v", got)
-	}
-	if usage, ok := Usage("gogo"); !ok || usage != "gogo help" {
-		t.Fatalf("usage = %q ok=%v", usage, ok)
-	}
-	if _, ok := Usage("katana"); ok {
-		t.Fatal("unlinked capability must not render usage")
-	}
-}
-
-func TestSkillGatingFollowsLinkedCapability(t *testing.T) {
-	reset()
-	if SkillEnabled("katana") {
-		t.Fatal("katana skill must stay hidden while the capability is unlinked")
-	}
-	if !SkillEnabled("scan") {
-		t.Fatal("ungated skills are always enabled")
-	}
-	Register(Descriptor{ID: "katana", Kind: KindScanner, Skills: []string{"katana"}})
-	if !SkillEnabled("katana") {
-		t.Fatal("katana skill should unlock once the capability is linked")
+	if !catalog.SkillEnabled("katana") || catalog.SkillEnabled("passive") {
+		t.Fatal("skill visibility did not follow the explicit catalog")
 	}
 }
 
 func TestSelectHonoursOptionalAndDefault(t *testing.T) {
-	reset()
-	Register(Descriptor{ID: "core"})
-	Register(Descriptor{ID: "search", Optional: true, Default: true})
-	Register(Descriptor{ID: "browser", Optional: true, Default: true})
-	Register(Descriptor{ID: "ioa", Optional: true})
-
-	plan := Select(Options{})
+	catalog := Must(
+		Descriptor{ID: "core"},
+		Descriptor{ID: "search", Optional: true, Default: true},
+		Descriptor{ID: "browser", Optional: true, Default: true},
+		Descriptor{ID: "ioa", Optional: true},
+	)
+	plan := catalog.Select(Options{})
 	for _, id := range []ID{"core", "search", "browser"} {
 		if !plan.Has(id) {
 			t.Fatalf("%s should be enabled by default", id)
 		}
 	}
 	if plan.Has("ioa") {
-		t.Fatal("non-default optional capability must stay off")
+		t.Fatal("non-default optional capability was enabled")
 	}
-
-	plan = Select(Options{OptionalTools: []string{"browser"}})
-	if plan.Has("search") {
-		t.Fatal("explicit --tools must not keep other optional capabilities")
+	plan = catalog.Select(Options{OptionalTools: []string{"browser"}})
+	if plan.Has("search") || !plan.Has("browser") || !plan.Has("core") {
+		t.Fatal("explicit optional selection was not respected")
 	}
-	if !plan.Has("browser") || !plan.Has("core") {
-		t.Fatal("explicit --tools must keep the selection and all non-optional capabilities")
-	}
-
-	plan = Select(Options{Extra: []ID{"ioa"}})
+	plan = catalog.Select(Options{Extra: []ID{"ioa"}})
 	if !plan.Has("ioa") {
-		t.Fatal("Extra must force-enable a capability")
+		t.Fatal("extra capability was not enabled")
 	}
 }
 
-func TestPlanGroupsFollowRegistrationOrder(t *testing.T) {
-	reset()
-	Register(Descriptor{ID: "core", Group: "core"})
-	Register(Descriptor{ID: "gogo", Group: "scanner"})
-	Register(Descriptor{ID: "spray", Group: "scanner"})
-	Register(Descriptor{ID: "arsenal", Group: "arsenal"})
-
-	if got := Select(Options{}).Groups(); !reflect.DeepEqual(got, []string{"core", "scanner", "arsenal"}) {
+func TestPlanGroupsFollowDescriptorOrder(t *testing.T) {
+	catalog := Must(
+		Descriptor{ID: "core", Group: "core"},
+		Descriptor{ID: "gogo", Group: "scanner"},
+		Descriptor{ID: "spray", Group: "scanner"},
+		Descriptor{ID: "arsenal", Group: "arsenal"},
+	)
+	if got := catalog.Select(Options{}).Groups(); !reflect.DeepEqual(got, []string{"core", "scanner", "arsenal"}) {
 		t.Fatalf("groups = %#v", got)
 	}
 }

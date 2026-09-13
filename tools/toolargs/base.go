@@ -9,8 +9,8 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -63,25 +63,33 @@ func (b *Base) EmitArtifactResultCtx(ctx context.Context, resultID, tool, kind, 
 		b.Logger.Warnf("artifact budget: %s %s for %.200s trimmed %d → %d bytes", tool, kind, target, len(raw), len(bounded))
 		raw = bounded
 	}
-	invocation := coretool.InvocationFromContext(ctx)
+	invocation := operation.InvocationFromContext(ctx)
 	artifact := &toolpb.Artifact{
 		Tool: tool, Kind: kind, Target: target, Data: raw,
-		MediaType: aop.JSONMediaType, Timestamp: timestamppb.New(time.Now()), CallId: invocation.CallID,
+		MediaType: aop.JSONMediaType, Timestamp: timestamppb.New(time.Now()),
 		ResultId: resultID,
+	}
+	emitter := invocation.Emitter
+	if emitter == "" {
+		emitter = tool
+	}
+	event := &aop.Event{
+		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: emitter,
+		Payload: &aop.Event_Extension{},
 	}
 	extension, err := anypb.New(artifact)
 	if err != nil {
 		b.Logger.Warnf("encode %s artifact: %s", tool, err)
 		return
 	}
-	emitter := invocation.Emitter
-	if emitter == "" {
-		emitter = tool
+	event.Payload.(*aop.Event_Extension).Extension = extension
+	if ref := operation.Correlation(ctx); ref != nil {
+		if err := aop.SetTypedExtension(event, ref); err != nil {
+			b.Logger.Warnf("encode %s artifact correlation: %s", tool, err)
+			return
+		}
 	}
-	b.Events.Emit(&aop.Event{
-		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: emitter,
-		Payload: &aop.Event_Extension{Extension: extension},
-	})
+	b.Events.Emit(event)
 }
 
 func (b *Base) EmitLootCtx(
@@ -92,7 +100,7 @@ func (b *Base) EmitLootCtx(
 	if b.Events == nil || resultID == "" {
 		return
 	}
-	invocation := coretool.InvocationFromContext(ctx)
+	invocation := operation.InvocationFromContext(ctx)
 	loot := &toolpb.Loot{
 		ResultId:           resultID,
 		Tool:               tool,
@@ -102,19 +110,26 @@ func (b *Base) EmitLootCtx(
 		Tags:               append([]string(nil), tags...),
 		Description:        description,
 		VerificationStatus: verificationStatus,
-		CallId:             invocation.CallID,
+	}
+	emitter := invocation.Emitter
+	if emitter == "" {
+		emitter = tool
+	}
+	event := &aop.Event{
+		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: emitter,
+		Payload: &aop.Event_Extension{},
 	}
 	extension, err := anypb.New(loot)
 	if err != nil {
 		b.Logger.Warnf("encode %s loot: %s", tool, err)
 		return
 	}
-	emitter := invocation.Emitter
-	if emitter == "" {
-		emitter = tool
+	event.Payload.(*aop.Event_Extension).Extension = extension
+	if ref := operation.Correlation(ctx); ref != nil {
+		if err := aop.SetTypedExtension(event, ref); err != nil {
+			b.Logger.Warnf("encode %s loot correlation: %s", tool, err)
+			return
+		}
 	}
-	b.Events.Emit(&aop.Event{
-		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: emitter,
-		Payload: &aop.Event_Extension{Extension: extension},
-	})
+	b.Events.Emit(event)
 }

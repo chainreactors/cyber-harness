@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/pkg/edition"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/skills"
 	goflags "github.com/jessevdk/go-flags"
@@ -125,14 +127,53 @@ func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
 	}
 }
 
-func TestParseCLIExtractsUnifiedFileForAgentAndScanners(t *testing.T) {
+func TestParseCLIScanKeepsNativeJSONFlag(t *testing.T) {
+	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--json"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if parsed.Option.JSON {
+		t.Fatal("scan-native --json was captured as the agent output flag")
+	}
+	if !slices.Contains(parsed.ScannerArgs, "--json") {
+		t.Fatalf("scanner args = %#v, want native --json", parsed.ScannerArgs)
+	}
+}
+
+func TestParseCLIIOAKeepsQueryJSONFlag(t *testing.T) {
+	parsed, err := parseCLI([]string{"ioa", "spaces", "--json"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if !parsed.Option.IOAJSON {
+		t.Fatalf("IOA options = %#v, want query JSON", parsed.Option.IOAOptions)
+	}
+	if parsed.Option.JSON {
+		t.Fatal("IOA --json was captured as the agent output flag")
+	}
+}
+
+func TestParseCLIAgentMachineOutput(t *testing.T) {
+	parsed, err := parseCLI([]string{"agent", "-p", "hello", "--json", "--observe=files,http", "-o", "run.jsonl"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if parsed.Option.OutputFormat != "json" || parsed.Option.Observe != "files,http" || parsed.Option.OutputFile != "run.jsonl" {
+		t.Fatalf("machine output options = %#v", parsed.Option.MiscOptions)
+	}
+	if _, err := parseCLI([]string{"agent", "-p", "hello", "--output-format", "yaml"}); err == nil {
+		t.Fatal("unsupported agent output format was accepted")
+	}
+}
+
+func TestParseCLIExtractsOutputForAgentAndScanners(t *testing.T) {
 	tests := []struct {
 		args     []string
 		wantArgs []string
 	}{
-		{args: []string{"agent", "-p", "hello", "-f", "agent.jsonl"}},
-		{args: []string{"scan", "-i", "127.0.0.1", "-f", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
-		{args: []string{"gogo", "-i", "127.0.0.1", "-p", "80", "-f", "gogo.jsonl"}, wantArgs: []string{"gogo", "-i", "127.0.0.1", "-p", "80"}},
+		{args: []string{"agent", "-p", "hello", "-o", "agent.jsonl"}},
+		{args: []string{"scan", "-i", "127.0.0.1", "-o", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
+		{args: []string{"gogo", "-i", "127.0.0.1", "-p", "80", "-o", "gogo.jsonl"}, wantArgs: []string{"gogo", "-i", "127.0.0.1", "-p", "80"}},
 	}
 	for _, test := range tests {
 		t.Run(test.args[0], func(t *testing.T) {
@@ -152,22 +193,26 @@ func TestParseCLIExtractsUnifiedFileForAgentAndScanners(t *testing.T) {
 }
 
 func TestParseCLIViewUsesUnifiedInputAndFileFlags(t *testing.T) {
-	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "markdown", "-f", "session.md"})
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "--view-format", "markdown", "-f", "session.md"})
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
-	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.ViewFormat != "markdown" || parsed.Option.OutputFile != "session.md" {
+	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.ViewFormat != "markdown" || parsed.Option.ViewOutput != "session.md" || parsed.Option.OutputFile != "" {
 		t.Fatalf("view options = %#v", parsed.Option.MiscOptions)
 	}
 }
 
-func TestParseCLIRejectsResumeWithExplicitFile(t *testing.T) {
+func TestParseCLIAllowsIndependentResumeAndOutput(t *testing.T) {
 	for _, args := range [][]string{
-		{"agent", "-r", "session.jsonl", "-f", "other.jsonl"},
-		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-f", "other.jsonl"},
+		{"agent", "-r", "session.jsonl", "-o", "other.jsonl"},
+		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-o", "other.jsonl"},
 	} {
-		if _, err := parseCLI(args); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		parsed, err := parseCLI(args)
+		if err != nil {
 			t.Fatalf("parseCLI(%v) error = %v", args, err)
+		}
+		if parsed.Option.Resume != "session.jsonl" || parsed.Option.OutputFile != "other.jsonl" {
+			t.Fatalf("parseCLI(%v) options = %#v", args, parsed.Option)
 		}
 	}
 	parsed, err := parseCLI([]string{"agent", "-r", "session.jsonl", "--save-session"})
@@ -295,7 +340,7 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 	for _, name := range []string{"scan", "gogo", "spray", "zombie", "neutron"} {
 		t.Run(name, func(t *testing.T) {
-			help, ok := cfg.StaticScannerUsage(name)
+			help, ok := edition.Catalog().Usage(name)
 			if !ok {
 				t.Fatalf("StaticScannerUsage(%q) was not registered", name)
 			}
@@ -313,7 +358,7 @@ func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 }
 
 func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
-	help, ok := cfg.StaticScannerUsage("proton")
+	help, ok := edition.Catalog().Usage("proton")
 	if !ok {
 		t.Fatal("proton scanner help was not registered")
 	}

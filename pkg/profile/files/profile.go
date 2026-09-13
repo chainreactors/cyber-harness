@@ -9,7 +9,9 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
 const (
@@ -20,8 +22,9 @@ const (
 // goroutine side effects. Runtime instance replacement is intentionally absent;
 // create a new Profile to apply a different composition.
 type Profile struct {
-	set *extension.Set
-	mu  sync.RWMutex
+	set      *extension.Set
+	registry *toolset.Registry
+	mu       sync.RWMutex
 	// Public access is enabled only after the entire graph loads.
 	active  bool
 	closing bool
@@ -29,17 +32,20 @@ type Profile struct {
 
 // New constructs the files extension and its host.
 func New(config filesystem.Config) (*Profile, error) {
-	fs, err := fileext.New(config)
+	hookRegistry := hooks.New()
+	registry := toolset.NewRegistry(hookRegistry)
+	fs, err := fileext.New(registry, hookRegistry, config)
 	if err != nil {
 		return nil, err
 	}
 	set, err := extension.New(
 		extension.Entry{ID: FileSystemID, Extension: fs},
+		extension.Entry{ID: "tool-registry", DependsOn: []string{FileSystemID}, Extension: registry},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &Profile{set: set}, nil
+	return &Profile{set: set, registry: registry}, nil
 }
 
 func (p *Profile) Load(ctx context.Context) error {
@@ -50,7 +56,7 @@ func (p *Profile) Load(ctx context.Context) error {
 	closing := p.closing
 	p.mu.RUnlock()
 	if closing {
-		return extension.ErrToolsUnavailable
+		return toolset.ErrUnavailable
 	}
 	if err := p.set.Load(ctx); err != nil {
 		return err
@@ -66,14 +72,14 @@ func (p *Profile) Load(ctx context.Context) error {
 // Executor borrows the host executor after the composition has loaded.
 func (p *Profile) Executor() (tool.Executor, error) {
 	if p == nil {
-		return nil, extension.ErrToolsUnavailable
+		return nil, toolset.ErrUnavailable
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if !p.active || p.closing {
-		return nil, extension.ErrToolsUnavailable
+		return nil, toolset.ErrUnavailable
 	}
-	return p.set.Executor(), nil
+	return p.registry, nil
 }
 
 func (p *Profile) Close(ctx context.Context) error {

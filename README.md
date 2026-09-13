@@ -131,7 +131,7 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 
 - **Single-file distribution** — bundled engines need no separate runtime install; OS graphics and system libraries still apply
 - **Minimal agent core** — composable ~160-line loop; tools, retries, evaluation are plugged in, not hardcoded
-- **Extension architecture** — adding a new tool is one file; heavy dependencies (playwright, katana) are compile-time optional
+- **Extension architecture** — tools use explicit registration and profile composition; heavy dependencies (playwright, katana) are compile-time optional
 - **Embedded skills** — each tool carries its own usage docs and tactical guidance, loaded by the agent on demand
 - **Scan + Agent unified** — the same engines drive both the deterministic pipeline and the autonomous agent
 
@@ -299,4 +299,4 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 
 ### Extension architecture
 
-The plugin host is `core/extension.Set`. Product adapters live under `pkg/exts`; raw tool implementations stay under `tools`, and agent loop code stays under `agent`. A Set publishes one tool catalog only after every extension loads and drains calls before closing resources.
+The plugin host is `core/extension.Set`. Product adapters live under `pkg/exts`; raw tool implementations stay under `tools`, and agent loop code stays under `agent`. A Set activates the tool and command registries only after every contributor loads, then drains calls before closing resources.

@@ -6,9 +6,11 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -16,37 +18,11 @@ import (
 const DefaultWSPath = "/api/aop/node/ws"
 
 // agentEndpoint is the sole event ingress/egress point for a node connection.
-// Tool-only nodes use the eventBusEndpoint adapter below. Keeping publication and
-// subscription on one object prevents a terminal event from being sent both
-// through the runtime bus and as a direct protocol reply.
+// Keeping publication and subscription on one object prevents a terminal event
+// from being sent both through the runtime bus and as a direct protocol reply.
 type agentEndpoint interface {
-	Subscribe(func(*aop.Event)) func()
+	Subscribe(func(*aop.Event)) *eventbus.Subscription[*aop.Event]
 	EmitEvent(*aop.Event)
-}
-
-type eventBusEndpoint struct {
-	bus *eventbus.Bus[*aop.Event]
-}
-
-func newEventBusEndpoint(bus *eventbus.Bus[*aop.Event]) agentEndpoint {
-	if bus == nil {
-		bus = eventbus.New[*aop.Event]()
-	}
-	return &eventBusEndpoint{bus: bus}
-}
-
-func (e *eventBusEndpoint) Subscribe(fn func(*aop.Event)) func() {
-	if e == nil || e.bus == nil {
-		return func() {}
-	}
-	return e.bus.Subscribe(fn)
-}
-
-func (e *eventBusEndpoint) EmitEvent(event *aop.Event) {
-	if e == nil || e.bus == nil || event == nil {
-		return
-	}
-	e.bus.Emit(event)
 }
 
 type connectionConfig struct {
@@ -59,10 +35,13 @@ type connectionConfig struct {
 	// JSONFrames switches the wire codec from binary protobuf to standard
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
 	JSONFrames bool
-	Registry   *commands.CommandRegistry
-	// Agent owns connection-side events. Control borrows the product runtime;
+	Executor   tool.Executor
+	// Registry supplies the Bash pseudo-command projection to AIScan agent nodes.
+	Registry *commands.Registry
+	Bash     *commands.BashTool
+	// Agent owns connection-side events. Control uses the product runtime;
 	// nil denotes a tool-only node. No optional interface selects routing.
-	Control       *runtimepkg.AgentRuntime
+	Control       *sessionext.Manager
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
 	Logger        telemetry.Logger
@@ -72,13 +51,11 @@ type connectionConfig struct {
 	Status        func() *aop.AgentStatus
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
-	// FileAudit is the node's file-access trail, streamed on the file namespace
-	// and steerable by the peer through Configure.
-	FileAudit *commands.FileAudit
-	PTYRouter func() (*terminal.Router, error)
-	// ExtraNamespaces registers additional AOP namespaces on the connection mux
-	// after the built-ins (see ToolNodeConfig.ExtraNamespaces).
-	ExtraNamespaces []func(*aop.NamespaceMux) error
+	Hooks         *hooks.Registry
+	PTYRouter     func() (*terminal.Router, error)
+	// RegisterResourceNamespaces binds control protocols backed by resources
+	// owned by the loaded profile. The connection owns only their registrations.
+	RegisterResourceNamespaces func(*aop.NamespaceMux) error
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

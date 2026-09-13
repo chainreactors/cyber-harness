@@ -19,8 +19,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -93,28 +92,13 @@ func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
 	}
 }
 
-type consoleTextTool struct {
-	output string
-}
-
-func (t *consoleTextTool) Name() string                 { return "bash" }
-func (t *consoleTextTool) Description() string          { return "console output test tool" }
-func (t *consoleTextTool) Definition() *tool.Definition { return &tool.Definition{} }
-func (t *consoleTextTool) RunForeground(context.Context, string, commands.BashExecOptions) (*tool.Result, error) {
-	return tool.TextResult(t.output), nil
-}
-func (t *consoleTextTool) Execute(context.Context, string) (*tool.Result, error) {
-	return tool.TextResult(t.output), nil
-}
-
 func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
-	repl.runtime.App().Commands.RegisterTool(&consoleTextTool{output: "DIRECT_OK"})
 	if _, err := executeAndWait(repl, "!printf DIRECT_OK"); err != nil {
 		t.Fatal(err)
 	}
-	if got := stdout.String(); !strings.HasSuffix(got, "DIRECT_OK\n") {
+	if got := output.StripANSI(stdout.String()); !strings.HasSuffix(got, "DIRECT_OK\n") {
 		t.Fatalf("output = %q", got)
 	}
 }
@@ -222,24 +206,24 @@ func TestReadlineDoesNotSuppressLiveStatusWhileTaskRuns(t *testing.T) {
 	}
 }
 
-func TestAgentConsoleRefreshesAgentAfterRuntimeResumeAndClear(t *testing.T) {
+func TestAgentConsoleRotatesSessionAfterRuntimeResumeAndClear(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.jsonl")
 	var stdout, stderr bytes.Buffer
 	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	handle := repl.session
-	oldAgent := handle.Agent()
+	previousID := handle.ID()
 	writeConsoleSession(t, path, "test", time.Now(), agent.TextMessage("user", "history"))
 	if _, err := executeAndWait(repl, "/resume "+path); err != nil {
 		t.Fatal(err)
 	}
-	resumedAgent := handle.Agent()
-	if oldAgent == resumedAgent || repl.session != handle {
+	resumedID := handle.ID()
+	if previousID == resumedID || repl.session != handle {
 		t.Fatal("resume did not rotate through the existing handle")
 	}
 	if _, err := executeAndWait(repl, "/clear"); err != nil {
 		t.Fatal(err)
 	}
-	if handle.Agent() == resumedAgent || len(handle.MessagesSnapshot()) != 0 {
+	if handle.ID() == resumedID || len(handle.MessagesSnapshot()) != 0 {
 		t.Fatal("clear did not rotate session")
 	}
 }
@@ -286,7 +270,7 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 	option := &cfg.Option{}
 	repl := newTestConsole(t, option, nil, &stdout, &stderr)
 	repl.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "openai", BaseURL: srv.URL + "/v1", APIKey: "sk-test", Model: "model-a"})
-	session := repl.session.Agent()
+	session := repl.session
 
 	if _, err := executeAndWait(repl, "/model"); err != nil {
 		t.Fatalf("/model: %v\nstderr=%s", err, stderr.String())
@@ -307,8 +291,12 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 	if option.Model != "model-b" {
 		t.Fatalf("option model = %q, want model-b", option.Model)
 	}
-	if session.Cfg.Model != "model-b" {
-		t.Fatalf("session model = %q, want model-b", session.Cfg.Model)
+	status, err := session.Command(t.Context(), "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := provider.MessageText(&aop.Message{Content: status.GetContent()}); !strings.Contains(text, "model-b") {
+		t.Fatalf("session status = %q, want model-b", text)
 	}
 	if out := stdout.String(); !strings.Contains(out, "Model ready: openai / model-b") {
 		t.Fatalf("switch output = %q", out)

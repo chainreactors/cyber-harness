@@ -4,7 +4,6 @@ package browser
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,7 +14,7 @@ import (
 )
 
 // Extension owns the browser command registration and the browser processes
-// opened by that command. The command registry is borrowed from the profile.
+// opened by that command. The profile owns the command registry.
 type Extension struct {
 	mu             sync.Mutex
 	registry       *commands.Registry
@@ -24,6 +23,7 @@ type Extension struct {
 	command        *playwright.Command
 	registered     bool
 	closed         bool
+	done           chan struct{}
 }
 
 var _ extension.Extension = (*Extension)(nil)
@@ -35,7 +35,7 @@ func New(registry *commands.Registry, workDir, defaultSession string) (*Extensio
 	return &Extension{registry: registry, workDir: workDir, defaultSession: defaultSession}, nil
 }
 
-func (m *Extension) Load(scope *extension.Context) error {
+func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -49,7 +49,7 @@ func (m *Extension) Load(scope *extension.Context) error {
 		return err
 	}
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
-	if err := m.registry.Register("browser", "browser", commands.Command{
+	if err := m.registry.Register(scope, "browser", commands.Command{
 		Name: command.Name(), Usage: command.Usage(),
 		DescriptionPath: "aiscan://skills/aiscan/okf/easm/playwright.md",
 		Run:             command.Run,
@@ -64,20 +64,31 @@ func (m *Extension) Load(scope *extension.Context) error {
 
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.closed {
+		m.mu.Unlock()
 		return nil
 	}
-	if m.registered {
-		if err := m.registry.UnregisterOwner(ctx, "browser"); err != nil {
-			return errors.Join(extension.ErrCloseIncomplete, err)
-		}
-		m.registered = false
+	m.registered = false
+	if m.done == nil {
+		m.done = make(chan struct{})
+		command := m.command
+		go func() {
+			if command != nil {
+				command.Close()
+			}
+			close(m.done)
+		}()
 	}
-	if m.command != nil {
-		m.command.Close()
-		m.command = nil
+	done := m.done
+	m.mu.Unlock()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+	m.mu.Lock()
+	m.command = nil
 	m.closed = true
+	m.mu.Unlock()
 	return nil
 }

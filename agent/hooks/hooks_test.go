@@ -9,12 +9,15 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	corehooks "github.com/chainreactors/aiscan/core/hooks"
+	"github.com/chainreactors/aiscan/core/tool"
+	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 )
 
 func ptr[T any](v T) *T { return &v }
 
 func TestEmitRunsHandlersInRegistrationOrder(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var order []string
 	for _, name := range []string{"a", "b", "c"} {
 		Context.On(r, name, func(_ context.Context, _ ContextEvent) (ContextResult, error) {
@@ -35,7 +38,7 @@ func TestEmitRunsHandlersInRegistrationOrder(t *testing.T) {
 }
 
 func TestUnsubscribeIsIdempotent(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var calls int
 	off := RunEnd.On(r, "counter", func(_ context.Context, _ RunEndEvent) (struct{}, error) {
 		calls++
@@ -45,8 +48,8 @@ func TestUnsubscribeIsIdempotent(t *testing.T) {
 	if _, err := RunEnd.Emit(context.Background(), r, RunEndEvent{}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
-	off()
-	off()
+	off.Cancel()
+	off.Cancel()
 	if r.Has("run_end") {
 		t.Fatal("Has after unsubscribe = true")
 	}
@@ -58,16 +61,15 @@ func TestUnsubscribeIsIdempotent(t *testing.T) {
 	}
 }
 
-// The in-flight dispatch works off an immutable snapshot, so a handler that
-// unsubscribes a later handler does not affect the round already running.
+// Revocation also prevents admission from an old in-flight snapshot.
 func TestUnsubscribeDuringDispatch(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var seen []string
-	var offSecond func()
+	var offSecond *corehooks.Subscription
 
 	Context.On(r, "first", func(_ context.Context, _ ContextEvent) (ContextResult, error) {
 		seen = append(seen, "first")
-		offSecond()
+		offSecond.Cancel()
 		return ContextResult{}, nil
 	})
 	offSecond = Context.On(r, "second", func(_ context.Context, _ ContextEvent) (ContextResult, error) {
@@ -78,8 +80,8 @@ func TestUnsubscribeDuringDispatch(t *testing.T) {
 	if _, err := Context.Emit(context.Background(), r, ContextEvent{}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
-	if got := strings.Join(seen, ","); got != "first,second" {
-		t.Fatalf("first dispatch = %q, want %q", got, "first,second")
+	if got := strings.Join(seen, ","); got != "first" {
+		t.Fatalf("first dispatch = %q, want %q", got, "first")
 	}
 
 	seen = nil
@@ -92,63 +94,56 @@ func TestUnsubscribeDuringDispatch(t *testing.T) {
 }
 
 func TestFailClosedShortCircuits(t *testing.T) {
-	r := New()
-	var sunk []*HandlerError
-	r.SetErrorSink(func(he *HandlerError) { sunk = append(sunk, he) })
-
+	r := corehooks.New()
 	boom := errors.New("boom")
 	var secondRan bool
-	ToolCallHook.On(r, "proxy", func(_ context.Context, _ ToolCallEvent) (ToolCallResult, error) {
-		return ToolCallResult{}, boom
+	toolhooks.Before.On(r, "proxy", func(_ context.Context, _ toolhooks.CallEvent) (toolhooks.Admission, error) {
+		return toolhooks.Admission{}, boom
 	})
-	ToolCallHook.On(r, "audit", func(_ context.Context, _ ToolCallEvent) (ToolCallResult, error) {
+	toolhooks.Before.On(r, "audit", func(_ context.Context, _ toolhooks.CallEvent) (toolhooks.Admission, error) {
 		secondRan = true
-		return ToolCallResult{Block: true, Reason: "nope"}, nil
+		return toolhooks.Admission{Deny: errors.New("nope")}, nil
 	})
 
-	res, err := ToolCallHook.Emit(context.Background(), r, ToolCallEvent{})
+	res, err := toolhooks.Before.Emit(context.Background(), r, toolhooks.CallEvent{})
 	if err == nil {
 		t.Fatal("err = nil, want failure")
 	}
 	if secondRan {
 		t.Fatal("second handler ran after fail-closed abort")
 	}
-	if res.Block {
+	if res.Deny != nil {
 		t.Fatal("result should be zero when dispatch aborts")
 	}
 	if !errors.Is(err, boom) {
 		t.Fatalf("errors.Is(err, boom) = false: %v", err)
 	}
 
-	var he *HandlerError
+	var he *corehooks.HandlerError
 	if !errors.As(err, &he) {
-		t.Fatalf("errors.As(*HandlerError) = false: %v", err)
+		t.Fatalf("errors.As(*corehooks.HandlerError) = false: %v", err)
 	}
-	if he.Source != "proxy" || he.Kind != "tool_call" {
+	if he.Source != "proxy" || he.Kind != "tool.before" {
 		t.Fatalf("attribution = %s/%s, want tool_call/proxy", he.Kind, he.Source)
 	}
-	if got := he.Error(); got != "hook tool_call/proxy: boom" {
+	if got := he.Error(); got != "hook tool.before/proxy: boom" {
 		t.Fatalf("Error() = %q", got)
-	}
-	if len(sunk) != 1 || sunk[0] != he {
-		t.Fatalf("sink got %d errors, want the one reported", len(sunk))
 	}
 }
 
 func TestHandlerPanicIsAttributedAndReported(t *testing.T) {
-	r := New()
-	var reported *HandlerError
-	r.SetErrorSink(func(he *HandlerError) { reported = he })
-	ToolCallHook.On(r, "plugin", func(context.Context, ToolCallEvent) (ToolCallResult, error) {
+	r := corehooks.New()
+	toolhooks.Before.On(r, "extension", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
 		panic("boom")
 	})
 
-	_, err := ToolCallHook.Emit(context.Background(), r, ToolCallEvent{})
+	_, err := toolhooks.Before.Emit(context.Background(), r, toolhooks.CallEvent{})
 	if err == nil {
 		t.Fatal("err = nil, want handler panic")
 	}
-	if reported == nil || reported.Source != "plugin" || reported.Kind != "tool_call" {
-		t.Fatalf("reported = %+v", reported)
+	var reported *corehooks.HandlerError
+	if !errors.As(err, &reported) || reported.Source != "extension" || reported.Kind != "tool.before" {
+		t.Fatalf("attributed = %+v", reported)
 	}
 	if reported.Panic != "boom" || len(reported.Stack) == 0 || strings.Contains(err.Error(), "boom") {
 		t.Fatalf("panic visibility = %+v, err = %v", reported, err)
@@ -156,9 +151,9 @@ func TestHandlerPanicIsAttributedAndReported(t *testing.T) {
 }
 
 func TestContinueOnErrorContinuesAfterHandlerPanic(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var secondRan bool
-	Context.On(r, "plugin", func(context.Context, ContextEvent) (ContextResult, error) {
+	Context.On(r, "extension", func(context.Context, ContextEvent) (ContextResult, error) {
 		panic("boom")
 	})
 	Context.On(r, "core", func(context.Context, ContextEvent) (ContextResult, error) {
@@ -175,7 +170,7 @@ func TestContinueOnErrorContinuesAfterHandlerPanic(t *testing.T) {
 }
 
 func TestContinueOnErrorCollectsAndKeepsGoing(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	first := errors.New("first")
 	second := errors.New("second")
 	var ran int
@@ -199,38 +194,42 @@ func TestContinueOnErrorCollectsAndKeepsGoing(t *testing.T) {
 	}
 }
 
-func TestToolResultPatchChaining(t *testing.T) {
-	r := New()
+func TestToolResultTransformChaining(t *testing.T) {
+	r := corehooks.New()
 	var observed string
+	result := tool.TextResult("raw")
 
-	ToolResult.On(r, "redact", func(_ context.Context, ev ToolResultEvent) (ToolResultPatch, error) {
-		return ToolResultPatch{Content: ptr(ev.Content + "+redacted")}, nil
+	toolhooks.After.On(r, "redact", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
+		ev.Result.Output = []*aop.Content{aop.Text(tool.ResultText(ev.Result) + "+redacted")}
+		return struct{}{}, nil
 	})
-	ToolResult.On(r, "truncate", func(_ context.Context, ev ToolResultEvent) (ToolResultPatch, error) {
-		observed = ev.Content
-		return ToolResultPatch{IsError: ptr(true), Terminate: ptr(true)}, nil
+	toolhooks.After.On(r, "truncate", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
+		observed = tool.ResultText(ev.Result)
+		ev.Result.IsError = true
+		ev.Result.Terminate = true
+		return struct{}{}, nil
 	})
 
-	patch, err := ToolResult.Emit(context.Background(), r, ToolResultEvent{Content: "raw"})
+	_, err := toolhooks.After.Emit(context.Background(), r, toolhooks.ResultEvent{Result: result})
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 	if observed != "raw+redacted" {
 		t.Fatalf("second handler saw %q, want the first handler's patch", observed)
 	}
-	if patch.Content == nil || *patch.Content != "raw+redacted" {
-		t.Fatalf("patch.Content = %v", patch.Content)
+	if tool.ResultText(result) != "raw+redacted" {
+		t.Fatalf("result output = %q", tool.ResultText(result))
 	}
-	if patch.IsError == nil || !*patch.IsError {
-		t.Fatalf("patch.IsError = %v", patch.IsError)
+	if !result.IsError {
+		t.Fatal("result should be marked as error")
 	}
-	if patch.Terminate == nil || !*patch.Terminate {
-		t.Fatalf("patch.Terminate = %v", patch.Terminate)
+	if !result.Terminate {
+		t.Fatal("result should terminate")
 	}
 }
 
 func TestBeforeRunFoldsSystemPromptAndAggregatesPrepend(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var observed string
 
 	BeforeRun.On(r, "base", func(_ context.Context, ev RunStartEvent) (RunStartResult, error) {
@@ -263,7 +262,7 @@ func TestBeforeRunFoldsSystemPromptAndAggregatesPrepend(t *testing.T) {
 }
 
 func TestContextReplacementFolds(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var observed int
 
 	Context.On(r, "drop", func(_ context.Context, ev ContextEvent) (ContextResult, error) {
@@ -287,7 +286,7 @@ func TestContextReplacementFolds(t *testing.T) {
 }
 
 func TestStopWhenShortCircuits(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var ran int
 
 	BeforeCompact.On(r, "budget", func(_ context.Context, _ CompactEvent) (CancelResult, error) {
@@ -312,7 +311,7 @@ func TestStopWhenShortCircuits(t *testing.T) {
 }
 
 func TestObservationPointsIgnoreResults(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var ran int
 	for _, name := range []string{"a", "b"} {
 		SessionStart.On(r, name, func(_ context.Context, _ SessionEvent) (struct{}, error) {
@@ -334,54 +333,53 @@ func TestObservationPointsIgnoreResults(t *testing.T) {
 }
 
 var (
-	sinkResult ToolCallResult
-	sinkErr    error
+	result toolhooks.Admission
+	err    error
 )
 
 func TestEmitFastPathDoesNotAllocate(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	// A handler on a different kind ensures the map lookup misses rather than
 	// short-circuiting on an empty table.
 	RunEnd.On(r, "other", func(_ context.Context, _ RunEndEvent) (struct{}, error) {
 		return struct{}{}, nil
 	})
-	if r.Has("tool_call") {
+	if r.Has("tool.before") {
 		t.Fatal("Has(tool_call) = true")
 	}
 
 	ctx := context.Background()
-	ev := ToolCallEvent{SessionID: "s1", TurnID: "t1", Call: &ToolCall{Id: "c1"}}
+	ev := toolhooks.CallEvent{Call: &aop.ToolCall{Id: "c1"}}
 
 	if got := testing.AllocsPerRun(100, func() {
-		sinkResult, sinkErr = ToolCallHook.Emit(ctx, r, ev)
+		result, err = toolhooks.Before.Emit(ctx, r, ev)
 	}); got != 0 {
 		t.Fatalf("Emit allocs = %v, want 0", got)
 	}
-	if sinkErr != nil || sinkResult.Block {
-		t.Fatalf("fast path returned %+v, %v", sinkResult, sinkErr)
+	if err != nil || result.Deny != nil {
+		t.Fatalf("fast path returned %+v, %v", result, err)
 	}
 
 	if got := testing.AllocsPerRun(100, func() {
-		sinkResult, sinkErr = ToolCallHook.Emit(ctx, nil, ev)
+		result, err = toolhooks.Before.Emit(ctx, nil, ev)
 	}); got != 0 {
 		t.Fatalf("nil-registry Emit allocs = %v, want 0", got)
 	}
 }
 
 func TestNilRegistryTolerated(t *testing.T) {
-	var r *Registry
-	if r.Has("tool_call") || r.Len("tool_call") != 0 {
+	var r *corehooks.Registry
+	if r.Has("tool.before") || r.Len("tool.before") != 0 {
 		t.Fatal("nil registry reports handlers")
 	}
-	r.SetErrorSink(func(*HandlerError) {})
 	r.Clear()
-	off := ToolCallHook.On(r, "x", func(_ context.Context, _ ToolCallEvent) (ToolCallResult, error) {
-		return ToolCallResult{}, nil
+	off := toolhooks.Before.On(corehooks.New(), "x", func(_ context.Context, _ toolhooks.CallEvent) (toolhooks.Admission, error) {
+		return toolhooks.Admission{}, nil
 	})
-	off()
+	off.Cancel()
 
-	res, err := ToolCallHook.Emit(context.Background(), r, ToolCallEvent{})
-	if err != nil || res.Block {
+	res, err := toolhooks.Before.Emit(context.Background(), r, toolhooks.CallEvent{})
+	if err != nil || res.Deny != nil {
 		t.Fatalf("nil registry Emit = %+v, %v", res, err)
 	}
 }
@@ -392,58 +390,41 @@ func TestOnRequiresSource(t *testing.T) {
 			t.Fatal("On with empty source did not panic")
 		}
 	}()
-	ToolCallHook.On(New(), "", func(_ context.Context, _ ToolCallEvent) (ToolCallResult, error) {
-		return ToolCallResult{}, nil
+	toolhooks.Before.On(corehooks.New(), "", func(_ context.Context, _ toolhooks.CallEvent) (toolhooks.Admission, error) {
+		return toolhooks.Admission{}, nil
 	})
 }
 
-func TestClearDropsHandlersAndRunsCleanups(t *testing.T) {
-	r := New()
+func TestClearDropsHandlers(t *testing.T) {
+	r := corehooks.New()
 	RunEnd.On(r, "a", func(_ context.Context, _ RunEndEvent) (struct{}, error) {
 		return struct{}{}, nil
 	})
 
-	var order []string
-	r.AddCleanup(func() { order = append(order, "first") })
-	removeSecond := r.AddCleanup(func() { order = append(order, "second") })
-	r.AddCleanup(func() { order = append(order, "third") })
-	removeSecond()
-	removeSecond()
-
 	r.Clear()
 	if r.Has("run_end") {
 		t.Fatal("Clear left handlers behind")
-	}
-	if got := strings.Join(order, ","); got != "first,third" {
-		t.Fatalf("cleanups = %q, want %q", got, "first,third")
-	}
-
-	r.Clear()
-	if len(order) != 2 {
-		t.Fatalf("cleanups ran twice: %v", order)
 	}
 }
 
 // Two points sharing a Kind with different types must surface as an attributed
 // error rather than a silently skipped handler.
 func TestSignatureMismatchIsReported(t *testing.T) {
-	r := New()
-	imposter := Point[SessionEvent, struct{}]{Kind: ToolCallHook.Kind}
+	r := corehooks.New()
+	imposter := corehooks.Point[SessionEvent, struct{}]{Kind: toolhooks.Before.Kind}
 	imposter.On(r, "imposter", func(_ context.Context, _ SessionEvent) (struct{}, error) {
 		return struct{}{}, nil
 	})
 
-	_, err := ToolCallHook.Emit(context.Background(), r, ToolCallEvent{})
-	if !errors.Is(err, errTypeMismatch) {
+	_, err := toolhooks.Before.Emit(context.Background(), r, toolhooks.CallEvent{})
+	if !errors.Is(err, corehooks.ErrTypeMismatch) {
 		t.Fatalf("err = %v, want type mismatch", err)
 	}
 }
 
 func TestConcurrentEmitWhileRegistering(t *testing.T) {
-	r := New()
+	r := corehooks.New()
 	var calls atomic.Int64
-	r.SetErrorSink(func(*HandlerError) {})
-
 	ctx := context.Background()
 	stop := make(chan struct{})
 	var emitters, registrars sync.WaitGroup
@@ -458,7 +439,7 @@ func TestConcurrentEmitWhileRegistering(t *testing.T) {
 					return
 				default:
 				}
-				if _, err := ToolResult.Emit(ctx, r, ToolResultEvent{Content: "x"}); err != nil {
+				if _, err := toolhooks.After.Emit(ctx, r, toolhooks.ResultEvent{Result: tool.TextResult("x")}); err != nil {
 					t.Errorf("emit: %v", err)
 					return
 				}
@@ -472,16 +453,17 @@ func TestConcurrentEmitWhileRegistering(t *testing.T) {
 		go func() {
 			defer registrars.Done()
 			for j := 0; j < 200; j++ {
-				off := ToolResult.On(r, "racer", func(_ context.Context, ev ToolResultEvent) (ToolResultPatch, error) {
+				off := toolhooks.After.On(r, "racer", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
 					calls.Add(1)
-					return ToolResultPatch{Content: ptr(ev.Content + "!")}, nil
+					ev.Result.Output = []*aop.Content{aop.Text(tool.ResultText(ev.Result) + "!")}
+					return struct{}{}, nil
 				})
 				offEnd := RunEnd.On(r, "racer", func(_ context.Context, _ RunEndEvent) (struct{}, error) {
 					calls.Add(1)
 					return struct{}{}, nil
 				})
-				off()
-				offEnd()
+				off.Cancel()
+				offEnd.Cancel()
 			}
 		}()
 	}
@@ -490,7 +472,7 @@ func TestConcurrentEmitWhileRegistering(t *testing.T) {
 	close(stop)
 	emitters.Wait()
 
-	if n := r.Len("tool_result"); n != 0 {
+	if n := r.Len("tool.after"); n != 0 {
 		t.Fatalf("leftover handlers: %d", n)
 	}
 	if calls.Load() == 0 {

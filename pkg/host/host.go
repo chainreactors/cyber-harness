@@ -12,13 +12,11 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 )
 
-// Host is one communication lifetime. It borrows registered namespaces and
+// Host is one communication lifetime. It owns its connection's namespace mux and
 // owns admission, cancellation and response serialization, never application
 // sessions or tools. Construct a separate Host for each connection/embedding.
 type Host struct {
 	mux    *aop.NamespaceMux
-	ctx    context.Context
-	cancel context.CancelFunc
 	mu     sync.Mutex
 	closed bool
 	err    error
@@ -26,16 +24,15 @@ type Host struct {
 	sendMu sync.Mutex
 }
 
-func New(ctx context.Context, mux *aop.NamespaceMux) *Host {
-	if ctx == nil {
-		ctx = context.Background()
+func New(mux *aop.NamespaceMux) *Host {
+	if mux == nil {
+		panic("host requires a connection namespace mux")
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	return &Host{mux: mux, ctx: ctx, cancel: cancel}
+	return &Host{mux: mux}
 }
 
 // Context lets the stream owner interrupt its own blocking IO on disconnect.
-func (h *Host) Context() context.Context { return h.ctx }
+func (h *Host) Context() context.Context { return h.mux.Context() }
 
 // Handle is the inline entry point; Serve uses exactly the same dispatch.
 // Asynchronous handlers receive the Host context and a guarded SendFunc. Their
@@ -53,10 +50,7 @@ func (h *Host) Handle(envelope *aop.Envelope, send aop.SendFunc) error {
 	h.mu.Unlock()
 	defer h.active.Done()
 	reply := func(value *aop.Envelope) error { return h.Send(value, send) }
-	if h.mux == nil {
-		return reply(aop.Reply(envelope.Id, aop.NewProtocolError("NAMESPACE_INIT_FAILED", "runtime namespaces are not initialized")))
-	}
-	handled, err := h.mux.Dispatch(h.ctx, envelope, reply)
+	handled, err := h.mux.Dispatch(envelope, reply)
 	// Preserve IO failures; they must not become INVALID_PAYLOAD responses.
 	if writeErr := h.Err(); writeErr != nil {
 		return writeErr
@@ -88,7 +82,7 @@ func (h *Host) Send(envelope *aop.Envelope, send aop.SendFunc) error {
 		h.mu.Lock()
 		h.err = err
 		h.mu.Unlock()
-		h.cancel()
+		h.mux.Cancel()
 	}
 	return err
 }
@@ -112,7 +106,7 @@ func (h *Host) Serve(stream aop.EnvelopeStream) error {
 			if writeErr := h.Err(); writeErr != nil {
 				return writeErr
 			}
-			return h.ctx.Err()
+			return h.Context().Err()
 		}
 		if err != nil {
 			return err
@@ -131,7 +125,7 @@ func (h *Host) Close() {
 	h.mu.Lock()
 	h.closed = true
 	h.mu.Unlock()
-	h.cancel()
+	_ = h.mux.Close(context.Background())
 	h.active.Wait()
 	h.sendMu.Lock()
 	h.sendMu.Unlock()
@@ -153,5 +147,5 @@ func (h *Host) stateError() error {
 	if h.closed {
 		return context.Canceled
 	}
-	return h.ctx.Err()
+	return h.Context().Err()
 }

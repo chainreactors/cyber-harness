@@ -47,7 +47,7 @@ func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	server := httptest.NewServer(newHandler(service, nil, nil, ""))
 	t.Cleanup(func() {
 		server.Close()
-		service.Close()
+		service.Close(context.Background())
 	})
 	return server, service
 }
@@ -104,7 +104,7 @@ func TestNodeEndpointRejectsNonAgentHelloFirstFrame(t *testing.T) {
 
 func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	service := NewService(ServiceConfig{})
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
 	registerConnectServices(mux, "", service)
@@ -166,7 +166,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	defer service.Close()
+	defer service.Close(context.Background())
 	if err := store.CreateSession(context.Background(), &types.SessionRecord{
 		Session: &aop.Session{Id: "session-1", State: SessionStateOpen}, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
@@ -233,7 +233,7 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 	service := NewService(ServiceConfig{Store: store})
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
 	registerConnectServices(mux, "", service)

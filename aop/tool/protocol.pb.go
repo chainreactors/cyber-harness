@@ -169,7 +169,6 @@ type Artifact struct {
 	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
 	MediaType     string                 `protobuf:"bytes,5,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
 	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	CallId        string                 `protobuf:"bytes,7,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
 	ResultId      string                 `protobuf:"bytes,8,opt,name=result_id,json=resultId,proto3" json:"result_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -247,13 +246,6 @@ func (x *Artifact) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Artifact) GetCallId() string {
-	if x != nil {
-		return x.CallId
-	}
-	return ""
-}
-
 func (x *Artifact) GetResultId() string {
 	if x != nil {
 		return x.ResultId
@@ -262,7 +254,7 @@ func (x *Artifact) GetResultId() string {
 }
 
 // Loot marks a scanner-native artifact as valuable without replacing or
-// duplicating its evidence. result_id joins the marker back to Artifact.
+// duplicating the observed artifact. result_id joins the marker to Artifact.
 type Loot struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	ResultId           string                 `protobuf:"bytes,1,opt,name=result_id,json=resultId,proto3" json:"result_id,omitempty"`
@@ -273,7 +265,6 @@ type Loot struct {
 	Tags               []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
 	Description        string                 `protobuf:"bytes,7,opt,name=description,proto3" json:"description,omitempty"`
 	VerificationStatus string                 `protobuf:"bytes,8,opt,name=verification_status,json=verificationStatus,proto3" json:"verification_status,omitempty"`
-	CallId             string                 `protobuf:"bytes,9,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -364,21 +355,12 @@ func (x *Loot) GetVerificationStatus() string {
 	return ""
 }
 
-func (x *Loot) GetCallId() string {
-	if x != nil {
-		return x.CallId
-	}
-	return ""
-}
-
 type ProtocolMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Message:
 	//
 	//	*ProtocolMessage_Progress
 	//	*ProtocolMessage_Call
-	//	*ProtocolMessage_Artifact
-	//	*ProtocolMessage_Loot
 	Message       isProtocolMessage_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -439,24 +421,6 @@ func (x *ProtocolMessage) GetCall() *Call {
 	return nil
 }
 
-func (x *ProtocolMessage) GetArtifact() *Artifact {
-	if x != nil {
-		if x, ok := x.Message.(*ProtocolMessage_Artifact); ok {
-			return x.Artifact
-		}
-	}
-	return nil
-}
-
-func (x *ProtocolMessage) GetLoot() *Loot {
-	if x != nil {
-		if x, ok := x.Message.(*ProtocolMessage_Loot); ok {
-			return x.Loot
-		}
-	}
-	return nil
-}
-
 type isProtocolMessage_Message interface {
 	isProtocolMessage_Message()
 }
@@ -469,21 +433,9 @@ type ProtocolMessage_Call struct {
 	Call *Call `protobuf:"bytes,11,opt,name=call,proto3,oneof"`
 }
 
-type ProtocolMessage_Artifact struct {
-	Artifact *Artifact `protobuf:"bytes,12,opt,name=artifact,proto3,oneof"`
-}
-
-type ProtocolMessage_Loot struct {
-	Loot *Loot `protobuf:"bytes,13,opt,name=loot,proto3,oneof"`
-}
-
 func (*ProtocolMessage_Progress) isProtocolMessage_Message() {}
 
 func (*ProtocolMessage_Call) isProtocolMessage_Message() {}
-
-func (*ProtocolMessage_Artifact) isProtocolMessage_Message() {}
-
-func (*ProtocolMessage_Loot) isProtocolMessage_Message() {}
 
 var File_aop_tool_protocol_proto protoreflect.FileDescriptor
 
@@ -500,7 +452,7 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\x06target\x18\x03 \x01(\tR\x06target\x128\n" +
 	"\ttimestamp\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x12\n" +
 	"\x04text\x18\x06 \x01(\tR\x04text\x12\x17\n" +
-	"\acall_id\x18\a \x01(\tR\x06callIdJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"\xed\x01\n" +
+	"\acall_id\x18\a \x01(\tR\x06callIdJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05\"\xda\x01\n" +
 	"\bArtifact\x12\x12\n" +
 	"\x04tool\x18\x01 \x01(\tR\x04tool\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x16\n" +
@@ -508,9 +460,8 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x1d\n" +
 	"\n" +
 	"media_type\x18\x05 \x01(\tR\tmediaType\x128\n" +
-	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x17\n" +
-	"\acall_id\x18\a \x01(\tR\x06callId\x12\x1b\n" +
-	"\tresult_id\x18\b \x01(\tR\bresultId\"\xff\x01\n" +
+	"\ttimestamp\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x1b\n" +
+	"\tresult_id\x18\b \x01(\tR\bresultIdJ\x04\b\a\x10\b\"\xec\x01\n" +
 	"\x04Loot\x12\x1b\n" +
 	"\tresult_id\x18\x01 \x01(\tR\bresultId\x12\x12\n" +
 	"\x04tool\x18\x02 \x01(\tR\x04tool\x12\x12\n" +
@@ -519,15 +470,13 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\bpriority\x18\x05 \x01(\tR\bpriority\x12\x12\n" +
 	"\x04tags\x18\x06 \x03(\tR\x04tags\x12 \n" +
 	"\vdescription\x18\a \x01(\tR\vdescription\x12/\n" +
-	"\x13verification_status\x18\b \x01(\tR\x12verificationStatus\x12\x17\n" +
-	"\acall_id\x18\t \x01(\tR\x06callId\"\xcc\x01\n" +
+	"\x13verification_status\x18\b \x01(\tR\x12verificationStatusJ\x04\b\t\x10\n" +
+	"\"\x80\x01\n" +
 	"\x0fProtocolMessage\x120\n" +
 	"\bprogress\x18\n" +
 	" \x01(\v2\x12.aop.tool.ProgressH\x00R\bprogress\x12$\n" +
-	"\x04call\x18\v \x01(\v2\x0e.aop.tool.CallH\x00R\x04call\x120\n" +
-	"\bartifact\x18\f \x01(\v2\x12.aop.tool.ArtifactH\x00R\bartifact\x12$\n" +
-	"\x04loot\x18\r \x01(\v2\x0e.aop.tool.LootH\x00R\x04lootB\t\n" +
-	"\amessageB/Z-github.com/chainreactors/aiscan/aop/tool;toolb\x06proto3"
+	"\x04call\x18\v \x01(\v2\x0e.aop.tool.CallH\x00R\x04callB\t\n" +
+	"\amessageJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eB/Z-github.com/chainreactors/aiscan/aop/tool;toolb\x06proto3"
 
 var (
 	file_aop_tool_protocol_proto_rawDescOnce sync.Once
@@ -557,13 +506,11 @@ var file_aop_tool_protocol_proto_depIdxs = []int32{
 	6, // 2: aop.tool.Artifact.timestamp:type_name -> google.protobuf.Timestamp
 	1, // 3: aop.tool.ProtocolMessage.progress:type_name -> aop.tool.Progress
 	0, // 4: aop.tool.ProtocolMessage.call:type_name -> aop.tool.Call
-	2, // 5: aop.tool.ProtocolMessage.artifact:type_name -> aop.tool.Artifact
-	3, // 6: aop.tool.ProtocolMessage.loot:type_name -> aop.tool.Loot
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_aop_tool_protocol_proto_init() }
@@ -574,8 +521,6 @@ func file_aop_tool_protocol_proto_init() {
 	file_aop_tool_protocol_proto_msgTypes[4].OneofWrappers = []any{
 		(*ProtocolMessage_Progress)(nil),
 		(*ProtocolMessage_Call)(nil),
-		(*ProtocolMessage_Artifact)(nil),
-		(*ProtocolMessage_Loot)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

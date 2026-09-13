@@ -2,12 +2,14 @@ package files
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	"github.com/chainreactors/aiscan/core/operation"
 )
 
 type EditPatch struct {
@@ -93,6 +95,8 @@ func applyEdits(original string, edits []EditPatch, maxBytes int64) (string, err
 }
 
 func (f *Files) Edit(ctx context.Context, path string, edits []EditPatch) error {
+	ctx, cancel := operation.Begin(ctx, "file", "edit")
+	defer cancel(nil)
 	f.mutation.Lock()
 	defer f.mutation.Unlock()
 	_, err := f.acquire(ctx)
@@ -114,8 +118,7 @@ func (f *Files) Edit(ctx context.Context, path string, edits []EditPatch) error 
 		data = []byte(result)
 	}
 	if err != nil {
-		f.observe(ctx, filepb.AccessOp_ACCESS_OP_EDIT, path, nil, 0, err, uint32(len(edits)))
-		return err
+		return errors.Join(err, f.observe(ctx, filepb.AccessOp_ACCESS_OP_EDIT, path, nil, 0, err, uint32(len(edits))))
 	}
 	return f.writeBytes(ctx, path, data, filepb.AccessOp_ACCESS_OP_EDIT, uint32(len(edits)))
 }

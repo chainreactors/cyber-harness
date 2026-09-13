@@ -2,46 +2,27 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 )
 
-type managedApp struct {
-	app     *apppkg.App
-	refs    int
-	retired bool
-	closed  bool
-}
-
 func (s *Service) aiAvailable() bool {
 	app, release := s.acquireApp()
 	defer release()
+	if app == nil {
+		return false
+	}
 	provider, _ := app.ProviderState()
 	return provider != nil
-}
-
-func wrapManagedApp(app *apppkg.App) *managedApp {
-	if app == nil {
-		return nil
-	}
-	return &managedApp{app: app}
-}
-
-func retireManagedApp(ref *managedApp) *apppkg.App {
-	if ref == nil || ref.closed {
-		return nil
-	}
-	ref.retired = true
-	if ref.refs != 0 {
-		return nil
-	}
-	ref.closed = true
-	return ref.app
 }
 
 func (s *Service) acquireApp() (*apppkg.App, func()) {
@@ -49,49 +30,103 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 		return nil, func() {}
 	}
 	s.appMu.Lock()
-	ref := s.app
-	if ref != nil && !ref.closed {
-		ref.refs++
-	}
-	s.appMu.Unlock()
-	if ref == nil || ref.closed {
+	p := s.profile
+	if p == nil {
+		s.appMu.Unlock()
 		return nil, func() {}
 	}
+	app, err := p.App()
+	if err != nil {
+		s.appMu.Unlock()
+		return nil, func() {}
+	}
+	s.profiles[p]++
+	s.appMu.Unlock()
 
 	var once sync.Once
-	return ref.app, func() {
+	return app, func() {
 		once.Do(func() {
-			var closeApp *apppkg.App
 			s.appMu.Lock()
-			ref.refs--
-			if ref.refs == 0 && ref.retired && !ref.closed {
-				ref.closed = true
-				closeApp = ref.app
-			}
+			s.profiles[p]--
+			retired := p != s.profile && s.profiles[p] == 0
+			s.applicationChangedLocked()
 			s.appMu.Unlock()
-			if closeApp != nil {
-				closeApp.Close()
+			if retired {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				// Incomplete cleanup stays in profiles for Service.Close.
+				_ = s.closeApplication(ctx, p)
 			}
 		})
 	}
 }
 
-func (s *Service) swapApp(next *apppkg.App) {
+// swapProfile transfers ownership only after validation. Retirement errors are
+// retained by Service; they do not undo publication of a new profile.
+func (s *Service) swapProfile(next *profile.Profile) error {
 	if s == nil || next == nil {
-		return
+		return fmt.Errorf("service and profile are required")
+	}
+	if _, err := next.App(); err != nil {
+		return err
 	}
 	s.appMu.Lock()
-	prev := s.app
-	if prev != nil && prev.app == next {
+	if s.closing {
 		s.appMu.Unlock()
-		return
+		return fmt.Errorf("service is closing")
 	}
-	s.app = wrapManagedApp(next)
-	closeApp := retireManagedApp(prev)
+	prev := s.profile
+	if prev == next {
+		s.appMu.Unlock()
+		return nil
+	}
+	if _, owned := s.profiles[next]; owned {
+		s.appMu.Unlock()
+		return fmt.Errorf("profile is already retiring")
+	}
+	s.profile = next
+	s.profiles[next] = 0
+	s.applicationChangedLocked()
 	s.appMu.Unlock()
-	if closeApp != nil {
-		closeApp.Close()
+	if prev != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.closeApplication(ctx, prev)
 	}
+	return nil
+}
+
+func (s *Service) applicationChangedLocked() {
+	close(s.appChanged)
+	s.appChanged = make(chan struct{})
+}
+
+func (s *Service) closeApplication(ctx context.Context, p *profile.Profile) error {
+	select {
+	case s.profileClose <- struct{}{}:
+		defer func() { <-s.profileClose }()
+	case <-ctx.Done():
+		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+	}
+	s.appMu.Lock()
+	refs, owned := s.profiles[p]
+	ready := owned && p != s.profile && refs == 0
+	s.appMu.Unlock()
+	if !ready {
+		return nil
+	}
+	err := p.Close(ctx)
+	s.appMu.Lock()
+	if !errors.Is(err, extension.ErrCloseIncomplete) {
+		delete(s.profiles, p)
+		s.appError = errors.Join(s.appError, err)
+	}
+	s.applicationChangedLocked()
+	s.appMu.Unlock()
+	if errors.Is(err, extension.ErrCloseIncomplete) {
+		return err
+	}
+	return nil
 }
 
 // ServeApplication performs the Application Endpoint initialization and then

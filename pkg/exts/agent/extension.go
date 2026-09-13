@@ -1,24 +1,23 @@
-// Package agent gives an agent loop an explicitly owned run lifetime.
+// Package agent installs a reasoning loop with an explicitly owned lifetime.
 package agent
 
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 
 	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/extension"
 )
 
 var ErrUnavailable = errors.New("agent extension is not active")
 
-// Extension owns one loop instance. Provider, executor and other dependencies
-// are borrowed through Config. Run is its only execution entry point.
-type Extension struct {
-	config   agent.Config
+// Runtime is the admitted agent.Loop published to sessions. It intentionally
+// has no lifecycle methods.
+type Runtime struct {
+	loop     agent.Loop
 	mu       sync.Mutex
-	loop     *agent.Agent
 	lifetime context.Context
 	cancel   context.CancelFunc
 	stopping bool
@@ -26,83 +25,118 @@ type Extension struct {
 	done     chan struct{}
 }
 
-// New is inert; callers supply the loop implementation and its dependencies.
-func New(config agent.Config) *Extension {
-	return &Extension{config: config, done: make(chan struct{})}
+// Extension is the sole lifecycle owner of Runtime.
+type Extension struct {
+	runtime *Runtime
 }
 
-func (e *Extension) Load(scope *extension.Context) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.stopping {
+// New is inert. The profile supplies the algorithm; no default is installed.
+func New(loop agent.Loop) *Extension {
+	return &Extension{runtime: &Runtime{loop: loop, done: make(chan struct{})}}
+}
+
+func (e *Extension) Loop() *Runtime {
+	if e == nil {
+		return nil
+	}
+	return e.runtime
+}
+
+func (e *Extension) Load(scope *extension.Scope) error {
+	if e == nil || e.runtime == nil || scope == nil {
+		return ErrUnavailable
+	}
+	r := e.runtime
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopping {
 		return ErrUnavailable
 	}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if e.loop != nil {
-		return nil
+	if r.loop == nil {
+		return errors.New("agent extension requires a loop")
 	}
-	e.lifetime, e.cancel = context.WithCancel(scope.Lifetime())
-	config := e.config
-	if config.Tools == nil {
-		config.Tools = scope.Executor()
+	value := reflect.ValueOf(r.loop)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if value.IsNil() {
+			return errors.New("agent extension requires a non-nil loop")
+		}
 	}
-	e.loop = agent.NewAgent(config)
+	if r.lifetime == nil {
+		r.lifetime, r.cancel = context.WithCancel(scope.Lifetime())
+	}
 	return nil
 }
 
-func (e *Extension) Run(ctx context.Context, input *aop.Message, options ...agent.RunOption) (*agent.Result, error) {
-	e.mu.Lock()
-	if e.loop == nil || e.stopping || e.lifetime.Err() != nil {
-		e.mu.Unlock()
+func (r *Runtime) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	if r == nil {
+		return nil, ErrUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.Lock()
+	if r.lifetime == nil || r.stopping || r.lifetime.Err() != nil {
+		r.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
-		e.mu.Unlock()
+		r.mu.Unlock()
 		return nil, err
 	}
-	e.active++
-	loop := e.loop
+	r.active++
 	call, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(e.lifetime, cancel)
-	e.mu.Unlock()
+	stop := context.AfterFunc(r.lifetime, cancel)
+	r.mu.Unlock()
 	defer func() {
 		stop()
 		cancel()
-		e.mu.Lock()
-		e.active--
-		if e.stopping && e.active == 0 {
-			close(e.done)
+		r.mu.Lock()
+		r.active--
+		if r.stopping && r.active == 0 {
+			close(r.done)
 		}
-		e.mu.Unlock()
+		r.mu.Unlock()
 	}()
-	return loop.Run(call, input, options...)
+	// Derived agent configs must retain the same lifecycle admission boundary.
+	config.Loop = r
+	return r.loop.Run(call, config)
 }
 
 func (e *Extension) Close(ctx context.Context) error {
-	e.mu.Lock()
-	if !e.stopping {
-		e.stopping = true
-		if e.cancel != nil {
-			e.cancel()
+	if e == nil || e.runtime == nil {
+		return nil
+	}
+	r := e.runtime
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.Lock()
+	if !r.stopping {
+		r.stopping = true
+		if r.cancel != nil {
+			r.cancel()
 		}
-		if e.active == 0 {
-			close(e.done)
+		if r.active == 0 {
+			close(r.done)
 		}
 	}
-	e.mu.Unlock()
+	r.mu.Unlock()
 	select {
-	case <-e.done:
+	case <-r.done:
 		return nil
 	default:
 	}
 	select {
-	case <-e.done:
+	case <-r.done:
 		return nil
 	case <-ctx.Done():
-		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+		return ctx.Err()
 	}
 }
 
 var _ extension.Extension = (*Extension)(nil)
+var _ agent.Loop = (*Runtime)(nil)

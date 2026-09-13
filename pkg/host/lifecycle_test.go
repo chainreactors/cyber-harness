@@ -22,7 +22,7 @@ func TestCloseCancelsAndWaitsForDispatch(t *testing.T) {
 		<-release
 		return ctx.Err()
 	})
-	h := New(context.Background(), mux)
+	h := New(mux)
 	request := aop.MustWrap("request", "", &aop.ProtocolMessage{})
 	dispatched := make(chan error, 1)
 	go func() { dispatched <- h.Handle(request, func(*aop.Envelope) error { return nil }) }()
@@ -50,13 +50,14 @@ func TestCloseCancelsAndWaitsForDispatch(t *testing.T) {
 	h.Close()
 }
 
-func TestClosedHostRejectsLateReplyWithoutClosingSharedNamespaces(t *testing.T) {
+func TestClosedHostRejectsLateReplyWithoutClosingAnotherConnection(t *testing.T) {
 	var retained aop.SendFunc
-	mux := testMux(t, func(_ context.Context, _ *aop.Envelope, _ proto.Message, send aop.SendFunc) error {
+	handler := func(_ context.Context, _ *aop.Envelope, _ proto.Message, send aop.SendFunc) error {
 		retained = send
 		return nil
-	})
-	first, second := New(context.Background(), mux), New(context.Background(), mux)
+	}
+	first := New(testMux(t, handler))
+	second := New(testMux(t, handler))
 	defer second.Close()
 	request := aop.MustWrap("request", "", &aop.ProtocolMessage{})
 	writes := 0
@@ -69,7 +70,7 @@ func TestClosedHostRejectsLateReplyWithoutClosingSharedNamespaces(t *testing.T) 
 		t.Fatalf("late reply: err=%v writes=%d", err, writes)
 	}
 	if err := second.Handle(request, send); err != nil {
-		t.Fatalf("shared mux was closed: %v", err)
+		t.Fatalf("another connection was closed: %v", err)
 	}
 	if err := retained(aop.Reply(request.Id, &aop.ProtocolMessage{})); err != nil || writes != 1 {
 		t.Fatalf("second Host cannot send: err=%v writes=%d", err, writes)
@@ -77,7 +78,7 @@ func TestClosedHostRejectsLateReplyWithoutClosingSharedNamespaces(t *testing.T) 
 }
 
 func TestLateWriteFailureSurvivesEOF(t *testing.T) {
-	h := New(context.Background(), aop.NewNamespaceMux())
+	h := New(aop.NewNamespaceMux(t.Context()))
 	defer h.Close()
 	if err := h.Serve(NewStdio(strings.NewReader(""), io.Discard)); err != nil {
 		t.Fatal(err)
@@ -99,7 +100,7 @@ func TestConcurrentCloseAndAdmission(t *testing.T) {
 	mux := testMux(t, func(_ context.Context, request *aop.Envelope, message proto.Message, send aop.SendFunc) error {
 		return send(aop.Reply(request.Id, message))
 	})
-	h := New(context.Background(), mux)
+	h := New(mux)
 	request := aop.MustWrap("request", "", &aop.ProtocolMessage{})
 	var workers sync.WaitGroup
 	for i := 0; i < 40; i++ {
@@ -123,7 +124,7 @@ func TestStreamOwnerCanInterruptBlockedRead(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer reader.Close()
 	defer writer.Close()
-	h := New(context.Background(), aop.NewNamespaceMux())
+	h := New(aop.NewNamespaceMux(t.Context()))
 	// The embedding owns this pipe, so it may close it on communication cancel.
 	stop := context.AfterFunc(h.Context(), func() { _ = reader.CloseWithError(context.Canceled) })
 	defer stop()

@@ -5,26 +5,47 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	searchtools "github.com/chainreactors/aiscan/tools/search"
-	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
 	commands *commands.Registry
+	tools    *toolset.Registry
+	config   Config
 	tool     *searchtools.WebSearchTool
 	entries  []commands.Command
-	owner    string
 }
 
-func New(cmdRegistry *commands.Registry, search func(context.Context, string, int) (string, error), tavilyKeys, proxy, proxyCA string, engines *engine.Set, resourceSet *resources.Set) (*Extension, error) {
-	if cmdRegistry == nil {
-		return nil, fmt.Errorf("search requires commands")
+type ProxyEndpoint interface {
+	ProxyURL() string
+	CAPath() string
+}
+
+type Config struct {
+	Search     func(context.Context, string, int) (string, error)
+	TavilyKeys string
+	Proxy      ProxyEndpoint
+}
+
+func New(toolRegistry *toolset.Registry, cmdRegistry *commands.Registry, config Config) (*Extension, error) {
+	if toolRegistry == nil || cmdRegistry == nil {
+		return nil, fmt.Errorf("search requires tool and command registries")
 	}
-	tavily := searchtools.NewTavilySearch(tavilyKeys)
+	return &Extension{tools: toolRegistry, commands: cmdRegistry, config: config}, nil
+}
+
+func (e *Extension) Load(scope *extension.Scope) error {
+	if scope == nil {
+		return fmt.Errorf("search extension context is required")
+	}
+	var proxy, proxyCA string
+	if e.config.Proxy != nil {
+		proxy, proxyCA = e.config.Proxy.ProxyURL(), e.config.Proxy.CAPath()
+	}
+	tavily := searchtools.NewTavilySearch(e.config.TavilyKeys)
 	if proxy != "" {
 		tavily.SetProxy(proxy)
 	}
@@ -35,41 +56,24 @@ func New(cmdRegistry *commands.Registry, search func(context.Context, string, in
 		Run:             fetch.Run,
 	}
 
-	var idx *association.Index
-	if engines != nil {
-		idx = engines.Index
-	}
-	if idx == nil && resourceSet != nil && resourceSet.FingersConfig != nil {
-		full := resourceSet.FingersConfig.FullFingers
-		idx = association.NewIndex()
-		idx.BuildWithFingers(full.Fingers(), full.Aliases(), nil)
-	}
-	cyberhub := searchtools.NewCyberhubSearch(idx)
+	cyberhub := searchtools.NewCyberhubSearch(nil)
 	cyberhubCommand := commands.Command{
 		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
 		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/search.md",
 		Run:             cyberhub.Run,
 	}
-	return &Extension{commands: cmdRegistry, tool: searchtools.NewWebSearchTool(search, tavily), entries: []commands.Command{fetchCommand, cyberhubCommand}}, nil
-}
-
-func (e *Extension) Load(scope *extension.Context) error {
+	e.tool = searchtools.NewWebSearchTool(e.config.Search, tavily)
+	e.entries = []commands.Command{fetchCommand, cyberhubCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := scope.RegisterTools(e.tool); err != nil {
+	if err := e.tools.Register(scope, e.tool); err != nil {
 		return err
 	}
-	if err := e.commands.Register(scope.Owner(), "search", e.entries...); err != nil {
+	if err := e.commands.Register(scope, "search", e.entries...); err != nil {
 		return err
 	}
-	e.owner = scope.Owner()
 	return nil
 }
 
-func (e *Extension) Close(ctx context.Context) error {
-	if e.owner == "" {
-		return nil
-	}
-	return e.commands.UnregisterOwner(ctx, e.owner)
-}
+func (e *Extension) Close(context.Context) error { return nil }

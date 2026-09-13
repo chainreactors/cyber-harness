@@ -14,17 +14,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func testHost(t *testing.T, ctx context.Context, mux *aop.NamespaceMux) *Host {
+func testHost(t *testing.T, mux *aop.NamespaceMux) *Host {
 	t.Helper()
-	h := New(ctx, mux)
+	h := New(mux)
 	t.Cleanup(h.Close)
 	return h
 }
 
 func testMux(t *testing.T, handler aop.NamespaceHandler) *aop.NamespaceMux {
 	t.Helper()
-	mux := aop.NewNamespaceMux()
-	if err := mux.Register(&aop.ProtocolMessage{}, handler); err != nil {
+	mux := aop.NewNamespaceMux(t.Context())
+	if err := mux.Register("test", &aop.ProtocolMessage{}, handler); err != nil {
 		t.Fatal(err)
 	}
 	return mux
@@ -36,7 +36,7 @@ func TestInlineAndStdioUseSameDispatch(t *testing.T) {
 	})
 	request := aop.MustWrap("request", "", aop.NewProtocolError("EXAMPLE", "example message"))
 	var inline *aop.Envelope
-	if err := testHost(t, context.Background(), mux).Handle(request, func(e *aop.Envelope) error { inline = e; return nil }); err != nil {
+	if err := testHost(t, mux).Handle(request, func(e *aop.Envelope) error { inline = e; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	data, err := protojson.Marshal(request)
@@ -44,7 +44,7 @@ func TestInlineAndStdioUseSameDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := testHost(t, context.Background(), mux).Serve(NewStdio(bytes.NewReader(data), &output)); err != nil {
+	if err := testHost(t, mux).Serve(NewStdio(bytes.NewReader(data), &output)); err != nil {
 		t.Fatal(err)
 	}
 	stdio, err := NewStdio(&output, io.Discard).Recv()
@@ -75,7 +75,7 @@ func TestAsyncRepliesRemainAvailableAfterDispatch(t *testing.T) {
 			t.Fatal(err)
 		}
 		stream := NewStdio(bytes.NewReader(data), &output)
-		h := testHost(t, context.Background(), mux)
+		h := testHost(t, mux)
 		if stdio {
 			err = h.Serve(stream)
 		} else {
@@ -99,7 +99,7 @@ func TestSendFailureIsNotAProtocolError(t *testing.T) {
 		return send(aop.Reply(e.Id, message))
 	})
 	calls := 0
-	err := testHost(t, context.Background(), mux).Handle(aop.MustWrap("request", "", &aop.ProtocolMessage{}), func(*aop.Envelope) error {
+	err := testHost(t, mux).Handle(aop.MustWrap("request", "", &aop.ProtocolMessage{}), func(*aop.Envelope) error {
 		calls++
 		return want
 	})
@@ -111,7 +111,7 @@ func TestSendFailureIsNotAProtocolError(t *testing.T) {
 func TestProtocolErrorsMatchAcrossInlineAndStdio(t *testing.T) {
 	for _, code := range []string{"UNSUPPORTED_MESSAGE", "INVALID_PAYLOAD"} {
 		t.Run(code, func(t *testing.T) {
-			mux := aop.NewNamespaceMux()
+			mux := aop.NewNamespaceMux(t.Context())
 			if code == "INVALID_PAYLOAD" {
 				mux = testMux(t, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
 					return errors.New("unsupported core message")
@@ -119,7 +119,7 @@ func TestProtocolErrorsMatchAcrossInlineAndStdio(t *testing.T) {
 			}
 			request := aop.MustWrap("request", "", &aop.ProtocolMessage{})
 			var inline *aop.Envelope
-			if err := testHost(t, context.Background(), mux).Handle(request, func(e *aop.Envelope) error { inline = e; return nil }); err != nil {
+			if err := testHost(t, mux).Handle(request, func(e *aop.Envelope) error { inline = e; return nil }); err != nil {
 				t.Fatal(err)
 			}
 			data, err := protojson.Marshal(request)
@@ -127,7 +127,7 @@ func TestProtocolErrorsMatchAcrossInlineAndStdio(t *testing.T) {
 				t.Fatal(err)
 			}
 			var output bytes.Buffer
-			if err := testHost(t, context.Background(), mux).Serve(NewStdio(bytes.NewReader(data), &output)); err != nil {
+			if err := testHost(t, mux).Serve(NewStdio(bytes.NewReader(data), &output)); err != nil {
 				t.Fatal(err)
 			}
 			stdio, err := NewStdio(&output, io.Discard).Recv()
@@ -153,7 +153,7 @@ func TestServeReturnsResponseWriteFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = testHost(t, context.Background(), mux).Serve(NewStdio(bytes.NewReader(data), new(shortWriter)))
+	err = testHost(t, mux).Serve(NewStdio(bytes.NewReader(data), new(shortWriter)))
 	if !errors.Is(err, io.ErrShortWrite) {
 		t.Fatalf("write failure was lost: %v", err)
 	}
@@ -162,15 +162,18 @@ func TestServeReturnsResponseWriteFailure(t *testing.T) {
 func TestCancellationPreventsDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	mux := testMux(t, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
+	mux := aop.NewNamespaceMux(ctx)
+	if err := mux.Register("test", &aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
 		t.Fatal("cancelled request dispatched")
 		return nil
-	})
-	request := aop.MustWrap("cancelled", "", &aop.ProtocolMessage{})
-	if err := testHost(t, ctx, mux).Handle(request, func(*aop.Envelope) error { t.Fatal("unexpected send"); return nil }); !errors.Is(err, context.Canceled) {
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := testHost(t, ctx, mux).Serve(NewStdio(strings.NewReader(""), io.Discard)); !errors.Is(err, context.Canceled) {
+	request := aop.MustWrap("cancelled", "", &aop.ProtocolMessage{})
+	if err := testHost(t, mux).Handle(request, func(*aop.Envelope) error { t.Fatal("unexpected send"); return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if err := testHost(t, mux).Serve(NewStdio(strings.NewReader(""), io.Discard)); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }

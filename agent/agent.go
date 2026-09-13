@@ -67,6 +67,9 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	if err := requireProvider(cfg); err != nil {
 		return nil, err
 	}
+	if cfg.Loop == nil {
+		return nil, fmt.Errorf("agent loop is not configured")
+	}
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
@@ -75,7 +78,7 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 		return nil, fmt.Errorf("push prompt: %w", err)
 	}
 
-	result, runErr := runLoop(runCtx, cfg)
+	result, runErr := cfg.Loop.Run(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr
 }
@@ -129,7 +132,10 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 	if err := requireProvider(cfg); err != nil {
 		return nil, err
 	}
-	result, runErr := runLoop(runCtx, cfg)
+	if cfg.Loop == nil {
+		return nil, fmt.Errorf("agent loop is not configured")
+	}
+	result, runErr := cfg.Loop.Run(runCtx, cfg)
 	a.saveState(result, runErr)
 	return result, runErr
 }
@@ -233,6 +239,7 @@ func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.Delegat
 
 func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return NewAgent(Config{
+		Loop:                  cfg.Loop,
 		Provider:              cfg.Provider,
 		Tools:                 cfg.Tools,
 		Model:                 cfg.Model,

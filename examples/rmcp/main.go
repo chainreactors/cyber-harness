@@ -14,15 +14,20 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	toolsext "github.com/chainreactors/aiscan/pkg/exts/tools"
 	"github.com/chainreactors/aiscan/pkg/toolnode"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
 func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
-	bash := commands.NewBashTool(workDir, 300)
-	ext, err := toolsext.New(bash)
+	bash := commands.NewBashTool(workDir, 300, nil)
+	registry := toolset.NewRegistry(nil)
+	ext, err := toolsext.New(registry, bash)
 	if err != nil {
 		panic(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "tools", Extension: ext})
+	set, err := extension.New(
+		extension.Entry{ID: "tools", Extension: ext},
+		extension.Entry{ID: "tool-registry", DependsOn: []string{"tools"}, Extension: registry},
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +35,7 @@ func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.
 		_ = set.Close(context.Background())
 		panic(err)
 	}
-	return set.Executor(), bash, set
+	return registry, bash, set
 }
 
 func main() {

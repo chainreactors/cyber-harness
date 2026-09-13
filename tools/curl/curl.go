@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 )
@@ -123,7 +123,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 
 	workDir := execution.Dir
 	if workDir == "" {
-		workDir = coretool.WorkDirFromContext(ctx, c.WorkDir)
+		workDir = operation.WorkDirFromContext(ctx, c.WorkDir)
 	}
 	return nil, c.do(ctx, req, commands.ResolveExecutionEgress(execution, c.Proxy), workDir, execution.Stdout, execution.Stderr)
 }

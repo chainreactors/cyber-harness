@@ -1,31 +1,41 @@
 // Package aiscan is the AIScan composition root. It constructs a fixed extension
-// graph; edition capabilities select the application-owned tool extensions.
+// graph and owns every edition-selected capability extension.
 package aiscan
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/pkg/edition"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
 	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa"
-	"github.com/chainreactors/aiscan/pkg/fileaudit"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
+	proxyext "github.com/chainreactors/aiscan/pkg/exts/proxy"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
-	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 )
 
 const (
-	RecorderID    = "aiscan.recorder"
-	FileAuditID   = "aiscan.file-audit"
+	EventOutputID = "aiscan.event-output"
+	ObserveID     = "aiscan.observe"
 	ProxyID       = "aiscan.proxy"
 	ApplicationID = "aiscan.application"
 	IOAID         = "aiscan.ioa"
+	AgentID       = "aiscan.agent"
 	RuntimeID     = "aiscan.runtime"
 )
 
@@ -34,20 +44,47 @@ type Config struct {
 	Application apppkg.Config
 	IOA         *ioatools.Config
 	// Runtime nil creates the application-only profile used by the Web service.
-	Runtime *runtimepkg.RuntimeConfig
+	Runtime *sessionext.Config
 	Logger  telemetry.Logger
+	Observe []observeext.Kind
+	Output  string
 }
 
-func FromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *runtimepkg.RuntimeConfig, logger telemetry.Logger) Config {
+func FromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *sessionext.Config, logger telemetry.Logger) Config {
 	application := apppkg.AppConfig(option, features, logger)
 	return Config{
 		Option: option, Application: application,
-		IOA: ioatools.ConfigFromOption(option), Runtime: cloneRuntimeConfig(runtimeConfig), Logger: logger,
+		IOA: ioatools.ConfigFromOption(option), Runtime: cloneConfig(runtimeConfig), Logger: logger,
+		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
 	}
 }
 
-// Profile owns one fixed graph through Set. The app and runtime references are
-// borrowed public entry points; Set alone owns their Load/Close ordering.
+func resolveOutputPath(option *cfg.Option) string {
+	if option == nil {
+		return ""
+	}
+	if path := strings.TrimSpace(option.OutputFile); path != "" {
+		return path
+	}
+	if option.Ephemeral || !option.SaveSession {
+		return ""
+	}
+	name := "session-" + time.Now().Format("20060102-150405.000000000") + ".jsonl"
+	return filepath.Join(cfg.DataDir(), "sessions", name)
+}
+
+func parseObserve(value string) []observeext.Kind {
+	var result []observeext.Kind
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, observeext.Kind(item))
+		}
+	}
+	return result
+}
+
+// Profile owns one fixed graph through Set. App and runtime are active business
+// entry points; Set alone owns their Load/Close ordering.
 type Profile struct {
 	set    *extension.Set
 	access sync.RWMutex
@@ -56,7 +93,8 @@ type Profile struct {
 	active  bool
 	closing bool
 	app     *apppkg.App
-	runtime *runtimepkg.AgentRuntime
+	runtime *sessionext.Manager
+	proxy   *proxyext.Extension
 }
 
 func New(config Config) (*Profile, error) {
@@ -66,72 +104,118 @@ func New(config Config) (*Profile, error) {
 	if config.Logger == nil {
 		config.Logger = telemetry.NopLogger()
 	}
-	config.Runtime = cloneRuntimeConfig(config.Runtime)
+	if config.Application.Capabilities.Empty() {
+		config.Application.Capabilities = edition.Catalog()
+	}
+	config.Runtime = cloneConfig(config.Runtime)
 	workDir, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve AIScan working directory: %w", err)
 	}
+	hookRegistry := hooks.New()
 	capture := config.Application.Tools.MitmCapture == nil || *config.Application.Tools.MitmCapture
-	proxyHub, err := proxytool.NewHub(workDir, config.Application.Scanner.Proxy, capture, config.Application.Tools.TrafficStorage)
+	proxyExtension, err := proxyext.New(workDir, config.Application.Scanner.Proxy, capture, hookRegistry, config.Application.Tools.TrafficStorage)
 	if err != nil {
 		return nil, fmt.Errorf("construct proxy infrastructure: %w", err)
 	}
-	audit := fileaudit.New()
-	application := apppkg.New(config.Application, audit, proxyHub)
-	recorder, err := output.NewJSONLRecorder(application.EventBus, config.Application.RecordFile)
+	proxyHub := proxyExtension.Hub()
+	events := coreevents.New()
+	var selectedLoop agent.Loop
+	if config.Runtime != nil {
+		selectedLoop = config.Runtime.Loop
+	}
+	if selectedLoop == nil && config.Application.Scanner.AIEnabled {
+		selectedLoop = agent.StandardLoop{}
+	}
+	var agentExtension *agentext.Extension
+	var managedLoop agent.Loop
+	if selectedLoop != nil {
+		agentExtension = agentext.New(selectedLoop)
+		managedLoop = agentExtension.Loop()
+	}
+	assembly, err := newApplicationAssembly(config.Application, hookRegistry, events, proxyHub, managedLoop, workDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("construct AIScan application: %w", err)
 	}
-	application.Recorder = recorder
+	application := assembly.application
 
-	entries := []extension.Entry{
-		{ID: RecorderID, Extension: recorder},
-		{ID: FileAuditID, Extension: audit},
-		{ID: ProxyID, Extension: proxyHub},
-		{ID: ApplicationID, DependsOn: []string{FileAuditID, ProxyID, RecorderID}, Extension: application},
+	var entries []extension.Entry
+	var sourceDependencies []string
+	if strings.TrimSpace(config.Output) != "" {
+		output, outputErr := eventoutput.New(events, eventoutput.Options{Path: config.Output})
+		if outputErr != nil {
+			return nil, outputErr
+		}
+		entries = append(entries, extension.Entry{ID: EventOutputID, Extension: output})
+		sourceDependencies = append(sourceDependencies, EventOutputID)
 	}
+	var observer *observeext.Extension
+	if len(config.Observe) > 0 {
+		var observeErr error
+		observer, observeErr = observeext.New(hookRegistry, events, observeext.Options{Kinds: config.Observe})
+		if observeErr != nil {
+			return nil, observeErr
+		}
+		entries = append(entries, extension.Entry{ID: ObserveID, DependsOn: append([]string(nil), sourceDependencies...), Extension: observer})
+		sourceDependencies = append(sourceDependencies, ObserveID)
+	}
+	entries = append(entries, extension.Entry{ID: ProxyID, DependsOn: append([]string(nil), sourceDependencies...), Extension: proxyExtension})
+	applicationDependencies := append([]string{ProxyID}, sourceDependencies...)
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
-		ioa = ioaext.New(*config.IOA, application.Commands, config.Logger)
+		ioa, err = ioaext.New(*config.IOA, application.Commands, config.Logger)
+		if err != nil {
+			return nil, fmt.Errorf("construct IOA extension: %w", err)
+		}
+		entries = append(entries, extension.Entry{ID: IOAID, Extension: ioa})
+		applicationDependencies = append(applicationDependencies, IOAID)
+	}
+	// The profile contributes all capability entries directly to its sole Set.
+	// Registries activate after every declaration and drain before resources.
+	applicationEntries, applicationReadyID := assembly.graph(ApplicationID, applicationDependencies...)
+	entries = append(entries, applicationEntries...)
+	if agentExtension != nil {
 		entries = append(entries, extension.Entry{
-			ID: IOAID, DependsOn: []string{ApplicationID},
-			Extension: ioa,
+			ID: AgentID, DependsOn: []string{applicationReadyID}, Extension: agentExtension,
 		})
 	}
-	var run *runtimepkg.AgentRuntime
-	var ioaService *ioatools.Service
+	var run *sessionext.Manager
+	var ioaRuntime *ioatools.Runtime
 	if ioa != nil {
-		ioaService = ioa.Service
+		ioaRuntime = ioa.Runtime()
 	}
 	if config.Runtime != nil {
-		run, err = runtimepkg.New(application, ioaService, config.Option, config.Logger, *config.Runtime)
+		dependencies := []string{applicationReadyID}
+		if config.Runtime.Loop != nil {
+			config.Runtime.Loop = managedLoop
+			dependencies = append(dependencies, AgentID)
+		}
+		runResource, runErr := sessionext.New(application, ioaRuntime, config.Option, config.Logger, *config.Runtime)
+		err = runErr
 		if err != nil {
 			return nil, fmt.Errorf("construct AIScan runtime: %w", err)
 		}
-		dependencies := []string{ApplicationID}
-		if ioa != nil {
-			dependencies = append(dependencies, IOAID)
-		}
+		run = runResource.Manager
 		entries = append(entries, extension.Entry{
 			ID: RuntimeID, DependsOn: dependencies,
-			Extension: run,
+			Extension: runResource,
 		})
 	}
 	set, err := extension.New(entries...)
 	if err != nil {
 		return nil, err
 	}
-	return &Profile{set: set, app: application, runtime: run}, nil
+	return &Profile{set: set, app: application, runtime: run, proxy: proxyExtension}, nil
 }
 
-func cloneRuntimeConfig(config *runtimepkg.RuntimeConfig) *runtimepkg.RuntimeConfig {
+func cloneConfig(config *sessionext.Config) *sessionext.Config {
 	if config == nil {
 		return nil
 	}
 	cloned := *config
 	if config.PromptConfig != nil {
 		prompt := *config.PromptConfig
-		prompt.LoadedSkills = append([]runtimepkg.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
+		prompt.LoadedSkills = append([]sessionext.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
 		cloned.PromptConfig = &prompt
 	}
 	return &cloned
@@ -167,7 +251,7 @@ func (p *Profile) App() (*apppkg.App, error) {
 	return p.app, nil
 }
 
-func (p *Profile) Runtime() (*runtimepkg.AgentRuntime, error) {
+func (p *Profile) Runtime() (*sessionext.Manager, error) {
 	if p == nil {
 		return nil, fmt.Errorf("aiscan profile is required")
 	}
@@ -180,6 +264,22 @@ func (p *Profile) Runtime() (*runtimepkg.AgentRuntime, error) {
 		return nil, fmt.Errorf("aiscan profile has no Agent runtime")
 	}
 	return p.runtime, nil
+}
+
+// RegisterResourceNamespaces installs protocols backed by resources owned by
+// this active profile. Session namespaces remain owned by the runtime.
+func (p *Profile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
+	if p == nil {
+		return fmt.Errorf("aiscan profile is required")
+	}
+	p.access.RLock()
+	if !p.active || p.closing || p.proxy == nil {
+		p.access.RUnlock()
+		return fmt.Errorf("aiscan profile is not active")
+	}
+	proxy := p.proxy
+	p.access.RUnlock()
+	return proxy.RegisterNamespaces(mux)
 }
 
 func (p *Profile) Close(ctx context.Context) error {

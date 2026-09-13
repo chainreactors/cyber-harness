@@ -110,10 +110,9 @@ func TestMergeOptionExtrasLayersNonProtoFields(t *testing.T) {
 	option := &cfg.Option{
 		PlaywrightSession:  "browser-1",
 		UncoverCredentials: map[string]string{"SHODAN_API_KEY": "shodan-key"},
-		MiscOptions:        cfg.MiscOptions{OutputFile: "session.jsonl"},
 	}
 	rc = MergeOptionExtras(rc, option)
-	if rc.Tools.PlaywrightSession != "browser-1" || rc.Scanner.UncoverCredentials["SHODAN_API_KEY"] != "shodan-key" || rc.RecordFile != "session.jsonl" {
+	if rc.Tools.PlaywrightSession != "browser-1" || rc.Scanner.UncoverCredentials["SHODAN_API_KEY"] != "shodan-key" {
 		t.Fatalf("extras = %+v", rc)
 	}
 }

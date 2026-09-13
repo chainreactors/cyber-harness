@@ -15,11 +15,12 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 	"github.com/chainreactors/aiscan/tools/scan/pipeline"
@@ -1684,9 +1685,9 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 	unsub := bus.Subscribe(func(event *aop.Event) {
 		events = append(events, event)
 	})
-	defer unsub()
+	defer unsub.Cancel()
 
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
 		CallID: "scan-call-1", SessionID: "scan-session", TurnID: "scan-turn", Emitter: "scan",
 	})
 	cmd.emitStructuredData(ctx, &output.ScanResult{
@@ -1707,7 +1708,9 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 		if event.GetExtension() == nil || event.GetExtension().UnmarshalTo(artifact) != nil {
 			t.Fatalf("artifact event = %#v", event)
 		}
-		if artifact.Tool != wants[index].tool || artifact.Kind != wants[index].kind || artifact.CallId != "scan-call-1" || artifact.ResultId == "" {
+		ref := new(operationpb.Ref)
+		found, err := aop.FindTypedExtension(event, ref)
+		if artifact.Tool != wants[index].tool || artifact.Kind != wants[index].kind || err != nil || !found || ref.GetCallId() != "scan-call-1" || artifact.ResultId == "" {
 			t.Fatalf("artifact = %#v, want %#v", artifact, wants[index])
 		}
 	}
@@ -1718,9 +1721,9 @@ func TestEmitStructuredDataPublishesNativeArtifactAndLoot(t *testing.T) {
 	cmd := New(&engine.Set{}, WithEvents(bus))
 	var events []*aop.Event
 	unsub := bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
-	defer unsub()
+	defer unsub.Cancel()
 
-	ctx := coretool.ContextWithInvocation(context.Background(), coretool.Invocation{
+	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
 		CallID: "scan-call-1", SessionID: "scan-session", TurnID: "scan-turn", Emitter: "scan",
 	})
 	record := &sdktypes.TemplateResult{

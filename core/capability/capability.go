@@ -1,18 +1,12 @@
-// Package capability is the single answer to "is this feature part of this
-// binary". A capability exists if and only if its package is linked, and it is
-// linked if and only if a blank import in cmd/*/imports*.go pulls it in — so
-// build tags and blank imports stay the edition switch, and everything else
-// (CLI help, scanner availability, skill gating, tool-group assembly) is
-// derived from the descriptors registered here instead of from parallel global
-// tables.
-//
-// The package deliberately imports nothing from aiscan so that core/config,
-// skills, pkg/commands and pkg/tools can all depend on it.
+// Package capability describes the features of one explicit product edition.
+// A Catalog is immutable after construction. Importing a tool package never
+// changes process-wide selection, help, or skill visibility.
 package capability
 
 import (
+	"fmt"
 	"sort"
-	"sync"
+	"strings"
 )
 
 type ID string
@@ -20,132 +14,108 @@ type ID string
 type Kind uint8
 
 const (
-	KindTool    Kind = iota // agent tool group
-	KindScanner             // CLI-facing scanner command
-	KindService             // ioa / proxy / web
+	KindTool Kind = iota
+	KindScanner
+	KindService
 )
 
-// Descriptor is what a capability package declares about itself in init().
 type Descriptor struct {
-	ID   ID
-	Kind Kind
-	// DependsOn names capabilities that must be active before this one.
-	// It is a lifecycle edge, not a service lookup mechanism.
-	DependsOn []ID
-	// Group is the command-factory group; empty means the ID is the group.
-	Group string
-	// CLIName is the top-level command name; empty means not CLI-facing.
-	CLIName string
-	// Summary is the word shown in the CLI command summary line.
-	Summary string
-	// UsageLine is the pre-aligned row shown in the scanner usage block.
+	ID        ID
+	Kind      Kind
+	Group     string
+	CLIName   string
+	Summary   string
 	UsageLine string
-	// Usage renders the command's full help lazily, so registering a
-	// capability never costs the work of building its usage text.
-	Usage func() string
-	// Skills lists skill names this capability unlocks.
-	Skills []string
-	// Optional marks a group selectable through --tools.
-	Optional bool
-	// Default enables an Optional group when --tools is empty.
-	Default bool
-	// Requires names the dependencies the factory needs, for the skip log.
-	Requires []string
+	Usage     func() string
+	Skills    []string
+	Optional  bool
+	Default   bool
 }
 
-// Conflict records a duplicate registration. First registration wins; the
-// duplicate is reported once at startup rather than silently shadowing.
-type Conflict struct {
-	ID    ID
-	Group string
+// Catalog is the linked feature surface of one edition. It contains metadata
+// only; extension.Entry remains the authority for instantiated modules.
+type Catalog struct {
+	order []Descriptor
+	byID  map[ID]int
 }
 
-var (
-	mu        sync.RWMutex
-	order     []ID
-	byID      = map[ID]Descriptor{}
-	conflicts []Conflict
-)
-
-// Register declares a capability. Called from init(); first registration wins.
-func Register(d Descriptor) {
-	if d.ID == "" {
-		return
+func New(descriptors ...Descriptor) (Catalog, error) {
+	result := Catalog{order: make([]Descriptor, 0, len(descriptors)), byID: make(map[ID]int, len(descriptors))}
+	cli := make(map[string]ID)
+	for _, descriptor := range descriptors {
+		if strings.TrimSpace(string(descriptor.ID)) == "" {
+			return Catalog{}, fmt.Errorf("capability ID is required")
+		}
+		if _, exists := result.byID[descriptor.ID]; exists {
+			return Catalog{}, fmt.Errorf("duplicate capability %s", descriptor.ID)
+		}
+		if descriptor.Group == "" {
+			descriptor.Group = string(descriptor.ID)
+		}
+		if descriptor.CLIName != "" {
+			if owner, exists := cli[descriptor.CLIName]; exists {
+				return Catalog{}, fmt.Errorf("duplicate capability command %s in %s and %s", descriptor.CLIName, owner, descriptor.ID)
+			}
+			cli[descriptor.CLIName] = descriptor.ID
+		}
+		descriptor.Skills = append([]string(nil), descriptor.Skills...)
+		result.byID[descriptor.ID] = len(result.order)
+		result.order = append(result.order, descriptor)
 	}
-	if d.Group == "" {
-		d.Group = string(d.ID)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if _, exists := byID[d.ID]; exists {
-		conflicts = append(conflicts, Conflict{ID: d.ID, Group: d.Group})
-		return
-	}
-	byID[d.ID] = d
-	order = append(order, d.ID)
+	return result, nil
 }
 
-// All returns the descriptors in registration order.
-func All() []Descriptor {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]Descriptor, 0, len(order))
-	for _, id := range order {
-		out = append(out, byID[id])
+func Must(descriptors ...Descriptor) Catalog {
+	catalog, err := New(descriptors...)
+	if err != nil {
+		panic(err)
 	}
-	return out
+	return catalog
 }
 
-func Get(id ID) (Descriptor, bool) {
-	mu.RLock()
-	defer mu.RUnlock()
-	d, ok := byID[id]
-	return d, ok
+func (c Catalog) All() []Descriptor {
+	result := make([]Descriptor, len(c.order))
+	copy(result, c.order)
+	for i := range result {
+		result[i].Skills = append([]string(nil), result[i].Skills...)
+	}
+	return result
 }
 
-// Enabled reports whether the capability is linked into this binary.
-func Enabled(id ID) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := byID[id]
+func (c Catalog) Get(id ID) (Descriptor, bool) {
+	index, ok := c.byID[id]
+	if !ok || index < 0 || index >= len(c.order) {
+		return Descriptor{}, false
+	}
+	descriptor := c.order[index]
+	descriptor.Skills = append([]string(nil), descriptor.Skills...)
+	return descriptor, true
+}
+
+func (c Catalog) Enabled(id ID) bool {
+	_, ok := c.byID[id]
 	return ok
 }
 
-func Conflicts() []Conflict {
-	mu.RLock()
-	defer mu.RUnlock()
-	return append([]Conflict(nil), conflicts...)
-}
-
-// Groups lists every distinct factory group, in registration order.
-func Groups() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, d := range All() {
-		if d.Group == "" || seen[d.Group] {
-			continue
+func (c Catalog) Groups() []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, descriptor := range c.order {
+		if descriptor.Group != "" && !seen[descriptor.Group] {
+			seen[descriptor.Group] = true
+			result = append(result, descriptor.Group)
 		}
-		seen[d.Group] = true
-		out = append(out, d.Group)
 	}
-	return out
+	return result
 }
 
-// IDsSorted is the stable identity of an edition, for golden tests.
-func IDsSorted() []string {
-	ids := make([]string, 0, len(All()))
-	for _, d := range All() {
-		ids = append(ids, string(d.ID))
+func (c Catalog) IDsSorted() []string {
+	ids := make([]string, 0, len(c.order))
+	for _, descriptor := range c.order {
+		ids = append(ids, string(descriptor.ID))
 	}
 	sort.Strings(ids)
 	return ids
 }
 
-// reset clears the registry. Tests only.
-func reset() {
-	mu.Lock()
-	defer mu.Unlock()
-	order = nil
-	byID = map[ID]Descriptor{}
-	conflicts = nil
-}
+func (c Catalog) Empty() bool { return len(c.order) == 0 }

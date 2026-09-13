@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/core/truncate"
@@ -26,7 +27,11 @@ func requireProvider(cfg Config) error {
 	return nil
 }
 
-func runLoop(ctx context.Context, cfg Config) (*Result, error) {
+// StandardLoop is AIScan's built-in provider/tool reasoning loop. It has no
+// mutable lifecycle and can be selected explicitly by any profile or session.
+type StandardLoop struct{}
+
+func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 	if err := requireProvider(cfg); err != nil {
 		return nil, err
 	}
@@ -538,13 +543,12 @@ func runToolCallSafely(ctx context.Context, cfg Config, assistantMsg *aop.Messag
 }
 
 func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, turn int) toolExecution {
-	startedAt := time.Now()
-	toolCtx := tool.ContextWithInvocation(ctx, tool.Invocation{
+	toolCtx := operation.ContextWithInvocation(ctx, operation.Invocation{
 		CallID: tc.Id, SessionID: cfg.SessionID, TurnID: cfg.TurnID, Emitter: cfg.AgentName,
 	})
 	toolCtx = withToolAgentConfig(toolCtx, cfg)
 	toolCtx = inbox.ContextWithInbox(toolCtx, cfg.Inbox)
-	execution := beforeToolCall(toolCtx, cfg, assistantMsg, tc)
+	execution := toolExecution{}
 	if execution.result == "" && !execution.isError {
 		arguments := ""
 		if tc.Arguments != nil {
@@ -576,7 +580,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 			"\n\n[truncated: showing %d/%d lines (%s of %s). Refine your query or use filter/parse tools to access specific parts.]",
 			tr.OutputLines, tr.TotalLines, truncate.FormatSize(tr.OutputBytes), truncate.FormatSize(tr.TotalBytes))
 	}
-	return afterToolCall(toolCtx, cfg, assistantMsg, tc, execution, time.Since(startedAt).Milliseconds())
+	return execution
 }
 
 func (e toolExecution) eventContent() []*aop.Content {
@@ -623,60 +627,6 @@ func (e toolExecution) toMessage(toolCallID string) *aop.Message {
 		result.Output = []*aop.Content{aop.Text(e.result)}
 	}
 	return &aop.Message{Role: "tool", Content: []*aop.Content{{Value: &aop.Content_ToolResult{ToolResult: result}}}}
-}
-
-func beforeToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall) toolExecution {
-	if cfg.BeforeToolCall != nil {
-		before, err := cfg.BeforeToolCall(ctx, BeforeToolCallContext{
-			AssistantMessage: assistantMsg,
-			ToolCall:         tc,
-			SystemPrompt:     cfg.SystemPrompt,
-			Messages:         cfg.Messages,
-		})
-		if err != nil {
-			return toolExecution{result: fmt.Sprintf("error: %s", err.Error()), isError: true, err: err}
-		}
-		if before != nil && before.Block {
-			result := before.Reason
-			if result == "" {
-				result = "tool execution was blocked"
-			}
-			return toolExecution{result: result, isError: true}
-		}
-	}
-	return beforeTypedToolCall(ctx, cfg, assistantMsg, tc)
-}
-
-func afterToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall, execution toolExecution, durationMs int64) toolExecution {
-	if cfg.AfterToolCall != nil {
-		after, err := cfg.AfterToolCall(ctx, AfterToolCallContext{
-			AssistantMessage: assistantMsg,
-			ToolCall:         tc,
-			Result:           execution.result,
-			IsError:          execution.isError,
-			SystemPrompt:     cfg.SystemPrompt,
-			Messages:         cfg.Messages,
-		})
-		if err != nil {
-			execution.result = fmt.Sprintf("error: %s", err.Error())
-			execution.isError = true
-			execution.err = err
-			return execution
-		}
-		if after != nil {
-			if after.Result != nil {
-				execution.result = *after.Result
-			}
-			if after.IsError != nil {
-				execution.isError = *after.IsError
-				if !execution.isError {
-					execution.err = nil
-				}
-			}
-			execution.flow = after.Flow
-		}
-	}
-	return afterTypedToolCall(ctx, cfg, tc, execution, int(durationMs))
 }
 
 func requestMessages(ctx context.Context, cfg Config, systemPrompt string, messages []*aop.Message, turn int) []*aop.Message {

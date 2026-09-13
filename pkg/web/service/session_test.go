@@ -184,7 +184,7 @@ func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	defer service.Close()
+	defer service.Close(context.Background())
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
@@ -226,7 +226,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	defer service.Close()
+	defer service.Close(context.Background())
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
@@ -324,7 +324,7 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	if err != nil || first.GetAccepted() == nil {
 		t.Fatalf("first open = %v, %v", first, err)
 	}
-	service.Close()
+	service.Close(context.Background())
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
 	}
 	defer store.Close()
 	service = NewService(ServiceConfig{Store: store})
-	defer service.Close()
+	defer service.Close(context.Background())
 	server := service.api.Sessions
 	replayed, err := server.OpenSession(context.Background(), "open-durable", proto.Clone(request).(*aop.OpenSessionRequest))
 	if err != nil || !proto.Equal(first, replayed) {
@@ -464,7 +464,7 @@ func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	defer service.Close()
+	defer service.Close(context.Background())
 	pool := NewAgentPool(service.Hub())
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{

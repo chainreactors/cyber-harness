@@ -14,10 +14,13 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	node "github.com/chainreactors/aiscan/pkg/node"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	"github.com/chainreactors/aiscan/pkg/web"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
@@ -26,19 +29,28 @@ import (
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, app *runner.App, ingestor webservice.ArtifactIngestor, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
-	service := webservice.NewService(webservice.ServiceConfig{Store: store, App: app, Artifacts: ingestor, AccessKey: token})
+func newHeadlessHandler(store *webservice.SQLiteStore, product *profile.Profile, ingestor webservice.ArtifactIngestor, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
+	service := webservice.NewService(webservice.ServiceConfig{Store: store, Profile: product, Artifacts: ingestor, AccessKey: token})
+	var app *apppkg.App
+	if product != nil {
+		app, _ = product.App()
+	}
 	pool := webservice.NewAgentPool(service.Hub())
 	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
-	if app != nil && app.EventBus != nil && ingestor != nil {
-		app.EventBus.Subscribe(func(event *aop.Event) {
+	if app != nil && ingestor != nil {
+		app.SubscribeEvents(func(event *aop.Event) {
 			if event == nil || event.GetExtension() == nil {
 				return
 			}
 			artifact := new(toolpb.Artifact)
 			if event.GetExtension().MessageIs(artifact) && event.GetExtension().UnmarshalTo(artifact) == nil {
-				_ = ingestor.IngestArtifact(context.Background(), artifact)
+				operationID := ""
+				ref := new(operationpb.Ref)
+				if found, err := aop.FindTypedExtension(event, ref); err == nil && found {
+					operationID = ref.GetCallId()
+				}
+				_, _, _ = ingestor.NormalizeArtifact(context.Background(), operationID, artifact.GetTool(), artifact.GetData())
 			}
 		})
 	}
@@ -88,20 +100,32 @@ func main() {
 		logger.Errorf("load config: %v", err)
 		os.Exit(1)
 	}
-	appConfig := runner.AppConfig(option, runner.RuntimeFeatures{
+	appConfig := apppkg.AppConfig(option, apppkg.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
 	}, logger)
 	appConfig.SkipEngines = true
 	appConfig.Scanner.VerifyMode = "off"
-	app, err := runner.NewApp(ctx, appConfig)
+	product, err := profile.New(profile.Config{Option: option, Application: appConfig, Logger: logger})
 	if err != nil {
-		logger.Errorf("init app: %v", err)
+		logger.Errorf("construct profile: %v", err)
 		os.Exit(1)
 	}
-	defer app.Close()
+	if err := product.Load(ctx); err != nil {
+		logger.Errorf("load profile: %v", err)
+		os.Exit(1)
+	}
+	_, err = product.App()
+	if err != nil {
+		logger.Errorf("get application: %v", err)
+		os.Exit(1)
+	}
 
-	service, _, handler := newHeadlessHandler(store, app, ingestor, token)
-	defer service.Close()
+	service, _, handler := newHeadlessHandler(store, product, ingestor, token)
+	defer func() {
+		if err := service.Close(context.Background()); err != nil {
+			logger.Errorf("close service: %v", err)
+		}
+	}()
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

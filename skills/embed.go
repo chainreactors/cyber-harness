@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/chainreactors/aiscan/core/capability"
 	ioaskills "github.com/chainreactors/ioa/skills"
 )
 
@@ -64,12 +65,13 @@ type Diagnostic struct {
 type Store struct {
 	Skills []Skill
 
-	byName map[string]Skill
+	byName  map[string]Skill
+	catalog capability.Catalog
 }
 
 // LoadAll loads skills from all sources with override support.
 // Priority (later overrides earlier): embedded < .aiscan/skills/ < .agent/skills/ < CLI paths.
-func LoadAll(cliPaths []string) (*Store, []Diagnostic) {
+func LoadAll(cliPaths []string, catalog capability.Catalog) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
 
@@ -116,7 +118,18 @@ func LoadAll(cliPaths []string) (*Store, []Diagnostic) {
 		}
 	}
 
-	return newStoreWithOverride(allSkills), allDiags
+	store := newStoreWithOverride(allSkills)
+	store.catalog = catalog
+	filtered := store.Skills[:0]
+	for _, skill := range store.Skills {
+		if catalog.SkillEnabled(skill.Name) {
+			filtered = append(filtered, skill)
+		} else {
+			delete(store.byName, skill.Name)
+		}
+	}
+	store.Skills = filtered
+	return store, allDiags
 }
 
 func LoadEmbedded() ([]Skill, []Diagnostic) {
@@ -150,9 +163,6 @@ func LoadEmbedded() ([]Skill, []Diagnostic) {
 		}
 		skill.Location = uriPrefix + skill.Name + "/SKILL.md"
 		skill.BaseDir = uriPrefix + skill.Name
-		if !skillAvailable(skill.Name) {
-			continue
-		}
 		if existing, exists := seen[skill.Name]; exists {
 			diagnostics = append(diagnostics, Diagnostic{
 				Path:    filePath,
@@ -307,7 +317,7 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 			return "", false, nil
 		}
 	}
-	if name := skillNameFromEmbedPath(embedPath); name != "" && !skillAvailable(name) {
+	if name := skillNameFromEmbedPath(embedPath); name != "" && !s.catalog.SkillEnabled(name) {
 		return "", true, fmt.Errorf("virtual file not available in this build: %s", location)
 	}
 	data, err := fs.ReadFile(embeddedFS, embedPath)
@@ -337,7 +347,7 @@ func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
 		matches, err := fs.Glob(embeddedFS, embedPattern)
 		if err == nil {
 			for _, m := range matches {
-				if name := skillNameFromEmbedPath(m); name != "" && !skillAvailable(name) {
+				if name := skillNameFromEmbedPath(m); name != "" && !s.catalog.SkillEnabled(name) {
 					continue
 				}
 				allMatches = append(allMatches, "skills/"+m)

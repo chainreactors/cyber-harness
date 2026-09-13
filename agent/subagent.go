@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -135,7 +136,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 	if err != nil {
 		return "", err
 	}
-	parentToolCallID := tool.InvocationFromContext(ctx).CallID
+	parentToolCallID := operation.InvocationFromContext(ctx).CallID
 	if parentToolCallID == "" {
 		return "", fmt.Errorf("subagent create requires the spawning tool call id")
 	}

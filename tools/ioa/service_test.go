@@ -2,7 +2,6 @@ package ioa
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,49 +10,38 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
-func TestFailedInstallCannotRemoveAnotherModulesCommands(t *testing.T) {
+func TestServiceReturnsCommandDeclarationsWithoutOwningARegistry(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer srv.Close()
-	r := commands.NewRegistry()
-	defer r.Close(context.Background())
 	config := Config{URL: srv.URL, RegisterCommands: true}
-	first := New(config, r, nil)
-	if err := first.Start(t.Context()); err != nil {
+	service := New(config, nil)
+	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close(context.Background())
-	second := New(config, r, nil)
-	if err := second.Start(t.Context()); !errors.Is(err, commands.ErrDuplicateCommand) {
-		t.Fatalf("conflicting Load: %v", err)
+	if len(service.Commands()) == 0 {
+		t.Fatal("started service did not expose command declarations")
 	}
-	if err := second.Close(t.Context()); err != nil {
+	if err := service.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !r.Has("ioa") {
-		t.Fatal("failed install removed the original owner's command")
+	if len(service.Commands()) != 0 {
+		t.Fatal("closed service retained command declarations")
 	}
-	if err := second.Start(t.Context()); err == nil {
-		t.Fatal("reused failed instance")
-	}
-	if err := first.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if r.Has("ioa") {
-		t.Fatal("successful owner did not revoke its registration")
-	}
-	if calls.Start() != 0 {
+	if calls.Load() != 0 {
 		t.Fatal("command construction performed network registration")
 	}
 }
 
-func TestIOACommandSelectionRequiresRegistry(t *testing.T) {
-	m := New(Config{RegisterCommands: true}, nil, nil)
-	if err := m.Start(t.Context()); err == nil {
-		t.Fatal("silently ignored requested command registration")
+func TestServiceWithoutURLIsDormant(t *testing.T) {
+	m := New(Config{RegisterCommands: true}, nil)
+	if err := m.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Commands()) != 0 {
+		t.Fatal("dormant service exposed commands without a client")
 	}
 	if err := m.Close(t.Context()); err != nil {
 		t.Fatal(err)
@@ -81,7 +69,7 @@ func TestRegistrationRetryOutlivesLoadAndStopsWithModule(t *testing.T) {
 	defer close(stopServer)
 
 	caller, cancelCaller := context.WithCancel(context.Background())
-	instance := New(Config{URL: srv.URL, AutoRegister: true}, commands.NewRegistry(), telemetry.NopLogger())
+	instance := New(Config{URL: srv.URL, AutoRegister: true}, telemetry.NopLogger())
 	if err := instance.Start(caller); err != nil {
 		t.Fatal(err)
 	}

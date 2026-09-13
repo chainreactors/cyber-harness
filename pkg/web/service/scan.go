@@ -14,9 +14,9 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -264,7 +264,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
 }
 
 func (s *Service) runScanLocally(ctx context.Context, scan *types.Scan) {
-	ctx = coretool.ContextWithInvocation(ctx, coretool.Invocation{CallID: scan.Id, Emitter: "scan"})
+	ctx = operation.ContextWithInvocation(ctx, operation.Invocation{CallID: scan.Id, Emitter: "scan"})
 	streamWriter := &scanStreamWriter{
 		hub:    s.hub,
 		scanID: scan.Id,
@@ -359,17 +359,10 @@ func scanArgsForScan(scan *types.Scan) []string {
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, error) {
 	app, release := s.acquireApp()
 	defer release()
-	if app == nil || app.Commands == nil {
+	if app == nil || app.Bash == nil {
 		return "", fmt.Errorf("aiscan runtime is not ready")
 	}
-	tool, ok := app.Commands.GetTool("bash")
-	if !ok {
-		return "", fmt.Errorf("bash tool is not registered")
-	}
-	bash, ok := tool.(*commands.BashTool)
-	if !ok {
-		return "", fmt.Errorf("registered bash tool has unexpected type")
-	}
+	bash := app.Bash
 	var text strings.Builder
 	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
 		OnOutput: func(data []byte) {

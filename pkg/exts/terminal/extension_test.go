@@ -8,19 +8,24 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
-	commands := commands.NewRegistry()
-	instance, err := New(commands, Config{Directory: t.TempDir(), Timeout: 5})
+	commands := commands.NewRegistry(nil)
+	tools := toolset.NewRegistry(nil)
+	instance, err := New(nil, tools, commands, Config{Directory: t.TempDir(), Timeout: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "terminal", Extension: instance})
+	set, err := extension.New(
+		extension.Entry{ID: "terminal", Extension: instance},
+		extension.Entry{ID: "command-registry", DependsOn: []string{"terminal"}, Extension: commands},
+		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := set.Executor()
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -33,24 +38,22 @@ func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 	if hasTool(tools, "bash") || commands.Has("tmux") {
 		t.Fatal("terminal instance left registrations published after close")
 	}
-	if err := commands.Close(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
-	commandRegistry := commands.NewRegistry()
-	if err := commandRegistry.Register("control", "control", commands.Command{
-		Name: "proxy",
-		Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
+	commandRegistry := commands.NewRegistry(nil)
+	tools := toolset.NewRegistry(nil)
+	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return commandRegistry.Register(scope, "control", commands.Command{
+			Name: "proxy",
+			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
+		})
+	}}
 	custom := commands.Command{
 		Name: "tmux",
 		Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
 	}
-	instance, err := New(commandRegistry, Config{
+	instance, err := New(nil, tools, commandRegistry, Config{
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
@@ -59,7 +62,12 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "terminal", Extension: instance})
+	set, err := extension.New(
+		extension.Entry{ID: "control", Extension: control},
+		extension.Entry{ID: "terminal", Extension: instance},
+		extension.Entry{ID: "command-registry", DependsOn: []string{"control", "terminal"}, Extension: commandRegistry},
+		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +88,6 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := commandRegistry.Close(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
 }
 
 func hasTool(registry tool.Executor, name string) bool {

@@ -1,61 +1,26 @@
-# Filesystem resource extension
+# Files
 
-`files.Extension` owns an `os.Root`, path policy and admitted operations. It implements
-Load/Close directly and has no tool, profile, audit or Agent dependency. Observer
-operations reuse the existing AOP AccessOp enum; no protocol runtime is installed.
+`tools/files.Resource` 是唯一文件生命周期所有者；其 `Files` 业务对象实现有界文件访问、
+路径/只读/大小策略、挂载和在途操作。构造只校验配置；Resource.Open 打开已存在的绝对目录；Resource.Close 停止准入、取消并等待
+操作后关闭 root。超时返回不完整关闭，使用新 context 重试。
 
-`files.New(files.Config{Directory: absoluteWorkDir, ReadOnly: false, MaxBytes: 1 << 20})`
-only validates configuration. Load opens an existing directory; it does not
-create one. Its context bounds initialization, not the resource lifetime. Failed
-Load seals the instance; finish cleanup with Close and construct a new FS.
+`pkg/exts/files.Extension` 是唯一文件插件。它在 Load 时打开 Files，并把 read、write、ls、
+glob 原子贡献给 `pkg/toolset.Registry`；只读配置不发布 write。Profile 让 Tool Registry
+依赖 files，因此 Registry 先 drain，再关闭文件资源。消费者直接得到 `*files.Files`；
+该类型从定义上不含 Open/Close，不需要 Access/Mounts、密封接口或 Borrow 包装。
 
-Read returns owned bytes. Write borrows bytes until return. Both accept local
-paths, enforce the byte limit and reject nonregular files. ReadOnly is enforced
-by FS, including direct calls without tools. FS accepts binary bytes; encoding
-and presentation belong to consumers.
+Read 返回自有字节；Write 在返回前借用输入。所有本地路径必须位于 root，读写只接受普通
+文件，并受单次 `MaxBytes` 限制。Write 使用同目录临时文件和 rename，失败时保留原文件并
+清理临时文件；不会隐式创建父目录，也不承诺 fsync 或跨平台 rename 原子性。
 
-Write uses a sibling temporary file and rename, preserving existing permissions
-and using 0600 for new files. It rejects a symlink destination. Failure before
-rename preserves the original and removes the temporary file. Parent directories
-are not created. Cancellation is checked between IO chunks and before rename;
-syscalls cannot be preempted or successful renames undone. There is no fsync or
-cross-platform atomic-rename guarantee.
+真实 IO 完成时直接发 `core/tool/hooks.FileEvent`。数据只在同步 hook dispatch 期间借用；
+未安装 hook 时不计算 digest、不序列化、不复制。`pkg/exts/observe` 在被选择时计算成功写入
+的 digest，并生成带 `aop.operation.Ref` 的 AOP file Access 事实。没有独立 FileAudit、
+Journal、filetools 或 workspacefiles 路径。
 
-Close stops admission, requests cancellation and waits before closing the root.
-A timeout retains the handle; retry Close with a fresh context. Closed instances
-cannot reload. Ready reports availability but does not grant a resource lease.
-Incomplete waits wrap extension.ErrCloseIncomplete and the context error. Closing
-the root consumes the handle even if it reports an error; subsequent Close does
-not retry that handle. Shared lifecycle, subscription and operation types come
-from core/extension, core/eventbus and aop/file.
-
-Profiles declare FS as a dependency of any extension borrowing it. File tool Close
-unregisters tools without closing FS, so non-tool consumers remain usable.
-
-Subscribe provides synchronous operation callbacks using the existing
-eventbus.Subscription admission and drain. Observers own their subscriptions;
-callbacks finish before FS releases the operation. Data is immutable and borrowed
-until the callback returns. An observer retaining data must copy it. FS does not
-compute digests, create audit records, queue content or depend on FileAudit.
-
-Read reports actual consumed bytes, including bytes consumed before an error.
-Write reports committed content once; internal temporary files produce no events.
-CREATE reflects the destination's absence at the existing pre-write Lstat; it is
-not an atomic create-only guarantee against concurrent writers. Failed writes
-report an error and unknown destination size/bytes, without a success digest.
-Admission rejected before an operation starts produces no observation.
-
-This package is the sole bounded filesystem resource owner. It is not a tool
-group and it is not a workspace profile. Extended product file
-
-| Package | Role | Owns |
-| --- | --- | --- |
-| `pkg/files` | resource extension | `os.Root`, path policy, in-flight file operations |
-| `pkg/files` | file extension | read/write/ls/glob tools and filesystem lifecycle |
-| `pkg/toolset/workspacefiles` | host workspace tool extension | workdir and virtual-source registrations |
-| `pkg/profile/workspace` | profile assembler | creates one Set and orders the extensions |
-
-`filetools` and `workspacefiles` intentionally expose different path policies;
-they are not duplicate resource owners. A profile selects them explicitly and
-assigns distinct owner IDs.
-behavior, mounts and the AOP file namespace remain to be merged.
+| Package | Role |
+| --- | --- |
+| `tools/files` | 文件实现与 Tool 声明 |
+| `pkg/exts/files` | 生命周期与 Registry 贡献 |
+| `pkg/profile/files` | 最小 headless 组合 |
+| `pkg/profile/workspace` | runner 的 files/observe/skills 显式组合 |

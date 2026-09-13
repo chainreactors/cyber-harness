@@ -8,7 +8,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 // Admission is synchronized with Close; Runtime is the only execution queue.
@@ -43,7 +43,7 @@ func (r *AgentConsole) submitPrompt(text string, continuation bool) error {
 	r.previews[id] = display
 	r.renderPreviewsLocked()
 	r.workMu.Unlock()
-	input := runtimepkg.RunInput{TurnID: id, Continue: continuation}
+	input := sessionext.RunInput{TurnID: id, Continue: continuation}
 	if !continuation {
 		input.Content = []*aop.Content{aop.Text(prompt)}
 	}
@@ -99,12 +99,11 @@ func (r *AgentConsole) Close() {
 		r.cancel()
 		r.workMu.Unlock()
 		r.work.Wait()
+		// The callback takes workMu; drain it before taking the lock to
+		// release output. Subscription owns callback admission and lifetime.
+		_ = r.subscription.Close(context.Background())
 		r.workMu.Lock()
 		defer r.workMu.Unlock()
-		if r.unsubscribe != nil {
-			r.unsubscribe()
-			r.unsubscribe = nil
-		}
 		r.output.Close()
 	})
 }
@@ -114,10 +113,6 @@ func (r *AgentConsole) handleEvent(event *aop.Event) {
 	}
 	r.workMu.Lock()
 	defer r.workMu.Unlock()
-	// The bus may already have snapshotted this handler before unsubscribe.
-	if r.unsubscribe == nil {
-		return
-	}
 	boundary := event.GetTurnStarted() != nil || event.GetTurnEnded() != nil
 	if boundary {
 		delete(r.previews, event.TurnId)

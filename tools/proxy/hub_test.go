@@ -31,11 +31,12 @@ func newTestHub(t *testing.T, capture bool) (*ProxyHub, *State, *http.Client) {
 	state := NewState("")
 	store := NewFlowStore(10000)
 	caRoot := t.TempDir()
-	hub := NewProxyHub(state, store, caRoot, capture)
-	if err := hub.Start(caRoot); err != nil {
+	resource := NewProxyHub(state, store, caRoot, capture, nil)
+	hub := resource.ProxyHub
+	if err := resource.Start(t.Context()); err != nil {
 		t.Fatalf("hub start: %v", err)
 	}
-	t.Cleanup(func() { hub.Shutdown(context.Background()) })
+	t.Cleanup(func() { resource.Close(context.Background()) })
 
 	pool := x509.NewCertPool()
 	if ca := hub.CAPath(); ca != "" {
@@ -65,7 +66,7 @@ func newTestHub(t *testing.T, capture bool) (*ProxyHub, *State, *http.Client) {
 // runMitm executes a mitm verb and returns its stdout.
 func runMitm(t *testing.T, store *FlowStore, hub *ProxyHub, args ...string) string {
 	t.Helper()
-	cmd := NewMitmCommand(nil, store, hub)
+	cmd := NewMitmCommand(store, hub)
 	var out bytes.Buffer
 	exec := &commands.Execution{Args: args, Stdout: &out, Stderr: &out}
 	if _, err := cmd.Run(context.Background(), exec); err != nil {
@@ -103,7 +104,7 @@ func TestCaptureHTTPAndHTTPS(t *testing.T) {
 		t.Fatalf("https body = %q", body)
 	}
 
-	flows := waitForFlows(t, hub.Store(), 2)
+	flows := waitForFlows(t, hub.store, 2)
 	if len(flows) < 2 {
 		t.Fatalf("want >=2 flows, got %d", len(flows))
 	}
@@ -138,7 +139,7 @@ func TestCapturePostRequestBody(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	flows := waitForFlows(t, hub.Store(), 1)
+	flows := waitForFlows(t, hub.store, 1)
 	var found bool
 	for _, f := range flows {
 		if f.Request.Method == "POST" && strings.Contains(string(f.Request.Body), "payload-marker") {
@@ -172,7 +173,7 @@ func TestCaptureIncludesHostHeader(t *testing.T) {
 		_ = body // body is empty; the request headers are what we assert on
 	}
 
-	flows := waitForFlows(t, hub.Store(), 1)
+	flows := waitForFlows(t, hub.store, 1)
 	var host string
 	for _, f := range flows {
 		for _, h := range f.Request.Headers {
@@ -209,7 +210,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	store := hub.Store()
+	store := hub.store
 	waitForFlows(t, store, 3)
 	if got := len(store.Query(QueryOpts{Status: "404"})); got != 1 {
 		t.Errorf("status 404 filter = %d, want 1", got)
@@ -253,7 +254,7 @@ func TestCaptureLargeBodyIsSnipped(t *testing.T) {
 	hub, _, client := newTestHub(t, true)
 	get(t, client, srv.URL)
 
-	for _, f := range waitForFlows(t, hub.Store(), 1) {
+	for _, f := range waitForFlows(t, hub.store, 1) {
 		if len(f.Response.Body) > maxBodySnip {
 			t.Fatalf("body snip = %d, want <= %d", len(f.Response.Body), maxBodySnip)
 		}
@@ -277,8 +278,8 @@ func TestCaptureConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	waitForFlows(t, hub.Store(), n)
-	if got := hub.Store().Count(); got != n {
+	waitForFlows(t, hub.store, n)
+	if got := hub.store.Count(); got != n {
 		t.Errorf("captured %d flows, want %d", got, n)
 	}
 }
@@ -295,7 +296,7 @@ func TestCaptureConnectionError(t *testing.T) {
 	}
 	// The failed upstream is recorded as a flow carrying the error.
 	var sawErr bool
-	for _, f := range waitForFlows(t, hub.Store(), 1) {
+	for _, f := range waitForFlows(t, hub.store, 1) {
 		if f.Error != "" {
 			sawErr = true
 		}
@@ -378,7 +379,7 @@ func TestRelayModeRoutesButDoesNotCapture(t *testing.T) {
 		t.Fatalf("relay routing failed: %q", body)
 	}
 	// Plain HTTP has no addon in relay mode, so nothing is recorded.
-	if got := hub.Store().Count(); got != 0 {
+	if got := hub.store.Count(); got != 0 {
 		t.Errorf("relay mode captured %d flows, want 0", got)
 	}
 }

@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/core/tool"
 )
 
 type WebSearchTool struct {
-	provider provider.Provider
-	tavily   *TavilySearch
+	search func(context.Context, string, int) (string, error)
+	tavily *TavilySearch
 }
 
 type webSearchArgs struct {
@@ -19,8 +18,8 @@ type webSearchArgs struct {
 	Num   int    `json:"num,omitempty"  jsonschema:"description=Max results 1-10 (default 5),minimum=1,maximum=10"`
 }
 
-func NewWebSearchTool(p provider.Provider, tavily *TavilySearch) *WebSearchTool {
-	return &WebSearchTool{provider: p, tavily: tavily}
+func NewWebSearchTool(search func(context.Context, string, int) (string, error), tavily *TavilySearch) *WebSearchTool {
+	return &WebSearchTool{search: search, tavily: tavily}
 }
 
 func (t *WebSearchTool) Name() string { return "web_search" }
@@ -51,10 +50,10 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*tool.Re
 		num = 10
 	}
 
-	if ws, ok := t.provider.(provider.WebSearchProvider); ok {
-		resp, err := ws.WebSearch(ctx, args.Query, num)
-		if err == nil {
-			return tool.TextResult(formatWebSearchResponse(resp, args.Query)), nil
+	if t.search != nil {
+		result, err := t.search(ctx, args.Query, num)
+		if err == nil && strings.TrimSpace(result) != "" {
+			return tool.TextResult(result), nil
 		}
 	}
 

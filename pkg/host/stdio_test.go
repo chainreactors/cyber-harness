@@ -2,7 +2,6 @@ package host
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"strings"
@@ -22,7 +21,7 @@ func (w *shortWriter) Write(p []byte) (int, error) {
 func TestHostRetainsStdioShortWriteFailure(t *testing.T) {
 	w := new(shortWriter)
 	stream := NewStdio(strings.NewReader(""), w)
-	h := testHost(t, context.Background(), aop.NewNamespaceMux())
+	h := testHost(t, aop.NewNamespaceMux(t.Context()))
 	for i := 0; i < 2; i++ {
 		if err := h.Send(aop.Reply("request", aop.NewProtocolError("EXAMPLE", "message")), stream.Send); !errors.Is(err, io.ErrShortWrite) {
 			t.Fatalf("send error = %v", err)
@@ -36,7 +35,7 @@ func TestHostRetainsStdioShortWriteFailure(t *testing.T) {
 func TestStdioConcurrentWritesKeepFramesIntact(t *testing.T) {
 	var output bytes.Buffer
 	stream := NewStdio(strings.NewReader(""), &output)
-	h := testHost(t, context.Background(), aop.NewNamespaceMux())
+	h := testHost(t, aop.NewNamespaceMux(t.Context()))
 	var pending sync.WaitGroup
 	for i := 0; i < 30; i++ {
 		pending.Add(1)

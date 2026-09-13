@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -120,36 +122,41 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 	}
 }
 
-type recordingArtifactSink struct {
-	artifact *toolpb.Artifact
+type recordingArtifactProjector struct {
+	operationID string
+	artifact    *toolpb.Artifact
 }
 
-func (s *recordingArtifactSink) IngestArtifact(_ context.Context, artifact *toolpb.Artifact) error {
-	s.artifact = protobuf.CloneOf(artifact)
-	return nil
-}
-
-func (*recordingArtifactSink) NormalizeArtifact(context.Context, string, string, []byte) (uint64, uint64, error) {
+func (s *recordingArtifactProjector) NormalizeArtifact(_ context.Context, operationID, tool string, data []byte) (uint64, uint64, error) {
+	s.operationID = operationID
+	s.artifact = &toolpb.Artifact{Tool: tool, Data: append([]byte(nil), data...)}
 	return 0, 0, nil
 }
 
-func (*recordingArtifactSink) SupportedArtifacts() []string { return nil }
-func (*recordingArtifactSink) Close() error                 { return nil }
+func (*recordingArtifactProjector) SupportedArtifacts() []string { return nil }
+func (*recordingArtifactProjector) Close() error                 { return nil }
 
-func TestAgentPoolForwardsRawToolArtifact(t *testing.T) {
-	sink := &recordingArtifactSink{}
+func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
+	projector := &recordingArtifactProjector{}
 	pool := NewAgentPool(NewHub())
-	pool.SetArtifactIngestor(sink)
+	pool.SetArtifactIngestor(projector)
 	raw := []byte(`{"ip":"127.0.0.1","port":"80"}`)
-	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Artifact{Artifact: &toolpb.Artifact{
-		Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: raw, MediaType: aop.JSONMediaType,
-	}}}))
-
-	if sink.artifact.CallId != "call-gogo-1" {
-		t.Fatalf("operation id = %q, want tool call id", sink.artifact.CallId)
+	event := &aop.Event{SessionId: "session-1"}
+	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: raw, MediaType: aop.JSONMediaType})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if sink.artifact.Tool != "gogo" || string(sink.artifact.Data) != string(raw) {
-		t.Fatalf("forwarded artifact = %+v", sink.artifact)
+	event.Payload = &aop.Event_Extension{Extension: extension}
+	if err := aop.SetTypedExtension(event, &operationpb.Ref{CallId: "call-gogo-1"}); err != nil {
+		t.Fatal(err)
+	}
+	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
+
+	if projector.operationID != "call-gogo-1" {
+		t.Fatalf("operation id = %q, want tool call id", projector.operationID)
+	}
+	if projector.artifact.Tool != "gogo" || string(projector.artifact.Data) != string(raw) {
+		t.Fatalf("forwarded artifact = %+v", projector.artifact)
 	}
 }
 
@@ -928,7 +935,11 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 	svc := NewService(ServiceConfig{Store: store})
 	pool := NewAgentPool(svc.Hub())
 	svc.SetAgentPool(pool)
-	t.Cleanup(svc.Close)
+	t.Cleanup(func() {
+		if err := svc.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
 	if err != nil {
@@ -1779,10 +1790,11 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 }
 
 func (p *AgentPool) handleAgentEnvelope(agent *remoteAgent, envelope *aop.Envelope) {
-	mux, err := p.newAgentNamespaceMux(agent)
+	mux, err := p.newAgentNamespaceMux(context.Background(), agent)
 	if err != nil {
 		return
 	}
+	defer mux.Close(context.Background())
 	p.dispatchAgentEnvelope(context.Background(), mux, envelope)
 }
 
@@ -1790,5 +1802,5 @@ func (p *AgentPool) dispatchAgentEnvelope(ctx context.Context, mux *aop.Namespac
 	if mux == nil || envelope == nil {
 		return
 	}
-	_, _ = mux.Dispatch(ctx, envelope, func(*aop.Envelope) error { return nil })
+	_, _ = mux.Dispatch(envelope, func(*aop.Envelope) error { return nil })
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protoncmd "github.com/chainreactors/aiscan/tools/proton"
 )
@@ -25,14 +26,11 @@ func e2eBash(t *testing.T) (*commands.BashTool, string) {
 	t.Helper()
 	dir := t.TempDir()
 
-	registry := commands.NewRegistry()
 	rs := &resources.Set{}
-	cmd := protoncmd.New().WithResourceProvider(rs.ProtonConfig)
-	cmd.SetWorkDir(dir)
-	registry.Register(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}, "proton")
+	registry := extensiontest.Commands(t, "scanner", protoncmd.NewCommand(dir, rs, nil, "", nil))
 
-	bash := commands.NewBashTool(dir, 30)
-	bash.SetCommandResolver(registry.Get)
+	bash := commands.NewBashTool(dir, 30, nil)
+	bash.SetCommandRegistry(registry)
 	return bash, dir
 }
 

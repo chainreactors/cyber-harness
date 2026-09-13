@@ -140,21 +140,26 @@ type IOAOptions struct {
 	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
 	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`
 	Space       string `long:"space" config:"space" description:"Space name" default:"default"`
-	IOAJSON     bool   `long:"json" description:"Output query results in JSON format"`
+	IOAJSON     bool   `no-flag:"true"`
 }
 
 type MiscOptions struct {
-	ConfigFile string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
-	DataDir    string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
-	InitConfig bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
-	ViewFile   string `short:"F" long:"view" description:"View an AOP event JSONL file"`
-	ViewFormat string `short:"o" long:"output" description:"Output format for -F: terminal (default), markdown" default:"terminal"`
-	OutputFile string `short:"f" long:"file" description:"Write scan and agent events to a streaming JSONL file (with -F: write rendered output)"`
-	Debug      bool   `long:"debug" config:"debug" description:"Enable debug logging"`
-	Verbose    []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
-	Quiet      bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
-	NoColor    bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
-	Version    bool   `long:"version" description:"Print version and exit"`
+	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
+	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
+	InitConfig   bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
+	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
+	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
+	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
+	OutputFile   string `short:"o" long:"output" description:"Write the canonical AOP event stream to a new JSONL file"`
+	OutputFormat string `long:"output-format" description:"One-shot agent output format: text, json, stream-json" default:"text"`
+	JSON         bool   `long:"json" description:"Alias for one-shot agent --output-format=json"`
+	Observe      string `long:"observe" description:"Comma-separated observations: tools,commands,processes,files,http"`
+	Ephemeral    bool   `long:"ephemeral" description:"Do not persist session history unless --output is explicit"`
+	Debug        bool   `long:"debug" config:"debug" description:"Enable debug logging"`
+	Verbose      []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
+	Quiet        bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
+	NoColor      bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
+	Version      bool   `long:"version" description:"Print version and exit"`
 }
 
 type RunMode string

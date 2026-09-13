@@ -113,7 +113,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		flags.Trace = true
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
-		c.Logger.Debugf("scan debug enabled")
+		c.Logger.Debugf("scanner debug enabled")
 	}
 	profile, err := profileForFlags(flags)
 	if err != nil {

@@ -31,7 +31,7 @@ func (c *testTmuxCommand) Execute(ctx context.Context, args []string) error {
 
 func tmuxTool(t *testing.T) *testTmuxCommand {
 	t.Helper()
-	bash := NewBashTool(t.TempDir(), 10)
+	bash := NewBashTool(t.TempDir(), 10, nil)
 	t.Cleanup(bash.Close)
 	return &testTmuxCommand{command: NewTmuxCommand(bash), manager: bash.Manager()}
 }

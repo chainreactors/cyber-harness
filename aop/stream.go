@@ -2,7 +2,7 @@ package aop
 
 // EnvelopeStream is the transport boundary for AOP. Implementations only
 // frame and carry protobuf Envelopes; application routing and lifecycle stay
-// in the concrete Hub or AgentRuntime loop.
+// in the concrete Hub or Manager loop.
 //
 // A caller must use at most one Recv goroutine and one Send goroutine.
 type EnvelopeStream interface {

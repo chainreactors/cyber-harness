@@ -75,7 +75,7 @@ jobs:
           fi
 
       - name: Check repository architecture and dependencies
-        run: go test -count=1 . ./core/deps
+        run: go test -count=1 . ./core/extension ./core/registry
 
       - name: Ensure the standard CLI does not depend on libcstx
         run: |

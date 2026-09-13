@@ -30,9 +30,12 @@ type queued[T any] struct {
 	bytes int64
 }
 
-// Subscription owns a serial worker. Cancel discards queued work; an admitted
-// handler may finish. Close drains admitted work. Blocking handlers must
-// observe their own cancellation context; the bus cannot interrupt user code.
+// Subscription owns callback admission and completion. Synchronous callbacks
+// run on producers; async callbacks run on one owned serial worker. Cancel
+// stops admission and discards queued work without waiting. Close stops
+// admission and waits for admitted callbacks, draining async queues. Callbacks
+// may Cancel themselves but must not wait for their own Done or Close.
+// Blocking handlers own their cancellation; the bus cannot interrupt user code.
 type Subscription[T any] struct {
 	mu                   sync.Mutex
 	wake                 *sync.Cond
@@ -44,7 +47,9 @@ type Subscription[T any] struct {
 	dropped              uint64
 	done                 chan struct{}
 	stopped              chan struct{}
-	unsub                func()
+	idle                 chan struct{}
+	bus                  *Bus[T]
+	syncHandler          func(T)
 	opts                 SubscribeOptions[T]
 	handler              func(T) error
 }
@@ -59,13 +64,62 @@ func (b *Bus[T]) SubscribeAsync(opts SubscribeOptions[T], handler func(T) error)
 	if opts.Buffer <= 0 {
 		opts.Buffer = 256
 	}
-	s := &Subscription[T]{opts: opts, handler: handler, done: make(chan struct{}), stopped: make(chan struct{}), queue: make([]queued[T], opts.Buffer)}
+	idle := make(chan struct{})
+	close(idle)
+	s := &Subscription[T]{bus: b, opts: opts, handler: handler, done: make(chan struct{}), stopped: make(chan struct{}), idle: idle, queue: make([]queued[T], opts.Buffer)}
 	s.wake = sync.NewCond(&s.mu)
-	s.mu.Lock()
-	s.unsub = b.Subscribe(s.enqueue)
-	s.mu.Unlock()
+	b.subscribe(s)
 	go s.run()
 	return s, nil
+}
+
+// deliver checks admission after taking the bus snapshot. An old snapshot
+// cannot invoke a stopped subscription. Completion runs even if the handler
+// panics; synchronous panics retain their normal propagation to the producer.
+func (s *Subscription[T]) deliver(event T) {
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return
+	}
+	s.beginLocked()
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.finishLocked()
+		if s.closing && s.pending == 0 {
+			close(s.done)
+		}
+		s.mu.Unlock()
+	}()
+	s.syncHandler(event)
+}
+
+func (s *Subscription[T]) beginLocked() {
+	if s.pending == 0 {
+		s.idle = make(chan struct{})
+	}
+	s.pending++
+}
+
+func (s *Subscription[T]) finishLocked() {
+	s.pending--
+	if s.pending == 0 {
+		close(s.idle)
+	}
+}
+
+func (s *Subscription[T]) stopLocked() {
+	if !s.closing {
+		s.closing = true
+		close(s.stopped)
+		if s.wake == nil && s.pending == 0 {
+			close(s.done)
+		}
+	}
+	if s.wake != nil {
+		s.wake.Broadcast()
+	}
 }
 
 func protect(fn func() error) (err error) {
@@ -103,7 +157,7 @@ func (s *Subscription[T]) enqueue(event T) {
 		}
 		s.queue[(s.head+s.count)%len(s.queue)] = queued[T]{event, size}
 		s.count++
-		s.pending++
+		s.beginLocked()
 		s.bytes += size
 		s.wake.Signal()
 		return nil
@@ -114,10 +168,7 @@ func (s *Subscription[T]) enqueue(event T) {
 }
 
 func (s *Subscription[T]) abortLocked(err error) {
-	if !s.closing {
-		close(s.stopped)
-	}
-	s.closing = true
+	s.stopLocked()
 	if s.err == nil {
 		s.err = err
 	}
@@ -129,13 +180,19 @@ func (s *Subscription[T]) abortLocked(err error) {
 		s.count--
 		s.pending--
 	}
-	s.wake.Broadcast()
+	if s.pending == 0 {
+		select {
+		case <-s.idle:
+		default:
+			close(s.idle)
+		}
+	}
 }
 
 func (s *Subscription[T]) run() {
 	defer close(s.done)
 	defer func() {
-		s.unsub()
+		s.bus.unsubscribe(s)
 		s.mu.Lock()
 		err, dropped := s.err, s.dropped
 		s.queue = nil
@@ -163,7 +220,7 @@ func (s *Subscription[T]) run() {
 		s.mu.Unlock()
 		err := protect(func() error { return s.handler(event.value) })
 		s.mu.Lock()
-		s.pending--
+		s.finishLocked()
 		s.bytes -= event.bytes
 		if err != nil {
 			s.abortLocked(err)
@@ -172,26 +229,59 @@ func (s *Subscription[T]) run() {
 	}
 }
 
+// Flush waits for work admitted before the call to finish without stopping
+// future admission. Producers that continue emitting concurrently may create
+// more work after this boundary.
+func (s *Subscription[T]) Flush(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	idle := s.idle
+	s.mu.Unlock()
+	select {
+	case <-idle:
+		return nil
+	default:
+	}
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *Subscription[T]) Cancel() {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	s.abortLocked(nil)
 	s.mu.Unlock()
-	s.unsub()
+	s.bus.unsubscribe(s)
 }
 
 // Close stops admission and waits for admitted work and callbacks to finish.
+// It reports only an incomplete wait. Processing failures remain available via
+// Err after completion; resource owners must collect them separately.
 func (s *Subscription[T]) Close(ctx context.Context) error {
-	s.mu.Lock()
-	if !s.closing {
-		close(s.stopped)
+	if s == nil {
+		return nil
 	}
-	s.closing = true
-	s.wake.Broadcast()
+	s.mu.Lock()
+	s.stopLocked()
 	s.mu.Unlock()
-	s.unsub()
+	s.bus.unsubscribe(s)
+	// Completed cleanup succeeds even if the caller's deadline also expired.
 	select {
 	case <-s.done:
-		return s.Err()
+		return nil
+	default:
+	}
+	select {
+	case <-s.done:
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}

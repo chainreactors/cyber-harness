@@ -4,7 +4,6 @@ package skills
 import (
 	"context"
 	"fmt"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
 	files "github.com/chainreactors/aiscan/tools/files"
 	"io"
 	"os"
@@ -19,7 +18,7 @@ import (
 
 type Extension struct {
 	mu              sync.Mutex
-	files           *fileext.Extension
+	files           *files.Files
 	directory       string
 	root            *os.Root
 	mounted, closed bool
@@ -27,13 +26,13 @@ type Extension struct {
 	names           []string
 }
 
-func New(filesystem *fileext.Extension, directory string) (*Extension, error) {
+func New(filesystem *files.Files, directory string) (*Extension, error) {
 	if filesystem == nil || !filepath.IsAbs(directory) {
 		return nil, fmt.Errorf("skills require a file service and absolute directory")
 	}
 	return &Extension{files: filesystem, directory: directory}, nil
 }
-func (m *Extension) Load(scope *coreextension.Context) error {
+func (m *Extension) Load(scope *coreextension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -110,19 +109,25 @@ func (m *Extension) Locations() []string {
 }
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.closed = true
 	m.names = nil
-	if m.mounted {
+	mounted := m.mounted
+	m.mu.Unlock()
+	if mounted {
 		if err := m.files.Unmount(ctx, "skill://"); err != nil {
 			return err
 		}
+		m.mu.Lock()
 		m.mounted = false
+		m.mu.Unlock()
 	}
+	m.mu.Lock()
 	if m.root != nil {
 		root := m.root
 		m.root = nil
+		m.mu.Unlock()
 		return root.Close()
 	}
+	m.mu.Unlock()
 	return nil
 }

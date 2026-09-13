@@ -1,17 +1,17 @@
 ---
 type: Tool Playbook
 title: cyberhub
-description: Search and list loaded fingerprints and POC templates with association-aware fingerprint-to-POC mapping. Available as cyberhub or search cyberhub.
+description: Search and list loaded fingerprints and POC templates with association-aware fingerprint-to-POC mapping.
 tags: [runtime, search]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
-# cyberhub (also: search cyberhub)
+# cyberhub
 
 Search and list loaded fingerprints and POC templates. Queries use the association index for fingerprint→POC mapping when structured filters are provided.
 
-`cyberhub` is available both as a standalone command and as `search cyberhub`. Both forms are identical.
+`cyberhub` is the standalone command name.
 
 ## Quick examples (use these patterns)
 

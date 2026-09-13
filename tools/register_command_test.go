@@ -21,17 +21,19 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/tools/curl"
 	"github.com/chainreactors/aiscan/tools/gogo"
 	"github.com/chainreactors/aiscan/tools/neutron"
-	_ "github.com/chainreactors/aiscan/tools/proton"
+	"github.com/chainreactors/aiscan/tools/proton"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
-	_ "github.com/chainreactors/aiscan/tools/search"
+	searchtools "github.com/chainreactors/aiscan/tools/search"
 	"github.com/chainreactors/aiscan/tools/spray"
 	"github.com/chainreactors/aiscan/tools/zombie"
 	fingerslib "github.com/chainreactors/fingers/fingers"
@@ -39,17 +41,59 @@ import (
 	"github.com/chainreactors/proxyclient"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	sdkgogo "github.com/chainreactors/sdk/gogo"
+	"github.com/chainreactors/sdk/pkg/association"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	"github.com/chainreactors/utils/parsers"
 )
 
-func buildRegistry(engineSet *engine.Set) *commands.CommandRegistry {
-	reg := commands.NewRegistry()
-	deps := &commands.Deps{}
-	commands.Provide(deps, engine.SetKey, engineSet)
-	commands.Provide(deps, resources.SetKey, engineSet.Resources)
-	buildTestGroups([]string{"scanner", "search"}, deps, reg)
-	return reg
+func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
+	t.Helper()
+	logger := telemetry.NopLogger()
+	events := eventbus.New[*aop.Event]()
+	fetch := searchtools.NewFetchCommand()
+	var index *association.Index
+	if engineSet != nil {
+		index = engineSet.Index
+		if index == nil && engineSet.Resources != nil && engineSet.Resources.FingersConfig != nil {
+			full := engineSet.Resources.FingersConfig.FullFingers
+			index = association.NewIndex()
+			index.BuildWithFingers(full.Fingers(), full.Aliases(), nil)
+		}
+	}
+	cyberhub := searchtools.NewCyberhubSearch(index)
+	return extensiontest.CommandGroups(t,
+		extensiontest.CommandGroup{Name: "scanner", Values: scannerCommandValues(engineSet, t.TempDir(), events, logger)},
+		extensiontest.CommandGroup{Name: "search", Values: []commands.Command{
+			{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
+			{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
+		}},
+	)
+}
+
+func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventEmitter, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
+	t.Helper()
+	values := scannerCommandValues(engineSet, workDir, events, logger)
+	values = append(values, extra...)
+	return extensiontest.Commands(t, "scanner", values...)
+}
+
+func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventEmitter, logger telemetry.Logger) []commands.Command {
+	values := []commands.Command{
+		curl.NewCommand(logger, "", events),
+		proton.NewCommand(workDir, engineSet.Resources, logger, "", events),
+	}
+	for _, factory := range []func() (commands.Command, error){
+		func() (commands.Command, error) { return gogo.NewCommand(engineSet, logger, "", events) },
+		func() (commands.Command, error) { return neutron.NewCommand(engineSet, logger, "", events) },
+		func() (commands.Command, error) { return spray.NewCommand(engineSet, logger, "", events) },
+		func() (commands.Command, error) { return zombie.NewCommand(engineSet, logger, "", events) },
+		func() (commands.Command, error) { return NewScanCommand(engineSet, nil, "", events) },
+	} {
+		if command, err := factory(); err == nil {
+			values = append(values, command)
+		}
+	}
+	return values
 }
 
 func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
@@ -59,7 +103,7 @@ func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
 		Gogo:  gogoEng,
 		Spray: sprayEng,
 	}
-	reg := buildRegistry(engineSet)
+	reg := buildRegistry(t, engineSet)
 
 	for _, name := range []string{"scan", "gogo", "spray"} {
 		if !reg.Has(name) {
@@ -77,7 +121,7 @@ func TestRegisterAllRegistersSearchWithResources(t *testing.T) {
 			FingersConfig: sdkfingers.NewConfig().WithFingers(fingerslib.Fingers{{Name: "nginx", Protocol: "http"}}),
 		},
 	}
-	reg := buildRegistry(engineSet)
+	reg := buildRegistry(t, engineSet)
 
 	if !reg.Has("cyberhub") {
 		t.Fatal("expected cyberhub search command to be registered")
@@ -290,9 +334,11 @@ func newFunctionalRecorder(bus *eventbus.Bus[*aop.Event]) *functionalRecorder {
 			return
 		}
 		decoded := decodeFunctionalArtifact(artifact)
+		ref := new(operationpb.Ref)
+		_, _ = aop.FindTypedExtension(event, ref)
 		recorder.mu.Lock()
 		recorder.events = append(recorder.events, functionalEvent{
-			Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target, CallID: artifact.CallId, Data: decoded,
+			Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target, CallID: ref.GetCallId(), Data: decoded,
 		})
 		recorder.mu.Unlock()
 	})
@@ -333,7 +379,7 @@ func (r *functionalRecorder) since(mark int) []functionalEvent {
 	return append([]functionalEvent(nil), r.events[mark:]...)
 }
 
-func runFunctionalCases(t *testing.T, registry *commands.CommandRegistry, recorder *functionalRecorder, cases []functionalCase) {
+func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *functionalRecorder, cases []functionalCase) {
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -349,11 +395,10 @@ func runFunctionalCases(t *testing.T, registry *commands.CommandRegistry, record
 
 			var stdout, stderr bytes.Buffer
 			parent := &commands.Execution{
-				ID:        "functional-" + testCase.Name,
-				Stdin:     strings.NewReader(testCase.Stdin),
-				Stdout:    &stdout,
-				Stderr:    &stderr,
-				StartedAt: time.Now(),
+				ID:     "functional-" + testCase.Name,
+				Stdin:  strings.NewReader(testCase.Stdin),
+				Stdout: &stdout,
+				Stderr: &stderr,
 			}
 			mark := recorder.mark()
 			_, err := registry.Run(ctx, append([]string{testCase.Tool}, testCase.Args...), parent)
@@ -371,7 +416,7 @@ func runFunctionalCases(t *testing.T, registry *commands.CommandRegistry, record
 	}
 }
 
-func requireFunctionalCoverage(t *testing.T, registry *commands.CommandRegistry, cases []functionalCase, coveredElsewhere ...string) {
+func requireFunctionalCoverage(t *testing.T, registry *commands.Registry, cases []functionalCase, coveredElsewhere ...string) {
 	t.Helper()
 	covered := make(map[string]bool, len(cases)+len(coveredElsewhere))
 	for _, testCase := range cases {
@@ -423,10 +468,6 @@ func writeTestFile(t *testing.T, path, content string) {
 	}
 }
 
-func buildTestGroups(groups []string, deps *commands.Deps, reg *commands.CommandRegistry) {
-	commands.BuildPlan(capability.Select(capability.Options{Groups: groups}), deps, reg)
-}
-
 func TestScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
 	tlsServer := newScannerTLSFixture(t)
@@ -455,15 +496,7 @@ func TestScannerFunctionalRegression(t *testing.T) {
 	workDir := t.TempDir()
 	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
-	registry := commands.NewRegistry()
-	deps := &commands.Deps{
-		WorkDir: workDir,
-		Events:  bus,
-		Logger:  telemetry.NopLogger(),
-	}
-	commands.Provide(deps, engine.SetKey, engineSet)
-	commands.Provide(deps, resources.SetKey, engineSet.Resources)
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
+	registry := registerTestScanners(t, engineSet, workDir, bus, telemetry.NopLogger())
 
 	required := []string{"scan", "gogo", "spray", "zombie", "neutron", "proton"}
 	for _, name := range required {
@@ -602,7 +635,7 @@ http:
 	}
 
 	// The full-tag suite supplies the katana and passive cases.
-	requireFunctionalCoverage(t, registry, cases, "katana", "passive")
+	requireFunctionalCoverage(t, registry, cases, "curl", "katana", "passive")
 	runFunctionalCases(t, registry, recorder, cases)
 }
 

@@ -214,34 +214,40 @@ func (t *Tool) status(id string) (*tool.Result, error) {
 }
 
 func (t *Tool) Close() {
-	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return
+	ctx, cancel := context.WithTimeout(context.Background(), sessionStopTimeout)
+	defer cancel()
+	_ = t.CloseContext(ctx)
+}
+
+// CloseContext cancels every active recording and waits for the same sessions
+// across retries. A context error means cleanup is still incomplete.
+func (t *Tool) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	t.mu.Lock()
+	first := !t.closed
 	t.closed = true
 	sessions := make([]*recordingSession, 0, len(t.sessions))
 	for _, session := range t.sessions {
 		if isActive(session.snapshot().State) {
-			session.update(func(info *SessionInfo) { info.State = sessionStopping })
-			session.cancel()
+			if first {
+				session.update(func(info *SessionInfo) { info.State = sessionStopping })
+				session.cancel()
+			}
 			sessions = append(sessions, session)
 		}
 	}
 	t.mu.Unlock()
 
-	if len(sessions) == 0 {
-		return
-	}
-	timer := time.NewTimer(sessionStopTimeout)
-	defer timer.Stop()
 	for _, session := range sessions {
 		select {
 		case <-session.done:
-		case <-timer.C:
-			return
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+	return nil
 }
 
 func (t *Tool) activeCountLocked() int {

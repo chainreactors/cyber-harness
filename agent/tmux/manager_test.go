@@ -71,7 +71,7 @@ func TestSubscribeReceivesLifecycleEvents(t *testing.T) {
 	unsub := mgr.Subscribe(func(ev Event) {
 		events <- ev
 	})
-	defer unsub()
+	defer unsub.Cancel()
 
 	release := make(chan struct{})
 	info, err := mgr.CreateFunc(context.Background(), "event-test", 5*time.Second, func(ctx context.Context, w io.Writer) error {

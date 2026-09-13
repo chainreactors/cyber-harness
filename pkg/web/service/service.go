@@ -4,28 +4,27 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/chainreactors/aiscan/core/config"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/core/extension"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ConfigStore and PreparedConfig are the host integration surface for config
-// persistence; the business semantics live in web/api.
-type ConfigStore = managementapi.ConfigStore
-type PreparedConfig = managementapi.PreparedConfig
-
 type ServiceConfig struct {
-	Store         *SQLiteStore
-	App           *apppkg.App
-	ConfigStore   ConfigStore
-	AppFactory    func(ctx context.Context, prepared *PreparedConfig) (*apppkg.App, error)
+	Store       *SQLiteStore
+	Profile     *profile.Profile
+	ConfigStore ConfigStore
+	// BuildProfile returns a fresh candidate, including partial results on error.
+	// Service owns every returned candidate and its cleanup.
+	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (*profile.Profile, error)
 	AgentPool     *AgentPool
 	Artifacts     ArtifactIngestor
 	MaxConcurrent int
@@ -34,15 +33,29 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	store   *SQLiteStore
-	appMu   sync.Mutex
-	app     *managedApp
-	api     *managementapi.API
-	auth    *Auth
-	agents  *AgentPool
-	hub     *Hub
-	sem     chan struct{}
-	timeout time.Duration
+	// configGate serializes update/activation with shutdown. Service owns both
+	// candidate and published profiles throughout the transaction.
+	configGate   chan struct{}
+	configStore  ConfigStore
+	buildProfile func(context.Context, *PreparedConfig) (*profile.Profile, error)
+	pending      *profile.Profile
+	store        *SQLiteStore
+	appMu        sync.Mutex
+	profile      *profile.Profile
+	// profiles owns the current and retired profiles and counts active borrowers.
+	// Entries survive cleanup timeouts; the profile itself owns lifecycle state.
+	profiles map[*profile.Profile]int
+	// profileClose serializes release and error collection as one transaction.
+	profileClose chan struct{}
+	appChanged   chan struct{}
+	appError     error
+	closing      bool
+	api          *managementapi.API
+	auth         *Auth
+	agents       *AgentPool
+	hub          *Hub
+	sem          chan struct{}
+	timeout      time.Duration
 
 	mu           sync.Mutex
 	cancels      map[string]context.CancelFunc
@@ -66,8 +79,13 @@ func NewService(cfg ServiceConfig) *Service {
 		timeout = 10 * time.Minute
 	}
 	svc := &Service{
+		configGate:   make(chan struct{}, 1),
+		configStore:  cfg.ConfigStore,
+		buildProfile: cfg.BuildProfile,
 		store:        cfg.Store,
-		app:          wrapManagedApp(cfg.App),
+		profiles:     make(map[*profile.Profile]int),
+		profileClose: make(chan struct{}, 1),
+		appChanged:   make(chan struct{}),
 		agents:       cfg.AgentPool,
 		hub:          NewHub(),
 		sem:          make(chan struct{}, maxConcurrent),
@@ -81,16 +99,11 @@ func NewService(cfg ServiceConfig) *Service {
 		sessionSeq:   make(map[string]uint64),
 		endedTurns:   make(map[string]bool),
 	}
-	configAPI := managementapi.NewConfig(managementapi.ConfigOptions{
-		Store: cfg.ConfigStore,
-		Build: cfg.AppFactory,
-		Apply: svc.swapApp,
-		Broadcast: func(config *types.DistributeConfig) {
-			if svc.agents != nil {
-				svc.agents.BroadcastConfigReload(config)
-			}
-		},
-	})
+	if cfg.Profile != nil {
+		svc.profile = cfg.Profile
+		svc.profiles[cfg.Profile] = 0
+	}
+	configAPI := managementapi.NewConfig(svc)
 	svc.api = &managementapi.API{
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,
@@ -124,10 +137,31 @@ func (s *Service) SetAgentPool(pool *AgentPool) {
 	pool.config = s.api.Config.Distribute
 }
 
-func (s *Service) Close() {
+func (s *Service) Close(ctx context.Context) (resultErr error) {
 	if s == nil {
-		return
+		return nil
 	}
+	select {
+	case s.configGate <- struct{}{}:
+	default:
+		select {
+		case s.configGate <- struct{}{}:
+		case <-ctx.Done():
+			return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+		}
+	}
+	defer func() { <-s.configGate }()
+	s.appMu.Lock()
+	s.closing = true
+	s.profile = nil
+	s.applicationChangedLocked()
+	s.appMu.Unlock()
+	defer func() {
+		s.appMu.Lock()
+		resultErr = errors.Join(resultErr, s.appError)
+		s.appError = nil
+		s.appMu.Unlock()
+	}()
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.cancels))
 	for _, cancel := range s.cancels {
@@ -137,13 +171,36 @@ func (s *Service) Close() {
 	for _, cancel := range cancels {
 		cancel()
 	}
-	s.appMu.Lock()
-	current := s.app
-	s.app = nil
-	app := retireManagedApp(current)
-	s.appMu.Unlock()
-	if app != nil {
-		app.Close()
+	resultErr = s.closePending(ctx)
+	for {
+		s.appMu.Lock()
+		remaining := len(s.profiles)
+		changed := s.appChanged
+		var ready []*profile.Profile
+		for p, refs := range s.profiles {
+			if refs == 0 {
+				ready = append(ready, p)
+			}
+		}
+		s.appMu.Unlock()
+		if remaining == 0 {
+			return resultErr
+		}
+		if len(ready) > 0 {
+			var incomplete error
+			for _, ref := range ready {
+				incomplete = errors.Join(incomplete, s.closeApplication(ctx, ref))
+			}
+			if incomplete != nil {
+				return errors.Join(resultErr, incomplete)
+			}
+			continue
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return errors.Join(resultErr, extension.ErrCloseIncomplete, ctx.Err())
+		}
 	}
 }
 

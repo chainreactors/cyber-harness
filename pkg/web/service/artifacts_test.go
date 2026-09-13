@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
 )
 
 type artifactTestStore struct {
@@ -27,10 +25,8 @@ func TestCSTXArtifactIngestorNormalizesOnServer(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 
-	err = ingestor.IngestArtifact(context.Background(), &toolpb.Artifact{
-		CallId: "scan-1", Tool: "gogo",
-		Data: []byte(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`),
-	})
+	_, _, err = ingestor.NormalizeArtifact(context.Background(), "scan-1", "gogo",
+		[]byte(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +56,8 @@ func TestCSTXArtifactIngestorNormalizesAIScanWebSummary(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 
-	err = ingestor.IngestArtifact(context.Background(), &toolpb.Artifact{
-		CallId: "curl-1", Tool: "aiscan",
-		Data: []byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`),
-	})
+	_, _, err = ingestor.NormalizeArtifact(context.Background(), "curl-1", "aiscan",
+		[]byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`))
 	if err != nil {
 		t.Fatal(err)
 	}

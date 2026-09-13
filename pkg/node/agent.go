@@ -8,15 +8,18 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/console"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 )
 
 func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
@@ -32,25 +35,33 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return err
 	}
 
-	appConfig := apppkg.AppConfig(option, apppkg.RuntimeFeatures{
+	features := apppkg.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
+	}
+	option.SaveSession = true
+	profileConfig := profile.FromOption(option, features, &sessionext.Config{
+		PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{},
 	}, logger)
-	appConfig.IOA = remoteIOAConfig(option)
-	application, err := apppkg.New(ctx, appConfig)
+	profileConfig.IOA = remoteIOAConfig(option)
+	product, err := profile.New(profileConfig)
 	if err != nil {
 		return err
 	}
-	defer application.Close()
+	if err := product.Load(ctx); err != nil {
+		_ = product.Close(context.Background())
+		return err
+	}
+	defer product.Close(context.Background())
+	application, err := product.App()
+	if err != nil {
+		return err
+	}
 	_, providerConfig := application.ProviderState()
 	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
-	option.SaveSession = true
-	rt, err := runtimepkg.New(ctx, option, logger, &runtimepkg.RuntimeConfig{
-		ExistingApp: application, PrimarySessionID: console.MainREPLName,
-	})
+	rt, err := product.Runtime()
 	if err != nil {
 		return err
 	}
-	defer rt.Close()
 	repl, err := console.StartPersistent(rt, option)
 	if err != nil {
 		return err
@@ -73,19 +84,23 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		logger.Debugf("websocket transport connection to %s", dialURL)
 
 		connection := connectionConfig{
-			ServerURL: option.ServerURL,
-			Name:      runtimepkg.ResolveIOANodeName(option),
-			Registry:  application.Commands,
-			Agent:     rt,
-			Control:   rt,
-			Progress:  application.Progress,
-			Logger:    logger,
-			Chat:      chatHandler,
-			NodeID:    nodeID,
-			Runtime:   runtimepkg.DefaultRuntimeInfo(),
-			Status:    func() *aop.AgentStatus { return runtimepkg.AgentStatus(option, application) },
-			Menu:      func() []*types.CommandSpec { return runtimepkg.CommandCatalog(application) },
-			PTYRouter: func() (*terminal.Router, error) { return NewPTYRouter(application.Commands), nil },
+			ServerURL:                  option.ServerURL,
+			Name:                       ioatools.ResolveNodeName(option.IOANodeName),
+			Registry:                   application.Commands,
+			Executor:                   application.Tools,
+			Agent:                      rt,
+			Control:                    rt,
+			Progress:                   application.Progress,
+			Hooks:                      application.Hooks,
+			Logger:                     logger,
+			Chat:                       chatHandler,
+			NodeID:                     nodeID,
+			Runtime:                    sessionext.DefaultRuntimeInfo(),
+			Status:                     func() *aop.AgentStatus { return sessionext.AgentStatus(option, application, rt.IOA()) },
+			Menu:                       func() []*types.CommandSpec { return sessionext.CommandCatalog(application) },
+			PTYRouter:                  func() (*terminal.Router, error) { return NewPTYRouter(application.Bash), nil },
+			Bash:                       application.Bash,
+			RegisterResourceNamespaces: product.RegisterResourceNamespaces,
 		}
 		_ = connect(ctx, connection)
 	}()
@@ -116,15 +131,15 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 		return nil
 	}
 
-	_, err = rt.EnsureSession(runtimepkg.SessionOptions{ID: "startup"})
+	_, err = rt.EnsureSession(sessionext.SessionOptions{ID: "startup"})
 	if err != nil {
 		return err
 	}
-	run, err := rt.RunSession(ctx, "startup", runtimepkg.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
+	run, err := rt.RunSession(ctx, "startup", sessionext.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
 	if err == nil {
 		_, err = run.Wait()
 	}
-	_ = rt.CloseSession(context.Background(), "startup", runtimepkg.SessionCloseCompleted)
+	_ = rt.CloseSession(context.Background(), "startup", sessionext.SessionCloseCompleted)
 
 	<-connectionDone
 	return err
@@ -146,7 +161,7 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
-	rt        *runtimepkg.AgentRuntime
+	rt        *sessionext.Manager
 	app       *apppkg.App
 	option    *cfg.Option
 	logger    telemetry.Logger
@@ -179,14 +194,14 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 			close(h.ready)
 		}
 	})
-	provider, model, err := runtimepkg.ReloadRuntimeConfig(config, h.rt, h.option, h.logger)
+	provider, model, err := sessionext.ReloadConfig(config, h.rt, h.option, h.logger)
 	result := &types.ReloadResult{Ok: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}
 	result.Provider = provider.Name()
-	return result, runtimepkg.AgentStatus(h.option, h.app)
+	return result, sessionext.AgentStatus(h.option, h.app, h.rt.IOA())
 }
 
 // ---------------------------------------------------------------------------
@@ -216,17 +231,17 @@ func webNodeID(option *cfg.Option) (string, error) {
 	return "", fmt.Errorf("node_id is required; set --node-id or --node-name")
 }
 
-func remoteIOAConfig(option *cfg.Option) *apppkg.IOAConfig {
+func remoteIOAConfig(option *cfg.Option) *ioatools.Config {
 	if option == nil || option.IOAURL == "" {
 		return nil
 	}
-	return &apppkg.IOAConfig{
-		URL:           option.IOAURL,
-		NodeID:        option.IOANodeID,
-		NodeName:      option.IOANodeName,
-		Space:         option.Space,
-		RegisterTools: true,
-		AutoRegister:  true,
-		NodeMeta:      map[string]any{"client": "aiscan", "transport": "websocket"},
+	return &ioatools.Config{
+		URL:              option.IOAURL,
+		NodeID:           option.IOANodeID,
+		NodeName:         option.IOANodeName,
+		Space:            option.Space,
+		RegisterCommands: true,
+		AutoRegister:     true,
+		NodeMeta:         map[string]any{"client": "aiscan", "transport": "websocket"},
 	}
 }

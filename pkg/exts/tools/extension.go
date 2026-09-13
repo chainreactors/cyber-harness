@@ -7,23 +7,22 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync"
 
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
-// Tools is the common adapter for a group of already constructed tools. It
-// only declares them to the owning Set. The Set owns publication, admission,
-// cancellation, and draining; this adapter owns no registry or lease.
+// Extension is the common owner for a group of already constructed tool
+// declarations. The Registry owns publication, admission, cancellation, and
+// draining; this contribution owns no registry or execution lease.
 type Extension struct {
-	mu     sync.Mutex
-	values []tool.Tool
-	closed bool
+	registry *toolset.Registry
+	values   []tool.Tool
 }
 
-func New(values ...tool.Tool) (*Extension, error) {
-	if len(values) == 0 {
+func New(registry *toolset.Registry, values ...tool.Tool) (*Extension, error) {
+	if registry == nil || len(values) == 0 {
 		return nil, errors.New("tools extension requires at least one tool")
 	}
 	for _, value := range values {
@@ -31,23 +30,15 @@ func New(values ...tool.Tool) (*Extension, error) {
 			return nil, errors.New("tools extension contains nil tool")
 		}
 	}
-	return &Extension{values: slices.Clone(values)}, nil
+	return &Extension{registry: registry, values: slices.Clone(values)}, nil
 }
 
-func (e *Extension) Load(scope *extension.Context) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed {
-		return extension.ErrToolsUnavailable
-	}
-	return scope.RegisterTools(e.values...)
+func (e *Extension) Load(scope *extension.Scope) error {
+	return e.registry.Register(scope, e.values...)
 }
 
 func (e *Extension) Close(context.Context) error {
-	e.mu.Lock()
-	e.closed = true
 	e.values = nil
-	e.mu.Unlock()
 	return nil
 }
 

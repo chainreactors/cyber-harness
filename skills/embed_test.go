@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/chainreactors/aiscan/core/capability"
 )
 
 var baseExpectedSkills = []string{"aiscan"}
@@ -181,7 +183,7 @@ func TestIOAFindingConvention(t *testing.T) {
 }
 
 func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
-	store, diags := LoadAll(nil)
+	store, diags := LoadAll(nil, capability.Catalog{})
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v", diags)
 	}

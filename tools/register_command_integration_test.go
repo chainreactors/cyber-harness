@@ -12,7 +12,6 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -39,14 +38,7 @@ func TestScannerPublicIntegration(t *testing.T) {
 
 	bus := eventbus.New[*aop.Event]()
 	recorder := newFunctionalRecorder(bus)
-	registry := commands.NewRegistry()
-	deps := &commands.Deps{
-		WorkDir: t.TempDir(),
-		Events:  bus, Logger: telemetry.NopLogger(),
-	}
-	commands.Provide(deps, engine.SetKey, engineSet)
-	commands.Provide(deps, resources.SetKey, engineSet.Resources)
-	commands.BuildPlan(capability.Select(capability.Options{Groups: []string{"scanner"}}), deps, registry)
+	registry := registerTestScanners(t, engineSet, t.TempDir(), bus, telemetry.NopLogger())
 	templateFile := filepath.Join(t.TempDir(), "redhaze-marker.yaml")
 	writeTestFile(t, templateFile, `id: redhaze-public-marker
 info:

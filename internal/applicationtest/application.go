@@ -1,0 +1,55 @@
+// Package applicationtest supplies a minimal App host graph for package tests.
+// Production code must construct a concrete Profile instead.
+package applicationtest
+
+import (
+	"context"
+	"testing"
+
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
+	app "github.com/chainreactors/aiscan/pkg/app"
+	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
+	"github.com/chainreactors/aiscan/pkg/toolset"
+)
+
+func Entries(t testing.TB, resource *app.Resource, dependencies ...string) []extension.Entry {
+	t.Helper()
+	if resource == nil || resource.App == nil {
+		t.Fatal("test application resource is required")
+	}
+	application := resource.App
+	tools, ok := application.Tools.(*toolset.Registry)
+	if !ok {
+		t.Fatal("test application does not expose its concrete tool registry")
+	}
+	var terminalOwner extension.Extension = extension.Func{CloseFunc: func(context.Context) error {
+		if application.Bash != nil {
+			application.Bash.Close()
+		}
+		return nil
+	}}
+	if application.Bash == nil {
+		terminal, err := terminalext.New(application.Hooks, tools, application.Commands, terminalext.Config{Directory: t.TempDir(), Timeout: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		application.Bash = terminal.Bash()
+		terminalOwner = terminal
+	}
+	return []extension.Entry{
+		{ID: "application", DependsOn: append([]string(nil), dependencies...), Extension: resource},
+		{ID: "application.terminal", DependsOn: []string{"application"}, Extension: terminalOwner},
+		{ID: "application.command-registry", DependsOn: []string{"application.terminal"}, Extension: application.Commands},
+		{ID: "application.tool-registry", DependsOn: []string{"application.terminal", "application.command-registry"}, Extension: tools},
+	}
+}
+
+func Load(t testing.TB, ctx context.Context, application *app.Resource, dependencies ...string) *extension.Set {
+	t.Helper()
+	set := extensiontest.Set(t, Entries(t, application, dependencies...)...)
+	if err := set.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return set
+}

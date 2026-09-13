@@ -24,7 +24,7 @@ func (p *fixedProvider) ChatCompletion(_ context.Context, request *provider.Chat
 }
 
 func TestRunWithEvalRequiresInitialInput(t *testing.T) {
-	ag := agent.NewAgent(agent.Config{
+	ag := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider: &fixedProvider{},
 		Model:    "test",
 	})
@@ -61,7 +61,7 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 	bus := eventbus.New[*aop.Event]()
 	var events []*aop.Event
 	bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
-	ag := agent.NewAgent(agent.Config{
+	ag := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider:  agentProvider,
 		Model:     "test",
 		Bus:       bus,

@@ -54,7 +54,7 @@ func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	var flows []Flow
 	for time.Now().Before(deadline) {
-		flows = hub.Store().Query(QueryOpts{})
+		flows = hub.store.Query(QueryOpts{})
 		if len(flows) > 0 {
 			break
 		}
@@ -70,14 +70,14 @@ func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := hub.Store().Get(id)
+	full := hub.store.Get(id)
 	if full == nil || full.Response == nil {
 		t.Fatal("hydrated flow missing response")
 	}
 	if got := string(full.Response.Body); got != body {
 		t.Fatalf("hydrated body length/content mismatch: got %d want %d", len(got), len(body))
 	}
-	wire := hub.Store().flowToProto(&flows[0])
+	wire := hub.store.flowToProto(&flows[0])
 	if got := string(wire.GetResponse().GetBody()); got != body {
 		t.Fatalf("wire body length/content mismatch: got %d want %d", len(got), len(body))
 	}
@@ -88,15 +88,15 @@ func TestLargeResponseBodyIsCappedOnDisk(t *testing.T) {
 	defer target.Close()
 	hub := startHub(t, true)
 	getThrough(t, hubClient(t, hub, "body-cap"), target.URL)
-	flows := waitForFlows(t, hub.Store(), 1)
+	flows := waitForFlows(t, hub.store, 1)
 	if len(flows) != 1 || flows[0].Response == nil {
 		t.Fatalf("captured flow missing response: %#v", flows)
 	}
-	stored := hub.Store().files[flows[0].ID][1]
+	stored := hub.store.files[flows[0].ID][1]
 	if stored < 0 || stored > maxBodyCaptureBytes {
 		t.Fatalf("stored bytes = %d", stored)
 	}
-	info, err := os.Stat(hub.Store().bodyPath(flows[0].ID, 1))
+	info, err := os.Stat(hub.store.bodyPath(flows[0].ID, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestCaptureFilterRunsBeforeStore(t *testing.T) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 	time.Sleep(100 * time.Millisecond)
-	if got := hub.Store().Count(); got != 0 {
+	if got := hub.store.Count(); got != 0 {
 		t.Fatalf("filtered flow count = %d, want 0", got)
 	}
 }
@@ -259,7 +259,7 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	hub := NewProxyHub(nil, store, "", true)
+	hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
 	hub.storage.BodyMaxBytes = 4
 	state := &captureState{
 		hub: hub,
@@ -300,7 +300,7 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			hub := NewProxyHub(nil, store, "", true)
+			hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
 			tc.setup(hub)
 			path := filepath.Join(dir, "body", tc.file)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -332,7 +332,7 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 // can route flows through hub.ingest in tests without starting the hub's own
 // listener (the test attaches the addon to its own proxy).
 func newCapturingHub(store *FlowStore) *ProxyHub {
-	return NewProxyHub(nil, store, "", true)
+	return NewProxyHub(nil, store, "", true, nil).ProxyHub
 }
 
 // startMITMProxy creates a MITM proxy with a captureAddon and returns its address.

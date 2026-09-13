@@ -345,7 +345,8 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		return nil
 	}
 
-	mux := aop.NewNamespaceMux()
+	mux := aop.NewNamespaceMux(ctx)
+	defer mux.Close(context.Background())
 	registrations := []struct {
 		prototype protobuf.Message
 		handler   aop.NamespaceHandler
@@ -357,12 +358,12 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		{prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
 	}
 	for _, registration := range registrations {
-		if err := mux.Register(registration.prototype, registration.handler); err != nil {
+		if err := mux.Register("application", registration.prototype, registration.handler); err != nil {
 			return fmt.Errorf("register application namespace: %w", err)
 		}
 	}
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, sendEnvelope aop.SendFunc) error {
-		handled, dispatchErr := mux.Dispatch(dispatchCtx, envelope, sendEnvelope)
+		handled, dispatchErr := mux.Dispatch(envelope, sendEnvelope)
 		if dispatchErr != nil {
 			fail(envelope.GetId(), "INVALID_PAYLOAD", dispatchErr)
 			return nil

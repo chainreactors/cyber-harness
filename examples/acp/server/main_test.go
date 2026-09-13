@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 	service, _, handler := newHeadlessHandler(store, nil, ingestor, "test-token")
-	t.Cleanup(service.Close)
+	t.Cleanup(func() {
+		if err := service.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	return httptest.NewServer(handler)
 }
 

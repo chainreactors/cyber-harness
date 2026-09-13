@@ -4,47 +4,24 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	agentprovider "github.com/chainreactors/aiscan/agent/provider"
 	configpkg "github.com/chainreactors/aiscan/core/config"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	probe "github.com/chainreactors/aiscan/pkg/probe"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	"google.golang.org/protobuf/proto"
 )
 
-type ConfigStore interface {
+// ConfigBackend owns configuration updates and runtime publication. The API
+// borrows this business interface and owns no profiles or staged resources.
+type ConfigBackend interface {
 	GetDistributeConfig(context.Context) (string, bool, *types.DistributeConfig, error)
-	PrepareDistributeConfig(context.Context, *types.DistributeConfig) (*PreparedConfig, error)
-	CommitDistributeConfig(context.Context, *PreparedConfig) error
-	DiscardDistributeConfig(*PreparedConfig)
+	SaveConfig(context.Context, *types.DistributeConfig) (*types.ConfigView, error)
+	ActivateConfig(context.Context, string) (*types.ConfigView, error)
 }
 
-type PreparedConfig struct {
-	Config      *types.DistributeConfig
-	RuntimePath string
-	TargetPath  string
-}
+type Config struct{ backend ConfigBackend }
 
-type ConfigOptions struct {
-	Store     ConfigStore
-	Build     func(context.Context, *PreparedConfig) (*apppkg.App, error)
-	Apply     func(*apppkg.App)
-	Broadcast func(*types.DistributeConfig)
-}
-
-type Config struct {
-	mu        sync.Mutex
-	store     ConfigStore
-	build     func(context.Context, *PreparedConfig) (*apppkg.App, error)
-	apply     func(*apppkg.App)
-	broadcast func(*types.DistributeConfig)
-}
-
-func NewConfig(options ConfigOptions) *Config {
-	return &Config{store: options.Store, build: options.Build, apply: options.Apply, broadcast: options.Broadcast}
-}
+func NewConfig(backend ConfigBackend) *Config { return &Config{backend: backend} }
 
 func (c *Config) GetConfig(ctx context.Context, _ *types.GetConfigRequest) (*types.GetConfigResponse, error) {
 	view, err := c.View(ctx)
@@ -58,7 +35,10 @@ func (c *Config) UpdateConfig(ctx context.Context, request *types.UpdateConfigRe
 	if request == nil || request.GetConfig() == nil {
 		return nil, Errorf(CodeInvalidArgument, "config is required")
 	}
-	view, err := c.Save(ctx, request.Config)
+	if c == nil || c.backend == nil {
+		return nil, Errorf(CodeFailedPrecondition, "config service is not configured")
+	}
+	view, err := c.backend.SaveConfig(ctx, request.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +49,10 @@ func (c *Config) ActivateProfile(ctx context.Context, request *types.ActivatePro
 	if request == nil {
 		return nil, Errorf(CodeInvalidArgument, "request is required")
 	}
-	view, err := c.Activate(ctx, request.ProfileId)
+	if c == nil || c.backend == nil {
+		return nil, Errorf(CodeFailedPrecondition, "config service is not configured")
+	}
+	view, err := c.backend.ActivateConfig(ctx, request.ProfileId)
 	if err != nil {
 		return nil, err
 	}
@@ -105,99 +88,21 @@ func (c *Config) TestConnection(ctx context.Context, request *types.TestConnecti
 }
 
 func (c *Config) View(ctx context.Context) (*types.ConfigView, error) {
-	if c == nil || c.store == nil {
+	if c == nil || c.backend == nil {
 		return nil, Errorf(CodeFailedPrecondition, "config store is not configured")
 	}
-	path, loaded, config, err := c.store.GetDistributeConfig(ctx)
+	path, loaded, config, err := c.backend.GetDistributeConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return ConfigView(config, path, loaded), nil
 }
 
-func (c *Config) Save(ctx context.Context, config *types.DistributeConfig) (*types.ConfigView, error) {
-	if c == nil || c.store == nil {
-		return nil, Errorf(CodeFailedPrecondition, "config store is not configured")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := ValidateLLMConfig(config.GetLlm()); err != nil {
-		return nil, NewError(CodeInvalidArgument, err)
-	}
-	prepared, err := c.store.PrepareDistributeConfig(ctx, config)
-	if err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			c.store.DiscardDistributeConfig(prepared)
-		}
-	}()
-	if prepared == nil || prepared.Config == nil {
-		return nil, fmt.Errorf("config store returned no prepared config")
-	}
-	if err := ValidateLLMConfig(prepared.Config.GetLlm()); err != nil {
-		return nil, NewError(CodeInvalidArgument, err)
-	}
-	var next *apppkg.App
-	if c.build != nil {
-		next, err = c.build(ctx, prepared)
-		if err != nil {
-			return nil, NewError(CodeFailedPrecondition, fmt.Errorf("reload aiscan runtime: %w", err))
-		}
-		if next == nil {
-			return nil, fmt.Errorf("reload aiscan runtime returned no app")
-		}
-	}
-	if err := c.store.CommitDistributeConfig(ctx, prepared); err != nil {
-		if next != nil {
-			next.Close()
-		}
-		return nil, err
-	}
-	committed = true
-	if next != nil && c.apply != nil {
-		c.apply(next)
-	}
-	if c.broadcast != nil {
-		c.broadcast(prepared.Config)
-	}
-	return c.View(ctx)
-}
-
-func (c *Config) Activate(ctx context.Context, id string) (*types.ConfigView, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, Errorf(CodeInvalidArgument, "LLM profile id is required")
-	}
-	stored, err := c.Distribute(ctx)
-	if err != nil {
-		return nil, err
-	}
-	found := false
-	for _, profile := range stored.GetLlm().GetProviders() {
-		if profile.GetId() == id {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return nil, Errorf(CodeNotFound, "LLM profile %q was not found", id)
-	}
-	next := proto.CloneOf(stored)
-	if next.Llm == nil {
-		next.Llm = &types.LLMConfig{}
-	}
-	next.Llm.ActiveProfile = id
-	return c.Save(ctx, next)
-}
-
 func (c *Config) Distribute(ctx context.Context) (*types.DistributeConfig, error) {
-	if c == nil || c.store == nil {
+	if c == nil || c.backend == nil {
 		return nil, Errorf(CodeFailedPrecondition, "config store is not configured")
 	}
-	_, _, config, err := c.store.GetDistributeConfig(ctx)
+	_, _, config, err := c.backend.GetDistributeConfig(ctx)
 	return config, err
 }
 

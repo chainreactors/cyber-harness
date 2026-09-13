@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	filesprofile "github.com/chainreactors/aiscan/pkg/profile/files"
+	"github.com/chainreactors/aiscan/tools/files"
 )
 
 func TestParseOptionsRequiresServer(t *testing.T) {
@@ -24,6 +26,26 @@ func TestParseOptionsRequiresServer(t *testing.T) {
 	}
 }
 
+func TestDiscoverSelectedExtensionsWithoutServer(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(t.Context(), []string{"--discover", "--workdir", t.TempDir(), "--read-only"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var result struct{ Installed, Tools []string }
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Installed) != 1 || result.Installed[0] != "files" || len(result.Tools) != 3 {
+		t.Fatalf("discovery: %s", stdout.String())
+	}
+}
+
+func TestRunnerRejectsUnselectedExtensionOptions(t *testing.T) {
+	if err := run(t.Context(), []string{"--discover", "--workdir", t.TempDir(), "--skills-dir", t.TempDir()}, io.Discard, io.Discard); err == nil {
+		t.Fatal("ignored unselected skills configuration")
+	}
+}
+
 func TestRunPrintsVersionWithoutServer(t *testing.T) {
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"--version"}, &stdout, io.Discard); err != nil {
@@ -34,18 +56,21 @@ func TestRunPrintsVersionWithoutServer(t *testing.T) {
 	}
 }
 
-func TestNewApplicationRegistersRunnerTools(t *testing.T) {
-	application, err := newApplication(context.Background(), new(cfg.Option), telemetry.NopLogger())
+func TestFilesProfileRegistersFileTools(t *testing.T) {
+	profile, err := filesprofile.New(files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer application.Close()
-	if err := application.WaitEngines(context.Background()); err != nil {
+	defer profile.Close(context.Background())
+	if err := profile.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"bash", "ls"} {
-		if _, ok := application.Commands.GetTool(name); !ok {
-			t.Fatalf("runner tool %q is not registered", name)
-		}
+	executor, err := profile.Executor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions := executor.ToolDefinitions()
+	if len(definitions) != 4 || definitions[0].Name != "read" || definitions[3].Name != "write" {
+		t.Fatalf("runner tools = %+v", definitions)
 	}
 }

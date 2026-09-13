@@ -19,9 +19,10 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/eventbus"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -48,8 +49,8 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	runtime        *runtimepkg.AgentRuntime
-	session        *runtimepkg.Session
+	runtime        *sessionext.Manager
+	session        *sessionext.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -75,7 +76,7 @@ type AgentConsole struct {
 	cancel               context.CancelFunc
 	submitCtx            context.Context
 	submitCancel         context.CancelFunc
-	unsubscribe          func()
+	subscription         *eventbus.Subscription[*aop.Event]
 	closeOnce            sync.Once
 	previews             map[string]string
 	compactContextTokens int
@@ -83,7 +84,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *runtimepkg.AgentRuntime, session *runtimepkg.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *sessionext.Manager, session *sessionext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}
@@ -154,7 +155,7 @@ func newAgentConsole(ctx context.Context, rt *runtimepkg.AgentRuntime, session *
 		return agentComposerPrompt(output, repl.readlineBridge)
 	}
 	repl.workMu.Lock()
-	repl.unsubscribe = rt.Subscribe(repl.handleEvent)
+	repl.subscription = rt.Subscribe(repl.handleEvent)
 	repl.workMu.Unlock()
 	repl.configureCompletionKey()
 	repl.configureInterruptKey()

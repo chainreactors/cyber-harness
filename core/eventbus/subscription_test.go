@@ -73,6 +73,12 @@ func TestSlowSubscriptionIsolatedAndBudgetIncludesHandler(t *testing.T) {
 			b.Emit("dd")
 			close(gate)
 			waitSubscription(t, s.Done())
+			if err := s.Close(context.Background()); err != nil {
+				t.Fatalf("overflow retained completed subscription: %v", err)
+			}
+			if !errors.Is(s.Err(), ErrOverflow) {
+				t.Fatalf("Close lost overflow error: %v", s.Err())
+			}
 			if got != 4 || drops != 2 {
 				t.Fatalf("healthy=%d drops=%d", got, drops)
 			}
@@ -92,8 +98,35 @@ func TestSubscriptionPanicStopsOnlyThatSubscriber(t *testing.T) {
 	if err := <-reported; !strings.Contains(err.Error(), "broken") {
 		t.Fatal(err)
 	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("panic retained completed subscription: %v", err)
+	}
+	if s.Err() == nil || !strings.Contains(s.Err().Error(), "broken") {
+		t.Fatalf("Close lost panic error: %v", s.Err())
+	}
 	s.Cancel()
 	s.Cancel()
+}
+
+func TestCompletedSubscriptionPreservesProcessingErrorSeparately(t *testing.T) {
+	b := New[int]()
+	want := errors.New("write failed")
+	s, err := b.SubscribeAsync(SubscribeOptions[int]{}, func(int) error { return want })
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Emit(1)
+	waitSubscription(t, s.Done())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 2 {
+		if err := s.Close(ctx); err != nil {
+			t.Fatalf("completed Close = %v", err)
+		}
+		if !errors.Is(s.Err(), want) {
+			t.Fatalf("processing error = %v", s.Err())
+		}
+	}
 }
 
 func TestSubscriptionConcurrentCancelAndEmit(t *testing.T) {
@@ -116,6 +149,46 @@ func TestSubscriptionConcurrentCancelAndEmit(t *testing.T) {
 		s.Cancel()
 		wg.Wait()
 		waitSubscription(t, s.Done())
+	}
+}
+
+func TestFlushWaitsForAdmittedWorkWithoutStoppingAdmission(t *testing.T) {
+	b := New[int]()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	var got []int
+	s, err := b.SubscribeAsync(SubscribeOptions[int]{Buffer: 4}, func(value int) error {
+		once.Do(func() { close(entered) })
+		<-release
+		got = append(got, value)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Emit(1)
+	<-entered
+	flushed := make(chan error, 1)
+	go func() { flushed <- s.Flush(t.Context()) }()
+	select {
+	case err := <-flushed:
+		t.Fatalf("Flush returned before admitted work completed: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-flushed; err != nil {
+		t.Fatal(err)
+	}
+	b.Emit(2)
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("events after Flush = %v", got)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

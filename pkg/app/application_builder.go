@@ -64,7 +64,6 @@ func MergeOptionExtras(rc Config, option *cfg.Option) Config {
 	rc.Tools.MitmCapture = cloneBool(option.Mitm)
 	rc.Tools.TrafficStorage = option.TrafficOptions
 	rc.CLISkillPaths = skillPathsFromOptions(option)
-	rc.RecordFile = option.OutputFile
 	return rc
 }
 
@@ -101,7 +100,6 @@ func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Lo
 		},
 		Logger:        logger,
 		CLISkillPaths: skillPathsFromOptions(option),
-		RecordFile:    option.OutputFile,
 	}
 }
 

@@ -9,12 +9,14 @@ import (
 	"sync"
 
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/record"
 )
 
 type Extension struct {
 	mu         sync.Mutex
 	workDir    string
+	registry   *toolset.Registry
 	tool       *record.Tool
 	registered bool
 	closed     bool
@@ -22,19 +24,19 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(workDir string) (*Extension, error) {
-	if strings.TrimSpace(workDir) == "" {
+func New(registry *toolset.Registry, workDir string) (*Extension, error) {
+	if registry == nil || strings.TrimSpace(workDir) == "" {
 		return nil, fmt.Errorf("record extension requires a working directory")
 	}
-	return &Extension{workDir: workDir}, nil
+	return &Extension{registry: registry, workDir: workDir}, nil
 }
 
-func (m *Extension) Load(scope *extension.Context) error {
+func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return extension.ErrToolsUnavailable
+		return toolset.ErrUnavailable
 	}
 	if m.registered {
 		return nil
@@ -46,7 +48,7 @@ func (m *Extension) Load(scope *extension.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := scope.RegisterTools(recorder); err != nil {
+	if err := m.registry.Register(scope, recorder); err != nil {
 		recorder.Close()
 		return fmt.Errorf("register record tool: %w", err)
 	}
@@ -57,14 +59,20 @@ func (m *Extension) Load(scope *extension.Context) error {
 
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.closed {
+		m.mu.Unlock()
 		return nil
 	}
-	if m.tool != nil {
-		m.tool.Close()
-		m.tool = nil
+	value := m.tool
+	m.mu.Unlock()
+	if value != nil {
+		if err := value.CloseContext(ctx); err != nil {
+			return err
+		}
 	}
+	m.mu.Lock()
+	m.tool = nil
 	m.closed = true
+	m.mu.Unlock()
 	return nil
 }

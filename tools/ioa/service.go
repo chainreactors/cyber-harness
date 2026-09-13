@@ -2,7 +2,6 @@ package ioa
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -24,34 +23,36 @@ type Config struct {
 	Identity         protocols.Identity
 }
 
-// Extension owns one composition's IOA client, node registration retry, and command
-// bindings. It is an optional concrete instance; the Agent runtime only borrows
-// its typed client APIs for handoff and inbox delivery.
-type Service struct {
-	mu       sync.RWMutex
-	config   Config
-	commands *commands.Registry
-	logger   telemetry.Logger
+// Runtime exposes the live IOA client APIs used by Agent sessions. It has no
+// lifecycle operations; Resource is the sole owner of startup and shutdown.
+type Runtime struct {
+	mu     sync.RWMutex
+	config Config
+	logger telemetry.Logger
 
-	client     *ioaclient.Client
-	stream     ioaclient.StreamAPI
-	cancel     context.CancelFunc
-	retry      chan struct{}
-	loaded     bool
-	closed     bool
-	attempted  bool
-	registered bool
-	binding    *spaceBinding
+	client    *ioaclient.Client
+	stream    ioaclient.StreamAPI
+	cancel    context.CancelFunc
+	retry     chan struct{}
+	loaded    bool
+	closed    bool
+	attempted bool
+	binding   *spaceBinding
 }
 
-// New constructs an inert instance. Network registration and command
-// publication begin in Load.
-func New(config Config, commands *commands.Registry, logger telemetry.Logger) *Service {
+// Resource owns one Runtime's client connection and registration retry. The
+// IOA extension retains this value and publishes only Runtime.
+type Resource struct {
+	*Runtime
+}
+
+// New constructs an inert instance. Network work begins in Start.
+func New(config Config, logger telemetry.Logger) *Resource {
 	config.NodeMeta = cloneNodeMeta(config.NodeMeta)
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Service{config: config, commands: commands, logger: logger, binding: &spaceBinding{}}
+	return &Resource{Runtime: &Runtime{config: config, logger: logger, binding: &spaceBinding{}}}
 }
 
 func cloneNodeMeta(source map[string]any) map[string]any {
@@ -67,10 +68,11 @@ func cloneNodeMeta(source map[string]any) map[string]any {
 
 // Load binds and registers the configured client. ctx bounds initial setup;
 // registration retries use the instance lifetime and stop in Close.
-func (m *Service) Start(ctx context.Context) error {
-	if m == nil {
+func (r *Resource) Start(ctx context.Context) error {
+	if r == nil || r.Runtime == nil {
 		return fmt.Errorf("IOA instance is required")
 	}
+	m := r.Runtime
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.attempted && !m.loaded {
@@ -86,9 +88,6 @@ func (m *Service) Start(ctx context.Context) error {
 		return err
 	}
 	m.attempted = true
-	if m.config.RegisterCommands && m.commands == nil {
-		return fmt.Errorf("IOA command registry is required")
-	}
 	client, err := newIOAClient(m.config)
 	if err != nil {
 		return err
@@ -104,14 +103,6 @@ func (m *Service) Start(ctx context.Context) error {
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
 	m.client, m.stream, m.cancel = client, client, cancel
-	if m.config.RegisterCommands && m.commands != nil {
-		root := &rootCommand{client: client, binding: m.binding, nodeName: m.config.NodeName, meta: m.config.NodeMeta}
-		if err := m.commands.Register("ioa", "ioa", root.commands()...); err != nil {
-			cancel()
-			return err
-		}
-		m.registered = true
-	}
 	if m.config.AutoRegister {
 		if err := client.EnsureRegistered(ctx, m.config.NodeName, "", m.config.NodeMeta); err != nil {
 			if ctx.Err() != nil {
@@ -133,7 +124,7 @@ func (m *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-func (m *Service) retryRegistration(ctx context.Context) {
+func (m *Runtime) retryRegistration(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
 		delay := registrationRetryDelay(attempt)
 		select {
@@ -159,7 +150,7 @@ func registrationRetryDelay(attempt int) time.Duration {
 	return time.Second << uint(attempt)
 }
 
-func (m *Service) configureSpace(ctx context.Context) {
+func (m *Runtime) configureSpace(ctx context.Context) {
 	if m.config.Space == "" || m.client == nil || !m.client.Bound() {
 		return
 	}
@@ -177,7 +168,7 @@ func newIOAClient(config Config) (*ioaclient.Client, error) {
 	return ioaclient.NewClient(config.URL, config.NodeID)
 }
 
-func (m *Service) Client() *ioaclient.Client {
+func (m *Runtime) Client() *ioaclient.Client {
 	if m == nil {
 		return nil
 	}
@@ -186,7 +177,7 @@ func (m *Service) Client() *ioaclient.Client {
 	return m.client
 }
 
-func (m *Service) Stream() ioaclient.StreamAPI {
+func (m *Runtime) Stream() ioaclient.StreamAPI {
 	if m == nil {
 		return nil
 	}
@@ -195,11 +186,26 @@ func (m *Service) Stream() ioaclient.StreamAPI {
 	return m.stream
 }
 
-// Close cancels registration work and waits for the owned retry to finish.
-func (m *Service) Close(ctx context.Context) error {
-	if m == nil {
+func (r *Resource) Commands() []commands.Command {
+	if r == nil || r.Runtime == nil {
 		return nil
 	}
+	m := r.Runtime
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.client == nil || m.closed {
+		return nil
+	}
+	root := &rootCommand{client: m.client, binding: m.binding, nodeName: m.config.NodeName, meta: m.config.NodeMeta}
+	return root.commands()
+}
+
+// Close cancels registration work and waits for the owned retry to finish.
+func (r *Resource) Close(ctx context.Context) error {
+	if r == nil || r.Runtime == nil {
+		return nil
+	}
+	m := r.Runtime
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -211,24 +217,19 @@ func (m *Service) Close(ctx context.Context) error {
 		}
 	}
 	retry := m.retry
-	registered := m.registered
 	m.mu.Unlock()
-	var unregisterErr error
-	if registered {
-		unregisterErr = m.commands.UnregisterOwner(ctx, "ioa")
-	}
 	if retry == nil {
-		return unregisterErr
+		return nil
 	}
 	select {
 	case <-retry:
-		return unregisterErr
+		return nil
 	default:
 	}
 	select {
 	case <-retry:
-		return unregisterErr
+		return nil
 	case <-ctx.Done():
-		return errors.Join(unregisterErr, ctx.Err())
+		return ctx.Err()
 	}
 }

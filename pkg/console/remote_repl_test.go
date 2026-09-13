@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	runtimepkg "github.com/chainreactors/aiscan/pkg/runtime"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -33,14 +33,11 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
-	applicationSet := extensiontest.Set(t, extension.Entry{ID: "application", Extension: application})
-	if err := applicationSet.Load(ctx); err != nil {
-		t.Fatal(err)
-	}
+	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := runtimepkg.New(application, nil, option, telemetry.NopLogger(), runtimepkg.RuntimeConfig{
+	rt, err := sessionext.New(application.App, nil, option, telemetry.NopLogger(), sessionext.Config{
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -54,7 +51,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	repl, err := StartPersistent(rt, option)
+	repl, err := StartPersistent(rt.Manager, option)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +167,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		info, ok := mgr.Get(initial.ID)
 		return !ok || info.State != pty.StateRunning
 	})
-	session, err := rt.OpenSession(ctx, runtimepkg.SessionOptions{ID: "after-console"})
+	session, err := rt.OpenSession(ctx, sessionext.SessionOptions{ID: "after-console"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,14 +180,11 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, nil, nil)
+	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
-	applicationSet := extensiontest.Set(t, extension.Entry{ID: "application", Extension: application})
-	if err := applicationSet.Load(ctx); err != nil {
-		t.Fatal(err)
-	}
+	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := runtimepkg.New(application, nil, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), runtimepkg.RuntimeConfig{
+	rt, err := sessionext.New(application.App, nil, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), sessionext.Config{
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})

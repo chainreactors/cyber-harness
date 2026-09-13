@@ -14,7 +14,7 @@ import (
 
 func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	f, err := New(Config{Directory: dir, MaxBytes: 4})
+	f, err := New(Config{Directory: dir, MaxBytes: 4}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 	if err != nil || !bytes.Equal(again, want) {
 		t.Fatalf("read bytes are not owned: %v, %v", again, err)
 	}
-	readonly, err := New(Config{Directory: dir, ReadOnly: true})
+	readonly, err := New(Config{Directory: dir, ReadOnly: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 
 func TestFSFailedLoadAndCloseAreFinal(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")
-	f, err := New(Config{Directory: dir})
+	f, err := New(Config{Directory: dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestFSFailedLoadAndCloseAreFinal(t *testing.T) {
 func TestFSCloseTimeoutRetainsAdmittedRoot(t *testing.T) {
 	dir := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
-		f, err := New(Config{Directory: dir})
+		f, err := New(Config{Directory: dir}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestFSCloseTimeoutRetainsAdmittedRoot(t *testing.T) {
 }
 
 func TestFSCanceledInitializationDoesNotOwnLifetime(t *testing.T) {
-	f, err := New(Config{Directory: t.TempDir()})
+	f, err := New(Config{Directory: t.TempDir()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

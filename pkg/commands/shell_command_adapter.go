@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/aiscan/core/operation"
 )
 
 const (
@@ -51,7 +51,7 @@ type shellCommandAdapterFrame struct {
 }
 
 type shellCommandAdapter struct {
-	registry   *CommandRegistry
+	registry   *Registry
 	executable string
 	runtimeDir string
 	endpoint   string
@@ -68,7 +68,7 @@ type shellCommandAdapter struct {
 	cleanupOnce  sync.Once
 }
 
-func newShellCommandAdapter(registry *CommandRegistry) (*shellCommandAdapter, error) {
+func newShellCommandAdapter(registry *Registry) (*shellCommandAdapter, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("shell command adapter requires a registry")
 	}
@@ -181,7 +181,7 @@ func (b *shellCommandAdapter) handle(parent context.Context, conn net.Conn) {
 		return
 	}
 	command, ok := b.registry.Get(header.Command)
-	if !ok || command.Run == nil {
+	if !ok {
 		message := "unknown in-memory command: " + header.Command
 		_, _ = io.WriteString(&shellCommandAdapterStreamWriter{writer: writer, frameType: "stderr"}, message+"\n")
 		_ = writer.write(shellCommandAdapterFrame{Type: "final", ExitCode: 127})
@@ -208,11 +208,9 @@ func (b *shellCommandAdapter) handle(parent context.Context, conn net.Conn) {
 	stdout := &shellCommandAdapterStreamWriter{writer: writer, frameType: "stdout"}
 	stderr := &shellCommandAdapterStreamWriter{writer: writer, frameType: "stderr"}
 	execution := newExecution(nil, command.Name, normalizeNoColor(command.Name, header.Args), header.Dir, nil)
-	execution.ID = coretool.InvocationFromContext(ctx).CallID
-	execution.StartedAt = time.Now()
+	execution.ID = operation.InvocationFromContext(ctx).CallID
 	execution.setIO(stdinReader, stdout, stderr)
-	_, runErr := command.Run(ctx, execution)
-	execution.EndedAt = time.Now()
+	_, runErr := b.registry.Execute(ctx, command.Name, execution)
 	_ = stdinReader.Close()
 	cancel()
 

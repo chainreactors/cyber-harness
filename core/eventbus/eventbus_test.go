@@ -36,7 +36,7 @@ func TestUnsubscribe(t *testing.T) {
 	var count int
 	unsub := bus.Subscribe(func(int) { count++ })
 	bus.Emit(1)
-	unsub()
+	unsub.Cancel()
 	bus.Emit(2)
 	if count != 1 {
 		t.Fatalf("expected 1 call after unsubscribe, got %d", count)
@@ -50,7 +50,7 @@ func TestUnsubscribeMiddle(t *testing.T) {
 	unsub := bus.Subscribe(func(int) { b++ })
 	bus.Subscribe(func(int) { c++ })
 	bus.Emit(1)
-	unsub()
+	unsub.Cancel()
 	bus.Emit(2)
 	if a != 2 || b != 1 || c != 2 {
 		t.Fatalf("expected a=2 b=1 c=2, got a=%d b=%d c=%d", a, b, c)
@@ -84,6 +84,6 @@ func TestConcurrentEmit(t *testing.T) {
 func TestDoubleUnsubscribe(t *testing.T) {
 	bus := New[int]()
 	unsub := bus.Subscribe(func(int) {})
-	unsub()
-	unsub()
+	unsub.Cancel()
+	unsub.Cancel()
 }

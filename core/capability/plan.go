@@ -1,18 +1,9 @@
 package capability
 
-// A Plan is the set of capabilities one binary should actually assemble, so
-// "which groups does this binary build" has exactly one answer.
-
 type Options struct {
-	// Groups limits the plan to these assembly groups. Nil means every linked
-	// group. Entry points use this to describe their runtime surface without
-	// keeping private factory lists.
-	Groups []string
-	// OptionalTools is --tools / config tools. Empty selects the defaults.
+	Groups        []string
 	OptionalTools []string
-	// Extra force-enables capabilities that become available at runtime, such
-	// as ioa once a client has connected.
-	Extra []ID
+	Extra         []ID
 }
 
 type Plan struct {
@@ -20,56 +11,49 @@ type Plan struct {
 	groups  []string
 }
 
-// Select resolves the registered descriptors against the caller's options.
-// A capability that is not Optional is always part of the plan: it is linked,
-// so it is meant to be there.
-func Select(o Options) Plan {
-	groups := map[string]bool{}
-	for _, group := range o.Groups {
+func (c Catalog) Select(options Options) Plan {
+	groups := make(map[string]bool)
+	for _, group := range options.Groups {
 		groups[group] = true
 	}
-	chosen := map[string]bool{}
-	for _, name := range o.OptionalTools {
+	chosen := make(map[string]bool)
+	for _, name := range options.OptionalTools {
 		chosen[name] = true
 	}
-	extra := map[ID]bool{}
-	for _, id := range o.Extra {
+	extra := make(map[ID]bool)
+	for _, id := range options.Extra {
 		extra[id] = true
 	}
-
-	p := Plan{enabled: map[ID]bool{}}
-	seen := map[string]bool{}
-	for _, d := range All() {
-		if len(groups) > 0 && !groups[d.Group] {
+	plan := Plan{enabled: make(map[ID]bool)}
+	seen := make(map[string]bool)
+	for _, descriptor := range c.order {
+		if len(groups) > 0 && !groups[descriptor.Group] {
 			continue
 		}
 		switch {
-		case extra[d.ID]:
-		case !d.Optional:
+		case extra[descriptor.ID]:
+		case !descriptor.Optional:
 		case len(chosen) > 0:
-			if !chosen[string(d.ID)] && !chosen[d.Group] {
+			if !chosen[string(descriptor.ID)] && !chosen[descriptor.Group] {
 				continue
 			}
-		case !d.Default:
+		case !descriptor.Default:
 			continue
 		}
-		p.enabled[d.ID] = true
-		if d.Group != "" && !seen[d.Group] {
-			seen[d.Group] = true
-			p.groups = append(p.groups, d.Group)
+		plan.enabled[descriptor.ID] = true
+		if descriptor.Group != "" && !seen[descriptor.Group] {
+			seen[descriptor.Group] = true
+			plan.groups = append(plan.groups, descriptor.Group)
 		}
 	}
-	return p
+	return plan
 }
 
-func (p Plan) Has(id ID) bool { return p.enabled[id] }
-
-// Groups lists the factory groups to build, in registration order.
+func (p Plan) Has(id ID) bool   { return p.enabled[id] }
 func (p Plan) Groups() []string { return append([]string(nil), p.groups...) }
-
 func (p Plan) HasGroup(group string) bool {
-	for _, g := range p.groups {
-		if g == group {
+	for _, current := range p.groups {
+		if current == group {
 			return true
 		}
 	}

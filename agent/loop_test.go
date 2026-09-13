@@ -13,27 +13,28 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/agent/tmux"
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
+	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "first", output: "first ok"})
-	tools.RegisterTool(&recordingTool{name: "second", output: "second ok"})
+	registry := hooks.New()
+	toolhooks.Before.On(registry, "test", func(_ context.Context, call toolhooks.CallEvent) (toolhooks.Admission, error) {
+		if call.Call.Name == "first" {
+			panic("before boom")
+		}
+		return toolhooks.Admission{}, nil
+	})
+	tools := extensiontest.ToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
 	var logs bytes.Buffer
 	cfg := Config{
 		Tools:  tools,
 		Logger: telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logs}),
-		BeforeToolCall: func(_ context.Context, call BeforeToolCallContext) (*BeforeToolCallResult, error) {
-			if call.ToolCall.Name == "first" {
-				panic("before boom")
-			}
-			return nil, nil
-		},
 	}.init()
 	firstArgs, _ := aop.JSONValue(map[string]any{})
 	secondArgs, _ := aop.JSONValue(map[string]any{})
@@ -54,20 +55,19 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 	}
 	first := provider.MessageToolResult(batch.messages[0])
 	second := provider.MessageToolResult(batch.messages[1])
-	if first == nil || !first.IsError || !strings.Contains(tool.ResultText(first), "call-first") {
+	if first == nil || !first.IsError || !strings.Contains(tool.ResultText(first), "operation denied") {
 		t.Fatalf("first result = %+v", first)
 	}
 	if second == nil || second.IsError || tool.ResultText(second) != "second ok" {
 		t.Fatalf("second result = %+v", second)
 	}
-	if got := logs.String(); !strings.Contains(got, "before boom") || !strings.Contains(got, "call-first") {
+	if got := logs.String(); strings.Contains(got, "before boom") || !strings.Contains(got, "handler panicked") {
 		t.Fatalf("panic log = %s", got)
 	}
 }
 
 func TestToolResultEventNormalizesInvalidUTF8(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(invalidUTF8Tool{})
+	tools := newTestTools(t, invalidUTF8Tool{})
 	var emitted *aop.Event
 	cfg := Config{
 		Tools: tools,
@@ -121,8 +121,7 @@ func (invalidUTF8Tool) Execute(context.Context, string) (*tool.Result, error) {
 }
 
 func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -141,7 +140,7 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 	}
 
 	var events []string
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -171,14 +170,14 @@ func TestRunEmitsTurnEndAfterToolResults(t *testing.T) {
 }
 
 func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "one")),
 			chatResponse(NewTextMessage("assistant", "two")),
 		},
 	}
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -205,8 +204,7 @@ func TestTransformContextAppliesOnlyToProviderRequest(t *testing.T) {
 }
 
 func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -224,7 +222,7 @@ func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
 		},
 	}
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -242,7 +240,7 @@ func TestMaxTurnsStopsBeforeNextModelCall(t *testing.T) {
 }
 
 func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
 			roleDelta("assistant"),
@@ -253,7 +251,7 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 	}
 	var updates int
 	var contentDeltas []string
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -287,7 +285,7 @@ func TestStreamingProviderEmitsMessageUpdates(t *testing.T) {
 }
 
 func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
 			roleDelta("assistant"),
@@ -296,7 +294,7 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 		},
 	}
 	var updateUsage *aop.TokenUsage
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -324,7 +322,7 @@ func TestStreamingMessageUpdateCarriesUsage(t *testing.T) {
 }
 
 func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		streamEvents: []ChatCompletionStreamEvent{
 			roleDelta("assistant"),
@@ -334,7 +332,7 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 		},
 	}
 	var sawUpdate bool
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -359,9 +357,8 @@ func TestStatefulAgentTracksStreamingMessage(t *testing.T) {
 }
 
 func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "ok"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{
 		streamEventBatches: [][]ChatCompletionStreamEvent{
 			{
@@ -377,7 +374,7 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 			},
 		},
 	}
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -395,11 +392,20 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 }
 
 func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	beforeCalled := false
 	afterCalled := false
+	registry := hooks.New()
+	tools = extensiontest.ToolsWithHooks(t, registry, echo)
+	toolhooks.Before.On(registry, "test", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
+		beforeCalled = true
+		return toolhooks.Admission{}, nil
+	})
+	toolhooks.After.On(registry, "test", func(context.Context, toolhooks.ResultEvent) (struct{}, error) {
+		afterCalled = true
+		return struct{}{}, nil
+	})
 	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
 		{Choices: []Choice{{
 			Message: ChatMessage{
@@ -414,18 +420,10 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 		chatResponse(NewTextMessage("assistant", "recovered")),
 	}}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
-			beforeCalled = true
-			return nil, nil
-		},
-		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
-			afterCalled = true
-			return nil, nil
-		},
 	}).Run(context.Background(), TextInput("use a tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -469,9 +467,8 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 }
 
 func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
 		{
 			roleDelta("assistant"),
@@ -487,7 +484,7 @@ func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
 		},
 	}}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -521,9 +518,8 @@ func TestStreamingOutputLimitToolCallPreservesFinishReason(t *testing.T) {
 }
 
 func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{streamEventBatches: [][]ChatCompletionStreamEvent{
 		{
 			roleDelta("assistant"),
@@ -539,7 +535,7 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 		},
 	}}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm, Tools: tools, Model: "test", Stream: true,
 	}).Run(context.Background(), TextInput("use a streaming tool"))
 	if err != nil {
@@ -579,10 +575,9 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 	}
 }
 
-func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
-	tools := commands.NewRegistry()
+func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	echo := &recordingTool{name: "echo", output: "raw"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -599,24 +594,25 @@ func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 		},
 	}
 	rewritten := "rewritten result"
-	isError := false
+	registry := hooks.New()
+	tools = extensiontest.ToolsWithHooks(t, registry, echo)
+	toolhooks.After.On(registry, "test", func(_ context.Context, event toolhooks.ResultEvent) (struct{}, error) {
+		event.Result.Output = []*aop.Content{aop.Text(rewritten)}
+		event.Result.IsError = false
+		event.Result.Terminate = true
+		return struct{}{}, nil
+	})
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
-		BeforeToolCall: func(context.Context, BeforeToolCallContext) (*BeforeToolCallResult, error) {
-			return &BeforeToolCallResult{Block: true, Reason: "blocked by test"}, nil
-		},
-		AfterToolCall: func(context.Context, AfterToolCallContext) (*AfterToolCallResult, error) {
-			return &AfterToolCallResult{Result: &rewritten, IsError: &isError, Flow: ToolFlowTerminate}, nil
-		},
 	})).Run(context.Background(), TextInput("use tool"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if got := echo.callsSnapshot(); len(got) != 0 {
-		t.Fatalf("tool calls = %#v, want blocked", got)
+	if got := echo.callsSnapshot(); len(got) != 1 {
+		t.Fatalf("tool calls = %#v, want one", got)
 	}
 	if len(llm.requestsSnapshot()) != 1 {
 		t.Fatalf("provider calls = %d, want 1", len(llm.requestsSnapshot()))
@@ -627,8 +623,7 @@ func TestToolHooksCanBlockRewriteAndTerminate(t *testing.T) {
 }
 
 func TestFinishToolTerminatesLoop(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(NewFinishTool())
+	tools := newTestTools(t, NewFinishTool())
 
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -642,7 +637,7 @@ func TestFinishToolTerminatesLoop(t *testing.T) {
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -657,7 +652,7 @@ func TestFinishToolTerminatesLoop(t *testing.T) {
 }
 
 func TestTokenBudgetWarning(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
@@ -668,7 +663,7 @@ func TestTokenBudgetWarning(t *testing.T) {
 	}
 
 	var sawWarning bool
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:    llm,
 		Tools:       tools,
 		Model:       "test",
@@ -692,7 +687,6 @@ func TestTokenBudgetWarning(t *testing.T) {
 }
 
 func TestTokenBudgetExceeded(t *testing.T) {
-	tools := commands.NewRegistry()
 	turn := 0
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
@@ -716,9 +710,9 @@ func TestTokenBudgetExceeded(t *testing.T) {
 			}, nil
 		},
 	}
-	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "ok"})
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:    llm,
 		Tools:       tools,
 		Model:       "test",
@@ -736,9 +730,8 @@ func TestTokenBudgetExceeded(t *testing.T) {
 }
 
 func TestBudgetExhaustionDoesNotKeepUnpairedToolCall(t *testing.T) {
-	tools := commands.NewRegistry()
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools.RegisterTool(echo)
+	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{responses: []*ChatCompletionResponse{{
 		Choices: []Choice{{Message: ChatMessage{
 			Role: "assistant",
@@ -749,7 +742,7 @@ func TestBudgetExhaustionDoesNotKeepUnpairedToolCall(t *testing.T) {
 		Usage: provider.TokenUsage(0, 0, 1000, 0, 0),
 	}}}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm, Tools: tools, Model: "test", TokenBudget: 1000,
 	}).Run(context.Background(), TextInput("use a tool"))
 	if err == nil || result == nil || result.Stop != StopReasonBudget {
@@ -774,7 +767,7 @@ func TestTruncateResultIncludesSize(t *testing.T) {
 }
 
 func TestResultIncludesTotalUsage(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
@@ -784,7 +777,7 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 		},
 	}
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -798,8 +791,7 @@ func TestResultIncludesTotalUsage(t *testing.T) {
 }
 
 func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "ok"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "ok"})
 
 	turn := 0
 	llm := &callbackProvider{
@@ -824,7 +816,7 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 		},
 	}
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -854,7 +846,7 @@ func TestResultIncludesPerTurnUsageAndContextTokens(t *testing.T) {
 }
 
 func TestTurnEndEventCarriesUsage(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &callbackProvider{
 		fn: func(_ context.Context, req *ChatCompletionRequest) (*ChatCompletionResponse, error) {
 			return &ChatCompletionResponse{
@@ -865,7 +857,7 @@ func TestTurnEndEventCarriesUsage(t *testing.T) {
 	}
 
 	var turnEndUsage *aop.TokenUsage
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
@@ -898,7 +890,7 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 		},
 	}
 
-	a := NewAgent(Config{
+	a := NewAgent(Config{Loop: StandardLoop{},
 		Provider:   llm,
 		Model:      "test",
 		MaxRetries: 0,
@@ -932,7 +924,7 @@ func TestSanitizeMessagesFiltersStaleEmptyAssistant(t *testing.T) {
 // --- Inbox integration tests ---
 
 func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "ack")),
@@ -942,7 +934,7 @@ func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
 	ib.Push(inbox.NewMessage(inbox.OriginPeer, "user", "[peer] hello"))
 	ib.Push(inbox.NewMessage(inbox.OriginPeer, "user", "[peer] status?"))
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        tools,
 		Model:        "test",
@@ -979,14 +971,14 @@ func TestInboxDrainedBeforeFirstTurnLLMCall(t *testing.T) {
 }
 
 func TestInboxClosedDoesNotBlock(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "done")),
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        tools,
 		Model:        "test",
@@ -1001,8 +993,7 @@ func TestInboxClosedDoesNotBlock(t *testing.T) {
 }
 
 func TestInboxDrainedBetweenTurns(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 
 	scripted := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
@@ -1025,7 +1016,7 @@ func TestInboxDrainedBetweenTurns(t *testing.T) {
 		push:  inbox.NewMessage(inbox.OriginPeer, "user", "[peer] watch out for example.com"),
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     pushing,
 		Tools:        tools,
 		Model:        "test",
@@ -1065,7 +1056,7 @@ func TestInboxDrainedBetweenTurns(t *testing.T) {
 }
 
 func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
-	tools := commands.NewRegistry()
+	tools := newTestTools(t)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(NewTextMessage("assistant", "waiting")),
@@ -1081,7 +1072,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 		ib.Push(inbox.NewMessage(inbox.OriginSession, "user", "<session_completion>scan done</session_completion>"))
 	}()
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        tools,
 		Model:        "test",
@@ -1113,8 +1104,7 @@ func TestRunWaitsWhenKeepAliveIsTrue(t *testing.T) {
 // --- Session completion tests ---
 
 func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "echo", output: "tool output"})
+	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 
 	ib := inbox.NewBuffered(8)
 	sessMgr := tmux.NewManager()
@@ -1152,7 +1142,7 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 		},
 	}
 
-	result, err := NewAgent(Config{
+	result, err := NewAgent(Config{Loop: StandardLoop{},
 		Provider:     scripted,
 		Tools:        tools,
 		Model:        "test",
@@ -1265,10 +1255,9 @@ func TestTurnUsageCacheAccumulation(t *testing.T) {
 		},
 	}
 
-	tools := commands.NewRegistry()
-	tools.RegisterTool(&recordingTool{name: "read", output: "file content"})
+	tools := newTestTools(t, &recordingTool{name: "read", output: "file content"})
 
-	result, err := (NewAgent(Config{
+	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:       llm,
 		Tools:          tools,
 		Model:          "test",
@@ -1325,9 +1314,9 @@ func TestEventCarriesCacheUsage(t *testing.T) {
 		}
 	}
 
-	_, err := (NewAgent(Config{
+	_, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
-		Tools:        commands.NewRegistry(),
+		Tools:        newTestTools(t),
 		Model:        "test",
 		SystemPrompt: "sys",
 		Bus:          testBus(func(e *aop.Event) { handler(e) }),

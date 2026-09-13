@@ -3,16 +3,19 @@ package workspace_test
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/fileaudit"
+	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	"github.com/chainreactors/aiscan/pkg/profile/workspace"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -22,16 +25,16 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("workspace instructions"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(logs, "audit.jsonl")
-	p, err := workspace.New(workspace.Config{Extensions: []string{"skills", "file-audit", "files"}, Files: files.Config{Directory: dir}, AuditLog: path, SkillsDirectory: skills})
+	path := filepath.Join(logs, "events.jsonl")
+	p, err := workspace.New(workspace.Config{Extensions: []string{"skills", "observe", "files"}, Files: files.Config{Directory: dir}, Output: path, SkillsDirectory: skills})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer p.Close(context.Background())
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("construction opened journal: %v", err)
+		t.Fatalf("construction opened event output: %v", err)
 	}
-	if _, err := p.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
+	if _, err := p.Executor(); !errors.Is(err, toolset.ErrUnavailable) {
 		t.Fatalf("published before Load: %v", err)
 	}
 	if len(p.Installed()) != 0 {
@@ -62,7 +65,7 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 	if len(p.Installed()) != 0 {
 		t.Fatal("reported closed extensions")
 	}
-	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note"}`); !errors.Is(err, extension.ErrToolsUnavailable) {
+	if _, err := executor.ExecuteTool(t.Context(), "read", `{"path":"note"}`); !errors.Is(err, toolset.ErrUnavailable) {
 		t.Fatalf("retained executor admitted: %v", err)
 	}
 	file, err := os.Open(path)
@@ -71,24 +74,37 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 	}
 	defer file.Close()
 	var records []*filepb.Access
+	var refs []*operationpb.Ref
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		record := new(filepb.Access)
-		if err := protojson.Unmarshal(scanner.Bytes(), record); err != nil {
+		event := new(aop.Event)
+		if err := protojson.Unmarshal(scanner.Bytes(), event); err != nil {
 			t.Fatal(err)
 		}
-		records = append(records, record)
+		record := new(filepb.Access)
+		if event.GetExtension() == nil || !event.GetExtension().MessageIs(record) {
+			continue
+		}
+		if err := event.GetExtension().UnmarshalTo(record); err != nil {
+			t.Fatal(err)
+		}
+		ref := new(operationpb.Ref)
+		if ok, err := aop.FindTypedExtension(event, ref); err != nil || !ok {
+			t.Fatalf("file event has no operation: %v %v", event, err)
+		}
+		records, refs = append(records, record), append(refs, ref)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 || records[0].Op != filepb.AccessOp_ACCESS_OP_CREATE || records[1].Op != filepb.AccessOp_ACCESS_OP_EDIT || records[1].Edits != 1 || records[1].Digest != fileaudit.Digest([]byte("edited")) {
-		t.Fatalf("audit did not drain canonical committed edits: %v", records)
+	digest := sha256.Sum256([]byte("edited"))
+	if len(records) != 2 || records[0].Op != filepb.AccessOp_ACCESS_OP_CREATE || records[1].Op != filepb.AccessOp_ACCESS_OP_EDIT || records[1].Edits != 1 || records[1].Digest != hex.EncodeToString(digest[:]) || refs[0].GetOperationId() == "" || refs[1].GetOperationId() == "" {
+		t.Fatalf("event output did not drain canonical committed edits: %v", records)
 	}
 }
 
 func TestSelectionRejectsInvalidConfigurationWithoutSideEffects(t *testing.T) {
-	for _, ids := range [][]string{{"unknown"}, {"files", "files"}, {"skills"}, {}, {"files", "file-audit"}, {"files", "skills"}} {
+	for _, ids := range [][]string{{"unknown"}, {"files", "files"}, {"skills"}, {}, {"files", "skills"}} {
 		p, err := workspace.New(workspace.Config{Extensions: ids, Files: files.Config{Directory: t.TempDir()}})
 		if err == nil {
 			p.Close(context.Background())
@@ -96,9 +112,11 @@ func TestSelectionRejectsInvalidConfigurationWithoutSideEffects(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	path := filepath.Join(root, "not-created", "audit.jsonl")
-	if _, err := workspace.New(workspace.Config{Files: files.Config{Directory: root}, AuditLog: path}); err == nil {
-		t.Fatal("silently ignored unselected audit configuration")
+	path := filepath.Join(root, "not-created", "events.jsonl")
+	if profile, err := workspace.New(workspace.Config{Files: files.Config{Directory: root}, Output: path}); err != nil {
+		t.Fatalf("output should be independently selectable: %v", err)
+	} else {
+		_ = profile.Close(context.Background())
 	}
 	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invalid configuration touched disk: %v", err)
@@ -124,7 +142,7 @@ func TestProfilesHaveIndependentSelectionAndFailureCleanup(t *testing.T) {
 	if err := bad.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bad.Executor(); !errors.Is(err, extension.ErrToolsUnavailable) {
+	if _, err := bad.Executor(); !errors.Is(err, toolset.ErrUnavailable) {
 		t.Fatalf("failed profile published: %v", err)
 	}
 	if got := p.Installed(); !reflect.DeepEqual(got, []string{"files"}) {

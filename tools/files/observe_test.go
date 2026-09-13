@@ -8,37 +8,32 @@ import (
 	"testing"
 
 	filepb "github.com/chainreactors/aiscan/aop/file"
+	corehooks "github.com/chainreactors/aiscan/core/hooks"
+	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 )
 
-func TestObservationReportsCommittedOperationsAndFailures(t *testing.T) {
-	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 4})
+func TestFileHookReportsCommittedOperationsAndFailures(t *testing.T) {
+	registry := corehooks.New()
+	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 4}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []observation
-	handler := func(ctx context.Context, op filepb.AccessOp, path string, data []byte, size int64, err error, _ uint32) {
-		if err == nil && ctx.Err() != nil {
-			t.Errorf("successful operation delivered an already canceled context: %v", ctx.Err())
+	var got []toolhooks.FileEvent
+	sub := toolhooks.FileAccessObserved.On(registry, "test", func(ctx context.Context, event toolhooks.FileEvent) (struct{}, error) {
+		if event.Err == nil && ctx.Err() != nil {
+			t.Errorf("successful operation delivered canceled context: %v", ctx.Err())
 		}
-		got = append(got, observation{ctx: ctx, op: op, path: path, data: append([]byte(nil), data...), size: size, err: err})
-	}
-	if _, err := f.Subscribe(handler); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("subscribe before Load: %v", err)
-	}
+		event.Data = append([]byte(nil), event.Data...)
+		got = append(got, event)
+		return struct{}{}, nil
+	})
+	defer sub.Close(context.Background())
 	fSet := filesystemSet(t, f)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := fSet.Close(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	s, err := f.Subscribe(handler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close(context.Background())
+	defer fSet.Close(context.Background())
+
 	if err := f.Write(t.Context(), "note", []byte("one")); err != nil {
 		t.Fatal(err)
 	}
@@ -61,32 +56,24 @@ func TestObservationReportsCommittedOperationsAndFailures(t *testing.T) {
 		t.Fatalf("observations: %d", len(got))
 	}
 	for i, op := range want {
-		if got[i].op != op || !filepath.IsAbs(got[i].path) {
+		if got[i].Op != op || !filepath.IsAbs(got[i].Path) || got[i].Operation.GetOperationId() == "" {
 			t.Fatalf("observation %d: %+v", i, got[i])
 		}
-		if i < 3 && (got[i].size != 3 || len(got[i].data) != 3 || got[i].err != nil) {
+		if i < 3 && (got[i].Size != 3 || len(got[i].Data) != 3 || got[i].Err != nil) {
 			t.Fatalf("successful operation %d: %+v", i, got[i])
 		}
-		if i >= 3 && (got[i].err == nil || len(got[i].data) != 0) {
+		if i >= 3 && (got[i].Err == nil || len(got[i].Data) != 0) {
 			t.Fatalf("failure reported content: %+v", got[i])
 		}
 	}
-	if string(got[2].data) != "two" {
-		t.Fatal("observer did not copy borrowed bytes")
-	}
-	if err := s.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Write(t.Context(), "note", []byte("last")); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(want) {
-		t.Fatal("callback after subscription Close")
+	if string(got[2].Data) != "two" {
+		t.Fatal("hook did not copy borrowed bytes")
 	}
 }
 
-func TestCloseRetainsRootUntilObservationCompletes(t *testing.T) {
-	f, err := New(Config{Directory: t.TempDir()})
+func TestCloseRetainsRootUntilFileHookCompletes(t *testing.T) {
+	registry := corehooks.New()
+	f, err := New(Config{Directory: t.TempDir()}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,39 +82,30 @@ func TestCloseRetainsRootUntilObservationCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
-	s, err := f.Subscribe(func(context.Context, filepb.AccessOp, string, []byte, int64, error, uint32) {
+	sub := toolhooks.FileAccessObserved.On(registry, "test", func(context.Context, toolhooks.FileEvent) (struct{}, error) {
 		close(entered)
 		<-release
+		return struct{}{}, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	writeDone := make(chan error, 1)
 	go func() { writeDone <- f.Write(context.Background(), "note", []byte("committed")) }()
 	<-entered
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	closeErr := f.Close(ctx)
-	subscriptionErr := s.Close(ctx)
-	// Always release the callback before assertions or cleanup.
+	subscriptionErr := sub.Close(ctx)
 	close(release)
 	writeErr := <-writeDone
-	if !errors.Is(closeErr, context.Canceled) {
-		t.Fatalf("Close: %v", closeErr)
-	}
-	if !errors.Is(subscriptionErr, context.Canceled) {
-		t.Fatalf("subscription Close: %v", subscriptionErr)
+	if !errors.Is(closeErr, context.Canceled) || !errors.Is(subscriptionErr, context.Canceled) {
+		t.Fatalf("close=%v subscription=%v", closeErr, subscriptionErr)
 	}
 	if writeErr != nil {
 		t.Fatalf("committed write canceled retroactively: %v", writeErr)
 	}
-	if err := s.Close(t.Context()); err != nil {
+	if err := sub.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := fSet.Close(t.Context()); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := f.Subscribe(func(context.Context, filepb.AccessOp, string, []byte, int64, error, uint32) {}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("subscribed to closed FS: %v", err)
 	}
 }

@@ -121,7 +121,7 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 	go func() {
 		errCh <- connectGenerated(ctx, connectionConfig{
 			ServerURL: server.URL,
-			Registry:  commands.NewRegistry(),
+			Registry:  commands.NewRegistry(nil),
 			Logger:    logger,
 		})
 	}()
@@ -164,7 +164,7 @@ func TestDialProtoWebSocketPreservesHandshakeStatus(t *testing.T) {
 func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		new(rejectingEnvelopeStream),
 	)
@@ -179,7 +179,7 @@ func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		&rejectingEnvelopeStream{replyTo: "another-request"},
 	)

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/chainreactors/aiscan/agent/hooks"
 	aop "github.com/chainreactors/aiscan/aop"
@@ -54,72 +53,6 @@ func transformContextHook(ctx context.Context, cfg Config, messages []*aop.Messa
 		return result.Messages
 	}
 	return messages
-}
-
-// beforeTypedToolCall is fail-closed: a handler error means the call was not
-// approved and is returned to the model as a tool error.
-func beforeTypedToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc *aop.ToolCall) toolExecution {
-	if !cfg.Hooks.Has(hooks.ToolCallHook.Kind) {
-		return toolExecution{}
-	}
-	decision, err := hooks.ToolCallHook.Emit(ctx, cfg.Hooks, hooks.ToolCallEvent{
-		SessionID:        cfg.SessionID,
-		TurnID:           cfg.TurnID,
-		AssistantMessage: assistantMsg,
-		Call:             tc,
-		SystemPrompt:     cfg.SystemPrompt,
-		Messages:         cfg.Messages,
-	})
-	if err != nil {
-		return toolExecution{result: fmt.Sprintf("error: %s", err), isError: true, err: err}
-	}
-	if !decision.Block {
-		return toolExecution{}
-	}
-	reason := decision.Reason
-	if reason == "" {
-		reason = "tool execution was blocked"
-	}
-	return toolExecution{result: reason, isError: true}
-}
-
-func afterTypedToolCall(ctx context.Context, cfg Config, tc *aop.ToolCall, execution toolExecution, durationMs int) toolExecution {
-	if !cfg.Hooks.Has(hooks.ToolResult.Kind) {
-		return execution
-	}
-	patch, err := hooks.ToolResult.Emit(ctx, cfg.Hooks, hooks.ToolResultEvent{
-		SessionID:  cfg.SessionID,
-		TurnID:     cfg.TurnID,
-		Call:       tc,
-		Content:    execution.result,
-		IsError:    execution.isError,
-		Terminate:  execution.flow == ToolFlowTerminate,
-		DurationMs: durationMs,
-		Full:       execution.fullResult,
-	})
-	if err != nil {
-		execution.result = fmt.Sprintf("error: %s", err)
-		execution.isError = true
-		execution.err = err
-		return execution
-	}
-	if patch.Content != nil {
-		execution.result = *patch.Content
-	}
-	if patch.IsError != nil {
-		execution.isError = *patch.IsError
-		if !execution.isError {
-			execution.err = nil
-		}
-	}
-	if patch.Terminate != nil {
-		if *patch.Terminate {
-			execution.flow = ToolFlowTerminate
-		} else {
-			execution.flow = ToolFlowContinue
-		}
-	}
-	return execution
 }
 
 func compactCanceled(ctx context.Context, cfg Config, trigger string, contextTokens int) (bool, string) {

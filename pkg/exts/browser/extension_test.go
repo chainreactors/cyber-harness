@@ -6,17 +6,24 @@ import (
 	"context"
 	"testing"
 
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {
-	registry := commands.NewRegistry()
+	registry := commands.NewRegistry(nil)
 	instance, err := New(registry, t.TempDir(), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := extensiontest.Load(t, t.Context(), instance)
+	set := extensiontest.Set(t,
+		extension.Entry{ID: "browser", Extension: instance},
+		extension.Entry{ID: "commands", DependsOn: []string{"browser"}, Extension: registry},
+	)
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	if !registry.Has("playwright") {
 		t.Fatal("browser command was not published")
 	}
@@ -25,8 +32,5 @@ func TestModuleOwnsBrowserRegistration(t *testing.T) {
 	}
 	if registry.Has("playwright") {
 		t.Fatal("browser command remained published")
-	}
-	if err := registry.Close(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
