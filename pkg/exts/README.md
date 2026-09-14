@@ -10,13 +10,15 @@ Only initialization or resource cleanup needs an Extension. Pure declarations
 are registered directly by the Profile; they need no tools/commands lifecycle
 adapter. An Extension may contribute to several unrelated domains.
 `pkg/exts/agent` owns admission, cancellation and draining for a selected
-`agent.Loop` and its sessions as one installation. Its Runtime is the single
-business surface for loop and session operations. Profiles can omit Agent
+`agent.Loop`. `pkg/exts/session` installs the independent `agent/session`
+manager and borrows that loop. Profiles can omit Agent
 execution while keeping the remaining tools and commands.
 
-Adapters must not create registries, leases, service locators, or a second
-filesystem implementation. Resource ownership and dependency order belong to
-the Set entries assembled by the profile.
+Infrastructure extensions such as Harness and TUI own their domain registries.
+Contributors borrow narrow registration interfaces, not concrete lifecycle
+owners. Adapters must not create service locators or a second filesystem
+implementation. Resource ownership and dependency order belong to the Set
+entries assembled by the profile.
 
 For example, `pkg/exts/proxy.Extension` owns the proxy Resource and publishes
 its lifecycle-free Hub. Traffic protocol
@@ -27,7 +29,7 @@ An adapter never publishes its lifecycle owner. Files, Proxy, IOA, and App
 construction separates a `Resource` from its named business object; only
 Resource has Start/Open/Load/Close, while consumers receive Files, ProxyHub,
 Runtime, or App directly. Agent follows the same boundary with one Extension
-and its published Runtime; there is no separate Session extension.
+and its published Runtime; Session has its own separate installation.
 There is no Borrow/Handle/sealed-interface layer. Extensions depend on business
 capabilities rather than importing one another. Event producers, observers and
 consumers share the profile's concrete `core/events.Stream`; it alone stamps

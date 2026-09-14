@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"maps"
 	"os"
 	"reflect"
 	"sort"
@@ -55,7 +56,13 @@ func (r *Sections) Register(source string, sections ...Section) error {
 		if strings.TrimSpace(section.Key) == "" || section.New == nil {
 			return fmt.Errorf("configuration section requires key and factory (%s)", source)
 		}
-		for _, name := range append([]string{section.Key}, section.Aliases...) {
+		local := map[string]bool{}
+		for index, name := range append([]string{section.Key}, section.Aliases...) {
+			// A root YAML alias and extensions key are different locations.
+			if index > 0 && name == section.Key && !local[name] {
+				local[name] = true
+				continue
+			}
 			if strings.TrimSpace(name) == "" {
 				return fmt.Errorf("empty configuration name (%s)", source)
 			}
@@ -80,7 +87,13 @@ func (r *Sections) Seal() { r.sealed = true }
 func CloneValues(values Values) Values {
 	out := Values{}
 	for key, fields := range values {
-		raw, _ := json.Marshal(fields)
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			// Keep invalid values so Decode can return their actual error. Dropping
+			// them here would silently replace bad configuration with defaults.
+			out[key] = maps.Clone(fields)
+			continue
+		}
 		var copy map[string]any
 		_ = json.Unmarshal(raw, &copy)
 		out[key] = copy

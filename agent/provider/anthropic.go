@@ -759,3 +759,10 @@ func parseAnthropicWebSearchResponse(data []byte) (*WebSearchResponse, error) {
 	out.Summary = strings.TrimSpace(out.Summary)
 	return out, nil
 }
+
+// CloseIdleConnections releases this provider's transport after callers drain.
+func (p *AnthropicProvider) CloseIdleConnections() {
+	if p != nil && p.client != nil {
+		p.client.CloseIdleConnections()
+	}
+}

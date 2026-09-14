@@ -13,7 +13,7 @@ import (
 
 // newTestApp supplies explicitly test-owned, unpublished registries. Tests that
 // execute commands or tools must activate their registry in their own graph.
-func newTestApp(t testing.TB, config apppkg.Config, deps apppkg.Dependencies) *apppkg.Resource {
+func newTestApp(t testing.TB, config apppkg.Config, deps apppkg.AppServices) *apppkg.Resource {
 	t.Helper()
 	if deps.Hooks == nil {
 		deps.Hooks = hooks.New()

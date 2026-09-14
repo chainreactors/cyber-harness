@@ -105,7 +105,7 @@ func TestShellCommandAdapterIsLazy(t *testing.T) {
 func TestShellCommandMarkerDoesNotHijackNormalChildProcess(t *testing.T) {
 	t.Setenv(shellCommandAdapterMarkerEnv, "1")
 	t.Setenv(shellCommandAdapterCommandEnv, "")
-	if code, ok := runShellCommandProxyIfRequested(); ok {
+	if code, ok := RunShellCommandProxy(); ok {
 		t.Fatalf("marker-only child was treated as proxy with code %d", code)
 	}
 }
@@ -249,4 +249,11 @@ func TestShellCommandStartupReclaimsOwnedStaleRuntime(t *testing.T) {
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale runtime still exists: %v", err)
 	}
+}
+
+func TestMain(m *testing.M) {
+	if code, handled := RunShellCommandProxy(); handled {
+		os.Exit(code)
+	}
+	os.Exit(m.Run())
 }

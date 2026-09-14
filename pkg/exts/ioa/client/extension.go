@@ -21,8 +21,10 @@ import (
 // lend ownership of the receiver to IOA.
 type DeliverFunc func(context.Context, inbox.Message) error
 
-type Dependencies struct {
-	Commands *commands.Registry
+// Services are the runtime contracts consumed by the IOA client extension.
+// They are supplied by the profile's extension service table.
+type Services struct {
+	Commands commands.Runtime
 	Events   *events.Stream
 	Deliver  DeliverFunc
 	Logger   telemetry.Logger
@@ -31,7 +33,7 @@ type Dependencies struct {
 type Extension struct {
 	resource      *service.Resource
 	config        service.Config
-	deps          Dependencies
+	deps          Services
 	sub           *eventbus.Subscription[*aop.Event]
 	receiveCancel context.CancelFunc
 	sendCancel    context.CancelFunc
@@ -41,7 +43,7 @@ type Extension struct {
 	outputErr     error
 }
 
-func New(config service.Config, deps Dependencies) (*Extension, error) {
+func New(config service.Config, deps Services) (*Extension, error) {
 	if config.RegisterCommands && deps.Commands == nil {
 		return nil, fmt.Errorf("IOA command registration requires a command registry")
 	}

@@ -9,6 +9,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
-func appendRecorderEntry(entries []extension.Entry, _ *app.App, _ *toolset.Registry, _ capability.Plan, _ string) ([]extension.Entry, error) {
+func appendRecorderEntry(entries []extension.Entry, _ app.Config, _ toolset.Runtime, _ capability.Plan, _ string) ([]extension.Entry, error) {
 	return entries, nil
 }

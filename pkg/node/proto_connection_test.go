@@ -32,7 +32,7 @@ import (
 	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/gorilla/websocket"
@@ -216,7 +216,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	app := newTestApp(t, apppkg.Config{
 		SkipEngines: true,
 		Logger:      telemetry.NopLogger(),
-	}, apppkg.Dependencies{})
+	}, apppkg.AppServices{})
 
 	appSet := loadNodeTestApplication(t, ctx, app)
 	defer appSet.Close(context.Background())
@@ -633,7 +633,7 @@ func loadNodeTestApplication(t *testing.T, ctx context.Context, application *app
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	app := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
 	appSet := loadNodeTestApplication(t, t.Context(), app)
 	defer appSet.Close(context.Background())
 	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})

@@ -15,7 +15,8 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
 )
 
 type profileLoop func(context.Context, agent.Config) (*agent.Result, error)
@@ -34,11 +35,11 @@ func (inertProvider) ChatCompletion(context.Context, *provider.ChatCompletionReq
 
 func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	runtimes := make(chan *agentext.Runtime, 2)
+	runtimes := make(chan *loopext.Runtime, 2)
 	var unblock sync.Once
 	config := minimalConfig(&agentext.Config{})
 	config.Runtime.Loop = profileLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
-		managed, ok := config.Loop.(*agentext.Runtime)
+		managed, ok := config.Loop.(*loopext.Runtime)
 		if !ok {
 			return nil, errors.New("run bypassed Agent extension")
 		}
@@ -127,7 +128,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	if err := p.Close(t.Context()); err != nil || !app.Closed() {
 		t.Fatalf("profile close retry: %v, app closed=%v", err, app.Closed())
 	}
-	if _, err := managed.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
+	if _, err := managed.Run(t.Context(), agent.Config{}); !errors.Is(err, loopext.ErrUnavailable) {
 		t.Fatalf("agent runtime remained active after profile close: %v", err)
 	}
 }

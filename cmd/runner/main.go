@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	"io"
 	"os"
 	"os/signal"
@@ -36,6 +37,9 @@ type options struct {
 }
 
 func main() {
+	if code, handled := commands.RunShellCommandProxy(); handled {
+		os.Exit(code)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {

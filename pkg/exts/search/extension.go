@@ -13,8 +13,8 @@ import (
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
-	commands *commands.Registry
-	tools    *toolset.Registry
+	commands commands.Runtime
+	tools    toolset.Registrar
 	config   Config
 }
 
@@ -32,7 +32,7 @@ type Config struct {
 	ResolveIndex func() *association.Index
 }
 
-func New(toolRegistry *toolset.Registry, cmdRegistry *commands.Registry, config Config) (*Extension, error) {
+func New(toolRegistry toolset.Registrar, cmdRegistry commands.Runtime, config Config) (*Extension, error) {
 	if toolRegistry == nil || cmdRegistry == nil {
 		return nil, fmt.Errorf("search requires tool and command registries")
 	}

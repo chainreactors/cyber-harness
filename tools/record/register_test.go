@@ -4,9 +4,8 @@ package record
 
 import "testing"
 
-func TestConfiguredRecorderUsesEnvironment(t *testing.T) {
-	t.Setenv(maxConcurrentEnv, "3")
-	recorder, err := NewConfigured(t.TempDir())
+func TestConfiguredRecorderUsesConfiguration(t *testing.T) {
+	recorder, err := NewConfigured(t.TempDir(), t.TempDir(), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -16,9 +15,8 @@ func TestConfiguredRecorderUsesEnvironment(t *testing.T) {
 	}
 }
 
-func TestConfiguredRecorderRejectsInvalidEnvironment(t *testing.T) {
-	t.Setenv(maxConcurrentEnv, "17")
-	if recorder, err := NewConfigured(t.TempDir()); err == nil {
+func TestConfiguredRecorderRejectsInvalidConfiguration(t *testing.T) {
+	if recorder, err := NewConfigured(t.TempDir(), t.TempDir(), 17); err == nil {
 		recorder.Close()
 		t.Fatal("accepted invalid maximum")
 	}

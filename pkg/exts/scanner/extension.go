@@ -4,20 +4,30 @@ import (
 	"context"
 	"fmt"
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/core/capability"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	app "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/scan/engine"
+	"github.com/chainreactors/sdk/pkg/association"
+	"path/filepath"
 	"sync"
 )
 
+// Config contains only scanner inputs selected by the product profile.
+type Config struct {
+	DataDir      string
+	Scanner      app.ScannerConfig
+	Capabilities capability.Catalog
+}
+
 type Extension struct {
 	mu          sync.Mutex
-	commands    *commands.Registry
+	commands    commands.Runtime
 	application func() *app.App
-	appConfig   app.Config
+	config      Config
 	loop        agent.Loop
 	workDir     string
 	proxyURL    string
@@ -29,11 +39,11 @@ type Extension struct {
 	initialized bool
 }
 
-func New(application func() *app.App, commands *commands.Registry, config app.Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) *Extension {
+func New(application func() *app.App, commands commands.Runtime, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) *Extension {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Extension{application: application, commands: commands, appConfig: config, loop: loop, workDir: workDir, proxyURL: proxyURL, logger: logger, ready: make(chan struct{})}
+	return &Extension{application: application, commands: commands, config: config, loop: loop, workDir: workDir, proxyURL: proxyURL, logger: logger, ready: make(chan struct{})}
 }
 
 func (e *Extension) Load(scope *extension.Scope) (err error) {
@@ -46,11 +56,15 @@ func (e *Extension) Load(scope *extension.Scope) (err error) {
 		e.mu.Unlock()
 		e.readyOnce.Do(func() { close(e.ready) })
 	}()
-	e.engines = initEngines(scope.Init(), e.appConfig.Scanner, e.logger)
+	e.engines = initEngines(scope.Init(), e.config.DataDir, e.config.Scanner, e.logger)
 	e.mu.Lock()
 	e.initialized = e.engines != nil
 	e.mu.Unlock()
-	values, err := buildScannerCommands(e.application(), e.engines, e.appConfig, e.loop, e.workDir, e.proxyURL, e.logger)
+	application := e.application()
+	if application == nil {
+		return fmt.Errorf("scanner application is required")
+	}
+	values, err := buildScannerCommands(application, e.engines, e.config, e.loop, e.workDir, e.proxyURL, e.logger)
 	if err != nil || len(values) == 0 {
 		return err
 	}
@@ -103,9 +117,10 @@ func (e *Extension) State() string {
 	return "degraded"
 }
 
-func initEngines(ctx context.Context, config app.ScannerConfig, logger telemetry.Logger) *engine.Set {
+func initEngines(ctx context.Context, dataDir string, config app.ScannerConfig, logger telemetry.Logger) *engine.Set {
 	engines, err := engine.InitWithOptions(ctx, resources.Options{
 		CyberhubURL: config.CyberhubURL,
+		CacheDir:    filepath.Join(dataDir, "cache"),
 		APIKey:      config.CyberhubKey,
 		Mode:        config.CyberhubMode,
 		Proxy:       config.Proxy,
@@ -126,3 +141,12 @@ func initEngines(ctx context.Context, config app.ScannerConfig, logger telemetry
 
 var _ extension.Extension = (*Extension)(nil)
 var _ app.Scanner = (*Extension)(nil)
+
+// Index is borrowed by search after scanner initialization; its registry must
+// drain before this extension closes the owning engines.
+func (e *Extension) Index() *association.Index {
+	if e == nil || e.engines == nil {
+		return nil
+	}
+	return e.engines.Index
+}

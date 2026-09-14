@@ -55,6 +55,7 @@ type ProcessContainment interface {
 }
 
 type BashTool struct {
+	baseEnv        map[string]string
 	hooks          *hooks.Registry
 	processMu      sync.Mutex
 	processClosed  bool
@@ -65,7 +66,7 @@ type BashTool struct {
 	scannerProxyCA string
 	egressResolver func(context.Context) (proxyURL, caPath string, release func())
 	tasks          *tmux.Manager
-	registry       *Registry
+	registry       Executor
 	shellCommands  bool
 	hiddenCommands map[string]struct{}
 	adapterMu      sync.Mutex
@@ -90,7 +91,7 @@ func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, f
 }
 
 // SetCommandRegistry supplies the profile-owned command boundary before use.
-func (t *BashTool) SetCommandRegistry(registry *Registry) {
+func (t *BashTool) SetCommandRegistry(registry Executor) {
 	t.registry = registry
 }
 
@@ -124,14 +125,14 @@ func (t *BashTool) Close() {
 	})
 }
 
-func (t *BashTool) attachShellCommands(registry *Registry) {
+func (t *BashTool) attachShellCommands(registry Executor) {
 	t.registry = registry
 	t.shellCommands = true
 }
 
 // EnableShellCommands binds the pseudo-command registry used when a shell line
 // composes registered commands. Product profiles call this before publication.
-func (t *BashTool) EnableShellCommands(registry *Registry) {
+func (t *BashTool) EnableShellCommands(registry Executor) {
 	t.attachShellCommands(registry)
 }
 
@@ -754,6 +755,9 @@ func contains(values []string, want string) bool {
 
 func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
 	values := make(map[string]string)
+	for key, value := range t.baseEnv {
+		values[key] = value
+	}
 	for _, item := range t.proxyEnv(ctx) {
 		if key, value, ok := strings.Cut(item, "="); ok {
 			values[key] = value
@@ -909,4 +913,14 @@ func splitPipeline(commandLine string) (left, right string, ok bool) {
 		}
 	}
 	return commandLine, "", false
+}
+
+// WithEnvironment sets the composition's child-process environment. Call only
+// during construction; per-invocation overrides remain owned by the caller.
+func (t *BashTool) WithEnvironment(values map[string]string) *BashTool {
+	t.baseEnv = make(map[string]string, len(values))
+	for key, value := range values {
+		t.baseEnv[key] = value
+	}
+	return t
 }

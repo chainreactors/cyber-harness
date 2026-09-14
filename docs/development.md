@@ -9,8 +9,8 @@
 Flags、Config、静态 Skill、协议定义和宿主绑定同样是扩展点，不受 Tool/Command 分类限制。
 Flags 复用 `config.FlagGroup` 和普通 Options；入口先声明选项，再解析配置并选择运行扩展。
 Config 复用现有 struct/tag、加载、优先级和默认值机制，Profile 将结果注入具体功能。
-help、配置模板生成和参数校验不要求 Extension.Load。完整接入约定见
-[静态扩展设计](extension-minimal-design.md)。
+help、配置模板生成和参数校验不要求 Extension.Load。完整插件接入约定见
+[系统架构](architecture.md)。
 
 原生 Tool 适合模型或外部框架直接调用：它提供名称、描述、AOP 定义和
 `Execute(context.Context, string)`。需要文件、代理、扫描引擎、IOA 或工作目录的

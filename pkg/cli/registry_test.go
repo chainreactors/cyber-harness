@@ -70,3 +70,41 @@ func TestDuplicateCommandsAndFlagsRejectedBeforeParsing(t *testing.T) {
 		}
 	}
 }
+
+func TestRejectedDeclarationDoesNotPoisonParser(t *testing.T) {
+	r := New(flags.NewNamedParser("host", 0))
+	group := func() cfg.FlagGroup {
+		return cfg.FlagGroup{Name: "Test", Options: &struct {
+			Value string `long:"value" config:"value"`
+		}{}}
+	}
+	if err := r.Group("first", "", "first", group()); err != nil {
+		t.Fatal(err)
+	}
+	err := r.Group("second", "", "second", group())
+	if err == nil || !strings.Contains(err.Error(), "first and second") {
+		t.Fatalf("conflict: %v", err)
+	}
+	if _, err := r.Parse([]string{"--value=kept"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Values(); got["first"]["value"] != "kept" || len(got) != 1 {
+		t.Fatalf("residual registration: %#v", got)
+	}
+	if err := r.Group("late", "", "late", group()); err == nil {
+		t.Fatal("registered after parse")
+	}
+}
+func TestRejectedCommandDoesNotLeaveParents(t *testing.T) {
+	r := New(flags.NewNamedParser("host", 0))
+	err := r.Command("bad", "parent broken", "", &struct {
+		A string `long:"same"`
+		B string `long:"same"`
+	}{}, Action{})
+	if err == nil {
+		t.Fatal("accepted duplicate command flags")
+	}
+	if r.Parser.Find("parent") != nil {
+		t.Fatal("failed declaration left a parent command")
+	}
+}

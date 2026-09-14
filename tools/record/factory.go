@@ -2,16 +2,12 @@
 
 package record
 
-import (
-	coreconfig "github.com/chainreactors/aiscan/core/config"
-	"os"
-)
+import "fmt"
 
-// NewConfigured constructs the platform recorder using the existing environment policy.
-func NewConfigured(workDir string) (*Tool, error) {
-	maximum, err := maxConcurrentFromEnvironment(os.LookupEnv)
-	if err != nil {
-		return nil, err
+// NewConfigured creates an inert recorder with host-resolved configuration.
+func NewConfigured(workDir, directory string, maximum int) (*Tool, error) {
+	if maximum < 1 || maximum > 16 {
+		return nil, fmt.Errorf("record maximum must be between 1 and 16")
 	}
-	return New(workDir, coreconfig.DataSubDir("record"), maximum, newPlatformBackend()), nil
+	return New(workDir, directory, maximum, newPlatformBackend()), nil
 }

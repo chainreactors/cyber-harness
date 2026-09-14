@@ -6,7 +6,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 )
 

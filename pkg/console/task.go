@@ -9,7 +9,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 // RunTask owns static presentation and its event subscription. Runtime only

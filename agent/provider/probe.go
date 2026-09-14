@@ -51,6 +51,7 @@ func ListLLMModels(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey
 		result.Error = err.Error()
 		return result, nil
 	}
+	defer closeIdleConnections(prov)
 
 	lister, ok := prov.(modelLister)
 	if !ok {
@@ -111,6 +112,7 @@ func TestLLM(ctx context.Context, req *types.LLMProbeRequest, storedAPIKey strin
 		result.Error = err.Error()
 		return result, nil
 	}
+	defer closeIdleConnections(prov)
 
 	probeCtx, cancel := context.WithTimeout(ctx, llmProbeTimeout)
 	defer cancel()

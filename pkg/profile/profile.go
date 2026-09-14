@@ -14,7 +14,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 // Application is the complete capability surface published by a product

@@ -14,6 +14,7 @@ import (
 )
 
 type Config struct {
+	Environment    map[string]string
 	Directory      string
 	Timeout        int
 	Proxy          string
@@ -31,19 +32,20 @@ type Config struct {
 }
 type Extension struct {
 	mu                 sync.Mutex
-	tools              *toolset.Registry
-	commands           *commands.Registry
+	tools              toolset.Registrar
+	commands           commands.Runtime
 	bash               *commands.BashTool
 	tmux               commands.Command
 	registered, closed bool
 	done               chan struct{}
 }
 
-func New(registry *hooks.Registry, tools *toolset.Registry, c *commands.Registry, config Config) (*Extension, error) {
+func New(registry *hooks.Registry, tools toolset.Registrar, c commands.Runtime, config Config) (*Extension, error) {
 	if tools == nil || c == nil || config.Directory == "" {
 		return nil, fmt.Errorf("terminal requires commands and a working directory")
 	}
 	bash := commands.NewBashTool(config.Directory, config.Timeout, registry).
+		WithEnvironment(config.Environment).
 		WithScannerProxy(config.Proxy).
 		WithScannerProxyCA(config.ProxyCA).
 		WithProcessContainment(config.Containment).

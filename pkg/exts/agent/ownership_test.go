@@ -10,7 +10,6 @@ import (
 
 func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 	for _, capability := range []reflect.Type{
-		reflect.TypeFor[*agentext.Session](),
 		reflect.TypeFor[*agentext.Runtime](),
 	} {
 		for _, method := range []string{"Load", "Close"} {
@@ -18,9 +17,6 @@ func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 				t.Errorf("business capability %s exposes lifecycle method %s", capability, method)
 			}
 		}
-	}
-	if _, exists := reflect.TypeFor[*agentext.Session]().MethodByName("Agent"); exists {
-		t.Fatal("Session exposes its mutable internal Agent")
 	}
 	if _, exists := reflect.TypeFor[*agentext.Extension]().MethodByName("Run"); exists {
 		t.Fatal("Agent Extension duplicates its Runtime execution API")

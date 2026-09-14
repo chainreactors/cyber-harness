@@ -33,12 +33,6 @@ const (
 	shellCommandAdapterDialTimeout     = 5 * time.Second
 )
 
-func init() {
-	if code, ok := runShellCommandProxyIfRequested(); ok {
-		os.Exit(code)
-	}
-}
-
 type shellCommandAdapterFrame struct {
 	Type      string   `json:"type"`
 	Version   int      `json:"version,omitempty"`
@@ -51,7 +45,7 @@ type shellCommandAdapterFrame struct {
 }
 
 type shellCommandAdapter struct {
-	registry   *Registry
+	registry   Executor
 	executable string
 	runtimeDir string
 	endpoint   string
@@ -68,7 +62,7 @@ type shellCommandAdapter struct {
 	cleanupOnce  sync.Once
 }
 
-func newShellCommandAdapter(registry *Registry) (*shellCommandAdapter, error) {
+func newShellCommandAdapter(registry Executor) (*shellCommandAdapter, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("shell command adapter requires a registry")
 	}
@@ -459,10 +453,10 @@ func (b *shellCommandAdapter) close() {
 	b.cleanup()
 }
 
-// runShellCommandProxyIfRequested dispatches the process-local PATH shim. The
+// RunShellCommandProxy dispatches the process-local PATH shim. The
 // marker and command variables are only injected into shim children, so normal
 // AIScan and embedding-host startup is unchanged.
-func runShellCommandProxyIfRequested() (code int, ok bool) {
+func RunShellCommandProxy() (code int, ok bool) {
 	command := strings.TrimSpace(os.Getenv(shellCommandAdapterCommandEnv))
 	if os.Getenv(shellCommandAdapterMarkerEnv) != "1" || command == "" {
 		return 0, false

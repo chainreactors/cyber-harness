@@ -4,43 +4,52 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 type Handler struct{ handler http.Handler }
 
 type Route struct {
+	Source  string
 	Pattern string
 	Handler http.Handler
 }
 
-func NewHandler(service Service, static http.Handler, routes ...Route) (handler *Handler, err error) {
+// NewHandler freezes profile-selected routes into one private ServeMux.
+func NewHandler(auth Auth, static http.Handler, routes ...Route) (handler *Handler, err error) {
+	if auth == nil {
+		return nil, fmt.Errorf("HTTP authentication policy is required")
+	}
+	source := "auth"
 	defer func() {
 		if value := recover(); value != nil {
 			handler = nil
-			err = fmt.Errorf("register HTTP routes: %v", value)
+			err = fmt.Errorf("register HTTP route from %s: %v", source, value)
 		}
 	}()
-	auth := service.Auth()
 	mux := http.NewServeMux()
 	auth.RegisterRoutes(mux)
-	RegisterConnectServices(mux, service)
-	if service != nil {
-		if handler := service.ApplicationWebSocketHandler(); handler != nil {
-			mux.Handle(ApplicationWebSocketPath, handler)
-		}
-		if handler := service.NodeWebSocketHandler(); handler != nil {
-			mux.Handle(NodeWebSocketPath, handler)
-		}
+	selected := []Route{
+		{Source: "web", Pattern: "GET /health", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		})},
+		{Source: "web", Pattern: "/api/", Handler: http.NotFoundHandler()},
 	}
-	for _, route := range routes {
-		mux.Handle(route.Pattern, route.Handler)
-	}
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	if static != nil {
-		mux.Handle("/", static)
+		selected = append(selected, Route{Source: "web.static", Pattern: "/", Handler: static})
+	}
+	selected = append(selected, routes...)
+	owners := map[string]string{}
+	for _, route := range selected {
+		source = route.Source
+		if strings.TrimSpace(source) == "" || route.Handler == nil {
+			return nil, fmt.Errorf("HTTP route %q requires source and handler", route.Pattern)
+		}
+		if previous, exists := owners[route.Pattern]; exists {
+			return nil, fmt.Errorf("duplicate HTTP route %q (sources %s and %s)", route.Pattern, previous, source)
+		}
+		mux.Handle(route.Pattern, route.Handler)
+		owners[route.Pattern] = source
 	}
 	return &Handler{handler: auth.Middleware(mux)}, nil
 }

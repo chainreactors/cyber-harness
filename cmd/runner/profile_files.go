@@ -5,9 +5,10 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/tool"
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
+	signalsext "github.com/chainreactors/aiscan/pkg/exts/signals"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	filesystem "github.com/chainreactors/aiscan/tools/files"
 )
@@ -19,20 +20,26 @@ const fileSystemID = "files"
 // create a new Profile to apply a different composition.
 type fileProfile struct {
 	extensions *extension.Set
-	registry   *toolset.Registry
+	registry   tool.Executor
 }
 
 // New constructs the files extension and its host.
 func newFileProfile(config filesystem.Config) (*fileProfile, error) {
-	hookRegistry := hooks.New()
-	registry := toolset.NewRegistry(hookRegistry)
+	signals := signalsext.New()
+	hookRegistry := signals.Hooks()
+	harness, err := harnessext.New(hookRegistry)
+	if err != nil {
+		return nil, err
+	}
+	registry := harness.ToolRegistry()
 	fs, err := fileext.New(registry, hookRegistry, config)
 	if err != nil {
 		return nil, err
 	}
 	extensions, err := extension.New(
+		extension.Entry{ID: "signals", Extension: signals},
 		extension.Entry{ID: fileSystemID, Extension: fs},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{fileSystemID}, Extension: registry},
+		extension.Entry{ID: "harness", DependsOn: []string{fileSystemID}, Extension: harness},
 	)
 	if err != nil {
 		return nil, err

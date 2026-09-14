@@ -18,7 +18,7 @@ func TestNewRequiresProfileDependencies(t *testing.T) {
 	for _, missing := range []string{"hooks", "events", "command registry", "tool registry"} {
 		t.Run(missing, func(t *testing.T) {
 			hookRegistry := hooks.New()
-			deps := Dependencies{
+			deps := AppServices{
 				Hooks: hookRegistry, Events: events.New(),
 				Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
 			}
@@ -48,7 +48,7 @@ func TestAppCloseDoesNotCloseBorrowedRegistries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resource, err := New(Config{SkipEngines: true}, Dependencies{
+	resource, err := New(Config{SkipEngines: true}, AppServices{
 		Hooks: hookRegistry, Events: events.New(), Commands: cmds, Tools: tools,
 	})
 	if err != nil {

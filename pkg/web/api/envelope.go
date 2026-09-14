@@ -44,12 +44,15 @@ type ApplicationConnection interface {
 // ApplicationBackends wires the application envelope business surface to its
 // owning mechanisms.
 type ApplicationBackends struct {
-	Sessions *Sessions
-	Scans    *Scans
-	Commands CommandExecutor
-	Files    FileUploader
-	PTY      PTYRouter
-	NewID    func() string
+	// RegisterNamespaces installs profile-selected bindings into each connection.
+	// Captured resources must outlive this application host.
+	RegisterNamespaces func(*aop.NamespaceMux) error
+	Sessions           *Sessions
+	Scans              *Scans
+	Commands           CommandExecutor
+	Files              FileUploader
+	PTY                PTYRouter
+	NewID              func() string
 }
 
 type applicationPTYRoute struct {
@@ -61,7 +64,7 @@ type applicationPTYRoute struct {
 // surface. Connection owns stream concurrency; this function owns only the
 // application business routes and connection-local subscriptions.
 func ServeApplication(connection ApplicationConnection, first *aop.Envelope, backends *ApplicationBackends) error {
-	if backends == nil || backends.Sessions == nil || backends.Scans == nil || backends.NewID == nil || connection == nil || first == nil {
+	if backends == nil || backends.Sessions == nil || backends.NewID == nil || connection == nil || first == nil {
 		return fmt.Errorf("application AOP connection is unavailable")
 	}
 	ctx := connection.Context()
@@ -348,18 +351,28 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	mux := aop.NewNamespaceMux(ctx)
 	defer mux.Close(context.Background())
 	registrations := []struct {
+		source    string
+		enabled   bool
 		prototype protobuf.Message
 		handler   aop.NamespaceHandler
 	}{
-		{prototype: &aop.ProtocolMessage{}, handler: handleCore},
-		{prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
-		{prototype: &filepb.ProtocolMessage{}, handler: handleFile},
-		{prototype: &types.ScanProtocolMessage{}, handler: handleScan},
-		{prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
+		{source: "agent", enabled: true, prototype: &aop.ProtocolMessage{}, handler: handleCore},
+		{source: "commands", enabled: backends.Commands != nil, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
+		{source: "files", enabled: backends.Files != nil, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
+		{source: "scanner", enabled: backends.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
+		{source: "terminal", enabled: backends.PTY != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
 	}
 	for _, registration := range registrations {
-		if err := mux.Register("application", registration.prototype, registration.handler); err != nil {
+		if !registration.enabled {
+			continue
+		}
+		if err := mux.Register(registration.source, registration.prototype, registration.handler); err != nil {
 			return fmt.Errorf("register application namespace: %w", err)
+		}
+	}
+	if backends.RegisterNamespaces != nil {
+		if err := backends.RegisterNamespaces(mux); err != nil {
+			return fmt.Errorf("register application extension namespace: %w", err)
 		}
 	}
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, sendEnvelope aop.SendFunc) error {

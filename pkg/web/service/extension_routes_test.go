@@ -11,8 +11,8 @@ import (
 func TestOptionalRoutesAndConflicts(t *testing.T) {
 	svc := NewService(ServiceConfig{})
 	defer svc.Close(context.Background())
-	fixture := web.Route{Pattern: "/fixture/", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}
-	handler, err := web.NewHandler(svc, nil, fixture)
+	fixture := web.Route{Source: "fixture", Pattern: "/fixture/", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	handler, err := web.NewHandler(svc.Auth(), nil, fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,10 +23,10 @@ func TestOptionalRoutesAndConflicts(t *testing.T) {
 			t.Fatalf("%s = %d, want %d", path, recorder.Code, want)
 		}
 	}
-	if _, err := web.NewHandler(svc, nil, fixture, fixture); err == nil {
+	if _, err := web.NewHandler(svc.Auth(), nil, fixture, fixture); err == nil {
 		t.Fatal("duplicate route accepted")
 	}
-	if _, err := web.NewHandler(svc, nil, web.Route{Pattern: "GET /health", Handler: fixture.Handler}); err == nil {
+	if _, err := web.NewHandler(svc.Auth(), nil, web.Route{Source: "fixture", Pattern: "GET /health", Handler: fixture.Handler}); err == nil {
 		t.Fatal("built-in route collision accepted")
 	}
 }

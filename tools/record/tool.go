@@ -14,6 +14,11 @@ import (
 	"github.com/chainreactors/aiscan/pkg/imageutil"
 )
 
+const (
+	DefaultMaxConcurrent = 4
+	MaxConcurrentLimit   = 16
+)
+
 type Tool struct {
 	workDir       string
 	outputDir     string
@@ -27,10 +32,10 @@ type Tool struct {
 
 func New(workDir, outputDir string, maxConcurrent int, backend captureBackend) *Tool {
 	if maxConcurrent <= 0 {
-		maxConcurrent = defaultMaxConcurrent
+		maxConcurrent = DefaultMaxConcurrent
 	}
-	if maxConcurrent > maxConcurrentLimit {
-		maxConcurrent = maxConcurrentLimit
+	if maxConcurrent > MaxConcurrentLimit {
+		maxConcurrent = MaxConcurrentLimit
 	}
 	return &Tool{
 		workDir:       workDir,

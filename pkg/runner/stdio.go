@@ -10,7 +10,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/host"
 	"github.com/chainreactors/aiscan/pkg/profile"
 )

@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	webext "github.com/chainreactors/aiscan/pkg/exts/web"
 	"net"
 	"net/http"
 	"os"
@@ -22,11 +23,16 @@ import (
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
+func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
 	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
 	pool := webservice.NewAgentPool(service.Hub(), ingestor)
 	service.SetAgentPool(pool)
-	return service, pool, web.NewHandler(service, nil, nil)
+	handler, err := web.NewHandler(service.Auth(), nil, webext.Routes(service)...)
+	if err != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, err
+	}
+	return service, pool, handler, nil
 }
 
 // acp server: AIScan headless control plane — no UI and no hidden local
@@ -65,7 +71,11 @@ func main() {
 	}
 	defer ingestor.Close()
 
-	service, _, handler := newHeadlessHandler(store, ingestor, token)
+	service, _, handler, err := newHeadlessHandler(store, ingestor, token)
+	if err != nil {
+		logger.Errorf("create handler: %v", err)
+		return
+	}
 	defer func() {
 		if err := service.Close(context.Background()); err != nil {
 			logger.Errorf("close service: %v", err)

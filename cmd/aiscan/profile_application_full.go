@@ -11,7 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
-func editionExtensionEntries(application *app.App, tools *toolset.Registry, commands *commands.Registry, config app.Config, plan capability.Plan, workDir string) ([]extension.Entry, error) {
+func editionExtensionEntries(application *app.App, tools toolset.Runtime, commands commands.Runtime, config app.Config, plan capability.Plan, workDir string) ([]extension.Entry, error) {
 	var entries []extension.Entry
 	if plan.Has("browser") {
 		browser, err := browserext.New(commands, workDir, config.Tools.PlaywrightSession)
@@ -20,5 +20,5 @@ func editionExtensionEntries(application *app.App, tools *toolset.Registry, comm
 		}
 		entries = append(entries, extension.Entry{ID: "browser", Extension: browser})
 	}
-	return appendRecorderEntry(entries, application, tools, plan, workDir)
+	return appendRecorderEntry(entries, config, tools, plan, workDir)
 }

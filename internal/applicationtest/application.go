@@ -40,7 +40,7 @@ func Entries(t testing.TB, resource *app.Resource, dependencies ...string) []ext
 	return []extension.Entry{
 		{ID: "application", DependsOn: append([]string(nil), dependencies...), Extension: resource},
 		{ID: "application.terminal", DependsOn: []string{"application"}, Extension: terminalOwner},
-		{ID: "application.command-registry", DependsOn: []string{"application.terminal"}, Extension: application.Commands},
+		{ID: "application.command-registry", DependsOn: []string{"application.terminal"}, Extension: application.Commands.(extension.Extension)},
 		{ID: "application.tool-registry", DependsOn: []string{"application.terminal", "application.command-registry"}, Extension: tools},
 	}
 }

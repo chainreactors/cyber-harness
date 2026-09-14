@@ -158,11 +158,12 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 	}
 
 	backends := &managementapi.ApplicationBackends{
-		Sessions: s.api.Sessions,
-		Scans:    s.api.Scans,
-		Commands: s,
-		Files:    s,
-		NewID:    generateID,
+		RegisterNamespaces: s.applicationNamespaces,
+		Sessions:           s.api.Sessions,
+		Scans:              s.api.Scans,
+		Commands:           s,
+		Files:              s,
+		NewID:              generateID,
 	}
 	if s.agents != nil {
 		backends.PTY = s.agents

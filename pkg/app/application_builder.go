@@ -24,6 +24,7 @@ type RuntimeFeatures struct {
 // startup path layers them from cfg.Option via MergeOptionExtras.
 func AppConfigFromDistribute(dc *types.DistributeConfig, features RuntimeFeatures, logger telemetry.Logger) Config {
 	return Config{
+		DataDir:      cfg.ResolveDataDir(""),
 		Capabilities: edition.Catalog(),
 		Provider: ApplicationProviderConfig{
 			Enabled:   features.ProviderEnabled,
@@ -59,6 +60,8 @@ func MergeOptionExtras(rc Config, option *cfg.Option) Config {
 	if option == nil {
 		return rc
 	}
+	rc.DataDir = cfg.ResolveDataDir(option.DataDir)
+	rc.Resolved = option.Resolved
 	rc.Scanner.UncoverCredentials = cloneStringMap(option.UncoverCredentials)
 	rc.Tools.PlaywrightSession = option.PlaywrightSession
 	rc.Tools.MitmCapture = cloneBool(option.Mitm)
@@ -69,6 +72,8 @@ func MergeOptionExtras(rc Config, option *cfg.Option) Config {
 
 func AppConfig(option *cfg.Option, features RuntimeFeatures, logger telemetry.Logger) Config {
 	return Config{
+		DataDir:      cfg.ResolveDataDir(option.DataDir),
+		Resolved:     option.Resolved,
 		Capabilities: edition.Catalog(),
 		Provider: ApplicationProviderConfig{
 			Enabled:   features.ProviderEnabled,

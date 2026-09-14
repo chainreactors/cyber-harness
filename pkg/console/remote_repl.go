@@ -9,7 +9,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )

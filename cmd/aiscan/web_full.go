@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	webext "github.com/chainreactors/aiscan/pkg/exts/web"
 	"io/fs"
 	"net"
 	"net/http"
@@ -152,7 +153,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler, err := web.NewHandler(service, newSPAFileServer(staticSub), web.Route{Pattern: "/ioa/", Handler: http.StripPrefix("/ioa", ioaHandler)})
+	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), append(webext.Routes(service), web.Route{Source: "ioa.server", Pattern: "/ioa/", Handler: http.StripPrefix("/ioa", ioaHandler)})...)
 	if err != nil {
 		return err
 	}

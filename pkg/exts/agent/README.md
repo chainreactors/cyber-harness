@@ -1,8 +1,9 @@
 # Agent harness extension
 
 `./agent` provides the standard loop, inbox, evaluator and execution mechanisms.
-`pkg/exts/agent` installs those capabilities and owns the optional session host.
-There is one `Extension`, one published `Runtime`, and no separate session extension.
+`pkg/exts/agent` installs the loop capability. Session lifecycle and history are
+provided by the independent `pkg/exts/session` extension, so either capability
+can be replaced without duplicating ownership.
 
 `New(Config)` is inert. Supply `Loop` for a loop-only installation; additionally
 supply `Application` and `Option` to enable sessions. A session host with a nil
@@ -10,7 +11,8 @@ loop supports history and control commands without reasoning. Constructors do no
 open history, subscribe to events or start tasks.
 
 Only `Extension.Load` and `Extension.Close` control installation lifetime.
-`Runtime()` exposes session operations and also implements `agent.Loop`; the
+`Runtime()` exposes loop operations; session operations are exposed by the
+session extension runtime. The
 Runtime cannot close its owner. The extension does not create
 an inner extension graph or close the injected App resources.
 

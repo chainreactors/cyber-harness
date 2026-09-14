@@ -37,6 +37,7 @@ func NewConfig(backend ConfigBackend, options ...ConfigOptions) *Config {
 	if selected.Probes == nil {
 		selected.Probes = probe.New()
 	}
+	selected.Probes.Seal()
 	return &Config{backend: backend, options: selected}
 }
 

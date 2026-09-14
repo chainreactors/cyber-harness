@@ -24,7 +24,7 @@ import (
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -114,7 +114,6 @@ func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentex
 	}
 
 	menu := c.NewMenu("agent")
-	menu.AddHistorySourceFile("history", agentConsoleHistoryPath())
 	menu.ErrorHandler = func(err error) error {
 		if errors.Is(err, errAgentConsoleExit) {
 			return errAgentConsoleExit
@@ -181,6 +180,11 @@ func isLocalAgentTerminal(t *rlterm.Terminal) bool {
 
 func (r *AgentConsole) Start() error {
 	defer r.Close()
+	history := agentConsoleHistoryPath(r.option)
+	if err := os.MkdirAll(filepath.Dir(history), 0700); err != nil {
+		return fmt.Errorf("create console history directory: %w", err)
+	}
+	r.menu.AddHistorySourceFile("history", history)
 	r.activateConsoleLogger()
 	if r.option.EvalCriteria != "" {
 		if err := r.command("/eval " + r.option.EvalCriteria); err != nil {
@@ -198,7 +202,7 @@ func (r *AgentConsole) activateConsoleLogger() {
 	if r == nil {
 		return
 	}
-	consoleLogger := telemetry.GlobalLogger(telemetry.LogConfig{
+	consoleLogger := telemetry.NewLogger(telemetry.LogConfig{
 		Debug:  r.option != nil && r.option.Debug,
 		Quiet:  r.option != nil && r.option.Quiet,
 		Output: r.stderr,
@@ -490,7 +494,9 @@ func (r *AgentConsole) allCommands() []*cobra.Command {
 	cmds = append(cmds, r.skillCommands()...)
 	cmds = append(cmds, r.providerCommands()...)
 	if r.bindings != nil && r.bindings.Commands != nil {
-		cmds = append(cmds, r.bindings.Commands(consoleapi.View{Out: r.stdout, Err: r.stderr, Table: r.printBoxTable})...)
+		cmds = append(cmds, r.bindings.Commands(consoleapi.View{Out: r.stdout, Err: r.stderr, Table: r.printBoxTable,
+			Command: r.command, RefreshStatus: func() { fmt.Fprint(r.stdout, r.renderStatus()) },
+		})...)
 	}
 	return cmds
 }
@@ -521,26 +527,6 @@ func (r *AgentConsole) builtinCommands() []*cobra.Command {
 		{Use: "/continue", Short: "继续当前会话", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { return r.submitPrompt("", true) }},
 		{Use: "/followup", Short: "排队到当前任务结束后再发送", DisableFlagParsing: true, Args: cobra.MinimumNArgs(1), RunE: func(_ *cobra.Command, args []string) error { return r.submitPrompt(strings.Join(args, " "), false) }},
 		{Use: "/exit", Aliases: []string{"/quit"}, Short: "退出交互模式", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { return errAgentConsoleExit }},
-	}
-	for _, spec := range r.runtime.CommandSpecs(false) {
-		if spec.Name == "/help" {
-			continue
-		} // The console owns its command panel.
-		usage := spec.Usage
-		if usage == "" {
-			usage = spec.Name
-		}
-		cmd := &cobra.Command{Use: usage, Aliases: spec.Aliases, Short: spec.Description, DisableFlagParsing: true}
-		cmd.RunE = func(c *cobra.Command, args []string) error {
-			if err := r.command(c.Name() + " " + strings.Join(args, " ")); err != nil {
-				return err
-			}
-			if c.Name() == "/status" {
-				fmt.Fprint(r.stdout, r.renderStatus())
-			}
-			return nil
-		}
-		cmds = append(cmds, cmd)
 	}
 	return cmds
 }
@@ -670,7 +656,7 @@ func (r *AgentConsole) renderProviders() string {
 		return "\n  No providers configured.\n\n"
 	}
 	rows := []helpRow{{Command: "#1  " + pc.Provider, Detail: pc.Model + "  ● active"}}
-	for i, p := range r.runtime.App().ProviderFallbacks {
+	for i, p := range r.runtime.App().Providers.Fallbacks() {
 		rows = append(rows, helpRow{Command: fmt.Sprintf("#%d  %s", i+2, p.Provider.Name()), Detail: p.Model + "  ○ configured"})
 	}
 	return r.renderPanel("providers", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
@@ -772,7 +758,7 @@ func (r *AgentConsole) renderSessions() (string, error) {
 func (r *AgentConsole) listSavedSessions() ([]SavedSession, error) {
 	dir := r.sessionDir
 	if dir == "" {
-		dir = cfg.DataSubDir("sessions")
+		dir = filepath.Join(cfg.ResolveDataDir(r.option.DataDir), "sessions")
 	}
 	return listSavedSessions(dir)
 }
@@ -1125,8 +1111,12 @@ func (r *AgentConsole) printBoxTable(title string, rows [][]string) {
 	fmt.Fprint(r.stdout, r.renderPanel(title, renderBoxTable(rows, enabled), enabled))
 }
 
-func agentConsoleHistoryPath() string {
-	return filepath.Join(cfg.DataSubDir(""), "agent_history")
+func agentConsoleHistoryPath(option *cfg.Option) string {
+	var directory string
+	if option != nil {
+		directory = option.DataDir
+	}
+	return filepath.Join(cfg.ResolveDataDir(directory), "agent_history")
 }
 
 func (r *AgentConsole) providerConfig() agent.ProviderConfig {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
@@ -23,8 +22,10 @@ type ArsenalCommand struct {
 	mgr *crtm.Manager
 }
 
-func NewArsenalCommand() (*ArsenalCommand, error) {
-	base := config.DataSubDir("arsenal")
+func NewArsenalCommand(base string) (*ArsenalCommand, error) {
+	if !filepath.IsAbs(base) {
+		return nil, fmt.Errorf("arsenal directory must be absolute")
+	}
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    filepath.Join(base, "bin"),
@@ -34,12 +35,9 @@ func NewArsenalCommand() (*ArsenalCommand, error) {
 		return nil, fmt.Errorf("init arsenal: %w", err)
 	}
 
-	binPath := mgr.BinPath()
-	_ = os.MkdirAll(binPath, 0o755)
-	if path := os.Getenv("PATH"); !strings.Contains(path, binPath) {
-		os.Setenv("PATH", binPath+string(os.PathListSeparator)+path)
+	if err := os.MkdirAll(mgr.BinPath(), 0755); err != nil {
+		return nil, err
 	}
-
 	return &ArsenalCommand{mgr: mgr}, nil
 }
 

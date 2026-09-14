@@ -69,8 +69,9 @@ type Bundle struct {
 }
 
 type Store struct {
-	bundles []Bundle
-	Skills  []Skill
+	Diagnostics []Diagnostic
+	bundles     []Bundle
+	Skills      []Skill
 
 	byName  map[string]Skill
 	catalog capability.Catalog
@@ -79,6 +80,12 @@ type Store struct {
 // LoadAll loads skills from all sources with override support.
 // Priority (later overrides earlier): embedded < .aiscan/skills/ < .agent/skills/ < CLI paths.
 func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
+	directory, _ := os.Getwd()
+	return LoadFrom(directory, cliPaths, catalog, bundles...)
+}
+
+// LoadFrom resolves project and relative CLI paths against the profile directory.
+func LoadFrom(directory string, cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
 
@@ -97,8 +104,11 @@ func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (
 		{".aiscan/skills", SourceProject},
 		{".agent/skills", SourceAgent},
 	} {
-		dir := findProjectSkillDir(rel.dir)
-		if dir == "" {
+		dir := filepath.Join(directory, rel.dir)
+		if directory == "" {
+			continue
+		}
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
 		}
 		local, diags := LoadFromDir(dir, rel.source)
@@ -107,6 +117,9 @@ func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (
 	}
 
 	for _, p := range cliPaths {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(directory, p)
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			allDiags = append(allDiags, Diagnostic{Path: p, Message: err.Error()})
@@ -137,6 +150,7 @@ func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (
 		}
 	}
 	store.Skills = filtered
+	store.Diagnostics = allDiags
 	return store, allDiags
 }
 
@@ -614,17 +628,4 @@ func splitRaw(raw string) (yamlBlock string, body string) {
 	body = strings.TrimPrefix(body, "---")
 	body = strings.TrimPrefix(body, "\n")
 	return yamlBlock, body
-}
-
-func findProjectSkillDir(relPath string) string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	candidate := filepath.Join(wd, relPath)
-	info, err := os.Stat(candidate)
-	if err == nil && info.IsDir() {
-		return candidate
-	}
-	return ""
 }

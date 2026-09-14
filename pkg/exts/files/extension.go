@@ -14,10 +14,10 @@ import (
 // Extension is the only files plugin and the sole lifecycle owner of Files.
 type Extension struct {
 	resource *files.Resource
-	registry *toolset.Registry
+	registry toolset.Registrar
 }
 
-func New(registry *toolset.Registry, hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
+func New(registry toolset.Registrar, hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
 	if registry == nil {
 		return nil, errors.New("files extension requires a tool registry")
 	}

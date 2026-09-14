@@ -3,6 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
+	webext "github.com/chainreactors/aiscan/pkg/exts/web"
+	"github.com/chainreactors/aiscan/pkg/probe"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,7 +24,7 @@ import (
 )
 
 func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...string) *web.Handler {
-	handler, err := web.NewHandler(service, static)
+	handler, err := web.NewHandler(service.Auth(), static, webext.Routes(service)...)
 	if err != nil {
 		panic(err)
 	}
@@ -28,7 +32,9 @@ func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...s
 }
 
 func registerConnectServices(mux *http.ServeMux, _ string, service web.Service) {
-	web.RegisterConnectServices(mux, service)
+	for _, route := range webext.Routes(service) {
+		mux.Handle(route.Pattern, route.Handler)
+	}
 }
 
 func newAccessKeyAuth(key string) func(http.Handler) http.Handler {
@@ -136,7 +142,12 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 }
 
 func TestHandlerTestConnRouting(t *testing.T) {
-	svc := NewService(ServiceConfig{})
+	probes := probe.New()
+	if err := probes.Register("scanner", "cyberhub", scannerprobe.Cyberhub); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Probes: probes}})
+	defer svc.Close(context.Background())
 	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()
 	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)

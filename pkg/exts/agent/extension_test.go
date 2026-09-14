@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/agent"
-	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
@@ -40,9 +39,6 @@ func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
 	result, err := runtime.Run(t.Context(), agent.Config{SessionID: "standalone"})
 	if err != nil || result.Output != "standalone" {
 		t.Fatalf("standalone loop: %v, %v", result, err)
-	}
-	if _, err := runtime.OpenSession(t.Context(), agentext.SessionOptions{ID: "absent"}); err == nil {
-		t.Fatal("loop-only installation admitted a session")
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
@@ -276,14 +272,14 @@ func TestFailedLoadAndPanickingLoopReleaseOwnership(t *testing.T) {
 
 func newLoopExtension(loop agent.Loop) (*agentext.Extension, *apppkg.Resource) {
 	hookRegistry := hooks.New()
-	application, err := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{
+	application, err := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.AppServices{
 		Hooks: hookRegistry, Events: events.New(),
 		Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
 	})
 	if err != nil {
 		panic(err)
 	}
-	value, err := agentext.New(agentext.Config{Application: application.App, Option: &cfg.Option{}, Loop: loop})
+	value, err := agentext.New(agentext.Config{Loop: loop})
 	if err != nil {
 		panic(err)
 	}

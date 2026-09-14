@@ -8,7 +8,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 // Admission is synchronized with Close; Runtime is the only execution queue.

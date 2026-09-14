@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
+	searchprobe "github.com/chainreactors/aiscan/pkg/exts/search/probe"
 	"github.com/chainreactors/aiscan/pkg/probe"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -37,7 +39,15 @@ func (f *fakeConfigStore) ActivateConfig(context.Context, string) (*types.Config
 	return nil, errors.New("configuration activation unavailable in probe fixture")
 }
 
-func newConfig(backend ConfigBackend) *Config { return NewConfig(backend) }
+func newConfig(backend ConfigBackend) *Config {
+	registry := probe.New()
+	for name, check := range map[string]probe.Check{"cyberhub": scannerprobe.Cyberhub, "recon": scannerprobe.Recon, "search": searchprobe.Check} {
+		if err := registry.Register(name, name, check); err != nil {
+			panic(err)
+		}
+	}
+	return NewConfig(backend, ConfigOptions{Probes: registry})
+}
 
 // configWith builds a DistributeConfig, letting each test set only the fields
 // it cares about. Pass nil for an empty config.
@@ -171,9 +181,9 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := probe.FofaInfoEndpoint
-	probe.FofaInfoEndpoint = srv.URL
-	defer func() { probe.FofaInfoEndpoint = orig }()
+	orig := scannerprobe.FofaInfoEndpoint
+	scannerprobe.FofaInfoEndpoint = srv.URL
+	defer func() { scannerprobe.FofaInfoEndpoint = orig }()
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
@@ -200,9 +210,9 @@ func TestProbeFofaError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": true, "errmsg": "[-700] account invalid"})
 	}))
 	defer srv.Close()
-	orig := probe.FofaInfoEndpoint
-	probe.FofaInfoEndpoint = srv.URL
-	defer func() { probe.FofaInfoEndpoint = orig }()
+	orig := scannerprobe.FofaInfoEndpoint
+	scannerprobe.FofaInfoEndpoint = srv.URL
+	defer func() { scannerprobe.FofaInfoEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{FofaKey: "bad"}
@@ -227,9 +237,9 @@ func TestProbeHunterSuccess(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := probe.HunterSearchEndpoint
-	probe.HunterSearchEndpoint = srv.URL
-	defer func() { probe.HunterSearchEndpoint = orig }()
+	orig := scannerprobe.HunterSearchEndpoint
+	scannerprobe.HunterSearchEndpoint = srv.URL
+	defer func() { scannerprobe.HunterSearchEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "hk"}
@@ -244,9 +254,9 @@ func TestProbeHunterError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 401, "message": "invalid api-key"})
 	}))
 	defer srv.Close()
-	orig := probe.HunterSearchEndpoint
-	probe.HunterSearchEndpoint = srv.URL
-	defer func() { probe.HunterSearchEndpoint = orig }()
+	orig := scannerprobe.HunterSearchEndpoint
+	scannerprobe.HunterSearchEndpoint = srv.URL
+	defer func() { scannerprobe.HunterSearchEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "bad"}

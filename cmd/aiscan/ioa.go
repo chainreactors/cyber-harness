@@ -30,7 +30,7 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 		return err
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
-	client, err := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "aiscan-cli", AutoRegister: autoRegister}, clientext.Dependencies{Logger: env.Logger})
+	client, err := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "aiscan-cli", AutoRegister: autoRegister}, clientext.Services{Logger: env.Logger})
 	if err != nil {
 		return err
 	}

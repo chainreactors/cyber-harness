@@ -9,7 +9,6 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
 var ErrUnavailable = errors.New("agent extension is not active")
@@ -27,30 +26,15 @@ type loopRuntime struct {
 // Extension owns loop admission and session shutdown as one installation.
 type Extension struct{ runtime *Runtime }
 
-// New is inert. Without Application it installs only the supplied loop.
+type Config struct{ Loop agent.Loop }
+type Runtime struct{ loop *loopRuntime }
+
+func (e *Extension) Descriptor() extension.Descriptor {
+	return extension.Descriptor{ID: "agent-loop", Description: "agent loop provider", Provides: []extension.Service{extension.ServiceOf[agent.Loop]("agent.loop")}}
+}
+
 func New(config Config) (*Extension, error) {
-	declared, index, err := commandDeclarations(config.Commands)
-	if err != nil {
-		return nil, err
-	}
-	if config.Application == nil && config.Option != nil || config.Application != nil && config.Option == nil {
-		return nil, errors.New("agent sessions require both application and options")
-	}
-	if config.Logger == nil {
-		config.Logger = telemetry.NopLogger()
-	}
-	rt := &Runtime{
-		commands: declared, commandIndex: index,
-		app: config.Application, option: config.Option,
-		logger: config.Logger, runtimeConfig: config,
-		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		closeDone: make(chan struct{}),
-	}
-	if config.Loop != nil || config.Application == nil {
-		rt.loop = &loopRuntime{loop: config.Loop, done: make(chan struct{})}
-		rt.runtimeConfig.Loop = rt
-	}
-	return &Extension{runtime: rt}, nil
+	return &Extension{runtime: &Runtime{loop: &loopRuntime{loop: config.Loop, done: make(chan struct{})}}}, nil
 }
 
 // Runtime lends business operations, never ownership of this installation.
@@ -69,9 +53,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		if err := rt.loop.load(scope); err != nil {
 			return err
 		}
-	}
-	if rt.app != nil {
-		return rt.loadSessions(scope)
 	}
 	return nil
 }
@@ -147,9 +128,6 @@ func (e *Extension) Close(ctx context.Context) error {
 		rt.loop.stop()
 	}
 	var err error
-	if rt.app != nil {
-		err = rt.close(ctx)
-	}
 	if rt.loop != nil {
 		err = errors.Join(err, rt.loop.close(ctx))
 	}

@@ -4,8 +4,8 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
-func NewCommand() (commands.Command, error) {
-	cmd, err := NewArsenalCommand()
+func NewCommand(directory string) (commands.Command, error) {
+	cmd, err := NewArsenalCommand(directory)
 	if err != nil {
 		return commands.Command{}, err
 	}

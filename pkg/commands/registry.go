@@ -46,7 +46,7 @@ func (r *Registry) Register(source, group string, commands ...Command) error {
 			return ErrInvalidCommand
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("%w: %s", ErrDuplicateCommand, name)
+			return fmt.Errorf("%w: %s (source %s repeated in batch)", ErrDuplicateCommand, name, source)
 		}
 		seen[name] = struct{}{}
 		values = append(values, coreregistry.Value[Command]{Name: name, Value: command})

@@ -4,6 +4,8 @@ package scan
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"math"
 	"net/url"
 	"strings"
@@ -11,8 +13,6 @@ import (
 	"sync/atomic"
 
 	browserutil "github.com/chainreactors/aiscan/pkg/headless"
-	"github.com/projectdiscovery/gologger"
-	"github.com/projectdiscovery/gologger/levels"
 	"github.com/projectdiscovery/katana/pkg/engine"
 	"github.com/projectdiscovery/katana/pkg/engine/headless"
 	"github.com/projectdiscovery/katana/pkg/engine/standard"
@@ -152,17 +152,16 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		}
 	}
 
-	gologger.DefaultLogger.SetMaxLevel(levels.LevelSilent)
-	crawlerOptions, err := katanatypes.NewCrawlerOptions(options)
+	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(options, &scanResultWriter{onResult: handleResult}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
+
 		emitError(emit, source, "katana init %s: %v", wt.URL, err)
 		return
 	}
-	crawlerOptions.OutputWriter = &scanResultWriter{onResult: handleResult}
+	// Output ownership is transferred during construction.
 	defer func() {
 		crawlerOptions.Close()
-		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
+
 	}()
 
 	var crawler engine.Engine

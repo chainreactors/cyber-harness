@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,8 +20,6 @@ import (
 	browserutil "github.com/chainreactors/aiscan/pkg/headless"
 	"github.com/chainreactors/aiscan/tools/toolargs"
 	"github.com/projectdiscovery/goflags"
-	"github.com/projectdiscovery/gologger"
-	"github.com/projectdiscovery/gologger/levels"
 	"github.com/projectdiscovery/katana/pkg/engine"
 	"github.com/projectdiscovery/katana/pkg/engine/headless"
 	"github.com/projectdiscovery/katana/pkg/engine/hybrid"
@@ -182,17 +182,17 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		}
 	}
 
-	// Suppress gologger during crawl.
-	gologger.DefaultLogger.SetMaxLevel(levels.LevelSilent)
-	crawlerOptions, err := katanatypes.NewCrawlerOptions(options)
+	// Use instance-owned output and logging for embedded crawling.
+
+	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(options, collector, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
+
 		return nil, fmt.Errorf("katana: init: %w", err)
 	}
-	crawlerOptions.OutputWriter = collector
+	// Output ownership is transferred during construction.
 	defer func() {
 		crawlerOptions.Close()
-		gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
+
 	}()
 
 	var crawler engine.Engine

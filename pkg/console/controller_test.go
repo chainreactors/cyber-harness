@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"io"
 	"strings"
@@ -54,7 +54,7 @@ func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := newAgentConsole(context.Background(), rt, session, option, rlterm.Stream(strings.NewReader(""), stdout, stderr, rlterm.NewControl(false, 80, 24)), nil)
+	c := newAgentConsole(context.Background(), rt, session, option, rlterm.Stream(strings.NewReader(""), stdout, stderr, rlterm.NewControl(false, 80, 24)), testSessionBindings(t, rt))
 	t.Cleanup(c.Close)
 	return c
 }

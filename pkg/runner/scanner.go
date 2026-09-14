@@ -15,7 +15,8 @@ import (
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/scan"
 )
@@ -199,9 +200,11 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
+	loopResource, err := loopext.New(loopext.Config{Loop: agent.StandardLoop{}})
+	if err != nil { return err }
 	runtimeResource, err := agentext.New(agentext.Config{
 		Application: application, Option: option, Logger: logger,
-		Loop: agent.StandardLoop{},
+		Loop: loopResource.Runtime(),
 		PromptConfig: &agentext.PromptConfig{
 			Tools:            application.Tools,
 			ScannerDocs:      application.Commands.UsageDocs(),
@@ -215,7 +218,8 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	}
 	runtime := runtimeResource.Runtime()
 	runtimeSet, err := extension.New(
-		extension.Entry{ID: "agent", Extension: runtimeResource},
+		extension.Entry{ID: "agent", Extension: loopResource},
+		extension.Entry{ID: "session", DependsOn: []string{"agent"}, Extension: runtimeResource},
 	)
 	if err != nil {
 		return err

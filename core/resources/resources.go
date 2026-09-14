@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ const (
 
 // Options controls aiscan-owned scanner resource loading.
 type Options struct {
+	CacheDir    string
 	CyberhubURL string
 	APIKey      string
 	Mode        string
@@ -68,7 +70,12 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 	}
 
 	if set.RemoteEnabled {
-		fingerCache := cachePath(opts.CyberhubURL, opts.APIKey, "fingers")
+		if opts.CacheDir != "" {
+			if err := os.MkdirAll(opts.CacheDir, 0755); err != nil {
+				return nil, fmt.Errorf("create scanner cache: %w", err)
+			}
+		}
+		fingerCache := cachePath(opts.CacheDir, opts.CyberhubURL, opts.APIKey, "fingers")
 		if ff, ok := loadCachedFingers(fingerCache); ok {
 			set.RemoteFingers = ff.Len()
 			if mode == ModeOverride {
@@ -88,7 +95,7 @@ func Init(ctx context.Context, opts Options) (*Set, error) {
 			}
 		}
 
-		tplCache := cachePath(opts.CyberhubURL, opts.APIKey, "neutron")
+		tplCache := cachePath(opts.CacheDir, opts.CyberhubURL, opts.APIKey, "neutron")
 		if tpls, ok := loadCachedTemplates(tplCache); ok {
 			set.RemoteNeutron = len(tpls)
 			if mode == ModeOverride {

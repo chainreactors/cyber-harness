@@ -5,6 +5,7 @@ package record
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -16,7 +17,9 @@ import (
 type Extension struct {
 	mu         sync.Mutex
 	workDir    string
-	registry   *toolset.Registry
+	directory  string
+	maximum    int
+	registry   toolset.Registrar
 	tool       *record.Tool
 	registered bool
 	closed     bool
@@ -24,11 +27,11 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry *toolset.Registry, workDir string) (*Extension, error) {
-	if registry == nil || strings.TrimSpace(workDir) == "" {
-		return nil, fmt.Errorf("record extension requires a working directory")
+func New(registry toolset.Registrar, workDir, directory string, maximum int) (*Extension, error) {
+	if registry == nil || strings.TrimSpace(workDir) == "" || !filepath.IsAbs(directory) || maximum < 1 || maximum > record.MaxConcurrentLimit {
+		return nil, fmt.Errorf("record extension requires directories, registry, and maximum between 1 and 16")
 	}
-	return &Extension{registry: registry, workDir: workDir}, nil
+	return &Extension{registry: registry, workDir: workDir, directory: directory, maximum: maximum}, nil
 }
 
 func (m *Extension) Load(scope *extension.Scope) error {
@@ -44,7 +47,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	recorder, err := record.NewConfigured(m.workDir)
+	recorder, err := record.NewConfigured(m.workDir, m.directory, m.maximum)
 	if err != nil {
 		return err
 	}

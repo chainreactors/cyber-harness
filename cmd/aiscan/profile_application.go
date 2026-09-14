@@ -8,20 +8,26 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/core/capability"
+	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
 	app "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	arsenalext "github.com/chainreactors/aiscan/pkg/exts/arsenal"
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
+	providerext "github.com/chainreactors/aiscan/pkg/exts/provider"
 	scannerext "github.com/chainreactors/aiscan/pkg/exts/scanner"
 	searchext "github.com/chainreactors/aiscan/pkg/exts/search"
+	skillsext "github.com/chainreactors/aiscan/pkg/exts/skills"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	"github.com/chainreactors/aiscan/pkg/toolset"
-	arsenal "github.com/chainreactors/aiscan/tools/arsenal"
 	"github.com/chainreactors/aiscan/tools/files"
 	looptool "github.com/chainreactors/aiscan/tools/loop"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
+	"os"
+	"path/filepath"
 )
 
 // applicationGraph declares the App-owned portion of the AIScan product graph.
@@ -30,14 +36,20 @@ import (
 type applicationGraph struct {
 	application *app.App
 	resource    *app.Resource
-	commands    *commands.Registry
-	tools       *toolset.Registry
+	harness     *harnessext.Extension
+	commands    commands.Runtime
+	tools       toolset.Runtime
 	entries     []extension.Entry
 }
 
 func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *events.Stream, proxy *proxytool.ProxyHub, loop agent.Loop, workDir string) (*applicationGraph, error) {
-	commandRegistry := commands.NewRegistry(registry)
-	toolRegistry := toolset.NewRegistry(registry)
+	config.DataDir = cfg.ResolveDataDir(config.DataDir)
+	harness, err := harnessext.New(registry)
+	if err != nil {
+		return nil, err
+	}
+	commandRegistry := harness.Commands()
+	toolRegistry := harness.ToolRegistry()
 	plan := config.Capabilities.Select(capability.Options{
 		Groups:        linkedBaseGroups(config.Capabilities),
 		OptionalTools: config.Tools.OptionalTools,
@@ -53,6 +65,15 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 	}
 
 	var entries []extension.Entry
+	var childEnv map[string]string
+	if plan.Has("arsenal") {
+		a, err := arsenalext.New(filepath.Join(cfg.ResolveDataDir(config.DataDir), "arsenal"), commandRegistry)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, extension.Entry{ID: "arsenal", Extension: a})
+		childEnv = map[string]string{"PATH": a.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH")}
+	}
 	var bash *commands.BashTool
 	if plan.Has("core") {
 		workspace, err := fileext.New(toolRegistry, registry, files.Config{Directory: workDir})
@@ -60,7 +81,7 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 			return nil, err
 		}
 		terminal, err := terminalext.New(registry, toolRegistry, commandRegistry, terminalext.Config{
-			Directory: workDir, Timeout: config.Tools.BashTimeout,
+			Directory: workDir, Timeout: config.Tools.BashTimeout, Environment: childEnv,
 			Proxy: proxyURL, ProxyCA: proxyCA, Egress: egress,
 		})
 		if err != nil {
@@ -76,20 +97,57 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 	var application *app.App
 	var scanner *scannerext.Extension
 	if !config.SkipEngines {
-		scanner = scannerext.New(func() *app.App { return application }, commandRegistry, config, loop, workDir, proxyURL, config.Logger)
+		scanner = scannerext.New(func() *app.App { return application }, commandRegistry, scannerext.Config{DataDir: config.DataDir, Scanner: config.Scanner, Capabilities: config.Capabilities}, loop, workDir, proxyURL, config.Logger)
 	}
 	var scannerHandle app.Scanner
 	if scanner != nil {
 		scannerHandle = scanner
 	}
-	applicationResource, err := app.New(config, app.Dependencies{
-		Hooks: registry, Events: stream, Commands: commandRegistry, Tools: toolRegistry,
-		Bash: bash, Scanner: scannerHandle,
-	})
+	skillResource, err := skillsext.NewLibrary(skillsext.LibraryConfig{Directory: workDir, Paths: config.CLISkillPaths, Catalog: config.Capabilities, Bundles: config.SkillBundles})
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, extension.Entry{ID: "skills", Extension: skillResource})
+	services := extension.NewServices()
+	for _, contribution := range []struct {
+		key   extension.Service
+		value any
+	}{
+		{app.HooksService, registry}, {app.EventsService, stream},
+		{app.CommandsService, commandRegistry}, {app.ToolsService, toolRegistry},
+		{app.SkillsService, skillResource.Store()},
+	} {
+		if err := services.Provide(contribution.key, contribution.value); err != nil {
+			return nil, err
+		}
+	}
+	if scannerHandle != nil {
+		if err := services.Provide(app.ScannerService, scannerHandle); err != nil {
+			return nil, err
+		}
+	}
+	if bash != nil {
+		if err := services.Provide(app.BashService, bash); err != nil {
+			return nil, err
+		}
+	}
+	services.Seal()
+	appServices, err := app.Services(services)
+	if err != nil {
+		return nil, err
+	}
+	applicationResource, err := app.New(config, appServices)
 	if err != nil {
 		return nil, err
 	}
 	application = applicationResource.App
+	if config.Provider.Enabled {
+		resource, err := providerext.New(&application.Providers, config.Provider, application.Logger())
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, extension.Entry{ID: "provider", Extension: resource})
+	}
 
 	if plan.Has("core") {
 		subagent := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
@@ -122,18 +180,8 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 			return nil, err
 		}
 	}
-	if plan.Has("arsenal") {
-		value, err := arsenal.NewCommand()
-		if err != nil {
-			application.Logger().Warnf("arsenal init: %v", err)
-		} else {
-			if err := commandRegistry.Register("arsenal", "arsenal", value); err != nil {
-				return nil, err
-			}
-		}
-	}
 	if plan.Has("search") {
-		search, err := searchext.New(toolRegistry, commandRegistry, searchext.Config{
+		searchConfig := searchext.Config{
 			Search: func(ctx context.Context, query string, maxResults int) (string, error) {
 				search := providerWebSearch(application)
 				if search == nil {
@@ -143,21 +191,31 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 			},
 			TavilyKeys: config.Tools.TavilyKeys,
 			Proxy:      proxy,
-		})
+		}
+		var dependencies []string
+		if scanner != nil {
+			searchConfig.ResolveIndex = scanner.Index
+			dependencies = append(dependencies, "scanner")
+		}
+		search, err := searchext.New(toolRegistry, commandRegistry, searchConfig)
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, extension.Entry{ID: "search", Extension: search})
+		entries = append(entries, extension.Entry{ID: "search", DependsOn: dependencies, Extension: search})
 	}
 	if scanner != nil {
-		entries = append(entries, extension.Entry{ID: "scanner", Extension: scanner})
+		var dependencies []string
+		if config.Provider.Enabled {
+			dependencies = append(dependencies, "provider")
+		}
+		entries = append(entries, extension.Entry{ID: "scanner", DependsOn: dependencies, Extension: scanner})
 	}
 	editionEntries, err := editionExtensionEntries(application, toolRegistry, commandRegistry, config, plan, workDir)
 	if err != nil {
 		return nil, err
 	}
 	entries = append(entries, editionEntries...)
-	return &applicationGraph{application: application, resource: applicationResource, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
+	return &applicationGraph{application: application, resource: applicationResource, harness: harness, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
 }
 
 func (a *applicationGraph) entriesFor(id string, dependencies ...string) ([]extension.Entry, string) {
@@ -180,13 +238,9 @@ func (a *applicationGraph) entriesFor(id string, dependencies ...string) ([]exte
 		entries = append(entries, entry)
 		contributors = append(contributors, entry.ID)
 	}
-	commandRegistryID := id + ".command-registry"
-	toolRegistryID := id + ".tool-registry"
-	entries = append(entries,
-		extension.Entry{ID: commandRegistryID, DependsOn: append([]string{id}, contributors...), Extension: a.commands},
-		extension.Entry{ID: toolRegistryID, DependsOn: append(append([]string(nil), contributors...), commandRegistryID), Extension: a.tools},
-	)
-	return entries, toolRegistryID
+	harnessID := id + ".harness"
+	entries = append(entries, extension.Entry{ID: harnessID, DependsOn: append([]string{id}, contributors...), Extension: a.harness})
+	return entries, harnessID
 }
 
 func providerWebSearch(application *app.App) func(context.Context, string, int) (string, error) {

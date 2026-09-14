@@ -42,10 +42,14 @@ Set 会把 Extension.Close 返回的 `context.Canceled` 或 `context.DeadlineExc
 Extension 的 Load/Close panic 不会越过 Set：Load panic 转为启动失败并触发逆序回滚；Close
 panic 转为可重试的未完成关闭，依赖继续受保护。
 
+Service Provider/Consumer 元数据由 Profile 在构造阶段校验；运行时服务表按 Profile
+隔离并在发布前 Seal。领域类型不进入 `core/extension`，只通过 typed Service contract
+声明。完整插件装配约定见 [系统架构](../../docs/architecture.md)。
+
 典型验证：
 
 ```text
 go test -mod=readonly -race ./core/extension ./core/registry ./pkg/profile ./cmd/runner
 ```
 
-覆盖依赖校验、启动回滚、关闭重试、资源排空、初始化与寿命取消分离和生命周期 panic。完整装配约定见 [静态扩展设计](../../docs/extension-minimal-design.md)。
+覆盖依赖校验、服务契约、启动回滚、关闭重试、资源排空、初始化与寿命取消分离和生命周期 panic。

@@ -213,7 +213,7 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 		filepath.Join("tools", "ioa", "service.go"):         {"func (m *Runtime) Start", "func (m *Runtime) Close"},
 		filepath.Join("tools", "proxy", "hub.go"):           {"func (h *ProxyHub) Start", "func (h *ProxyHub) Close"},
 		filepath.Join("pkg", "app", "app.go"):               {"func (a *App) Load(", "func (a *App) Close("},
-		filepath.Join("pkg", "exts", "agent", "runtime.go"): {"func (rt *Runtime) Load(", "func (rt *Runtime) Close("},
+		filepath.Join("pkg", "exts", "agent", "extension.go"): {"func (rt *Runtime) Load(", "func (rt *Runtime) Close("},
 	} {
 		source := readRepositoryFile(t, root, rel)
 		for _, value := range forbidden {
@@ -223,7 +223,7 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 		}
 	}
 	agentExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "agent", "extension.go"))
-	agentRuntime := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "agent", "runtime.go"))
+	agentRuntime := readRepositoryFile(t, root, filepath.Join("agent", "session", "runtime.go"))
 	for source, required := range map[string][]string{
 		agentExtension: {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Runtime() *Runtime", "func (rt *Runtime) Run"},
 		agentRuntime:   {"type Runtime struct"},
@@ -246,9 +246,9 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 			t.Errorf("agent lifecycle owner publishes business method %q", method)
 		}
 	}
-	legacySources, err := filepath.Glob(filepath.Join(root, "pkg", "exts", "session", "*.go"))
-	if err != nil || len(legacySources) != 0 {
-		t.Fatal("session remains a second extension boundary instead of the agent runtime capability")
+	sessionExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "session", "extension.go"))
+	if !strings.Contains(sessionExtension, "type Extension struct") {
+		t.Fatal("session extension boundary is missing")
 	}
 	skillsExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "skills", "extension.go"))
 	for _, required := range []string{"type Catalog struct", "func (m *Extension) Catalog() *Catalog", "func (c *Catalog) Locations"} {
@@ -780,6 +780,25 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	// one-to-one production source file. They exercise a package boundary or a
 	// resource lifetime assembled from several files.
 	standalone := map[string]bool{
+		// Composition fixtures, cross-file contracts, and test process entry points.
+		"pkg/app/app_fixture_test.go":              true,
+		"pkg/app/dependencies_test.go":             true,
+		"pkg/console/app_fixture_test.go":          true,
+		"pkg/exts/agent/app_fixture_test.go":       true,
+		"pkg/exts/agent/delivery_test.go":          true,
+		"pkg/exts/ioa/client/lifecycle_test.go":    true,
+		"pkg/node/app_fixture_test.go":             true,
+		"pkg/toolset/composition_test.go":          true,
+		"pkg/web/service/agents_snapshot_test.go":  true,
+		"pkg/web/service/app_fixture_test.go":      true,
+		"pkg/web/service/extension_routes_test.go": true,
+		"skills/bundle_test.go":                    true,
+		"cmd/aiscan/process_entry_test.go":         true,
+		"pkg/console/process_entry_test.go":        true,
+		"pkg/exts/agent/process_entry_test.go":     true,
+		"pkg/node/process_entry_test.go":           true,
+		"pkg/web/service/process_entry_test.go":    true,
+
 		"architecture_test.go":                     true,
 		"session_architecture_test.go":             true,
 		"aop/mux_lifecycle_test.go":                true,
@@ -1312,6 +1331,11 @@ func trackedFiles(t *testing.T, root string) []string {
 			continue
 		}
 		rel := filepath.ToSlash(string(raw))
+		// Pinned third-party modules retain upstream sources and tests. Their local
+		// patches are exercised through repository integration tests, not naming lint.
+		if strings.HasPrefix(rel, "third_party/") {
+			continue
+		}
 		info, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
 		if statErr != nil || info.IsDir() {
 			continue

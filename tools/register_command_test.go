@@ -272,30 +272,18 @@ func TestZombieExecuteWithProxy(t *testing.T) {
 	}
 }
 
-// TestNeutronSetProxyUpdatesDefault verifies that neutron's SetProxy/WithProxy
-// sets neutron DefaultOption.Proxy for subsequent executions.
-func TestNeutronSetProxyUpdatesDefault(t *testing.T) {
-	proxyAddr, _ := startSOCKS5CountingProxy(t)
-
-	origProxy := neutronhttp.DefaultOption.Proxy
-
-	cmd := neutron.New(nil, nil).WithProxy(proxyAddr)
-	_ = cmd
-
-	if neutronhttp.DefaultOption.Proxy == nil {
-		t.Fatal("neutron DefaultOption.Proxy not set after WithProxy")
+// Neutron proxy configuration belongs to each command and resource set.
+func TestNeutronProxyIsInstanceLocal(t *testing.T) {
+	original := fmt.Sprintf("%p/%p", neutronhttp.DefaultOption.Proxy, neutronhttp.DefaultTransport.Proxy)
+	first := neutron.New(nil, nil).WithProxy("socks5://127.0.0.1:10001")
+	second := neutron.New(nil, nil).WithProxy("socks5://127.0.0.1:10002")
+	first.SetProxy("")
+	if first.Proxy != "" || second.Proxy != "socks5://127.0.0.1:10002" {
+		t.Fatal("proxy leaked between commands")
 	}
-	if neutronhttp.DefaultTransport.Proxy == nil {
-		t.Fatal("neutron DefaultTransport.Proxy not set after WithProxy")
+	if current := fmt.Sprintf("%p/%p", neutronhttp.DefaultOption.Proxy, neutronhttp.DefaultTransport.Proxy); current != original {
+		t.Fatal("command changed Neutron process defaults")
 	}
-
-	// Clear proxy
-	cmd.SetProxy("")
-	if neutronhttp.DefaultOption.Proxy != nil {
-		t.Fatal("neutron DefaultOption.Proxy not cleared after SetProxy empty")
-	}
-
-	_ = origProxy
 }
 
 type functionalResult struct {

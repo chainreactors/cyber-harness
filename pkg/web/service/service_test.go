@@ -13,11 +13,11 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
@@ -281,7 +281,7 @@ var _ profile.Application = (*recordingProfile)(nil)
 
 func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
 	t.Helper()
-	resource := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	resource := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
 	extensions, err := extension.New(extension.Entry{ID: "application", Extension: resource})
 	if err != nil {
 		t.Fatal(err)
@@ -379,4 +379,4 @@ func (*recordingProfile) AgentStatus() *aop.AgentStatus { return &aop.AgentStatu
 
 func (*recordingProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
 
-func (*recordingProfile) Capabilities() []string {return nil}
+func (*recordingProfile) Capabilities() []string { return nil }

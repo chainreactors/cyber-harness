@@ -24,7 +24,7 @@ import (
 	zombietools "github.com/chainreactors/aiscan/tools/zombie"
 )
 
-func buildScannerCommands(application *app.App, engineSet *engine.Set, config app.Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+func buildScannerCommands(application *app.App, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
 	var scannerResources *resources.Set
 	if engineSet != nil {
 		scannerResources = engineSet.Resources
@@ -114,7 +114,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config ap
 	return append(values, editionCommands...), nil
 }
 
-func executeRegistryCommand(ctx context.Context, registry *commands.Registry, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
+func executeRegistryCommand(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
 	}
@@ -173,7 +173,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func collectDeepBrowserArtifacts(ctx context.Context, registry *commands.Registry, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
+func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}

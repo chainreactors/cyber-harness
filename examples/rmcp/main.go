@@ -36,6 +36,7 @@ func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.
 }
 
 func main() {
+ if code,handled := commands.RunShellCommandProxy(); handled { os.Exit(code) }
 	var (
 		serverURL string
 		token     string

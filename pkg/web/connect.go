@@ -36,33 +36,45 @@ type connectServer struct {
 	service Service
 }
 
-// RegisterConnectServices mounts management RPCs and the AOP bidirectional
-// stream using only the unified Service abstraction. The handler negotiates
-// Connect, gRPC and gRPC-Web on the same paths.
-func RegisterConnectServices(mux *http.ServeMux, service Service) {
-	auth := service.Auth()
-	interceptor := connectAuthInterceptor{auth: auth}
-	opts := []connect.HandlerOption{
-		connect.WithInterceptors(interceptor),
-		connect.WithReadMaxBytes(connectMaxMessageBytes),
-		connect.WithSendMaxBytes(connectMaxMessageBytes),
-	}
+// Connect bindings are inert handler declarations. The profile selects the
+// services to mount; no service list is installed by the HTTP host.
+func connectOptions(service Service) []connect.HandlerOption {
+	return []connect.HandlerOption{connect.WithInterceptors(connectAuthInterceptor{auth: service.Auth()}), connect.WithReadMaxBytes(connectMaxMessageBytes), connect.WithSendMaxBytes(connectMaxMessageBytes)}
+}
+func AOPRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
-	register := func(path string, handler http.Handler) { mux.Handle(path, handler) }
-	path, handler := rpc.NewAOPServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewSessionServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewScanServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewConfigServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewAgentServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewSystemServiceHandler(server, opts...)
-	register(path, handler)
-	path, handler = rpc.NewSCOServiceHandler(server, opts...)
-	register(path, handler)
+	path, handler := rpc.NewAOPServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "agent", Pattern: path, Handler: handler}
+}
+func SessionRoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewSessionServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "agent", Pattern: path, Handler: handler}
+}
+func ScanRoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewScanServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "scanner", Pattern: path, Handler: handler}
+}
+func ConfigRoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewConfigServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "config", Pattern: path, Handler: handler}
+}
+func AgentRoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewAgentServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "node", Pattern: path, Handler: handler}
+}
+func SystemRoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewSystemServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "web", Pattern: path, Handler: handler}
+}
+func SCORoute(service Service) Route {
+	server := &connectServer{api: service.API(), service: service}
+	path, handler := rpc.NewSCOServiceHandler(server, connectOptions(service)...)
+	return Route{Source: "scanner", Pattern: path, Handler: handler}
 }
 
 func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[aop.Envelope, aop.Envelope]) error {

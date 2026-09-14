@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +31,7 @@ import (
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	toolset "github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -228,9 +227,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
 	}
 	hello.Capabilities = append(hello.Capabilities, cc.ExtraCapabilities...)
-	if cc.RegisterResourceNamespaces != nil && !slices.Contains(hello.Capabilities, "traffic") {
-		hello.Capabilities = append(hello.Capabilities, "traffic")
-	}
 	helloEnvelope, err := aop.Wrap(nextEnvelopeID("hello"), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
 	if err != nil {
 		return err
@@ -473,7 +469,7 @@ func newAgentConnectionNamespaceMux(
 			_ = mux.Close(context.Background())
 		}
 	}()
-	if err := mux.Register("agent-connection", &aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent", &aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*aop.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected core namespace message %T", message)
@@ -482,7 +478,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("agent.commands", &types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		if cc.Control != nil {
 			return cc.Control.HandleCommandNamespace(ctx, envelope, message, func(response *aop.Envelope) error {
 				sendEnvelope(response)
@@ -494,7 +490,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("tools", &toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*toolpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected tool namespace message %T", message)
@@ -504,7 +500,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("files", &filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*filepb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected file namespace message %T", message)
@@ -514,7 +510,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("terminal", &execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*execpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected exec namespace message %T", message)
@@ -524,7 +520,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("config", &types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*types.ReloadProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected reload namespace message %T", message)
@@ -534,7 +530,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-connection", &ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register("terminal", &ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*ptypb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected PTY namespace message %T", message)

@@ -7,7 +7,7 @@ import (
 
 	"github.com/chainreactors/aiscan/aop"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 )
 

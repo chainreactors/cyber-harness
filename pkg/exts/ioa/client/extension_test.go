@@ -12,16 +12,15 @@ import (
 )
 
 func TestCommandSelectionRequiresRegistry(t *testing.T) {
-	if _, err := New(service.Config{RegisterCommands: true}, Dependencies{}); err == nil {
+	if _, err := New(service.Config{RegisterCommands: true}, Services{}); err == nil {
 		t.Fatal("accepted IOA command publication without a registry")
 	}
-	if _, err := New(service.Config{}, Dependencies{}); err != nil {
+	if _, err := New(service.Config{}, Services{}); err != nil {
 		t.Fatalf("dormant IOA service requires no registry: %v", err)
 	}
 }
-
 func TestRuntimeHandleDoesNotExposeLifecycle(t *testing.T) {
-	adapter, err := New(service.Config{}, Dependencies{})
+	adapter, err := New(service.Config{}, Services{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +37,7 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	registry := commands.NewRegistry(nil)
-	ioa, err := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{Commands: registry})
+	ioa, err := New(service.Config{URL: server.URL, RegisterCommands: true}, Services{Commands: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,3 +61,4 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 		t.Fatal("closed composition still published IOA commands")
 	}
 }
+

@@ -30,9 +30,9 @@ func TestResourceDoesNotPromoteAppBusinessMethods(t *testing.T) {
 }
 
 func TestNewIsInertUntilLoad(t *testing.T) {
-	resource := newTestApp(t, Config{SkipEngines: true}, Dependencies{})
+	resource := newTestApp(t, Config{SkipEngines: true}, AppServices{})
 	a := resource.App
-	if a.Skills != nil || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
+	if len(a.Skills.Skills) != 0 || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("New exposed initialized application resources before Load")
 	}
 	set := extensiontest.Set(t, extension.Entry{ID: "app", Extension: resource})
@@ -42,8 +42,8 @@ func TestNewIsInertUntilLoad(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if a.Skills == nil {
-		t.Fatal("Load did not initialize application state")
+	if len(a.Skills.Skills) != 0 {
+		t.Fatal("App initialized skills without a profile dependency")
 	}
 }
 

@@ -18,4 +18,4 @@ Registry 贡献，`pkg/profile` 只提供 `Application`、`Factory` 与 `Request
 具体产品图由 `cmd/aiscan`、`cmd/runner` 等可执行入口声明，不能放回共享包。
 
 Flags、Configs、静态 Skill、协议声明和宿主绑定也可独立提供，不必实现 Extension。
-复用所属领域的类型和声明函数，参见 [静态扩展设计](../docs/extension-minimal-design.md)。
+复用所属领域的类型和声明函数，参见 [系统架构](../docs/architecture.md)。

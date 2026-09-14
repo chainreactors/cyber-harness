@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/provider"
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -9,6 +9,8 @@ import (
 )
 
 type Config struct {
+	Resolved      *cfg.Resolved
+	DataDir       string
 	Capabilities  capability.Catalog
 	Provider      ApplicationProviderConfig
 	Scanner       ScannerConfig
@@ -19,12 +21,7 @@ type Config struct {
 	SkipEngines   bool
 }
 
-type ApplicationProviderConfig struct {
-	Enabled   bool
-	Config    agent.ProviderConfig
-	Fallbacks []agent.ProviderConfig
-	Optional  bool
-}
+type ApplicationProviderConfig = provider.StartupConfig
 
 type ScannerConfig struct {
 	CyberhubURL        string

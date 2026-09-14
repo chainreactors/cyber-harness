@@ -149,12 +149,7 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if proxy != "" {
 		gogoConfig.WithProxy(proxy)
 	}
-	var gogoEngine *gogo.Engine
-	func() {
-		restoreLogs := telemetry.SuppressGlobalNonErrors()
-		defer restoreLogs()
-		gogoEngine, err = gogo.NewEngine(gogoConfig)
-	}()
+	gogoEngine, err := gogo.NewEngine(gogoConfig)
 	if err != nil {
 		logger.Warnf("%s", telemetry.StartupLine("fail", "gogo", err.Error()))
 	} else {
@@ -173,12 +168,7 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if proxy != "" {
 		sprayConfig.WithProxy(proxy)
 	}
-	var sprayEngine *spray.Engine
-	func() {
-		restoreLogs := telemetry.SuppressGlobalNonErrors()
-		defer restoreLogs()
-		sprayEngine, err = spray.NewEngine(sprayConfig)
-	}()
+	sprayEngine, err := spray.NewEngine(sprayConfig)
 	if err != nil {
 		logger.Warnf("%s", telemetry.StartupLine("fail", "spray", err.Error()))
 	} else {

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/fingers"
 	"gopkg.in/yaml.v3"
@@ -17,8 +16,10 @@ import (
 
 const cacheTTL = 24 * time.Hour
 
-func cachePath(cyberhubURL, apiKey, kind string) string {
-	dir := config.DataSubDir("cache")
+func cachePath(dir, cyberhubURL, apiKey, kind string) string {
+	if dir == "" {
+		return ""
+	}
 	h := sha256.Sum256([]byte(cyberhubURL + "|" + apiKey))
 	return filepath.Join(dir, fmt.Sprintf("%s_%s.cache", kind, hex.EncodeToString(h[:8])))
 }

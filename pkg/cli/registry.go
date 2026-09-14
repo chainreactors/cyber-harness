@@ -56,6 +56,15 @@ func (r *Registry) Group(source, path, key string, group cfg.FlagGroup) error {
 	if cmd == nil {
 		return fmt.Errorf("unknown command %q", path)
 	}
+	// Parse and validate in an isolated group before touching the live parser.
+	probe := flags.NewParser(nil, flags.None)
+	candidate, err := probe.AddGroup(group.Name, group.Description, group.Options)
+	if err != nil {
+		return err
+	}
+	if err := r.validateOptions(cmd.Name, groupOptions(cmd.Group), groupOptions(candidate), source); err != nil {
+		return err
+	}
 	added, err := cmd.AddGroup(group.Name, group.Description, group.Options)
 	if err != nil {
 		return err
@@ -74,6 +83,14 @@ func (r *Registry) Command(source, path, description string, data any, action Ac
 	if len(parts) == 0 {
 		return fmt.Errorf("command path is required")
 	}
+	probe := flags.NewParser(nil, flags.None)
+	candidate, err := probe.AddCommand(parts[len(parts)-1], description, "", data)
+	if err != nil {
+		return err
+	}
+	if err := r.validateOptions(path, nil, groupOptions(candidate.Group), source); err != nil {
+		return err
+	}
 	parent := r.Parser.Command
 	for _, part := range parts[:len(parts)-1] {
 		child := parent.Find(part)
@@ -83,6 +100,9 @@ func (r *Registry) Command(source, path, description string, data any, action Ac
 			if err != nil {
 				return err
 			}
+		}
+		if r.commandSources[child] == "" {
+			r.commandSources[child] = source
 		}
 		parent = child
 	}
@@ -233,4 +253,34 @@ func (r *Registry) Parse(args []string) ([]string, error) {
 		return nil, err
 	}
 	return r.Parser.ParseArgs(args)
+}
+
+func (r *Registry) validateOptions(command string, existing, incoming []*flags.Option, source string) error {
+	names := map[string]string{}
+	check := func(options []*flags.Option, incoming bool) error {
+		for _, option := range options {
+			owner := r.source(option)
+			if incoming {
+				owner = source
+			}
+			var keys []string
+			if option.LongName != "" {
+				keys = append(keys, "--"+option.LongNameWithNamespace())
+			}
+			if option.ShortName != 0 {
+				keys = append(keys, "-"+string(option.ShortName))
+			}
+			for _, key := range keys {
+				if previous, exists := names[key]; exists {
+					return fmt.Errorf("duplicate flag %s on command %s (sources %s and %s)", key, command, previous, owner)
+				}
+				names[key] = owner
+			}
+		}
+		return nil
+	}
+	if err := check(existing, false); err != nil {
+		return err
+	}
+	return check(incoming, true)
 }

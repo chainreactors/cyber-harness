@@ -16,7 +16,7 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
 	"github.com/chainreactors/aiscan/pkg/types"
 )
@@ -54,7 +54,7 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 
 func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentext.Runtime {
 	t.Helper()
-	a := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	a := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
 
 	aSet := loadConsoleApplication(t, t.Context(), a)
 	a.App.SetProvider(provider, agent.ProviderConfig{Model: "test"})

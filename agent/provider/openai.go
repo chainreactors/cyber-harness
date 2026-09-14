@@ -564,3 +564,10 @@ func parseOpenAIWebSearchResponse(data []byte, maxResults int) (*WebSearchRespon
 	out.Summary = strings.TrimSpace(out.Summary)
 	return out, nil
 }
+
+// CloseIdleConnections releases this provider's transport after callers drain.
+func (p *OpenAIProvider) CloseIdleConnections() {
+	if p != nil && p.client != nil {
+		p.client.CloseIdleConnections()
+	}
+}

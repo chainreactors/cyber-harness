@@ -315,7 +315,7 @@ func (r *AgentConsole) renderHelp() string {
 }
 
 func (r *AgentConsole) renderStatus() string {
-	rows := []helpRow{{Command: "render", Detail: r.sessionSummary()}, {Command: "history", Detail: agentConsoleHistoryPath()}}
+	rows := []helpRow{{Command: "render", Detail: r.sessionSummary()}, {Command: "history", Detail: agentConsoleHistoryPath(r.option)}}
 	if r.bindings != nil && r.bindings.Status != nil {
 		for _, row := range r.bindings.Status() {
 			rows = append(rows, helpRow{Command: row.Name, Detail: row.Value})

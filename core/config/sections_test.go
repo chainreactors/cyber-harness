@@ -109,3 +109,46 @@ func TestExtensionConfigurationMasksAndPreservesNestedSecrets(t *testing.T) {
 		t.Fatal("source mutated")
 	}
 }
+
+func TestSnapshotValidatesOnceAndPreservesOwnedValues(t *testing.T) {
+	calls := 0
+	r := NewSections()
+	if err := r.Register("example", Section{Key: "example", Aliases: []string{"example"}, New: func() any { return &fixtureOptions{Count: 7, Enabled: true} }, Validate: func(any) error { calls++; return nil }, Environment: func(s Sources) (map[string]any, map[string]any, error) {
+		value, _ := s.LookupEnv("EXAMPLE_NAME")
+		return map[string]any{"name": value}, map[string]any{"count": 5}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	file, err := r.Normalize(map[string]any{"example": map[string]any{"count": 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.ResolveValues(file, Values{"example": {"count": 0, "enabled": false}}, func(string) (string, bool) { return "first", true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := Get[*fixtureOptions](result, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Count != 0 || first.Enabled || first.Name != "first" {
+		t.Fatalf("precedence: %+v", first)
+	}
+	first.Name = "mutated"
+	values := result.Values()
+	values["example"]["name"] = "mutated"
+	second, err := Get[*fixtureOptions](result, "example")
+	if err != nil || second.Name != "first" || calls != 1 {
+		t.Fatalf("snapshot leaked: %+v, calls %d, %v", second, calls, err)
+	}
+	if err := r.Register("late", Section{Key: "late", New: func() any { return &fixtureOptions{} }}); err == nil {
+		t.Fatal("snapshot did not seal declarations")
+	}
+}
+
+func TestSnapshotDoesNotDropUnencodableInput(t *testing.T) {
+	r := fixtureSections(t)
+	if _, err := r.ResolveValues(Values{"fixture": {"name": make(chan int)}}, nil, nil); err == nil {
+		t.Fatal("invalid input was silently replaced by defaults")
+	}
+}

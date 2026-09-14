@@ -7,11 +7,12 @@ import (
 
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/tool"
 	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
+	signalsext "github.com/chainreactors/aiscan/pkg/exts/signals"
 	skillmount "github.com/chainreactors/aiscan/pkg/exts/skills"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	files "github.com/chainreactors/aiscan/tools/files"
@@ -28,7 +29,7 @@ type workspaceProfileConfig struct {
 
 type workspaceProfile struct {
 	extensions *extension.Set
-	registry   *toolset.Registry
+	registry   toolset.Runtime
 	events     *coreevents.Stream
 	selected   []string
 	skills     *skillmount.Catalog
@@ -57,10 +58,15 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 	if !seen["skills"] && config.SkillsDirectory != "" {
 		return nil, fmt.Errorf("skills directory configured without skills extension")
 	}
-	hookRegistry := hooks.New()
-	events := coreevents.New()
-	p := &workspaceProfile{selected: selected, registry: toolset.NewRegistry(hookRegistry), events: events}
-	entries := []extension.Entry{}
+	signals := signalsext.New()
+	hookRegistry := signals.Hooks()
+	events := signals.Events()
+	harness, err := harnessext.New(hookRegistry)
+	if err != nil {
+		return nil, err
+	}
+	p := &workspaceProfile{selected: selected, registry: harness.ToolRegistry(), events: events}
+	entries := []extension.Entry{{ID: "signals", Extension: signals}}
 	dependencies := []string{}
 	fileConfig := config.Files
 	if config.Output != "" {
@@ -94,7 +100,7 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"files"}, Extension: skills})
 		toolDependencies = append(toolDependencies, "skills")
 	}
-	entries = append(entries, extension.Entry{ID: "tool-registry", DependsOn: toolDependencies, Extension: p.registry})
+	entries = append(entries, extension.Entry{ID: "harness", DependsOn: toolDependencies, Extension: harness})
 	p.extensions, err = extension.New(entries...)
 	if err != nil {
 		return nil, err

@@ -17,7 +17,7 @@ import (
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/extension"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
@@ -19,10 +20,11 @@ import (
 )
 
 type ServiceConfig struct {
-	ConfigAPI   managementapi.ConfigOptions
-	Store       *SQLiteStore
-	Profile     profile.Application
-	ConfigStore ConfigStore
+	RegisterApplicationNamespaces func(*aop.NamespaceMux) error
+	ConfigAPI                     managementapi.ConfigOptions
+	Store                         *SQLiteStore
+	Profile                       profile.Application
+	ConfigStore                   ConfigStore
 	// BuildProfile returns a fresh candidate, including partial results on error.
 	// Service owns every returned candidate and its cleanup.
 	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Application, error)
@@ -34,6 +36,7 @@ type ServiceConfig struct {
 }
 
 type Service struct {
+	applicationNamespaces func(*aop.NamespaceMux) error
 	// configGate serializes update/activation with shutdown. Service owns both
 	// candidate and published profiles throughout the transaction.
 	configGate   chan struct{}
@@ -80,25 +83,26 @@ func NewService(cfg ServiceConfig) *Service {
 		timeout = 10 * time.Minute
 	}
 	svc := &Service{
-		configGate:   make(chan struct{}, 1),
-		configStore:  cfg.ConfigStore,
-		buildProfile: cfg.BuildProfile,
-		store:        cfg.Store,
-		profiles:     make(map[profile.Application]int),
-		profileClose: make(chan struct{}, 1),
-		appChanged:   make(chan struct{}),
-		agents:       cfg.AgentPool,
-		hub:          NewHub(),
-		sem:          make(chan struct{}, maxConcurrent),
-		timeout:      timeout,
-		auth:         NewAuth(cfg.AccessKey),
-		cancels:      make(map[string]context.CancelFunc),
-		scanNodeIDs:  make(map[string]string),
-		taskSessions: make(map[string]string),
-		taskNodeIDs:  make(map[string]string),
-		taskCanceled: make(map[string]bool),
-		sessionSeq:   make(map[string]uint64),
-		endedTurns:   make(map[string]bool),
+		applicationNamespaces: cfg.RegisterApplicationNamespaces,
+		configGate:            make(chan struct{}, 1),
+		configStore:           cfg.ConfigStore,
+		buildProfile:          cfg.BuildProfile,
+		store:                 cfg.Store,
+		profiles:              make(map[profile.Application]int),
+		profileClose:          make(chan struct{}, 1),
+		appChanged:            make(chan struct{}),
+		agents:                cfg.AgentPool,
+		hub:                   NewHub(),
+		sem:                   make(chan struct{}, maxConcurrent),
+		timeout:               timeout,
+		auth:                  NewAuth(cfg.AccessKey),
+		cancels:               make(map[string]context.CancelFunc),
+		scanNodeIDs:           make(map[string]string),
+		taskSessions:          make(map[string]string),
+		taskNodeIDs:           make(map[string]string),
+		taskCanceled:          make(map[string]bool),
+		sessionSeq:            make(map[string]uint64),
+		endedTurns:            make(map[string]bool),
 	}
 	if !profile.IsNil(cfg.Profile) {
 		svc.profile = cfg.Profile

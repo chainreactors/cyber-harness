@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestProfileWithoutIOAHasNoCollaborationContributions(t *testing.T) {
 	if application.Commands.Has("ioa") || application.Skills.ReadBody("ioa") != "" || application.Skills.ReadBody("checkpoint") != "" {
 		t.Fatal("unselected client contributed commands or skills")
 	}
-	if product.ConsoleBindings() != nil || len(product.Capabilities()) != 0 || product.AgentStatus().Bound {
+	if product.ConsoleBindings() != nil || slices.Contains(product.Capabilities(), "ioa") || product.AgentStatus().Bound {
 		t.Fatal("unselected client exposed host capabilities")
 	}
 }

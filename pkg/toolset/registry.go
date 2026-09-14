@@ -56,7 +56,7 @@ func (r *Registry) Register(source string, tools ...tool.Tool) error {
 			return errors.New("tool requires a name and matching definition")
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("%w: %s", ErrDuplicate, name)
+			return fmt.Errorf("%w: %s (source %s repeated in batch)", ErrDuplicate, name, source)
 		}
 		seen[name] = struct{}{}
 		values = append(values, coreregistry.Value[registeredTool]{

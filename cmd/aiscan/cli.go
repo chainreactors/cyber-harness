@@ -18,7 +18,8 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	hostcli "github.com/chainreactors/aiscan/pkg/cli"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	settings "github.com/chainreactors/aiscan/pkg/exts/settings"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -408,12 +409,14 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	if err := declareProductCLI(cli.registry); err != nil {
 		panic(err)
 	}
-	// Install inert declarations before Parse/WriteHelp. Extension Load is not
-	// part of command-line discovery, including defaults and aliases.
-	for _, group := range agentext.FlagGroups(&cli.Agent.AgentOptions) {
-		if _, err := parser.Find("agent").AddGroup(group.Name, group.Description, group.Options); err != nil {
-			panic(fmt.Sprintf("invalid agent flag declaration: %v", err))
-		}
+	// Session flags are inert declarations installed before Parse/WriteHelp.
+	// Runtime Session loading is not part of command-line discovery.
+	settingsExt, err := settings.New([]settings.Declaration{agentext.Declaration(&cli.Agent.AgentOptions)})
+	if err != nil {
+		panic(err)
+	}
+	if err := settingsExt.Declare(cli.registry); err != nil {
+		panic(fmt.Sprintf("invalid session flag declaration: %v", err))
 	}
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)

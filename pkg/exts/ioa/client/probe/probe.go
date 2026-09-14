@@ -45,7 +45,7 @@ func Check(ctx context.Context, in, stored *types.DistributeConfig) []*types.Con
 		}
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		client, err := clientext.New(ioatools.Config{URL: value.URL, Token: value.Token}, clientext.Dependencies{})
+		client, err := clientext.New(ioatools.Config{URL: value.URL, Token: value.Token}, clientext.Services{})
 		if err != nil {
 			return "", err
 		}

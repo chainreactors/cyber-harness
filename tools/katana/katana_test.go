@@ -5,8 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/projectdiscovery/gologger"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -287,5 +293,48 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "/workspace/session-42") {
 		t.Fatalf("Katana output does not contain the browser-only workspace route\noutput:\n%s", output.String())
+	}
+}
+
+type ownedTestWriter struct {
+	resultCollector
+	closed int
+}
+
+func (w *ownedTestWriter) Close() error { w.closed++; return nil }
+func TestEmbeddedCrawlerOwnsOutputWithoutChangingProcessState(t *testing.T) {
+	before := *gologger.DefaultLogger
+	path := filepath.Join(t.TempDir(), "not-created", "results.json")
+	options := &katanatypes.Options{OutputFile: path, Silent: true, RateLimit: 1}
+	writer := &ownedTestWriter{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	crawler, err := katanatypes.NewCrawlerOptionsWithOutput(options, writer, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crawler.Logger != logger || crawler.OutputWriter != writer {
+		t.Fatal("lost injected output")
+	}
+	if !reflect.DeepEqual(before, *gologger.DefaultLogger) {
+		t.Fatal("modified global logger")
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("created unused output: %v", err)
+	}
+	if options.MaxOnclickLinks != 0 {
+		t.Fatal("mutated caller options")
+	}
+	if err := crawler.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if writer.closed != 1 {
+		t.Fatalf("writer close count: %d", writer.closed)
+	}
+	rejected := &ownedTestWriter{}
+	if _, err := katanatypes.NewCrawlerOptionsWithOutput(&katanatypes.Options{OutputMatchRegex: []string{"["}}, rejected, logger); err == nil {
+		t.Fatal("accepted invalid regex")
+	}
+	if rejected.closed != 0 {
+		t.Fatal("failed constructor took caller writer ownership")
 	}
 }

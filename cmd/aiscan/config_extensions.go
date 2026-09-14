@@ -5,6 +5,8 @@ import (
 	client "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
 	ioaprobe "github.com/chainreactors/aiscan/pkg/exts/ioa/client/probe"
 	server "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
+	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
+	searchprobe "github.com/chainreactors/aiscan/pkg/exts/search/probe"
 	"github.com/chainreactors/aiscan/pkg/probe"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -64,7 +66,12 @@ func marshalProductConfig(config *types.DistributeConfig) ([]byte, error) {
 }
 func productConfigAPI() managementapi.ConfigOptions {
 	probes := probe.New()
-	if err := probes.Register("ioa", ioaprobe.Check); err != nil {
+	for name, check := range map[string]probe.Check{"cyberhub": scannerprobe.Cyberhub, "recon": scannerprobe.Recon, "search": searchprobe.Check} {
+		if err := probes.Register(name, name, check); err != nil {
+			panic(err)
+		}
+	}
+	if err := probes.Register("ioa.client", "ioa", ioaprobe.Check); err != nil {
 		panic(err)
 	}
 	return managementapi.ConfigOptions{Probes: probes, Sections: productSections(false), Project: func(config *types.DistributeConfig, view *types.ConfigView) {

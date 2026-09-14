@@ -10,6 +10,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
-func editionExtensionEntries(*app.App, *toolset.Registry, *commands.Registry, app.Config, capability.Plan, string) ([]extension.Entry, error) {
+func editionExtensionEntries(*app.App, toolset.Runtime, commands.Runtime, app.Config, capability.Plan, string) ([]extension.Entry, error) {
 	return nil, nil
 }

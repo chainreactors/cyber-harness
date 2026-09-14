@@ -68,7 +68,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			}))
 			defer server.Close()
 			received := make(chan inbox.Message, 4)
-			adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Dependencies{
+			adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Services{
 				Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil },
 			})
 			if err != nil {
@@ -128,14 +128,13 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 		})
 	}
 }
-
 func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 	store := ioaserver.NewMemoryStore()
 	defer store.Close()
 	server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "test-key")))
 	defer server.Close()
 	stream := events.New()
-	adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Dependencies{Events: stream})
+	adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Services{Events: stream})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +178,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	}))
 	defer server.Close()
 	stream := events.New()
-	adapter, err := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{Events: stream})
+	adapter, err := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Services{Events: stream})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,3 +217,4 @@ func setDelegation(t *testing.T, event *aop.Event) {
 		t.Fatal(err)
 	}
 }
+

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
+	providerapi "github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
@@ -34,7 +35,7 @@ func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
 	hookRegistry := hooks.New()
 	commandRegistry := commands.NewRegistry(hookRegistry)
 	toolRegistry := toolset.NewRegistry(hookRegistry)
-	resource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
+	resource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{
 		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
 	})
 	application := resource.App
@@ -61,7 +62,7 @@ func TestLogLLMProbeStatusReady(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
 
-	health := logLLMProbeStatus(context.Background(), agent.ProviderConfig{
+	health := providerapi.Probe(context.Background(), agent.ProviderConfig{
 		Provider: "openai",
 		BaseURL:  srv.URL + "/v1",
 		APIKey:   "sk-test",
@@ -88,7 +89,7 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
 
-	health := logLLMProbeStatus(context.Background(), agent.ProviderConfig{
+	health := providerapi.Probe(context.Background(), agent.ProviderConfig{
 		Provider: "openai",
 		BaseURL:  srv.URL + "/v1",
 		APIKey:   "sk-test",
@@ -135,7 +136,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
+	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{Events: events})
 	app := appResource.App
 	appSet := extensiontest.Set(t,
 		extension.Entry{ID: "output", Extension: recorder},
