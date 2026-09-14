@@ -10,7 +10,7 @@ import (
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	coreevents "github.com/chainreactors/aiscan/core/events"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -108,11 +108,11 @@ func sessionTestEvent(sessionID string, event *aop.Event) *aop.Event {
 func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	t.Helper()
 	bus := coreevents.New()
-	output, err := eventoutput.New(bus, eventoutput.Options{Path: path})
+	output, err := telemetry.New(bus, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadEventOutput(t, output); err != nil {
+	if err := loadtelemetry(t, output); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {
@@ -122,3 +122,4 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 		t.Fatal(err)
 	}
 }
+

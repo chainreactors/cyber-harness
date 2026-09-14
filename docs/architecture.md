@@ -15,7 +15,7 @@ Service Provider/Consumer，再构造唯一的 `extension.Set`；`DependsOn` 只
 
 ```mermaid
 flowchart TB
-    OUTPUT[EventOutput]
+    OUTPUT[telemetry]
     OBSERVE[Observe]
     RESOURCES[Proxy / IOA / capability Extensions]
     APP[App state]
@@ -38,7 +38,7 @@ flowchart TB
 观测投影和持久化均由 Extension 通过选择具体的 `T` 实现。消费者直接实现回调并使用
 `Subscription.Flush/Close` 完成排空，不再引入第二套 Sink 生命周期。
 
-`signals` 负责 Hook；AOP 事件发布、`observe` 投影和 `eventoutput` 持久化是可选 Extension，
+`signals` 负责 Hook；AOP 事件发布、`observe` 投影和 `telemetry` 持久化是可选 Extension，
 它们共享 Profile 内的 typed EventBus，但任何一个都不是 Core 的隐式默认实现。
 
 每个机制由三个角色组成：Service Definition 定义 typed contract，Provider Extension
@@ -82,7 +82,7 @@ Extension 组合变化通过重建 Profile 完成，避免运行中替换已有 
 | `provider` | LLM Provider 状态和切换 |
 | `skills` | Skill 目录、加载和 Catalog |
 | `observe` | Hook 到 AOP observation 的转换 |
-| `eventoutput` | AOP Event 持久化输出 |
+| `telemetry` | AOP Event 持久化输出 |
 | `ioa/client`、`ioa/server` | IOA client/server 连接与协议能力 |
 | `session/console`、`ioa/client/console` | 向 TUI 注册 REPL 展示贡献 |
 | `arsenal`、`browser`、`record`、`web` | 对应的可选资源、浏览器、录制和 Web 能力 |
@@ -115,7 +115,7 @@ IOA 只有独立的 client/server 两个扩展。通用 Profile 不再暴露 IOA
 
 `core/events.Stream` 统一补全 AOP Event 的 ID、时间和序号。生产者调用 `Publish`，同步
 投影调用 `Observe`，有界持久化调用 `Consume`。`pkg/exts/observe` 把选中的
-Tool、Command、Process、File、HTTP hook 转成 typed AOP Event，`pkg/exts/eventoutput`
+Tool、Command、Process、File、HTTP hook 转成 typed AOP Event，`pkg/exts/telemetry`
 将同一 Stream 异步、可排空地写入 JSONL。Console、Web、Node 和 stdio 只订阅事件流。
 
 CLI 中 `--observe` 只选择观测种类，`-o/--output` 只选择 AOP JSONL 持久化位置；
@@ -158,3 +158,4 @@ App/Profile 的资源。
 Web 或 Node。代理行为位于 `tools/proxy`；`pkg/exts/proxy.Extension` 将唯一 Hub 适配到 Set，
 连接级 Traffic handler 直接由连接自己的 `NamespaceMux` 管理。Extension 组合变化通过整体
 Profile 换代完成；Provider 配置更新按 Run 快照隔离，活跃 Run 保留原 Provider。
+

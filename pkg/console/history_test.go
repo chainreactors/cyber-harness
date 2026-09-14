@@ -17,7 +17,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	"github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -83,7 +83,7 @@ func sessionTestEvent(id string, event *aop.Event) *aop.Event {
 func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	t.Helper()
 	stream := coreevents.New()
-	recorder, err := eventoutput.New(stream, eventoutput.Options{Path: path})
+	recorder, err := telemetry.New(stream, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,3 +118,4 @@ func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 		t.Fatalf("context tokens = %d, want 8200", result.ContextTokens)
 	}
 }
+

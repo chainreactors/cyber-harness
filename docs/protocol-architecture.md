@@ -135,7 +135,7 @@ AOP 应用面只额外暴露一个双向流服务：
 
 - Session 和 Scan 以 protobuf 为存储真相；
 - AOP 历史只存 `aop.Event` ProtoJSON；
-- CLI `-o/--output` 通过 `eventoutput` Extension 将 agent、scan、观测和 scanner-native artifact 写入一个新建的 `aop.Event` ProtoJSONL；
+- CLI `-o/--output` 通过 `telemetry` Extension 将 agent、scan、观测和 scanner-native artifact 写入一个新建的 `aop.Event` ProtoJSONL；
 - `-r`、`/resume` 和 `-F` 只读取事件流，不修改恢复源，也不隐式开启输出；系统不保留 checkpoint/snapshot 文件、Record/Timeline 双写或 replay/fallback 管线。
 
 历史读取是纯查询，不派发 Agent frame、不收敛 operation，也不复制 terminal event。
@@ -185,3 +185,4 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - Connect boundary：`pkg/web/connect.go`
 
 完成态验收：全仓只能由 `AOPClient` 创建浏览器 WebSocket；不存在 ChatService、WatchEventsResponse、WatchScanEventsResponse、AgentTransport frame、terminal 专用 socket、手写 wire DTO 或 grpc-go service 生成物。
+

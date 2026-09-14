@@ -357,7 +357,7 @@ func TestAIScanProfileIsOnlyApplicationCompositionRoot(t *testing.T) {
 		}
 	}
 	abstraction := readRepositoryFile(t, root, filepath.Join("pkg", "profile", "profile.go"))
-	for _, forbidden := range []string{"proxyext", "observeext", "eventoutput", "newAIScanProfile"} {
+	for _, forbidden := range []string{"proxyext", "observeext", "telemetry", "newAIScanProfile"} {
 		if strings.Contains(abstraction, forbidden) {
 			t.Errorf("generic profile assembler contains product implementation %q", forbidden)
 		}
@@ -1607,3 +1607,4 @@ func TestGenericHostsHaveNoTransitiveIOADependency(t *testing.T) {
 		}
 	}
 }
+

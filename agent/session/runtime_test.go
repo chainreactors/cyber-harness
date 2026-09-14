@@ -24,7 +24,7 @@ import (
 	coreoutput "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -861,21 +861,21 @@ func assertRotationEvents(t *testing.T, events []*aop.Event, oldID, newID, reaso
 	}
 }
 
-func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *eventoutput.Extension) {
+func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *telemetry.Extension) {
 	return newPersistenceRuntimeWithMode(t, option, llm, false)
 }
 
-func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *eventoutput.Extension) {
+func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetry.Extension) {
 	t.Helper()
 	stream := coreevents.New()
 	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{Events: stream})
 	app := appResource.App
 	var dependencies []string
 	var entries []extension.Entry
-	var output *eventoutput.Extension
+	var output *telemetry.Extension
 	if option.OutputFile != "" {
 		var outputErr error
-		output, outputErr = eventoutput.New(stream, eventoutput.Options{Path: option.OutputFile})
+		output, outputErr = telemetry.New(stream, telemetry.Options{Path: option.OutputFile})
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
@@ -911,7 +911,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	return app, runtimeResource.Runtime(), output
 }
 
-func flushPersistenceOutput(t *testing.T, output *eventoutput.Extension) {
+func flushPersistenceOutput(t *testing.T, output *telemetry.Extension) {
 	t.Helper()
 	if output != nil {
 		if err := output.Flush(t.Context()); err != nil {
@@ -953,11 +953,11 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	}
 	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := coreevents.New()
-	writer, err := eventoutput.New(bus, eventoutput.Options{Path: path})
+	writer, err := telemetry.New(bus, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadEventOutput(t, writer); err != nil {
+	if err := loadtelemetry(t, writer); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {
@@ -986,7 +986,7 @@ func persistenceMessagesText(messages []*aop.Message) string {
 func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.jsonl")
 	bus := coreevents.New()
-	output, err := eventoutput.New(bus, eventoutput.Options{Path: path})
+	output, err := telemetry.New(bus, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1099,3 +1099,4 @@ func newLoopExtension(loop agent.Loop) *Extension {
 	}
 	return value
 }
+

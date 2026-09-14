@@ -245,9 +245,9 @@ AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通�
 
 跨界面 Runtime 命令通过 typed AOP command detail 标记 `presentation: preformatted`。Web 展示层和 `-F` 格式化入口只在最终展示边界生成自适应 Markdown code fence；Runtime、Session 和 transport 不处理 Markdown 或终端格式。
 
-Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，由 `eventoutput` Extension 经同一个 EventBus 写入 ProtoJSONL。`-o/--output` 显式选择新的事件输出文件；`-r/--resume` 与 `/resume` 只读取历史并创建 continuation，不修改源文件，也不隐式启用或切换输出。`/clear` 和 `/compact` 只改变会话状态。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
+Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，由 `telemetry` Extension 经同一个 EventBus 写入 ProtoJSONL。`-o/--output` 显式选择新的事件输出文件；`-r/--resume` 与 `/resume` 只读取历史并创建 continuation，不修改源文件，也不隐式启用或切换输出。`/clear` 和 `/compact` 只改变会话状态。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
 
-**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/eventoutput`, `pkg/exts/agent/session_jsonl.go`
+**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/telemetry`, `pkg/exts/agent/session_jsonl.go`
 
 ---
 
@@ -264,3 +264,4 @@ Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 
 **文件**: `core/config/env.go`
 
 所有 AIScan 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。
+

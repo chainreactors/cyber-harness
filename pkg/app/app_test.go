@@ -11,7 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	"net/http"
 	"net/http/httptest"
@@ -132,7 +132,7 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	events := coreevents.New()
-	recorder, err := eventoutput.New(events, eventoutput.Options{Path: path})
+	recorder, err := telemetry.New(events, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,3 +225,4 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		t.Fatalf("gogo result = %#v", decoded)
 	}
 }
+

@@ -14,7 +14,7 @@ import (
 
 // machineOutput is the non-interactive stdout renderer. stream-json is the
 // canonical typed AOP stream; json is a compact result document intended for
-// shell pipelines. Durable event persistence remains the eventoutput
+// shell pipelines. Durable event persistence remains the telemetry
 // extension selected by -o/--output.
 type machineOutput struct {
 	mu     sync.Mutex
@@ -166,3 +166,4 @@ func writeMachineOutput(writer io.Writer, data []byte) error {
 	}
 	return err
 }
+

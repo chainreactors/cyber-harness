@@ -40,7 +40,7 @@ callers still receive the loop's panic after its admission count is released.
 
 The existing AOP protocol, history format and command exposure remain unchanged.
 `Observe` reads the application's canonical event stream; output remains the
-independent eventoutput extension. Console and Node consume Runtime, never the
+independent telemetry extension. Console and Node consume Runtime, never the
 mutable internal Agent. Scan policy belongs to product composition, not this host.
 
 `Config.Commands` adds slash commands using the existing protobuf `CommandSpec`
@@ -53,3 +53,4 @@ Native `!` commands keep their separate command registry.
 `FlagGroups` publishes the existing typed Agent options before argument parsing.
 The CLI collects these inert groups without loading an extension, so help,
 aliases, defaults and configuration precedence do not depend on runtime startup.
+

@@ -1,4 +1,4 @@
-package eventoutput_test
+package telemetry_test
 
 import (
 	"context"
@@ -11,13 +11,13 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/output"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	events := coreevents.New()
-	writer, err := eventoutput.New(events, eventoutput.Options{Path: path, Queue: 8})
+	writer, err := telemetry.New(events, telemetry.Options{Path: path, Queue: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 		if err := os.WriteFile(path, want, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		writer, err := eventoutput.New(coreevents.New(), eventoutput.Options{Path: path})
+		writer, err := telemetry.New(coreevents.New(), telemetry.Options{Path: path})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +79,7 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	events := coreevents.New()
-	writer, err := eventoutput.New(events, eventoutput.Options{Path: path})
+	writer, err := telemetry.New(events, telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,3 +110,4 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 		t.Fatalf("closed output: %v %v", recorded, err)
 	}
 }
+
