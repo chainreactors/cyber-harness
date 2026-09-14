@@ -6,8 +6,9 @@ Profile。当前边界和待验收项见 [Issue 127 约定](issue127-extension-b
 ## 组合与关闭
 
 `cmd/aiscan` 与 `cmd/runner` 声明各自固定的 Extension 图并创建唯一的
-`core/extension.Set`。可复用 host 收到具体 `pkg/profile.Profile`，它只保留该 Set 与所需
-业务能力，不实现第二套生命周期状态。依赖通过构造参数传入，
+`core/extension.Set`。可复用 host 通过 `pkg/profile.Application` 访问命令入口的具体组合；
+`profile.Assembly` 只委托同一个 Set，不保存产品能力，也不实现第二套生命周期状态。具体
+`aiscanProfile` 位于 `cmd/aiscan`，显式发布 App、Runtime 与 Proxy 能力。依赖通过构造参数传入，
 `DependsOn` 只表达资源寿命：依赖先加载、依赖者先关闭。共享包不包含任何具体产品 Profile。
 
 ```mermaid
@@ -76,8 +77,8 @@ App/Profile 的资源。
 | `tools/*` | 原始能力实现 |
 | `agent/` | Agent loop |
 | `pkg/app` | 产品状态与访问面 |
-| `pkg/profile` | 已装配图的具体 host 访问面；生命周期委托 Set |
-| `cmd/aiscan`、`cmd/runner` | 各可执行产品的唯一具体组合根 |
+| `pkg/profile` | 通用 host 契约与无产品状态的 `Assembly` |
+| `cmd/aiscan`、`cmd/runner` | 各可执行产品的具体 Profile 与唯一组合根 |
 | `pkg/exts/agent` | Agent Runtime 的唯一生命周期适配与 Session 宿主 |
 
 文件能力只有 `pkg/exts/files` 一个扩展，底层位于 `tools/files`。无 Agent 的

@@ -31,7 +31,7 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 	}
 	s.appMu.Lock()
 	p := s.profile
-	if p == nil {
+	if profile.IsNil(p) {
 		s.appMu.Unlock()
 		return nil, func() {}
 	}
@@ -63,8 +63,8 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 
 // swapProfile transfers ownership only after validation. Retirement errors are
 // retained by Service; they do not undo publication of a new profile.
-func (s *Service) swapProfile(next *profile.Profile) error {
-	if s == nil || next == nil {
+func (s *Service) swapProfile(next profile.Application) error {
+	if s == nil || profile.IsNil(next) {
 		return fmt.Errorf("service and profile are required")
 	}
 	if _, err := next.App(); err != nil {
@@ -88,7 +88,7 @@ func (s *Service) swapProfile(next *profile.Profile) error {
 	s.profiles[next] = 0
 	s.applicationChangedLocked()
 	s.appMu.Unlock()
-	if prev != nil {
+	if !profile.IsNil(prev) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.closeApplication(ctx, prev)
@@ -101,7 +101,7 @@ func (s *Service) applicationChangedLocked() {
 	s.appChanged = make(chan struct{})
 }
 
-func (s *Service) closeApplication(ctx context.Context, p *profile.Profile) error {
+func (s *Service) closeApplication(ctx context.Context, p profile.Application) error {
 	select {
 	case s.profileClose <- struct{}{}:
 		defer func() { <-s.profileClose }()

@@ -1,11 +1,13 @@
-// Package profile is the host-facing view of one AIScan extension graph.
-// Product composition remains in the executable; this package only couples the
-// loaded graph to the capabilities required by reusable hosts.
+// Package profile defines the lifecycle boundary shared by AIScan hosts.
+// Product-specific composition and capabilities belong to the executable that
+// implements Application; this package only validates factories and assembles
+// an extension graph.
 package profile
 
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
@@ -15,9 +17,18 @@ import (
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 )
 
-// Request contains host-selected inputs to a product composition root. It has
-// no extension selection or resource lookup fields; those decisions belong to
-// the executable implementing Factory.
+// Application is the complete capability surface published by a product
+// composition root. Load must publish nothing until the whole graph is active.
+type Application interface {
+	Load(context.Context) error
+	Close(context.Context) error
+	App() (*apppkg.App, error)
+	Runtime() (*agentext.Runtime, error)
+	RegisterResourceNamespaces(*aop.NamespaceMux) error
+}
+
+// Request contains host-selected inputs. Extension selection and resource
+// construction remain decisions of the product Factory.
 type Request struct {
 	Option   *cfg.Option
 	Features apppkg.RuntimeFeatures
@@ -25,94 +36,64 @@ type Request struct {
 	Logger   telemetry.Logger
 }
 
-// Factory constructs an unpublished product graph. The caller owns Load and
-// Close, including cleanup of a partially loaded candidate.
-type Factory func(Request) (*Profile, error)
+// Factory constructs an unpublished product graph. The caller owns every
+// non-nil result, including cleanup when construction or loading fails.
+type Factory func(Request) (Application, error)
 
-func (f Factory) Build(request Request) (*Profile, error) {
+func (f Factory) Build(request Request) (Application, error) {
 	if f == nil {
 		return nil, fmt.Errorf("profile factory is required")
 	}
 	value, err := f(request)
-	if err == nil && value == nil {
+	if err == nil && IsNil(value) {
 		return nil, fmt.Errorf("profile factory returned nil")
 	}
 	return value, err
 }
 
-// Config binds a graph to the capabilities published by that graph. Entries
-// are constructed by the executable composition root; New only validates and
-// seals their dependency order.
-type Config struct {
-	Entries                    []extension.Entry
-	App                        *apppkg.App
-	Runtime                    *agentext.Runtime
-	RegisterResourceNamespaces func(*aop.NamespaceMux) error
-}
-
-// Profile owns one fixed extension graph and publishes its host capabilities
-// only while the complete graph is active. It adds no lifecycle state of its
-// own; core/extension.Set is the sole state machine.
-type Profile struct {
-	extensions                 *extension.Set
-	app                        *apppkg.App
-	runtime                    *agentext.Runtime
-	registerResourceNamespaces func(*aop.NamespaceMux) error
-}
-
-func New(config Config) (*Profile, error) {
-	if config.App == nil {
-		return nil, fmt.Errorf("profile application is required")
+// IsNil recognizes nil interface values and typed nil implementations.
+func IsNil(value Application) bool {
+	if value == nil {
+		return true
 	}
-	set, err := extension.New(config.Entries...)
+	kind := reflect.ValueOf(value).Kind()
+	switch kind {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflect.ValueOf(value).IsNil()
+	default:
+		return false
+	}
+}
+
+// Assembly owns one fixed extension graph. core/extension.Set remains the only
+// lifecycle state machine; Assembly deliberately exposes no product resources.
+type Assembly struct {
+	extensions *extension.Set
+}
+
+func Assemble(entries ...extension.Entry) (*Assembly, error) {
+	set, err := extension.New(entries...)
 	if err != nil {
 		return nil, err
 	}
-	return &Profile{
-		extensions:                 set,
-		app:                        config.App,
-		runtime:                    config.Runtime,
-		registerResourceNamespaces: config.RegisterResourceNamespaces,
-	}, nil
+	return &Assembly{extensions: set}, nil
 }
 
-func (p *Profile) Load(ctx context.Context) error {
-	if p == nil || p.extensions == nil {
-		return fmt.Errorf("profile is required")
+func (a *Assembly) Load(ctx context.Context) error {
+	if a == nil || a.extensions == nil {
+		return fmt.Errorf("profile assembly is required")
 	}
-	return p.extensions.Load(ctx)
+	return a.extensions.Load(ctx)
 }
 
-func (p *Profile) App() (*apppkg.App, error) {
-	if p == nil || p.extensions == nil || !p.extensions.Active() || p.app == nil {
-		return nil, fmt.Errorf("profile is not active")
-	}
-	return p.app, nil
+// Available reports whether the complete graph has been loaded and published.
+func (a *Assembly) Available() bool {
+	return a != nil && a.extensions != nil && a.extensions.Active()
 }
 
-func (p *Profile) Runtime() (*agentext.Runtime, error) {
-	if p == nil || p.extensions == nil || !p.extensions.Active() {
-		return nil, fmt.Errorf("profile is not active")
-	}
-	if p.runtime == nil {
-		return nil, fmt.Errorf("profile has no Agent runtime")
-	}
-	return p.runtime, nil
-}
-
-func (p *Profile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
-	if p == nil || p.extensions == nil || !p.extensions.Active() {
-		return fmt.Errorf("profile is not active")
-	}
-	if p.registerResourceNamespaces == nil {
+func (a *Assembly) Close(ctx context.Context) error {
+	if a == nil || a.extensions == nil {
 		return nil
 	}
-	return p.registerResourceNamespaces(mux)
-}
-
-func (p *Profile) Close(ctx context.Context) error {
-	if p == nil || p.extensions == nil {
-		return nil
-	}
-	return p.extensions.Close(ctx)
+	return a.extensions.Close(ctx)
 }

@@ -477,7 +477,6 @@ type sessionState struct {
 	closeReason SessionCloseReason
 	finishClose sync.Once
 	closeDone   chan struct{}
-	closeErr    error
 }
 
 func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
@@ -673,16 +672,9 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 			<-state.done
 			state.scheduler.Stop()
 			state.inbox.Close()
-			// A failing observer must not crash an owned cleanup goroutine.
-			// Resources are already drained; retain the error for close waiters.
-			func() {
-				defer func() {
-					if failure := recover(); failure != nil {
-						state.closeErr = fmt.Errorf("session %q completion observer panicked: %v", state.id, failure)
-					}
-				}()
-				emitSessionEnded(rt.app, state.id, state.agentName, string(state.closeReason))
-			}()
+			// The canonical stream isolates and reports observer failures.
+			// Publication completes before this session identity is released.
+			emitSessionEnded(rt.app, state.id, state.agentName, string(state.closeReason))
 			rt.mu.Lock()
 			if rt.sessions[logicalID] == state {
 				delete(rt.sessions, logicalID)
@@ -695,12 +687,12 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 	}
 	select {
 	case <-state.closeDone:
-		return state.closeErr
+		return nil
 	default:
 	}
 	select {
 	case <-state.closeDone:
-		return state.closeErr
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -1155,7 +1147,15 @@ func hasRunInput(content []*aop.Content) bool {
 	return false
 }
 
-func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunInput) (*agent.Result, error) {
+func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunInput) (result *agent.Result, err error) {
+	// A replaceable loop may panic. Convert that failure at the session task
+	// boundary so the ordinary completion path releases the Run and queue.
+	defer func() {
+		if failure := recover(); failure != nil {
+			result = nil
+			err = fmt.Errorf("session %q run panicked: %v", s.id, failure)
+		}
+	}()
 	if input.automatic || input.Continue {
 		return s.agent.Continue(ctx, agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
 	}

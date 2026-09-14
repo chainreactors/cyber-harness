@@ -6,8 +6,10 @@
 ## 单一生命周期图
 
 每个命令入口声明并拥有一张固定的 `core/extension.Set` 图。需要被 Web、Node 或 Runner
-复用的 AIScan 图由具体 `pkg/profile.Profile` 持有同一个 Set 和少量业务能力；Profile
-不增加 active/closing 状态，发布状态统一读取 `Set.Active()`。构造函数注入真实依赖，
+复用的 AIScan 图由命令入口的具体 Profile 持有业务能力，通过 `pkg/profile.Application`
+供 host 使用。`profile.Assembly` 只委托同一个 Set，不保存产品能力，也不增加
+active/closing 状态；具体 `aiscanProfile` 位于 `cmd/aiscan`，发布状态统一读取
+`Assembly.Available()`（其来源是 `Set.Active()`）。构造函数注入真实依赖，
 `Entry.DependsOn` 只决定 Load 与逆序 Close；`extension.Scope` 只提供初始化 context、
 寿命 context 和同步撤销跟踪，不是服务容器，也不生成 owner ID 或资源 Ref。
 
@@ -82,8 +84,8 @@ FlowStore 完成提交和 body finalization 后发 HTTP hook。Traffic 协议只
 | `tools/*` | 原始实现和领域声明 |
 | `agent` | Agent 状态与 loop，只依赖 `tool.Executor` |
 | `pkg/app` | 内置产品状态与业务访问面；不选择插件、不生成 Entries |
-| `pkg/profile` | 已装配图的具体 host 访问面；生命周期完全委托同一个 Set |
-| `cmd/aiscan`、`cmd/runner` | 构造具体实例、声明固定产品图并创建唯一 Set |
+| `pkg/profile` | host 接口、Factory 输入和无产品状态的 Set 组装器 |
+| `cmd/aiscan`、`cmd/runner` | 实现具体 Profile、构造实例并声明唯一固定产品图 |
 
 AIScan 的主要加载顺序是 EventOutput、Observe、Proxy/IOA、App 与能力贡献者、Command
 Registry、Tool Registry、可选 Agent 扩展；关闭严格逆序。Output 可独立记录 Agent 事件，
