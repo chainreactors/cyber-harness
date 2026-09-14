@@ -28,6 +28,10 @@ type Execution struct {
 
 	manager *tmux.Manager
 	mu      sync.RWMutex
+	// idReady closes after the execution receives either its manager-assigned
+	// session ID or its in-process call ID. A built-in command may start before
+	// CreateFunc returns, so correlation waits on this boundary.
+	idReady chan struct{}
 
 	cancelProcess context.CancelCauseFunc
 	detachParent  func() bool
@@ -136,13 +140,46 @@ func newExecution(manager *tmux.Manager, command string, args []string, dir stri
 		Stdout:  io.Discard,
 		Stderr:  io.Discard,
 		manager: manager,
+		idReady: make(chan struct{}),
 	}
 }
 
-func (e *Execution) bindSession(id string) {
+func (e *Execution) bindID(id string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	if e.ID != "" {
+		e.mu.Unlock()
+		return
+	}
 	e.ID = id
+	ready := e.idReady
+	e.idReady = nil
+	e.mu.Unlock()
+	if ready != nil {
+		close(ready)
+	}
+}
+
+func (e *Execution) waitID(ctx context.Context) (string, error) {
+	if e == nil {
+		return "", nil
+	}
+	e.mu.RLock()
+	id, ready := e.ID, e.idReady
+	e.mu.RUnlock()
+	if id != "" || ready == nil {
+		return id, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ready:
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+		return e.ID, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 func (e *Execution) setIO(stdin io.Reader, stdout, stderr io.Writer) {

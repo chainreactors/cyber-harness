@@ -64,20 +64,29 @@ type ProxyHub struct {
 	correlations  map[string]*correlationLease
 }
 
+// State returns the live egress selection capability. Lifecycle remains owned
+// by the proxy extension; policy tools may use this handle to change routing.
+func (h *ProxyHub) State() *State {
+	if h == nil {
+		return nil
+	}
+	return h.state
+}
+
 // Resource owns a ProxyHub's listener and flow store. Extensions retain the
 // Resource and publish only ProxyHub, whose public API contains no lifecycle
 // operations.
 type Resource struct {
-	*ProxyHub
+	ProxyHub *ProxyHub
 }
 
 // Keep proxy-side buffering bounded. Bodies at or above this threshold are
-// captured through the recorder reader and written to disk incrementally.
+// captured through the body stream and written to disk incrementally.
 const hubStreamLargeBodies = 64 * 1024
 
-// NewProxyHub borrows State and takes ownership of FlowStore. Query consumers
-// borrow that same store; Shutdown drains and closes it. A nil store creates a
-// private store with the same ownership contract.
+// NewProxyHub uses caller-owned State and takes ownership of FlowStore. Query
+// consumers share that store; Shutdown drains and closes it. A nil store
+// creates a private store with the same ownership contract.
 //
 // capture selects the mode. The hub is ALWAYS the routing substrate — tools
 // route through it and `proxy switch` swaps its upstream live in either mode.

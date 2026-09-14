@@ -12,7 +12,7 @@ import (
 )
 
 // observe emits at the actual file-operation boundary, including failures.
-// Data remains borrowed for the synchronous dispatch. With no installed hook,
+// Data is valid only for the synchronous dispatch. With no installed hook,
 // no digest, serialization or copy is performed.
 func (f *Files) observe(ctx context.Context, op filepb.AccessOp, path string, data []byte, size int64, operationErr error, edits uint32) error {
 	if !strings.Contains(path, "://") && filepath.IsLocal(path) {

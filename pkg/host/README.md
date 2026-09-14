@@ -37,8 +37,8 @@ err = h.Serve(stream)
 | `aop.NamespaceMux` | 每连接的协议路由表；注册带 owner，拥有 namespace context、执行准入和排空 |
 | 产品 Runtime | Session、Run、Inbox、业务 goroutine、事件订阅 |
 
-Host 是一个实际需要维护连接状态的具体对象。它不持有 Sender/Sink 对象，不提供
-新接口、DTO、传输适配器、依赖容器或另一套业务状态机。`Send` 接收现有的
+Host 是一个实际需要维护连接状态的具体对象。它不持有额外发送对象，不提供
+中间传输层、依赖容器或另一套业务状态机。`Send` 接收现有的
 `aop.SendFunc`，用于让请求响应和主动事件经过同一个关闭检查与发送互斥。
 所有写入错误只由 Host 保存，Stdio 不重复保存错误或给写入加锁。
 

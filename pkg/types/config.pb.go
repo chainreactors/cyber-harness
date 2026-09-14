@@ -585,7 +585,6 @@ type AgentConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tools         []string               `protobuf:"bytes,1,rep,name=tools,proto3" json:"tools,omitempty"`
 	Timeout       int32                  `protobuf:"varint,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	SaveSession   bool                   `protobuf:"varint,3,opt,name=save_session,json=saveSession,proto3" json:"save_session,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -632,13 +631,6 @@ func (x *AgentConfig) GetTimeout() int32 {
 		return x.Timeout
 	}
 	return 0
-}
-
-func (x *AgentConfig) GetSaveSession() bool {
-	if x != nil {
-		return x.SaveSession
-	}
-	return false
 }
 
 type LLMProviderView struct {
@@ -1896,11 +1888,10 @@ const file_types_config_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1b\n" +
 	"\tnode_name\x18\x03 \x01(\tR\bnodeName\x12\x14\n" +
-	"\x05space\x18\x04 \x01(\tR\x05space\"`\n" +
+	"\x05space\x18\x04 \x01(\tR\x05space\"C\n" +
 	"\vAgentConfig\x12\x14\n" +
 	"\x05tools\x18\x01 \x03(\tR\x05tools\x12\x18\n" +
-	"\atimeout\x18\x02 \x01(\x05R\atimeout\x12!\n" +
-	"\fsave_session\x18\x03 \x01(\bR\vsaveSession\"\xce\x02\n" +
+	"\atimeout\x18\x02 \x01(\x05R\atimeoutJ\x04\b\x03\x10\x04\"\xce\x02\n" +
 	"\x0fLLMProviderView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

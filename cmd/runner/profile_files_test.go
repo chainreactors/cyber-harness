@@ -1,4 +1,4 @@
-package files_test
+package main
 
 import (
 	"context"
@@ -9,14 +9,13 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/tool"
-	filesprofile "github.com/chainreactors/aiscan/pkg/profile/files"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 )
 
 func TestProfileLifecycleAndActualFiles(t *testing.T) {
 	dir := t.TempDir()
-	p, err := filesprofile.New(files.Config{Directory: dir})
+	p, err := newFileProfile(files.Config{Directory: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +67,7 @@ func TestProfileLifecycleAndActualFiles(t *testing.T) {
 }
 
 func TestReadOnlyProfile(t *testing.T) {
-	p, err := filesprofile.New(files.Config{Directory: t.TempDir(), ReadOnly: true})
+	p, err := newFileProfile(files.Config{Directory: t.TempDir(), ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +86,7 @@ func TestReadOnlyProfile(t *testing.T) {
 }
 
 func TestFailedLoadDoesNotPublishExecutor(t *testing.T) {
-	p, err := filesprofile.New(files.Config{Directory: filepath.Join(t.TempDir(), "missing")})
+	p, err := newFileProfile(files.Config{Directory: filepath.Join(t.TempDir(), "missing")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +105,7 @@ func TestFailedLoadDoesNotPublishExecutor(t *testing.T) {
 }
 
 func TestConcurrentCloseNeverRepublishesProfile(t *testing.T) {
-	p, err := filesprofile.New(files.Config{Directory: t.TempDir()})
+	p, err := newFileProfile(files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

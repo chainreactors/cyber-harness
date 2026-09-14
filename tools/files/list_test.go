@@ -19,8 +19,9 @@ func TestListingAndGlobRespectRootAndCancellation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	f, _ := New(Config{Directory: dir}, nil)
-	fSet := filesystemSet(t, f)
+	resource, _ := New(Config{Directory: dir}, nil)
+	f := resource.Files
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

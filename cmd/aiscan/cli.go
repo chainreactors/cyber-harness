@@ -179,7 +179,7 @@ func aiscan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := transportpkg.Run(ctx, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := transportpkg.Run(ctx, aiscanProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
@@ -204,7 +204,7 @@ func aiscan() {
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runner.RunDirectScannerMode(ctx, aiscanProfileFactory, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}
@@ -370,8 +370,6 @@ func applyScannerPersistenceArgs(args []string, option *cfg.Option) ([]string, e
 				return nil, err
 			}
 			option.Resume = resolved
-		case "--save-session":
-			option.SaveSession = !hasValue || truthyFlagValue(value)
 		default:
 			out = append(out, arg)
 		}
@@ -384,7 +382,6 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.OutputFormat = cfg.ResolveString(manual.OutputFormat, option.OutputFormat)
 	option.Observe = cfg.ResolveString(manual.Observe, option.Observe)
 	option.JSON = option.JSON || manual.JSON
-	option.Ephemeral = option.Ephemeral || manual.Ephemeral
 	option.Provider = cfg.ResolveString(manual.Provider, option.Provider)
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
@@ -415,9 +412,6 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.Prompt = cfg.ResolveString(manual.Prompt, option.Prompt)
 	option.TaskFile = cfg.ResolveString(manual.TaskFile, option.TaskFile)
 	option.Resume = cfg.ResolveString(manual.Resume, option.Resume)
-	if manual.SaveSession {
-		option.SaveSession = true
-	}
 	if len(manual.Skills) > 0 {
 		option.Skills = append(option.Skills, manual.Skills...)
 	}
@@ -588,12 +582,10 @@ var scannerKnownFlags = []knownFlag{
 	}},
 	{names: []string{"--resume"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"-r"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
-	{names: []string{"--save-session"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.SaveSession = true }},
 	{names: []string{"--output", "-o"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
 	{names: []string{"--output-format"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFormat = v }},
 	{names: []string{"--json"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.JSON = true }},
 	{names: []string{"--observe"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Observe = v }},
-	{names: []string{"--ephemeral"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.Ephemeral = true }},
 }
 
 var rootOnlyFlagValueArity = map[string]int{

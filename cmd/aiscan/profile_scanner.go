@@ -1,4 +1,4 @@
-package aiscan
+package main
 
 import (
 	"context"

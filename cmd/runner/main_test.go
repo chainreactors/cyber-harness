@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
-	filesprofile "github.com/chainreactors/aiscan/pkg/profile/files"
 	"github.com/chainreactors/aiscan/tools/files"
 )
 
@@ -57,7 +56,7 @@ func TestRunPrintsVersionWithoutServer(t *testing.T) {
 }
 
 func TestFilesProfileRegistersFileTools(t *testing.T) {
-	profile, err := filesprofile.New(files.Config{Directory: t.TempDir()})
+	profile, err := newFileProfile(files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

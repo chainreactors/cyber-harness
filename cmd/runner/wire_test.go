@@ -22,7 +22,7 @@ import (
 
 func TestRunnerOverAOP(t *testing.T) {
 	t.Run("files", func(t *testing.T) { runnerOverAOP(t, false) })
-	t.Run("files_audit_skills", func(t *testing.T) { runnerOverAOP(t, true) })
+	t.Run("files_observe_skills", func(t *testing.T) { runnerOverAOP(t, true) })
 }
 
 func runnerOverAOP(t *testing.T, withExtensions bool) {
@@ -135,7 +135,7 @@ func runnerOverAOP(t *testing.T, withExtensions bool) {
 			t.Fatal(err)
 		}
 		if len(accesses) != 2 || accesses[0].GetOp() != filepb.AccessOp_ACCESS_OP_CREATE || accesses[1].GetOp() != filepb.AccessOp_ACCESS_OP_READ || refs[0].GetCallId() != "write-1" || refs[1].GetCallId() != "read-1" {
-			t.Fatalf("audit lost real file operations or included virtual reads: %v", accesses)
+			t.Fatalf("observation stream lost real file operations or included virtual reads: %v", accesses)
 		}
 	}
 }

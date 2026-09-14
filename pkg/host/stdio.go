@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// Stdio frames envelopes as protobuf JSONL and borrows both streams. Like
+// Stdio frames envelopes as protobuf JSONL over caller-owned streams. Like
 // aop.EnvelopeStream, it allows one reader and one writer. Host serializes
 // concurrent replies and events; the codec owns no connection state.
 type Stdio struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -16,12 +17,25 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+func TestResourceDoesNotPromoteAppBusinessMethods(t *testing.T) {
+	resource := reflect.TypeFor[*Resource]()
+	for _, method := range []string{"Emit", "SubscribeEvents", "ProviderState", "SetProvider"} {
+		if _, exists := resource.MethodByName(method); exists {
+			t.Errorf("App Resource promotes business method %s", method)
+		}
+	}
+	if !resource.Implements(reflect.TypeFor[extension.Extension]()) {
+		t.Fatal("App Resource does not implement extension lifecycle")
+	}
+}
+
 func TestNewIsInertUntilLoad(t *testing.T) {
-	a := New(Config{SkipEngines: true}, Dependencies{})
+	resource := New(Config{SkipEngines: true}, Dependencies{})
+	a := resource.App
 	if a.Skills != nil || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("New exposed initialized application resources before Load")
 	}
-	set := extensiontest.Set(t, extension.Entry{ID: "app", Extension: a})
+	set := extensiontest.Set(t, extension.Entry{ID: "app", Extension: resource})
 	if len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("construction published registries before Set.Load")
 	}

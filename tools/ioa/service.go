@@ -43,7 +43,7 @@ type Runtime struct {
 // Resource owns one Runtime's client connection and registration retry. The
 // IOA extension retains this value and publishes only Runtime.
 type Resource struct {
-	*Runtime
+	Runtime *Runtime
 }
 
 // New constructs an inert instance. Network work begins in Start.

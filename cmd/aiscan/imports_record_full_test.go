@@ -11,7 +11,6 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 )
 
 func TestRecordFullCapabilitySet(t *testing.T) {
@@ -22,7 +21,7 @@ func TestRecordFullCapabilitySet(t *testing.T) {
 }
 
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	product, err := profile.New(profile.Config{
+	product, err := newAIScanProfile(aiscanProfileConfig{
 		Option: &cfg.Option{},
 		Application: apppkg.Config{
 			Tools: apppkg.ToolConfig{BashTimeout: 1}, Logger: telemetry.NopLogger(), SkipEngines: true,

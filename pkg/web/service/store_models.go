@@ -61,8 +61,8 @@ type sessionScanModel struct {
 	Scan      *scanModel    `bun:"rel:belongs-to,join:scan_id=id,on_delete:cascade"`
 }
 
-type requestJournalModel struct {
-	bun.BaseModel `bun:"table:aop_request_journal,alias:request_journal"`
+type requestLedgerModel struct {
+	bun.BaseModel `bun:"table:aop_request_ledger,alias:request_ledger"`
 
 	RequestID    string `bun:"request_id,pk"`
 	Method       string `bun:"method,notnull"`

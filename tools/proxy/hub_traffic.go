@@ -26,15 +26,15 @@ func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 		return
 	}
 	correlation := flow
-	if flow.Ref == nil {
-		flow.Ref = &operationpb.Ref{Correlation: operationpb.Correlation_CORRELATION_UNATTRIBUTED}
+	if flow.Operation == nil {
+		flow.Operation = &operationpb.Ref{Correlation: operationpb.Correlation_CORRELATION_UNATTRIBUTED}
 	}
 	stored := h.store.addFiles(flow, files)
 	message := h.store.flowToProto(&stored)
 	ctx := operation.ContextWithInvocation(context.Background(), correlation.Invocation)
 	makeEvent := func() toolhooks.FlowEvent {
 		return toolhooks.FlowEvent{
-			Operation: proto.Clone(stored.Ref).(*operationpb.Ref),
+			Operation: proto.Clone(stored.Operation).(*operationpb.Ref),
 			Flow:      proto.Clone(message).(*traffic.Flow),
 		}
 	}
@@ -51,8 +51,8 @@ func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 
 func cloneFlowMetadata(flow Flow) Flow {
 	flow.Exchange = flow.Clone()
-	if flow.Ref != nil {
-		flow.Ref = proto.Clone(flow.Ref).(*operationpb.Ref)
+	if flow.Operation != nil {
+		flow.Operation = proto.Clone(flow.Operation).(*operationpb.Ref)
 	}
 	flow.Invocation.Progress = nil
 	flow.cancel = nil
@@ -62,7 +62,7 @@ func cloneFlowMetadata(flow Flow) Flow {
 // Includes previews and variable-sized headers/strings, plus conservative
 // fixed overhead. There is also an independent event count limit.
 func flowMetadataSize(flow Flow) int64 {
-	size := int64(1024 + len(flow.ID) + proto.Size(flow.Ref) + len(flow.Host) + len(flow.ContentType) + len(flow.Error))
+	size := int64(1024 + len(flow.ID) + proto.Size(flow.Operation) + len(flow.Host) + len(flow.ContentType) + len(flow.Error))
 	size += int64(len(flow.Request.URL) + len(flow.Request.Method) + len(flow.Request.Protocol) + len(flow.Request.Body))
 	for _, pair := range flow.Request.Headers {
 		size += int64(len(pair.Name) + len(pair.Value) + 64)

@@ -13,7 +13,7 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 )
 
-// outputConsumer is a test-only consumer of an actual borrowed file. Callback
+// outputConsumer is a test-only consumer of an extension-owned file. Callback
 // admission and completion belong entirely to Subscription, with no second
 // inflight counter or completion channel in the extension.
 type outputConsumer struct {
@@ -50,7 +50,7 @@ func (m *outputConsumer) Close(ctx context.Context) error {
 	return errors.Join(m.err, m.subscription.Err())
 }
 
-func TestAsyncProcessingFailureDoesNotRetainBorrowedExtensionResource(t *testing.T) {
+func TestAsyncProcessingFailureDoesNotRetainExtensionResource(t *testing.T) {
 	file := &fileExtension{path: filepath.Join(t.TempDir(), "events.txt")}
 	want := errors.New("processing failed after writing")
 	bus := eventbus.New[string]()
@@ -77,7 +77,7 @@ func TestAsyncProcessingFailureDoesNotRetainBorrowedExtensionResource(t *testing
 	}
 }
 
-func TestSubscriptionTimeoutRetainsBorrowedExtensionResource(t *testing.T) {
+func TestSubscriptionTimeoutRetainsExtensionResource(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.txt")
 	synctest.Test(t, func(t *testing.T) {
 		bus := eventbus.New[string]()

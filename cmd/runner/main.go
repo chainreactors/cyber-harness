@@ -15,7 +15,6 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/profile/workspace"
 	"github.com/chainreactors/aiscan/pkg/toolnode"
 	"github.com/chainreactors/aiscan/tools/files"
 )
@@ -78,7 +77,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 			return err
 		}
 	}
-	profile, err := workspace.New(workspace.Config{
+	profile, err := newWorkspaceProfile(workspaceProfileConfig{
 		Extensions:      strings.Split(options.extensions, ","),
 		Files:           files.Config{Directory: workDir, ReadOnly: options.readOnly, MaxBytes: options.maxBytes},
 		Output:          options.output,
@@ -105,7 +104,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 			Installed []string `json:"installed"`
 			Tools     []string `json:"tools"`
 			Skills    []string `json:"skills"`
-		}{workspace.Available(), profile.Installed(), names, profile.SkillLocations()})
+		}{availableWorkspaceExtensions(), profile.Installed(), names, profile.SkillLocations()})
 	}
 	logger.Infof("runner tools ready: %s", strings.Join(names, ", "))
 	return toolnode.Run(ctx, toolnode.Config{

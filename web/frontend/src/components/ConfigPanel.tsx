@@ -35,7 +35,7 @@ interface ConfigFormState {
   scan: { verify: string }
   search: { tavily_keys: string }
   ioa: { url: string; token: string; node_name: string; space: string }
-  agent: { tools: string[]; timeout: number; save_session: boolean }
+  agent: { tools: string[]; timeout: number }
 }
 
 function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
@@ -66,7 +66,7 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
     scan: { verify: form.scan.verify },
     search: { tavilyKeys: form.search.tavily_keys },
     ioa: { url: form.ioa.url, token: form.ioa.token, nodeName: form.ioa.node_name, space: form.ioa.space },
-    agent: { tools: form.agent.tools, timeout: form.agent.timeout, saveSession: form.agent.save_session },
+    agent: { tools: form.agent.tools, timeout: form.agent.timeout },
   })
 }
 
@@ -113,7 +113,7 @@ function emptyForm(): ConfigFormState {
     scan: { verify: '' },
     search: { tavily_keys: '' },
     ioa: { url: '', token: '', node_name: '', space: '' },
-    agent: { tools: [], timeout: 0, save_session: false },
+    agent: { tools: [], timeout: 0 },
   }
 }
 
@@ -156,7 +156,7 @@ function statusToForm(cs: ConfigView): ConfigFormState {
     scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
     ioa: { url: cs.ioa?.url || '', token: '', node_name: cs.ioa?.nodeName || '', space: cs.ioa?.space || '' },
-    agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0, save_session: cs.agent?.saveSession || false },
+    agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0 },
   }
 }
 
@@ -712,12 +712,6 @@ function AgentTab({ form, setForm }: Omit<TabProps, 'cs'>) {
       <Field label={t('optionalTools')}>
         <Input value={(form.agent.tools || []).join(', ')} onChange={(e) => { const tools = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); setForm((f) => ({ ...f, agent: { ...f.agent, tools } })) }} placeholder="search, browser" />
       </Field>
-      <div className="sm:col-span-2">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Switch checked={form.agent.save_session} onCheckedChange={(v) => setForm((f) => ({ ...f, agent: { ...f.agent, save_session: v } }))} />
-          {t('autoSaveSessions')}
-        </label>
-      </div>
       <p className="sm:col-span-2 text-xs text-muted-foreground">{t('localOnlyNote')}</p>
     </div>
   )

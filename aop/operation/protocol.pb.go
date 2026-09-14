@@ -448,7 +448,7 @@ func (x *Completed) GetFailure() *Failure {
 	return nil
 }
 
-// Decision is the common audit shape for a policy decision. Policy-specific
+// Decision is the common observation shape for a policy decision. Policy-specific
 // rationale is carried as a typed Event extension owned by that policy.
 type Decision struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`

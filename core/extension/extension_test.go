@@ -274,7 +274,7 @@ func TestCompletedCloseErrorReleasesDependenciesWithoutRetry(t *testing.T) {
 	assertEvents(t, events, wantEvents)
 }
 
-func TestNestedSetPropagatesCompletionAndRetainsBorrowedResource(t *testing.T) {
+func TestNestedSetPropagatesCompletionAndRetainsSharedResource(t *testing.T) {
 	for _, incomplete := range []bool{false, true} {
 		t.Run(map[bool]string{false: "completed error", true: "incomplete"}[incomplete], func(t *testing.T) {
 			var events []string

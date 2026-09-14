@@ -118,7 +118,7 @@ func (h *Host) Serve(stream aop.EnvelopeStream) error {
 }
 
 // Close stops admission, cancels handlers and waits for active dispatches and
-// sends. It does not close borrowed IO or wait for handler-created goroutines.
+// sends. It does not close caller-owned IO or wait for handler-created goroutines.
 // The owner must unblock its IO and wait for its application work separately.
 // Call Close outside handlers and send callbacks; concurrent calls are safe.
 func (h *Host) Close() {

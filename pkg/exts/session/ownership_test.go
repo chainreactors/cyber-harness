@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
-func TestBorrowedCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
+func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 	for _, capability := range []reflect.Type{
 		reflect.TypeFor[*session.Manager](),
 		reflect.TypeFor[*session.Session](),
@@ -17,7 +17,7 @@ func TestBorrowedCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 	} {
 		for _, method := range []string{"Load", "Close"} {
 			if _, exists := capability.MethodByName(method); exists {
-				t.Errorf("borrowed %s exposes lifecycle method %s", capability, method)
+				t.Errorf("business capability %s exposes lifecycle method %s", capability, method)
 			}
 		}
 	}
@@ -25,7 +25,12 @@ func TestBorrowedCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 		t.Fatal("Session exposes its mutable internal Agent")
 	}
 	if _, exists := reflect.TypeFor[*agentext.Extension]().MethodByName("Run"); exists {
-		t.Fatal("Agent Extension duplicates its borrowed Runtime execution API")
+		t.Fatal("Agent Extension duplicates its Runtime execution API")
+	}
+	for _, method := range []string{"OpenSession", "EnsureSession", "Subscribe", "RunSession"} {
+		if _, exists := reflect.TypeFor[*session.Resource]().MethodByName(method); exists {
+			t.Errorf("Session Resource promotes business method %s", method)
+		}
 	}
 	for _, owner := range []reflect.Type{
 		reflect.TypeFor[*session.Resource](),

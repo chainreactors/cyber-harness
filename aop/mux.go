@@ -37,7 +37,7 @@ type namespaceOwner struct {
 var ErrNamespaceUnavailable = errors.New("namespace owner or mux is closed")
 
 // NamespaceMux owns namespace registrations and admission, never the resources
-// borrowed by handlers. A connection owns its mux; extensions unregister and wait
+// used by handlers. A connection owns its mux; extensions unregister and wait
 // before releasing their resources. Closed owners and names cannot be reused.
 type NamespaceMux struct {
 	mu       sync.Mutex

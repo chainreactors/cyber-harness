@@ -76,7 +76,7 @@ func (c *Command) do(ctx context.Context, req *Request, egress commands.Egress, 
 		// A standard library HTTP proxy owns the destination dial and therefore
 		// cannot safely honor a local host mapping without also changing CONNECT
 		// and TLS-SNI behavior. Fail explicitly instead of silently ignoring the
-		// option (or bypassing the evidence proxy).
+		// option (or bypassing the observed proxy path).
 		return fmt.Errorf("curl: --resolve cannot be used with a proxy")
 	}
 
@@ -563,8 +563,8 @@ func (t *capturingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return resp, err
 }
 
-// asciiTrace is the local diagnostic sink used by --trace-ascii. It is kept
-// separate from the Hub/evidence path: tracing observes the request and
+// asciiTrace is the local diagnostic writer used by --trace-ascii. It is kept
+// separate from the Hub observation path: tracing copies the request and
 // response but never changes attribution or transport routing.
 type asciiTrace struct {
 	mu     sync.Mutex

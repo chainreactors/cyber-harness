@@ -24,7 +24,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	node "github.com/chainreactors/aiscan/pkg/node"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
@@ -85,7 +85,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (*profile.Profile, error) {
+		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -184,7 +184,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			return err
 		}
 		telemetry.SafeGo("embedded-agent", func() {
-			if err := node.RunWebSocket(ctx, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(ctx, aiscanProfileFactory, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		})
@@ -265,7 +265,7 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*profile.Profile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*aiscanProfile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
@@ -279,14 +279,14 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 	return initWebProfileFromConfig(ctx, &option, appCfg)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config) (*profile.Profile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config) (*aiscanProfile, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
-	profileConfig := profile.FromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
+	profileConfig := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
 	profileConfig.Application = appCfg
 	profileConfig.IOA = nil
-	product, err := profile.New(profileConfig)
+	product, err := newAIScanProfile(profileConfig)
 	if err != nil {
 		return nil, err
 	}

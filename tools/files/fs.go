@@ -47,11 +47,10 @@ type Files struct {
 	mounts    map[string]*mount
 }
 
-// Resource is the construction result held by the files extension. Embedding
-// keeps low-level use convenient while allowing the extension to publish the
-// lifecycle-free Files field.
+// Resource is the construction result held by the files extension. Its named
+// Files field prevents lifecycle and business methods from sharing a method set.
 type Resource struct {
-	*Files
+	Files *Files
 }
 
 func New(config Config, registry *corehooks.Registry) (*Resource, error) {
@@ -202,7 +201,7 @@ func (f *Files) read(ctx context.Context, path string, observed bool) (result []
 	return data, nil
 }
 
-// Write borrows data until return. It preserves the destination on errors
+// Write reads data only until return. It preserves the destination on errors
 // before rename. Context cancellation cannot preempt a filesystem syscall or
 // undo a successful rename. Concurrent writes use last successful rename.
 func (f *Files) Write(ctx context.Context, path string, data []byte) (err error) {

@@ -65,7 +65,7 @@ message IOAConfig {
 message AgentConfig {
   repeated string tools = 1;
   int32 timeout = 2;
-  bool save_session = 3;
+  reserved 3;
 }
 
 message LLMProviderView {

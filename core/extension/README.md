@@ -46,7 +46,7 @@ panic 转为可重试的未完成关闭，依赖继续受保护。
 典型验证：
 
 ```text
-go test -mod=readonly -race ./core/extension ./core/registry ./pkg/profile/workspace
+go test -mod=readonly -race ./core/extension ./core/registry ./pkg/profile ./cmd/runner
 ```
 
 覆盖依赖校验、启动回滚、关闭重试、资源排空、初始化与寿命取消分离和撤销 panic。完整边界与全仓验收见 [Issue 127](../../docs/issue127-extension-boundary.md)。

@@ -20,7 +20,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Manager owns sessions and drains their operations as an Extension.
+// Manager exposes session operations. Resource alone owns activation and drain.
 // ---------------------------------------------------------------------------
 
 type Manager struct {
@@ -58,7 +58,7 @@ type Manager struct {
 // Resource owns Manager activation and shutdown. Profiles retain Resource and
 // publish Manager, whose API manages sessions but not its own lifetime.
 type Resource struct {
-	*Manager
+	Manager *Manager
 }
 
 var _ extension.Extension = (*Resource)(nil)

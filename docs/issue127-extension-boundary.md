@@ -5,7 +5,8 @@
 
 ## 单一生命周期图
 
-每个产品 Profile 只拥有一张 `core/extension.Set` 固定图。构造函数注入真实依赖，
+每个命令入口声明一张固定图，`pkg/profile.Assembly` 是唯一的 `core/extension.Set` 所有者；
+具体 Profile 只保留 Assembly 与需要发布的资源引用。构造函数注入真实依赖，
 `Entry.DependsOn` 只决定 Load 与逆序 Close；`extension.Scope` 只提供初始化 context、
 寿命 context 和同步撤销跟踪，不是服务容器，也不生成 owner ID 或资源 Ref。
 
@@ -44,10 +45,16 @@ Tool 与 Command 不是重复抽象：
 fail-closed，事实观察点不能改变已经完成的结果。
 
 `core/events.Stream` 是每个 Profile 唯一的 AOP stamping 和发布入口，其底层 Bus 不公开，负责 Event ID、时间和
-session 内序号。`pkg/exts/observe` 将已选择的 typed hook 转为 AOP 事实；operation 关联使用
+session 内序号。`pkg/exts/observe` 将已选择的 typed hook 转为 AOP 观测；operation 关联使用
 Event typed extension 中的 `aop.operation.Ref`，不在每种 payload 中重复 `tool_id`。
+这里的 `Ref` 是跨进程 typed message，只携带不可变的关联 ID；它不是 Go 资源引用、生命周期
+handle 或服务定位入口，也没有 Load/Close/lookup 能力。进程内代码统一以
+`operation.Correlation(ctx)` 生成它，不传播泛化的 `*Ref` 包装。
 `pkg/exts/eventoutput` 是唯一通用 JSONL 输出扩展。它只订阅 AOP Stream，不导入 Tool、File 或
 Traffic 领域。无 session 的根观察同样是合法事件。
+
+控制决策由作出决策的策略 Extension 直接发布为 typed `aop.operation.Decision`。Observe
+只投影执行边界事实，不能代替策略发布决策或将异步消费者带回同步准入路径。
 
 ```text
 execution boundary → typed hooks → Observe → AOP Stream → EventOutput / transport
@@ -73,20 +80,21 @@ FlowStore 完成提交和 body finalization 后发 HTTP hook。Traffic 协议只
 | `tools/*` | 原始实现和领域声明 |
 | `agent` | Agent 状态与 loop，只依赖 `tool.Executor` |
 | `pkg/app` | 内置产品状态与业务访问面；不选择插件、不生成 Entries |
-| `pkg/profile/*` | 唯一 composition root：构造具体实例、生成固定图并拥有唯一 Set |
+| `pkg/profile` | Profile 生命周期抽象与原子装配器，不声明产品图 |
+| `cmd/aiscan`、`cmd/runner` | 构造具体实例并声明固定产品图；通过 Assembly 驱动生命周期 |
 
 AIScan 的主要加载顺序是 EventOutput、Observe、Proxy/IOA、App 与能力贡献者、Command
 Registry、Tool Registry、可选 Agent 扩展、Session Manager；关闭严格逆序。Output 可独立记录 Agent 事件，
 Observe 只在明确选择观察种类时安装。
 
-`pkg/exts/session.Resource` 是会话管理器的生命周期所有者，Profile 只借出没有 Load/Close
-的 `Manager`。`pkg/exts/agent.Extension` 同样只拥有生命周期，通过 `Loop()` 借出实现
+`pkg/exts/session.Resource` 是会话管理器的生命周期所有者，Profile 只发布没有 Load/Close
+的 `Manager`。`pkg/exts/agent.Extension` 同样只拥有生命周期，通过 `Loop()` 发布实现
 `agent.Loop` 的 Runtime，负责选定 Loop 的运行准入、寿命取消和排空。两者在同一张图中
 平级装配，不另建 Agent 状态或 Session 图。会话级 Loop 覆盖入口已移除。
 
-此处的所有权统一不代表旧状态实现已全部迁移：Session 内部仍调用 `agent.Agent`，
-`agent/subagent.go` 仍有独立的派生会话起止路径。这些是尚未收敛的实现边界，
-不能以目录迁移、私有化方法或删除兼容入口代替其调用链迁移。
+`agent.Agent` 是单次会话中的领域状态，subagent 是受父调用 context 约束的临时执行，
+二者都不拥有 Extension、Registry 或 Profile 生命周期。这是执行模型本身，而不是第二套
+宿主生命周期或待迁移兼容层。
 
 Files、Proxy、IOA 在原始实现中拆分为生命周期 `Resource` 与业务对象；各自 Extension
 只持有 Resource，消费者直接取得本身没有 Open/Start/Close 的 Files、ProxyHub 或 Runtime。

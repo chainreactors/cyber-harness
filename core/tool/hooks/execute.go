@@ -55,7 +55,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 	ctx, cancel := operation.Begin(ctx, "tool", name)
 	defer cancel(nil)
 
-	ref := operation.Correlation(ctx)
+	correlation := operation.Correlation(ctx)
 	call := &aop.ToolCall{
 		Id:               invocation.CallID,
 		Name:             name,
@@ -89,7 +89,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 		}
 		if registry.Has(Completed.Kind) {
 			corehooks.Notify(context.WithoutCancel(ctx), registry, Completed, Completion{
-				Lifecycle: Lifecycle{Operation: cloneRef(ref), StartedAt: startedAt, EndedAt: endedAt, Err: err},
+				Lifecycle: Lifecycle{Operation: cloneCorrelation(correlation), StartedAt: startedAt, EndedAt: endedAt, Err: err},
 				Call:      proto.Clone(call).(*aop.ToolCall),
 				Result:    proto.Clone(result).(*tool.Result),
 			})
@@ -97,7 +97,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 	}()
 
 	if registry.Has(Before.Kind) {
-		admission, hookErr := Before.Emit(ctx, registry, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneRef(ref)})
+		admission, hookErr := Before.Emit(ctx, registry, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneCorrelation(correlation)})
 		if err = Check(admission, hookErr); err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 
 	startedAt = time.Now()
 	if registry.Has(Started.Kind) {
-		corehooks.Notify(ctx, registry, Started, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneRef(ref)})
+		corehooks.Notify(ctx, registry, Started, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneCorrelation(correlation)})
 	}
 	if err = context.Cause(ctx); err != nil {
 		return nil, err
@@ -122,7 +122,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 		wasError, wasTerminate := result.IsError, result.Terminate
 		transformed := proto.Clone(result).(*tool.Result)
 		_, hookErr := After.Emit(ctx, registry, ResultEvent{
-			Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneRef(ref), Result: transformed,
+			Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneCorrelation(correlation), Result: transformed,
 		})
 		if hookErr == nil {
 			// Result transforms are monotonic for terminal state. A policy may
@@ -137,9 +137,9 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 	return result, err
 }
 
-func cloneRef(ref *operationpb.Ref) *operationpb.Ref {
-	if ref == nil {
+func cloneCorrelation(correlation *operationpb.Ref) *operationpb.Ref {
+	if correlation == nil {
 		return nil
 	}
-	return proto.Clone(ref).(*operationpb.Ref)
+	return proto.Clone(correlation).(*operationpb.Ref)
 }

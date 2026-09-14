@@ -128,9 +128,6 @@ func mergeOption(dst, src *Option) {
 	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
 		dst.Tools = src.Tools
 	}
-	if !dst.SaveSession && src.SaveSession {
-		dst.SaveSession = true
-	}
 	mergeOutputOptions(&dst.OutputOptions, &src.OutputOptions)
 	dst.DataDir = ResolveString(dst.DataDir, src.DataDir)
 }

@@ -68,7 +68,7 @@ func (e Exchange) Clone() Exchange {
 // ExchangeFromHTTP converts the standard library's request/response pair into
 // the canonical HTTP observation model. Callers provide body bytes explicitly
 // because the http bodies are streaming and may already have been consumed by
-// the caller (for example, by a file-backed recorder).
+// the caller (for example, by file-backed capture).
 func ExchangeFromHTTP(req *http.Request, resp *http.Response, requestBody, responseBody []byte) *Exchange {
 	e := &Exchange{}
 	if req != nil {

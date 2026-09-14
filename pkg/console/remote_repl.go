@@ -16,7 +16,7 @@ import (
 const MainREPLName = "main-repl"
 
 // REPL owns the console task's cancellation and completion. Its Runtime and
-// Bash manager are borrowed; neither is closed when the console detaches.
+// Bash manager are profile-owned; neither is closed when the console detaches.
 type REPL struct {
 	cancel context.CancelFunc
 	done   chan struct{}

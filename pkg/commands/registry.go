@@ -144,12 +144,16 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 	if err := call.Err(); err != nil {
 		return nil, err
 	}
+	resourceID, err := execution.waitID(call)
+	if err != nil {
+		return nil, err
+	}
 	call, finish := operation.Begin(call, "command", name)
 	defer finish(nil)
-	call = operation.ContextWithResource(call, execution.ID)
-	ref := operation.Correlation(call)
+	call = operation.ContextWithResource(call, resourceID)
+	correlation := operation.Correlation(call)
 	event := toolhooks.CommandEvent{
-		Operation: proto.Clone(ref).(*operationpb.Ref), Name: name,
+		Operation: proto.Clone(correlation).(*operationpb.Ref), Name: name,
 		Args: append([]string(nil), execution.Args...), Directory: execution.Dir,
 	}
 	var startedAt time.Time
@@ -166,7 +170,7 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 		if r.hooks.Has(toolhooks.CommandCompleted.Kind) {
 			hooks.Notify(context.WithoutCancel(call), r.hooks, toolhooks.CommandCompleted, toolhooks.CommandCompletion{
 				Lifecycle: toolhooks.Lifecycle{
-					Operation: proto.Clone(ref).(*operationpb.Ref), StartedAt: startedAt, EndedAt: endedAt, Err: err,
+					Operation: proto.Clone(correlation).(*operationpb.Ref), StartedAt: startedAt, EndedAt: endedAt, Err: err,
 				},
 				Command: event,
 			})

@@ -59,7 +59,6 @@ export default {
   space: '空间',
   timeout: '超时（秒）',
   optionalTools: '可选工具',
-  autoSaveSessions: '自动保存会话',
   // placeholder hints
   configuredKeep: '已配置；留空则保持不变',
   apiKeyRequired: '需要 API Key',

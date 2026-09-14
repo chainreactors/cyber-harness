@@ -57,7 +57,7 @@ func newConsoleRuntime(t *testing.T, provider agent.Provider) *sessionext.Manage
 	a := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 	aSet := loadConsoleApplication(t, t.Context(), a)
-	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
+	a.App.SetProvider(provider, agent.ProviderConfig{Model: "test"})
 	t.Cleanup(func() { _ = aSet.Close(context.Background()) })
 	rt, err := sessionext.New(a.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {

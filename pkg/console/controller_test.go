@@ -146,7 +146,7 @@ func TestConsoleStopCancelsOnlyItsOwnSubmissions(t *testing.T) {
 		t.Fatalf("inputs=%v", p.inputs)
 	}
 }
-func TestConsoleCloseRejectsInputAndLeavesBorrowedSession(t *testing.T) {
+func TestConsoleCloseRejectsInputAndLeavesProfileSession(t *testing.T) {
 	c := newTestConsole(t, &cfg.Option{}, &consoleProvider{}, io.Discard, io.Discard)
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

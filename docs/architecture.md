@@ -5,8 +5,9 @@ Profile。当前边界和待验收项见 [Issue 127 约定](issue127-extension-b
 
 ## 组合与关闭
 
-每个 Profile 构造一张固定 `core/extension.Set` 图。依赖通过构造参数传入，
-`DependsOn` 只表达资源寿命：依赖先加载、依赖者先关闭。
+`cmd/aiscan` 与 `cmd/runner` 声明各自固定的 Extension 图并保留所需资源的直接引用；
+`pkg/profile.Assembly` 是唯一创建和驱动 `core/extension.Set` 的装配器。依赖通过构造参数传入，
+`DependsOn` 只表达资源寿命：依赖先加载、依赖者先关闭。共享包不包含任何具体产品 Profile。
 
 ```mermaid
 flowchart TB
@@ -21,8 +22,8 @@ flowchart TB
 ```
 
 关闭顺序反向执行：入口停止，两个 Registry 拒绝新工作、取消并 drain，资源 Extension
-随后释放。Close 返回 `ErrCloseIncomplete` 时保留依赖，重试继续原关闭过程。App 当前负责
-构造能力并贡献 Entries，同时提供产品访问面；这些 Entries 并入 Profile，不创建嵌套 Set。
+随后释放。Close 返回 `ErrCloseIncomplete` 时保留依赖，重试继续原关闭过程。具体入口负责
+构造能力并声明 Entries；App 只提供产品访问面，不选择扩展，也不创建嵌套 Set。
 
 ## 两类执行运行时
 
@@ -36,7 +37,8 @@ flowchart TB
 ## 控制与事实
 
 `core/hooks` 提供 typed 控制点和观察点；`core/operation` 提供执行身份、父子 operation
-和取消。执行前控制可以拒绝或取消，执行后观察不能修改事实。
+和取消。执行前控制可以拒绝或取消，执行后观察不能修改事实。策略 Extension 直接将准入
+结果发布为 typed `operation.Decision`；Observe 不反向参与准入，也不代替策略发布决策。
 
 `core/events.Stream` 统一补全 AOP Event 的 ID、时间和序号。`pkg/exts/observe` 把选中的
 Tool、Command、Process、File、HTTP hook 转成 typed AOP Event，`pkg/exts/eventoutput`
@@ -48,7 +50,7 @@ CLI 中 `--observe` 只选择观测种类，`-o/--output` 只选择 AOP JSONL �
 
 文件访问直接来自 `tools/files` 的真实 IO 边界；进程事件来自 `pkg/commands` 的真实启动与
 退出边界；HTTP 事件在 Proxy FlowStore 完成提交后产生。它们通过
-`aop.operation.Ref` 关联，不复制另一套 tool ID 或日志 DTO。
+`aop.operation.Ref` 关联，不复制另一套 tool ID 或日志消息。
 
 ## Agent、Session 与入口
 
@@ -70,12 +72,13 @@ App/Profile 的资源。
 | `pkg/toolset` / `pkg/commands` | 两类领域 Registry |
 | `tools/*` | 原始能力实现 |
 | `agent/` | Agent loop |
-| `pkg/app` | 产品状态、访问面及当前能力装配 |
-| `pkg/profile/*` | 唯一组合根 |
+| `pkg/app` | 产品状态与访问面 |
+| `pkg/profile` | Profile 生命周期抽象与原子装配器 |
+| `cmd/aiscan`、`cmd/runner` | 各可执行产品的唯一具体组合根 |
 | `pkg/exts/session` | Session runtime |
 
-文件能力只有 `pkg/exts/files` 一个插件，底层位于 `tools/files`。无 Agent 的
-`pkg/profile/files` 直接暴露 `tool.Executor`，依赖闭包不包含 App、Session、Console、
-Web 或 Node。代理行为位于 `tools/proxy`；`pkg/exts/proxy.Hub` 将唯一 Hub 适配到 Set，
+文件能力只有 `pkg/exts/files` 一个扩展，底层位于 `tools/files`。无 Agent 的
+`cmd/runner` 的文件组合直接暴露 `tool.Executor`，其底层依赖闭包不包含 App、Session、Console、
+Web 或 Node。代理行为位于 `tools/proxy`；`pkg/exts/proxy.Extension` 将唯一 Hub 适配到 Set，
 连接级 Traffic handler 直接由连接自己的 `NamespaceMux` 管理。Extension 组合变化通过整体
 Profile 换代完成；Provider 配置更新按 Run 快照隔离，活跃 Run 保留原 Provider。

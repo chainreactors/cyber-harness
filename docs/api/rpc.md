@@ -8,22 +8,22 @@
 
 - [rpc/aop.proto](#rpc_aop-proto)
     - [AOPService](#aiscan-rpc-aop-AOPService)
-  
+
 - [rpc/chat.proto](#rpc_chat-proto)
     - [SessionService](#aiscan-rpc-chat-SessionService)
-  
+
 - [rpc/config.proto](#rpc_config-proto)
     - [ConfigService](#aiscan-rpc-config-ConfigService)
-  
+
 - [rpc/scan.proto](#rpc_scan-proto)
     - [ScanService](#aiscan-rpc-scan-ScanService)
-  
+
 - [rpc/sco.proto](#rpc_sco-proto)
     - [SCOService](#aiscan-rpc-sco-SCOService)
-  
+
 - [rpc/system.proto](#rpc_system-proto)
     - [SystemService](#aiscan-rpc-system-SystemService)
-  
+
 - [types/agent.proto](#types_agent-proto)
     - [AgentListEntry](#aiscan-agent-AgentListEntry)
     - [AgentListMetadata](#aiscan-agent-AgentListMetadata)
@@ -39,7 +39,7 @@
     - [ListAgentsRequest](#aiscan-agent-ListAgentsRequest)
     - [ListAgentsResponse](#aiscan-agent-ListAgentsResponse)
     - [WebMessageMetadata](#aiscan-agent-WebMessageMetadata)
-  
+
 - [types/chat.proto](#types_chat-proto)
     - [DeleteSessionRequest](#aiscan-chat-DeleteSessionRequest)
     - [DeleteSessionResponse](#aiscan-chat-DeleteSessionResponse)
@@ -52,8 +52,11 @@
     - [ResetSessionReceipt](#aiscan-chat-ResetSessionReceipt)
     - [ResetSessionRequest](#aiscan-chat-ResetSessionRequest)
     - [ResetSessionResponse](#aiscan-chat-ResetSessionResponse)
+    - [SessionHistory](#aiscan-chat-SessionHistory)
     - [SessionRecord](#aiscan-chat-SessionRecord)
-  
+
+    - [SessionHistory.Mode](#aiscan-chat-SessionHistory-Mode)
+
 - [types/command.proto](#types_command-proto)
     - [CommandCatalog](#aiscan-command-CommandCatalog)
     - [CommandProtocolMessage](#aiscan-command-CommandProtocolMessage)
@@ -61,7 +64,7 @@
     - [CommandRequest](#aiscan-command-CommandRequest)
     - [CommandResult](#aiscan-command-CommandResult)
     - [CommandSpec](#aiscan-command-CommandSpec)
-  
+
 - [types/config.proto](#types_config-proto)
     - [ActivateProfileRequest](#aiscan-config-ActivateProfileRequest)
     - [ActivateProfileResponse](#aiscan-config-ActivateProfileResponse)
@@ -91,12 +94,12 @@
     - [TestConnectionResponse](#aiscan-config-TestConnectionResponse)
     - [UpdateConfigRequest](#aiscan-config-UpdateConfigRequest)
     - [UpdateConfigResponse](#aiscan-config-UpdateConfigResponse)
-  
+
 - [types/reload.proto](#types_reload-proto)
     - [ReloadProtocolMessage](#aiscan-reload-ReloadProtocolMessage)
     - [ReloadRequest](#aiscan-reload-ReloadRequest)
     - [ReloadResult](#aiscan-reload-ReloadResult)
-  
+
 - [types/scan.proto](#types_scan-proto)
     - [CancelScanRequest](#aiscan-scan-CancelScanRequest)
     - [CancelScanResponse](#aiscan-scan-CancelScanResponse)
@@ -118,9 +121,9 @@
     - [SubmitScanRequest](#aiscan-scan-SubmitScanRequest)
     - [SubmitScanResponse](#aiscan-scan-SubmitScanResponse)
     - [WatchScanEventsRequest](#aiscan-scan-WatchScanEventsRequest)
-  
+
     - [ScanStatus](#aiscan-scan-ScanStatus)
-  
+
 - [types/sco.proto](#types_sco-proto)
     - [DeleteNodesRequest](#aiscan-sco-DeleteNodesRequest)
     - [DeleteNodesResponse](#aiscan-sco-DeleteNodesResponse)
@@ -135,12 +138,12 @@
     - [ListArtifactsResponse](#aiscan-sco-ListArtifactsResponse)
     - [ListNodesRequest](#aiscan-sco-ListNodesRequest)
     - [ListNodesResponse](#aiscan-sco-ListNodesResponse)
-  
+
 - [types/system.proto](#types_system-proto)
     - [GetStatusRequest](#aiscan-system-GetStatusRequest)
     - [GetStatusResponse](#aiscan-system-GetStatusResponse)
     - [SystemStatus](#aiscan-system-SystemStatus)
-  
+
 - [Scalar Value Types](#scalar-value-types)
 
 
@@ -195,7 +198,7 @@ the WebSocket compatibility transport over the same service core.
 | ----------- | ------------ | ------------- | ------------|
 | Connect | [.aop.Envelope](#aop-Envelope) stream | [.aop.Envelope](#aop-Envelope) stream |  |
 
- 
+
 
 
 
@@ -205,11 +208,11 @@ the WebSocket compatibility transport over the same service core.
 ## rpc/chat.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-chat-SessionService"></a>
@@ -226,7 +229,7 @@ the WebSocket compatibility transport over the same service core.
 | ListCommands | [.aiscan.chat.ListCommandsRequest](#aiscan-chat-ListCommandsRequest) | [.aiscan.chat.ListCommandsResponse](#aiscan-chat-ListCommandsResponse) |  |
 | ListEvents | [.aop.ListEventsRequest](#aop-ListEventsRequest) | [.aop.ListEventsResponse](#aop-ListEventsResponse) |  |
 
- 
+
 
 
 
@@ -236,11 +239,11 @@ the WebSocket compatibility transport over the same service core.
 ## rpc/config.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-config-ConfigService"></a>
@@ -257,7 +260,7 @@ the WebSocket compatibility transport over the same service core.
 | ListModels | [.aiscan.config.LLMProbeRequest](#aiscan-config-LLMProbeRequest) | [.aiscan.config.ListModelsResult](#aiscan-config-ListModelsResult) |  |
 | TestConnection | [.aiscan.config.TestConnectionRequest](#aiscan-config-TestConnectionRequest) | [.aiscan.config.TestConnectionResponse](#aiscan-config-TestConnectionResponse) |  |
 
- 
+
 
 
 
@@ -267,11 +270,11 @@ the WebSocket compatibility transport over the same service core.
 ## rpc/scan.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-scan-ScanService"></a>
@@ -287,7 +290,7 @@ the WebSocket compatibility transport over the same service core.
 | CancelScan | [.aiscan.scan.CancelScanRequest](#aiscan-scan-CancelScanRequest) | [.aiscan.scan.CancelScanResponse](#aiscan-scan-CancelScanResponse) |  |
 | GetScanReport | [.aiscan.scan.GetScanReportRequest](#aiscan-scan-GetScanReportRequest) | [.aiscan.scan.GetScanReportResponse](#aiscan-scan-GetScanReportResponse) |  |
 
- 
+
 
 
 
@@ -297,11 +300,11 @@ the WebSocket compatibility transport over the same service core.
 ## rpc/sco.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-sco-SCOService"></a>
@@ -318,7 +321,7 @@ the WebSocket compatibility transport over the same service core.
 | ImportNodes | [.aiscan.sco.ImportNodesRequest](#aiscan-sco-ImportNodesRequest) | [.aiscan.sco.ImportNodesResponse](#aiscan-sco-ImportNodesResponse) |  |
 | ListArtifacts | [.aiscan.sco.ListArtifactsRequest](#aiscan-sco-ListArtifactsRequest) | [.aiscan.sco.ListArtifactsResponse](#aiscan-sco-ListArtifactsResponse) |  |
 
- 
+
 
 
 
@@ -328,11 +331,11 @@ the WebSocket compatibility transport over the same service core.
 ## rpc/system.proto
 
 
- 
 
- 
 
- 
+
+
+
 
 
 <a name="aiscan-rpc-system-SystemService"></a>
@@ -344,7 +347,7 @@ the WebSocket compatibility transport over the same service core.
 | ----------- | ------------ | ------------- | ------------|
 | GetStatus | [.aiscan.system.GetStatusRequest](#aiscan-system-GetStatusRequest) | [.aiscan.system.GetStatusResponse](#aiscan-system-GetStatusResponse) |  |
 
- 
+
 
 
 
@@ -590,13 +593,13 @@ the WebSocket compatibility transport over the same service core.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -784,6 +787,22 @@ the WebSocket compatibility transport over the same service core.
 
 
 
+<a name="aiscan-chat-SessionHistory"></a>
+
+### SessionHistory
+SessionHistory is persisted as an AOP event extension. It makes transcript
+inheritance explicit without changing the shared AOP protocol schema.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [SessionHistory.Mode](#aiscan-chat-SessionHistory-Mode) |  |  |
+
+
+
+
+
+
 <a name="aiscan-chat-SessionRecord"></a>
 
 ### SessionRecord
@@ -802,13 +821,26 @@ the WebSocket compatibility transport over the same service core.
 
 
 
- 
 
- 
 
- 
 
- 
+<a name="aiscan-chat-SessionHistory-Mode"></a>
+
+### SessionHistory.Mode
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| MODE_UNSPECIFIED | 0 |  |
+| MODE_INHERIT | 1 |  |
+| MODE_SNAPSHOT | 2 |  |
+
+
+
+
+
+
+
 
 
 
@@ -919,13 +951,13 @@ the WebSocket compatibility transport over the same service core.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -976,7 +1008,6 @@ the WebSocket compatibility transport over the same service core.
 | ----- | ---- | ----- | ----------- |
 | tools | [string](#string) | repeated |  |
 | timeout | [int32](#int32) |  |  |
-| save_session | [bool](#bool) |  |  |
 
 
 
@@ -1425,13 +1456,13 @@ the WebSocket compatibility transport over the same service core.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -1490,13 +1521,13 @@ the WebSocket compatibility transport over the same service core.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -1829,7 +1860,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
- 
+
 
 
 <a name="aiscan-scan-ScanStatus"></a>
@@ -1847,11 +1878,11 @@ reintroducing a parallel web-only domain event envelope.
 | SCAN_STATUS_CANCELED | 5 |  |
 
 
- 
 
- 
 
- 
+
+
+
 
 
 
@@ -2049,13 +2080,13 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -2113,13 +2144,13 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 

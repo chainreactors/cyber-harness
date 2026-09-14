@@ -263,10 +263,10 @@ func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.Context() != nil {
+	if rt.Manager.Context() != nil {
 		t.Fatal("New created a runtime lifetime before Load")
 	}
-	if _, err := rt.OpenSession(t.Context(), SessionOptions{ID: "too-early"}); err == nil {
+	if _, err := rt.Manager.OpenSession(t.Context(), SessionOptions{ID: "too-early"}); err == nil {
 		t.Fatal("runtime admitted a session before Load")
 	}
 	if err := rt.Close(t.Context()); err != nil {
@@ -311,7 +311,7 @@ func (o *lifecycleOutput) snapshot() []string {
 	return append([]string(nil), o.kinds...)
 }
 
-func TestRuntimeCloseKeepsBorrowedManager(t *testing.T) {
+func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	appResource := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 	app := appResource.App
 	terminal, err := terminalext.New(app.Hooks, app.Tools.(*toolset.Registry), app.Commands, terminalext.Config{
@@ -340,9 +340,9 @@ func TestRuntimeCloseKeepsBorrowedManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
-	unsubscribe := rt.Subscribe(output.HandleEvent)
+	unsubscribe := rt.Manager.Subscribe(output.HandleEvent)
 	defer unsubscribe.Cancel()
-	if _, err := rt.OpenSession(context.Background(), SessionOptions{ID: "owned-session"}); err != nil {
+	if _, err := rt.Manager.OpenSession(context.Background(), SessionOptions{ID: "owned-session"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -759,7 +759,6 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	primary := "task"
 	if interactive {
 		primary = "main-repl"
-		option.SaveSession = true
 	}
 	runtimeResource, err := New(app, nil, option, telemetry.NopLogger(), Config{PrimarySessionID: primary, Loop: agent.StandardLoop{}})
 	if err != nil {
@@ -851,7 +850,7 @@ func persistenceMessagesText(messages []*aop.Message) string {
 	return strings.Join(parts, "\n")
 }
 
-func TestRuntimesBorrowOneAppEventSequenceAndOutput(t *testing.T) {
+func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.jsonl")
 	bus := coreevents.New()
 	output, err := eventoutput.New(bus, eventoutput.Options{Path: path})
@@ -867,7 +866,7 @@ func TestRuntimesBorrowOneAppEventSequenceAndOutput(t *testing.T) {
 	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
-	unsubscribe := a.SubscribeEvents(func(event *aop.Event) {
+	unsubscribe := a.App.SubscribeEvents(func(event *aop.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -886,24 +885,24 @@ func TestRuntimesBorrowOneAppEventSequenceAndOutput(t *testing.T) {
 		}
 		defer rtSet.Close(context.Background())
 		runtimes = append(runtimes, rt)
-		if _, err := rt.OpenSession(context.Background(), SessionOptions{ID: "shared"}); err != nil {
+		if _, err := rt.Manager.OpenSession(context.Background(), SessionOptions{ID: "shared"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_ = runtimes[0].Close(context.Background())
-	session, err := runtimes[1].EnsureSession(SessionOptions{ID: "shared"})
+	session, err := runtimes[1].Manager.EnsureSession(SessionOptions{ID: "shared"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := session.Command(context.Background(), "/status"); err != nil {
-		t.Fatalf("closing sibling runtime broke borrowed App: %v", err)
+		t.Fatalf("closing sibling runtime broke shared App: %v", err)
 	}
 	_ = runtimes[1].Close(context.Background())
 	if output.Path() == "" {
-		t.Fatal("borrower closed application output")
+		t.Fatal("session runtime closed application output")
 	}
 	last := &aop.Event{SessionId: "shared", Id: "after-runtimes"}
-	a.Emit(last)
+	a.App.Emit(last)
 	mu.Lock()
 	defer mu.Unlock()
 	var sequence uint64

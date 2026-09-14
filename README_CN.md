@@ -106,7 +106,7 @@ make full                                                  # 前端 + 完整版
 ```
 
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
-`examples/agent`，需要时可手动运行 `go run ./examples/agent --help`。执行
+唯一的 AIScan 产品入口是 `cmd/aiscan`。执行
 `make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
 `web/static` 嵌入 full 二进制。默认 full 构建不包含原生 `record` 工具；SDK 和工具
 开发者可通过 `make record` 显式构建，详见 [record 文档](docs/record.md)。

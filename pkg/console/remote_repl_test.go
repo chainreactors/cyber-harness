@@ -56,7 +56,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repl.Close()
-	mgr := bashManager(rt.App().Bash)
+	mgr := bashManager(rt.Manager.App().Bash)
 	if mgr == nil {
 		t.Fatal("pty manager unavailable")
 	}
@@ -76,7 +76,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 
 	messages := make(chan *ptypb.ProtocolMessage, 64)
-	router, err := newPTYRouter(rt.App().Bash)
+	router, err := newPTYRouter(rt.Manager.App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
 		t.Fatalf("router close terminated resident repl: %+v ok=%v", info, ok)
 	}
-	router2, err := newPTYRouter(rt.App().Bash)
+	router2, err := newPTYRouter(rt.Manager.App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,12 +167,12 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		info, ok := mgr.Get(initial.ID)
 		return !ok || info.State != pty.StateRunning
 	})
-	session, err := rt.OpenSession(ctx, sessionext.SessionOptions{ID: "after-console"})
+	session, err := rt.Manager.OpenSession(ctx, sessionext.SessionOptions{ID: "after-console"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := session.Command(ctx, "/status"); err != nil {
-		t.Fatalf("console close broke the borrowed runtime: %v", err)
+		t.Fatalf("console close broke the profile-owned runtime: %v", err)
 	}
 }
 
@@ -198,7 +198,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	for _, info := range bashManager(rt.App().Bash).List() {
+	for _, info := range bashManager(rt.Manager.App().Bash).List() {
 		if info.Kind == "repl" && info.Name == MainREPLName {
 			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
 		}

@@ -1,4 +1,4 @@
-package aiscan
+package main
 
 import (
 	"context"
@@ -29,10 +29,10 @@ import (
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
-// applicationAssembly is construction-time state owned only by this profile.
-// It never survives as a second lifecycle graph; entries are handed directly
-// to the profile's single extension.Set.
-type applicationAssembly struct {
+// applicationGraph declares the App-owned portion of the AIScan product graph.
+// It owns no lifecycle state; its entries are merged into the command's single
+// profile.Assembly.
+type applicationGraph struct {
 	application *app.App
 	resource    *app.Resource
 	commands    *commands.Registry
@@ -40,7 +40,7 @@ type applicationAssembly struct {
 	entries     []extension.Entry
 }
 
-func newApplicationAssembly(config app.Config, registry *hooks.Registry, stream *events.Stream, proxy *proxytool.ProxyHub, loop agent.Loop, workDir string) (*applicationAssembly, error) {
+func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *events.Stream, proxy *proxytool.ProxyHub, loop agent.Loop, workDir string) (*applicationGraph, error) {
 	commandRegistry := commands.NewRegistry(registry)
 	toolRegistry := toolset.NewRegistry(registry)
 	plan := config.Capabilities.Select(capability.Options{
@@ -171,10 +171,10 @@ func newApplicationAssembly(config app.Config, registry *hooks.Registry, stream 
 		return nil, err
 	}
 	entries = append(entries, editionEntries...)
-	return &applicationAssembly{application: application, resource: applicationResource, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
+	return &applicationGraph{application: application, resource: applicationResource, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
 }
 
-func (a *applicationAssembly) graph(id string, dependencies ...string) ([]extension.Entry, string) {
+func (a *applicationGraph) entriesFor(id string, dependencies ...string) ([]extension.Entry, string) {
 	entries := []extension.Entry{{ID: id, DependsOn: append([]string(nil), dependencies...), Extension: a.resource}}
 	idMap := make(map[string]string, len(a.entries))
 	for _, entry := range a.entries {

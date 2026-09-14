@@ -9,10 +9,10 @@ Session Manager 不保存输出接口、PTY Manager 或终端模式。
 - IOA CLI 展示入口在本包；IOA 服务端启动仍属于 runner 的产品入口。
 
 返回的 `REPL` 只保存自己的 cancel 和完成 channel。这两个状态保证显式关闭可取消并等待
-终端任务结束；它们不包装 Runtime 数据，也不关闭借用的 Runtime、App 或 Bash Manager。
+终端任务结束；它们不包装 Runtime 数据，也不关闭 Profile 拥有的 Runtime、App 或 Bash Manager。
 `Close` 可重复调用，Runtime 取消也会传播到终端任务。
 
-交互实现已直接位于 `pkg/console`，不再通过 AppInfo、Sink、DTO 或另一套回调接口连接 Runtime。
+交互实现已直接位于 `pkg/console`，通过具体 Runtime 直接协作，不设置中间回调或传输模型。
 Session/Turn 事件、Provider 安装和 JSONL 恢复仍由其实际所有者处理，Console 只负责显示与交互。
 
 Session 是唯一执行入口，Runtime 的有界队列决定准入和顺序。Console 只保存按 Turn ID

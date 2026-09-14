@@ -7,7 +7,7 @@ import (
 )
 
 // bodyStream is the AIScan observation side of an io.TeeReader. Bytes passed
-// to the bus are borrowed until Emit returns; async subscribers must clone
+// to the bus are valid until Emit returns; async subscribers must clone
 // them on admission. File limits and subscriber failures never limit the
 // stream itself. The bounded preview is available even without subscribers.
 type bodyStream struct {

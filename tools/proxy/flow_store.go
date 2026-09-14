@@ -282,7 +282,7 @@ func (s *FlowStore) appendIndex(f Flow) error {
 	}
 	exchange := f.Exchange
 	record := flowIndexRecord{
-		ID: f.ID, Operation: f.Ref, Timestamp: f.Timestamp, Host: f.Host,
+		ID: f.ID, Operation: f.Operation, Timestamp: f.Timestamp, Host: f.Host,
 		ContentType: f.ContentType, Duration: int64(f.Duration), TLS: f.TLS,
 		Exchange: &exchange, BodySizes: &sizes, OldestID: oldest,
 	}
@@ -438,7 +438,7 @@ func (s *FlowStore) loadIndex(path string) error {
 			return errors.New("traffic: invalid metadata index record")
 		}
 		f := Flow{
-			Ref: record.Operation, Timestamp: record.Timestamp, Host: record.Host,
+			Operation: record.Operation, Timestamp: record.Timestamp, Host: record.Host,
 			ContentType: record.ContentType, Duration: time.Duration(record.Duration),
 			TLS: record.TLS, Exchange: *record.Exchange,
 		}

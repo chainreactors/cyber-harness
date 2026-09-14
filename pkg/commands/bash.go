@@ -439,7 +439,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 			cleanup()
 			return nil, err
 		}
-		execution.bindSession(info.ID)
+		execution.bindID(info.ID)
 		go func() {
 			<-t.tasks.Done(execution.ID)
 			adapter.releaseContext(contextID)
@@ -511,7 +511,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 		cleanup()
 		return nil, err
 	}
-	execution.bindSession(info.ID)
+	execution.bindID(info.ID)
 	t.releaseProcess(cleanup, execution)
 	return execution, nil
 }
@@ -572,7 +572,7 @@ func (t *BashTool) startBuiltin(
 	if err != nil {
 		return nil, err
 	}
-	execution.bindSession(info.ID)
+	execution.bindID(info.ID)
 	return execution, nil
 }
 
@@ -617,7 +617,7 @@ func (t *BashTool) startBuiltinToShell(
 	if err != nil {
 		return nil, err
 	}
-	execution.bindSession(info.ID)
+	execution.bindID(info.ID)
 	return execution, nil
 }
 
@@ -663,7 +663,7 @@ func (t *BashTool) startShellToBuiltin(
 	if err != nil {
 		return nil, err
 	}
-	execution.bindSession(info.ID)
+	execution.bindID(info.ID)
 	return execution, nil
 }
 

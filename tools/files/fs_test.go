@@ -14,17 +14,18 @@ import (
 
 func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	f, err := New(Config{Directory: dir, MaxBytes: 4}, nil)
+	resource, err := New(Config{Directory: dir, MaxBytes: 4}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := resource.Files
 	if f.Ready() {
 		t.Fatal("constructor opened root")
 	}
 	if _, err := f.Read(t.Context(), "file"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("read before Load: %v", err)
 	}
-	fSet := filesystemSet(t, f)
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -42,11 +43,12 @@ func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 	if err != nil || !bytes.Equal(again, want) {
 		t.Fatalf("read bytes are not owned: %v, %v", again, err)
 	}
-	readonly, err := New(Config{Directory: dir, ReadOnly: true}, nil)
+	readonlyResource, err := New(Config{Directory: dir, ReadOnly: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	readonlySet := filesystemSet(t, readonly)
+	readonly := readonlyResource.Files
+	readonlySet := filesystemSet(t, readonlyResource)
 	if err := readonlySet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -71,14 +73,15 @@ func TestFSOwnsBytesAndEnforcesReadOnly(t *testing.T) {
 
 func TestFSFailedLoadAndCloseAreFinal(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")
-	f, err := New(Config{Directory: dir}, nil)
+	resource, err := New(Config{Directory: dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := resource.Files
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("constructor touched filesystem: %v", err)
 	}
-	fSet := filesystemSet(t, f)
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err == nil {
 		t.Fatal("loaded absent root")
 	}
@@ -99,11 +102,12 @@ func TestFSFailedLoadAndCloseAreFinal(t *testing.T) {
 func TestFSCloseTimeoutRetainsAdmittedRoot(t *testing.T) {
 	dir := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
-		f, err := New(Config{Directory: dir}, nil)
+		resource, err := New(Config{Directory: dir}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fSet := filesystemSet(t, f)
+		f := resource.Files
+		fSet := filesystemSet(t, resource)
 		if err := fSet.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -143,12 +147,13 @@ func TestFSCloseTimeoutRetainsAdmittedRoot(t *testing.T) {
 }
 
 func TestFSCanceledInitializationDoesNotOwnLifetime(t *testing.T) {
-	f, err := New(Config{Directory: t.TempDir()}, nil)
+	resource, err := New(Config{Directory: t.TempDir()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := resource.Files
 	ctx, cancel := context.WithCancel(context.Background())
-	fSet := filesystemSet(t, f)
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

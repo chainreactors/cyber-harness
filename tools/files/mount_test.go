@@ -20,8 +20,9 @@ func (g gatedMount) Open(name string) (fs.File, error) {
 }
 
 func TestUnmountRevokesAndRetainsInFlightSource(t *testing.T) {
-	f, _ := New(Config{Directory: t.TempDir()}, nil)
-	fSet := filesystemSet(t, f)
+	resource, _ := New(Config{Directory: t.TempDir()}, nil)
+	f := resource.Files
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestUnmountRevokesAndRetainsInFlightSource(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := f.Unmount(ctx, "skill://"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("unmount released borrowed source: %v", err)
+		t.Fatalf("unmount released shared source: %v", err)
 	}
 	if _, err := f.Read(t.Context(), "skill://SKILL.md"); err == nil {
 		t.Fatal("admitted after unmount")
@@ -70,8 +71,9 @@ func TestUnmountRevokesAndRetainsInFlightSource(t *testing.T) {
 }
 
 func TestMountedReadsRespectPolicyAndLifetime(t *testing.T) {
-	f, _ := New(Config{Directory: t.TempDir(), MaxBytes: 4}, nil)
-	fSet := filesystemSet(t, f)
+	resource, _ := New(Config{Directory: t.TempDir(), MaxBytes: 4}, nil)
+	f := resource.Files
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +105,7 @@ func TestMountedReadsRespectPolicyAndLifetime(t *testing.T) {
 	<-source.entered
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := f.Close(ctx); !errors.Is(err, context.Canceled) {
+	if err := resource.Close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("close: %v", err)
 	}
 	close(source.release)

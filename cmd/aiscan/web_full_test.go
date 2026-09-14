@@ -94,10 +94,12 @@ func TestWireWebAppBindsRawArtifactsForReloadedApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	event.Payload = &aop.Event_Extension{Extension: extension}
-	if err := aop.SetTypedExtension(event, &operationpb.Ref{CallId: "scan-1"}); err != nil {
+	if err := aop.SetTypedExtension(event, &operationpb.Ref{
+		CallId: "scan-1", Correlation: operationpb.Correlation_CORRELATION_EXPLICIT,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	application.Emit(event)
+	application.App.Emit(event)
 	if ingestor.operationID != "scan-1" || ingestor.artifact == nil || ingestor.artifact.Tool != "gogo" {
 		t.Fatalf("artifact was not forwarded: %+v", ingestor.artifact)
 	}

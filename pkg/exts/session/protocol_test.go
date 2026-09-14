@@ -42,7 +42,7 @@ func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 	}
 }
 
-func TestInlineHostBorrowsRuntimeAcrossReconnect(t *testing.T) {
+func TestInlineHostSharesRuntimeAcrossReconnect(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	mux := aop.NewNamespaceMux(t.Context())
 	if err := rt.RegisterNamespaces(mux); err != nil {
@@ -82,7 +82,7 @@ func TestInlineHostBorrowsRuntimeAcrossReconnect(t *testing.T) {
 		t.Fatalf("reconnect response=%v err=%v", response, err)
 	}
 	if err := rt.CloseSession(context.Background(), "embedded", SessionCloseCompleted); err != nil {
-		t.Fatalf("borrowed runtime was closed: %v", err)
+		t.Fatalf("shared runtime was closed: %v", err)
 	}
 }
 

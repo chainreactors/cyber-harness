@@ -305,7 +305,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	pool.handleAgentEnvelope(fake, turnEndEnvelope(t, "turn-2", "session-1", "canceled"))
 }
 
-func TestAOPRequestJournalSurvivesServerRestart(t *testing.T) {
+func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.db")
 	store, err := NewSQLiteStore(path)
 	if err != nil {

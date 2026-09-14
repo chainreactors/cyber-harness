@@ -1,6 +1,6 @@
 //go:build !full
 
-package aiscan
+package main
 
 import (
 	"github.com/chainreactors/aiscan/core/capability"

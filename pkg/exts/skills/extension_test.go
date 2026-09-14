@@ -29,7 +29,7 @@ func TestMountDiscoveryReadAndClose(t *testing.T) {
 	}
 	mSet := extensiontest.Set(t, extension.Entry{ID: "skills", Extension: m})
 	defer mSet.Close(context.Background())
-	if m.root != nil || len(m.Locations()) != 0 {
+	if m.root != nil || len(m.Catalog().Locations()) != 0 {
 		t.Fatal("constructor published resources")
 	}
 	if err := mSet.Load(t.Context()); err != nil {
@@ -38,12 +38,12 @@ func TestMountDiscoveryReadAndClose(t *testing.T) {
 	if err := mSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	names := m.Locations()
+	names := m.Catalog().Locations()
 	if len(names) != 1 || names[0] != "skill://SKILL.md" {
 		t.Fatalf("locations: %v", names)
 	}
 	names[0] = "mutated"
-	data, err := access.Read(t.Context(), m.Locations()[0])
+	data, err := access.Read(t.Context(), m.Catalog().Locations()[0])
 	if err != nil || string(data) != "local instructions" {
 		t.Fatalf("mounted read: %q %v", data, err)
 	}
@@ -53,7 +53,7 @@ func TestMountDiscoveryReadAndClose(t *testing.T) {
 	if _, err := access.Read(t.Context(), "skill://SKILL.md"); err == nil {
 		t.Fatal("read closed mount")
 	}
-	if len(m.Locations()) != 0 {
+	if len(m.Catalog().Locations()) != 0 {
 		t.Fatal("closed mount still advertised")
 	}
 	if err := access.Write(t.Context(), "note", []byte("still usable")); err != nil {
