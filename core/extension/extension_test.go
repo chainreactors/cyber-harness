@@ -78,8 +78,14 @@ func TestFixedCompositionLoadsAndClosesInDependencyOrder(t *testing.T) {
 	b := &testExtension{name: "b", events: &events}
 	c := &testExtension{name: "c", events: &events}
 	set := newSet(t, entry(b, "a"), entry(c), entry(a))
+	if set.Active() {
+		t.Fatal("unloaded set was published")
+	}
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if !set.Active() {
+		t.Fatal("loaded set was not published")
 	}
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
@@ -87,6 +93,9 @@ func TestFixedCompositionLoadsAndClosesInDependencyOrder(t *testing.T) {
 	assertEvents(t, events, []string{"load:a", "load:b", "load:c"})
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if set.Active() {
+		t.Fatal("closed set remained published")
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
@@ -247,6 +256,32 @@ func TestCanceledLifecycleWaiterDoesNotMutateComposition(t *testing.T) {
 	close(m.release)
 	if err := <-loaded; err != nil {
 		t.Fatal(err)
+	}
+	if err := set.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertEvents(t, events, []string{"load:m", "close:m"})
+}
+
+func TestCloseRequestPreventsConcurrentLoadPublication(t *testing.T) {
+	var events []string
+	m := &testExtension{name: "m", events: &events, started: make(chan struct{}), release: make(chan struct{})}
+	set := newSet(t, entry(m))
+	loaded := make(chan error, 1)
+	go func() { loaded <- set.Load(t.Context()) }()
+	<-m.started
+
+	closeCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := set.Close(closeCtx); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("concurrent Close = %v", err)
+	}
+	close(m.release)
+	if err := <-loaded; err == nil {
+		t.Fatal("load published after Close started")
+	}
+	if set.Active() {
+		t.Fatal("closing set was published")
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)

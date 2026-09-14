@@ -11,7 +11,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -204,7 +204,7 @@ func TestInvalidOversizedJSONFallsBackToBoundedRecord(t *testing.T) {
 }
 
 func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	base := &Base{Events: bus}
 	base.InitLogger(nil)
 	data := map[string]any{
@@ -214,7 +214,7 @@ func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
 	wantID := ArtifactResultID("katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
 	var artifact *toolpb.Artifact
 	var ref *operationpb.Ref
-	unsubscribe := bus.Subscribe(func(event *aop.Event) {
+	unsubscribe := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		decoded := new(toolpb.Artifact)
 		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
 			artifact = decoded
@@ -223,7 +223,7 @@ func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
 				ref = correlation
 			}
 		}
-	})
+	}))
 	defer unsubscribe.Cancel()
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{CallID: "call-1"})
 

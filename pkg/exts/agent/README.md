@@ -1,28 +1,42 @@
-# Agent lifecycle
+# Agent harness extension
 
-`New(loop)` constructs an inert Extension, the sole lifecycle owner of its
-Runtime. Only `Extension.Load` and `Extension.Close` control that lifetime.
-`Extension.Loop()` lends a Runtime implementing the existing `agent.Loop`
-interface, without exposing Load or Close. Its `Run` combines caller cancellation
-with the installed lifetime; Extension.Close rejects new calls, cancels accepted calls
-and waits for their actual completion. A close timeout can be retried through
-the owning Set, which keeps dependencies alive while calls drain.
+`./agent` provides the standard loop, inbox, evaluator and execution mechanisms.
+`pkg/exts/agent` installs those capabilities and owns the optional session host.
+There is one `Extension`, one published `Runtime`, and no separate session extension.
 
-The profile supplies the algorithm and its dependency entries. The Extension
-does not create another Agent, Session, tool registry or event stream. Session
-history and per-Agent concurrency protection stay with their existing owners.
-Derived Agent configs retain the installed Loop, so their execution uses the
-same lifetime. Cancellation of one call does not close other sessions.
+`New(Config)` is inert. Supply `Loop` for a loop-only installation; additionally
+supply `Application` and `Option` to enable sessions. A session host with a nil
+loop supports history and control commands without reasoning. Constructors do not
+open history, subscribe to events or start tasks.
 
-AIScan installs this Entry when a session Loop or scanner AI is selected. A
-session configuration with a nil Loop keeps reasoning disabled; the minimal
-file profile installs neither this Extension nor a Session Manager. The Loop
-selection is fixed by composition and is not overridden by individual sessions.
+Only `Extension.Load` and `Extension.Close` control installation lifetime.
+`Runtime()` exposes session operations and also implements `agent.Loop`; the
+Runtime cannot close its owner. The extension does not create
+an inner extension graph or close the injected App/IOA resources.
 
-Custom Go compositions pass `Extension.Loop()` anywhere an `agent.Loop` is
-accepted and put the Extension after its resources in the same `extension.Set`. The raw
-Loop remains usable without the lifecycle plugin when its caller owns execution.
+Load binds execution to `Scope.Lifetime`, not the initialization context. Close
+seals loop admission, cancels sessions and direct loop calls, and waits for actual
+completion. A deadline limits waiting only: the owning Set retains dependencies
+until a subsequent Close confirms drain. Session handles retain instance identity;
+closed IDs cannot be reused before cleanup and terminal publication finish.
 
-```text
-go test -race ./pkg/exts/agent ./pkg/profile ./pkg/exts/session ./cmd/aiscan
-```
+Sessions own their inbox, ordered queue, scheduler and execution state. History
+inputs and snapshots are deep copies. Evaluation uses the underlying agent
+mechanisms through the same admitted loop. `/clear` and `/compact` have one
+session-rotation implementation. Local cancellation does not stop other sessions.
+
+The existing AOP protocol, history format and command exposure remain unchanged.
+`Observe` reads the application's canonical event stream; output remains the
+independent eventoutput extension. Console and Node consume Runtime, never the
+mutable internal Agent. Scan policy belongs to product composition, not this host.
+
+`Config.Commands` adds slash commands using the existing protobuf `CommandSpec`
+and a session handler. Declarations are cloned and duplicate names/aliases are
+rejected during construction. Dispatch, runtime help, Console completion and
+remote catalogs all project the installed declarations. Remote advertisement is
+explicit; the existing built-in remote catalog remains status/clear/compact.
+Native `!` commands keep their separate command registry.
+
+`FlagGroups` publishes the existing typed Agent options before argument parsing.
+The CLI collects these inert groups without loading an extension, so help,
+aliases, defaults and configuration precedence do not depend on runtime startup.

@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
-func NewCommand(engines *engine.Set, logger telemetry.Logger, proxy string, events aop.EventEmitter) (commands.Command, error) {
+func NewCommand(engines *engine.Set, logger telemetry.Logger, proxy string, events aop.EventPublisher) (commands.Command, error) {
 	if engines == nil || engines.Gogo == nil {
 		return commands.Command{}, fmt.Errorf("gogo engine is unavailable")
 	}

@@ -17,9 +17,6 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
@@ -28,6 +25,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/runner"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/pkg/web"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
@@ -44,7 +42,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
-	ingestor, err := webservice.NewArtifactIngestor(store)
+	ingestor, err := webservice.NewArtifactImporter(store)
 	if err != nil {
 		return fmt.Errorf("init artifact normalization: %w", err)
 	}
@@ -53,7 +51,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
 	// later staged reloads, where the candidate config is resolved independently.
-	product, err := initWebProfile(ctx, option, logger)
+	product, err := initWebProfile(ctx, option, logger, ingestor)
 	if err != nil {
 		if product != nil {
 			err = errors.Join(err, product.Close(context.Background()))
@@ -85,7 +83,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
+		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (*profile.Profile, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -103,15 +101,10 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 				AIEnabled:        true,
 			}, logger)
 			appCfg = apppkg.MergeOptionExtras(appCfg, &candidateOption)
-			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg)
+			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
 			if err != nil {
 				return candidateProfile, err
 			}
-			candidate, err := candidateProfile.App()
-			if err != nil {
-				return candidateProfile, err
-			}
-			wireWebApp(candidate, ingestor)
 			return candidateProfile, nil
 		},
 		MaxConcurrent: opts.MaxScans,
@@ -120,15 +113,12 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	product = nil // Service now owns the initial profile and all replacements.
 	defer func() { resultErr = errors.Join(resultErr, service.Close(context.Background())) }()
 
-	wireWebApp(application, ingestor)
-
 	var pool *webservice.AgentPool
 	if option.Debug {
-		pool = webservice.NewAgentPool(service.Hub(), "*")
+		pool = webservice.NewAgentPool(service.Hub(), ingestor, "*")
 	} else {
-		pool = webservice.NewAgentPool(service.Hub())
+		pool = webservice.NewAgentPool(service.Hub(), ingestor)
 	}
-	pool.SetArtifactIngestor(ingestor)
 	service.SetAgentPool(pool)
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
@@ -212,26 +202,6 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	return option, nil
 }
 
-func wireWebApp(application *apppkg.App, ingestor webservice.ArtifactIngestor) {
-	if application == nil || ingestor == nil {
-		return
-	}
-	application.SubscribeEvents(func(event *aop.Event) {
-		if event == nil || event.GetExtension() == nil {
-			return
-		}
-		artifact := new(toolpb.Artifact)
-		if event.GetExtension().MessageIs(artifact) && event.GetExtension().UnmarshalTo(artifact) == nil {
-			operationID := ""
-			ref := new(operationpb.Ref)
-			if found, err := aop.FindTypedExtension(event, ref); err == nil && found {
-				operationID = ref.GetCallId()
-			}
-			_, _, _ = ingestor.NormalizeArtifact(context.Background(), operationID, artifact.GetTool(), artifact.GetData())
-		}
-	})
-}
-
 func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	indexBytes, _ := fs.ReadFile(fsys, "index.html")
 	fileServer := http.FileServer(http.FS(fsys))
@@ -265,7 +235,7 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*aiscanProfile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts managementapi.ArtifactImporter) (*profile.Profile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
@@ -276,16 +246,17 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 		ToolsEnabled:     true,
 		AIEnabled:        true,
 	}, logger)
-	return initWebProfileFromConfig(ctx, &option, appCfg)
+	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config) (*aiscanProfile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config, artifacts managementapi.ArtifactImporter) (*profile.Profile, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
 	profileConfig := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
 	profileConfig.Application = appCfg
 	profileConfig.IOA = nil
+	profileConfig.Artifacts = artifacts
 	product, err := newAIScanProfile(profileConfig)
 	if err != nil {
 		return nil, err

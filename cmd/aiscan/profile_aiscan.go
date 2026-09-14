@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -20,19 +19,20 @@ import (
 	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	proxyext "github.com/chainreactors/aiscan/pkg/exts/proxy"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profilepkg "github.com/chainreactors/aiscan/pkg/profile"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 )
 
 const (
 	eventOutputID = "aiscan.event-output"
+	artifactsID   = "aiscan.artifacts"
 	observeID     = "aiscan.observe"
 	proxyID       = "aiscan.proxy"
 	applicationID = "aiscan.application"
 	ioaID         = "aiscan.ioa"
 	agentID       = "aiscan.agent"
-	runtimeID     = "aiscan.runtime"
 )
 
 type aiscanProfileConfig struct {
@@ -40,13 +40,14 @@ type aiscanProfileConfig struct {
 	Application apppkg.Config
 	IOA         *ioatools.Config
 	// Runtime nil creates the application-only profile used by the Web service.
-	Runtime *sessionext.Config
-	Logger  telemetry.Logger
-	Observe []observeext.Kind
-	Output  string
+	Runtime   *agentext.Config
+	Logger    telemetry.Logger
+	Observe   []observeext.Kind
+	Output    string
+	Artifacts managementapi.ArtifactImporter
 }
 
-func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *sessionext.Config, logger telemetry.Logger) aiscanProfileConfig {
+func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *agentext.Config, logger telemetry.Logger) aiscanProfileConfig {
 	application := apppkg.AppConfig(option, features, logger)
 	return aiscanProfileConfig{
 		Option: option, Application: application,
@@ -72,20 +73,11 @@ func parseObserve(value string) []observeext.Kind {
 	return result
 }
 
-// aiscanProfile is the concrete product graph declared by the AIScan command.
-// Shared packages see only profile.Application.
-type aiscanProfile struct {
-	assembly *profilepkg.Assembly
-	app      *apppkg.App
-	runtime  *sessionext.Manager
-	proxy    *proxyext.Extension
-}
-
-var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (profilepkg.Application, error) {
+var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (*profilepkg.Profile, error) {
 	return newAIScanProfile(profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger))
 }
 
-func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
+func newAIScanProfile(config aiscanProfileConfig) (*profilepkg.Profile, error) {
 	if config.Option == nil {
 		return nil, fmt.Errorf("aiscan profile option is required")
 	}
@@ -108,20 +100,15 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	}
 	proxyHub := proxyExtension.Hub()
 	events := coreevents.New()
-	var selectedLoop agent.Loop
+	var runtimeLoop agent.Loop
 	if config.Runtime != nil {
-		selectedLoop = config.Runtime.Loop
+		runtimeLoop = config.Runtime.Loop
 	}
-	if selectedLoop == nil && config.Application.Scanner.AIEnabled {
-		selectedLoop = agent.StandardLoop{}
+	scannerLoop := runtimeLoop
+	if scannerLoop == nil && config.Application.Scanner.AIEnabled {
+		scannerLoop = agent.StandardLoop{}
 	}
-	var agentExtension *agentext.Extension
-	var managedLoop agent.Loop
-	if selectedLoop != nil {
-		agentExtension = agentext.New(selectedLoop)
-		managedLoop = agentExtension.Loop()
-	}
-	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, managedLoop, workDir)
+	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, scannerLoop, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("construct AIScan application: %w", err)
 	}
@@ -137,10 +124,18 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 		entries = append(entries, extension.Entry{ID: eventOutputID, Extension: output})
 		sourceDependencies = append(sourceDependencies, eventOutputID)
 	}
+	if config.Artifacts != nil {
+		projection, projectionErr := newArtifactProjection(events, config.Artifacts, config.Logger)
+		if projectionErr != nil {
+			return nil, projectionErr
+		}
+		entries = append(entries, extension.Entry{ID: artifactsID, DependsOn: append([]string(nil), sourceDependencies...), Extension: projection})
+		sourceDependencies = append(sourceDependencies, artifactsID)
+	}
 	var observer *observeext.Extension
 	if len(config.Observe) > 0 {
 		var observeErr error
-		observer, observeErr = observeext.New(hookRegistry, events, observeext.Options{Kinds: config.Observe})
+		observer, observeErr = observeext.New(hookRegistry, events, observeext.Options{Kinds: config.Observe, Logger: config.Logger})
 		if observeErr != nil {
 			return nil, observeErr
 		}
@@ -162,100 +157,45 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	// Registries activate after every declaration and drain before resources.
 	applicationEntries, applicationReadyID := applicationGraph.entriesFor(applicationID, applicationDependencies...)
 	entries = append(entries, applicationEntries...)
-	if agentExtension != nil {
-		entries = append(entries, extension.Entry{
-			ID: agentID, DependsOn: []string{applicationReadyID}, Extension: agentExtension,
-		})
-	}
-	var run *sessionext.Manager
+	var run *agentext.Runtime
 	var ioaRuntime *ioatools.Runtime
 	if ioa != nil {
 		ioaRuntime = ioa.Runtime()
 	}
 	if config.Runtime != nil {
-		dependencies := []string{applicationReadyID}
-		if config.Runtime.Loop != nil {
-			config.Runtime.Loop = managedLoop
-			dependencies = append(dependencies, agentID)
-		}
-		runResource, runErr := sessionext.New(application, ioaRuntime, config.Option, config.Logger, *config.Runtime)
-		err = runErr
+		agentConfig := *config.Runtime
+		agentConfig.Application, agentConfig.IOA = application, ioaRuntime
+		agentConfig.Option, agentConfig.Logger = config.Option, config.Logger
+		agentConfig.Loop = runtimeLoop
+		agentExtension, err := agentext.New(agentConfig)
 		if err != nil {
 			return nil, fmt.Errorf("construct AIScan runtime: %w", err)
 		}
-		run = runResource.Manager
+		run = agentExtension.Runtime()
 		entries = append(entries, extension.Entry{
-			ID: runtimeID, DependsOn: dependencies,
-			Extension: runResource,
+			ID: agentID, DependsOn: []string{applicationReadyID},
+			Extension: agentExtension,
 		})
 	}
-	assembled, err := profilepkg.Assemble(entries...)
-	if err != nil {
-		return nil, err
-	}
-	return &aiscanProfile{assembly: assembled, app: application, runtime: run, proxy: proxyExtension}, nil
+	return profilepkg.New(profilepkg.Config{
+		Entries: entries,
+		App:     application,
+		Runtime: run,
+		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
+			return proxytool.RegisterTrafficNamespace(mux, proxyHub)
+		},
+	})
 }
 
-func cloneConfig(config *sessionext.Config) *sessionext.Config {
+func cloneConfig(config *agentext.Config) *agentext.Config {
 	if config == nil {
 		return nil
 	}
 	cloned := *config
 	if config.PromptConfig != nil {
 		prompt := *config.PromptConfig
-		prompt.LoadedSkills = append([]sessionext.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
+		prompt.LoadedSkills = append([]agentext.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
 		cloned.PromptConfig = &prompt
 	}
 	return &cloned
 }
-
-func (p *aiscanProfile) Load(ctx context.Context) error {
-	if p == nil {
-		return fmt.Errorf("aiscan profile is required")
-	}
-	return p.assembly.Load(ctx)
-}
-
-func (p *aiscanProfile) App() (*apppkg.App, error) {
-	if p == nil {
-		return nil, fmt.Errorf("aiscan profile is required")
-	}
-	if p.assembly == nil || !p.assembly.Available() || p.app == nil {
-		return nil, fmt.Errorf("aiscan profile is not active")
-	}
-	return p.app, nil
-}
-
-func (p *aiscanProfile) Runtime() (*sessionext.Manager, error) {
-	if p == nil {
-		return nil, fmt.Errorf("aiscan profile is required")
-	}
-	if p.assembly == nil || !p.assembly.Available() {
-		return nil, fmt.Errorf("aiscan profile is not active")
-	}
-	if p.runtime == nil {
-		return nil, fmt.Errorf("aiscan profile has no Agent runtime")
-	}
-	return p.runtime, nil
-}
-
-// RegisterResourceNamespaces installs protocols backed by resources owned by
-// this active profile. Session namespaces remain owned by the runtime.
-func (p *aiscanProfile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
-	if p == nil {
-		return fmt.Errorf("aiscan profile is required")
-	}
-	if p.assembly == nil || !p.assembly.Available() || p.proxy == nil {
-		return fmt.Errorf("aiscan profile is not active")
-	}
-	return p.proxy.RegisterNamespaces(mux)
-}
-
-func (p *aiscanProfile) Close(ctx context.Context) error {
-	if p == nil {
-		return nil
-	}
-	return p.assembly.Close(ctx)
-}
-
-var _ profilepkg.Application = (*aiscanProfile)(nil)

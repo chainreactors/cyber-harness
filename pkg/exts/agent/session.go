@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	toolpkg "github.com/chainreactors/aiscan/core/tool"
@@ -130,15 +131,15 @@ func emitSessionStarted(application *apppkg.App, sessionID, agentName string, st
 	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
 		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
 	}
-	application.Emit(event)
+	application.Publish(event)
 }
 
 func emitSessionEnded(application *apppkg.App, sessionID, agentName, reason string) {
-	application.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
+	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
 func (s *sessionState) emitTurnStarted(turnID string) {
-	s.runtime.app.Emit(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
+	s.runtime.app.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
 func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr error) {
@@ -146,7 +147,7 @@ func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr
 	if runErr != nil {
 		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
-	s.runtime.app.Emit(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
+	s.runtime.app.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
 }
 
 type commandSession struct {
@@ -182,39 +183,15 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 		return commandOutcome{err: fmt.Errorf("command line is required")}
 	}
 	name := args[0]
-	values := args[1:]
-	switch name {
-	case "/help":
-		return commandText(line, CommandPresentationPreformatted,
-			"Runtime commands:\n  /status\n  /clear\n  /compact [focus]\n  /eval [criteria|off]\n  /loop [interval prompt|list|stop name]\n  !<command>")
-	case "/status":
-		return commandText(line, CommandPresentationPreformatted, s.statusText())
-	case "/eval", "/goal":
-		criteria := strings.TrimSpace(strings.Join(values, " "))
-		switch criteria {
-		case "":
-			if s.evalCriteria == "" {
-				return commandText(line, CommandPresentationPlain, "Goal evaluation: off")
-			}
-			return commandText(line, CommandPresentationPlain, "Goal evaluation: on\n  criteria: "+s.evalCriteria)
-		case "off":
-			s.evalCriteria = ""
-			return commandText(line, CommandPresentationPlain, "Goal evaluation disabled.")
-		default:
-			s.evalCriteria = criteria
-			return commandText(line, CommandPresentationPlain, "Goal evaluation enabled: "+criteria)
-		}
-	case "/loop":
-		command := "loop"
-		if len(values) == 0 {
-			command += " list"
-		} else {
-			command += " " + strings.Join(values, " ")
-		}
-		return s.executeBash(ctx, line, command)
-	default:
+	declaration, ok := s.state.runtime.commandIndex[name]
+	if !ok || declaration.rotation {
 		return commandOutcome{err: fmt.Errorf("command %q is not a Runtime command", name)}
 	}
+	result, err := declaration.invoke(ctx, &Session{state: s.state}, args[1:])
+	if result != nil {
+		result.Command = line
+	}
+	return commandOutcome{result: result, err: err}
 }
 
 func (s *commandSession) statusText() string {
@@ -479,7 +456,7 @@ func (m *sessionMailbox) RegisterProducer(name string) *inboxpkg.ProducerHandle 
 func (m *sessionMailbox) ActiveProducers() int { return m.base.ActiveProducers() }
 
 type sessionState struct {
-	runtime          *Manager
+	runtime          *Runtime
 	id               string
 	logicalID        string
 	agentName        string
@@ -503,7 +480,7 @@ type sessionState struct {
 	closeErr    error
 }
 
-func (rt *Manager) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
+func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Session, error) {
 	if err := rt.ready(); err != nil {
 		return nil, err
 	}
@@ -608,7 +585,7 @@ func (rt *Manager) OpenSession(ctx context.Context, options SessionOptions) (*Se
 // EnsureSession returns an existing Runtime-owned Session or opens it with the
 // Runtime lifetime. It is idempotent so a transport reconnect can safely
 // announce the same logical Session again.
-func (rt *Manager) EnsureSession(options SessionOptions) (*Session, error) {
+func (rt *Runtime) EnsureSession(options SessionOptions) (*Session, error) {
 	if err := rt.ready(); err != nil {
 		return nil, err
 	}
@@ -659,7 +636,7 @@ func ensuredSession(state *sessionState, options SessionOptions) (*Session, erro
 	return &Session{state: state}, nil
 }
 
-func (rt *Manager) CloseSession(ctx context.Context, sessionID string, reason SessionCloseReason) error {
+func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason SessionCloseReason) error {
 	if rt == nil {
 		return fmt.Errorf("agent runtime is not configured")
 	}
@@ -679,7 +656,7 @@ func (rt *Manager) CloseSession(ctx context.Context, sessionID string, reason Se
 		return nil
 	}
 	defer rt.operations.Done()
-	// Cleanup belongs to the Manager, not to any individual close waiter.
+	// Cleanup belongs to the Runtime, not to any individual close waiter.
 	state.finishClose.Do(func() {
 		state.mu.Lock()
 		state.closeReason = reason
@@ -729,7 +706,7 @@ func (rt *Manager) CloseSession(ctx context.Context, sessionID string, reason Se
 	}
 }
 
-func (rt *Manager) findSessionLocked(sessionID string) (string, *sessionState) {
+func (rt *Runtime) findSessionLocked(sessionID string) (string, *sessionState) {
 	sessionID = strings.TrimSpace(sessionID)
 	if state := rt.sessions[sessionID]; state != nil {
 		return sessionID, state
@@ -742,23 +719,23 @@ func (rt *Manager) findSessionLocked(sessionID string) (string, *sessionState) {
 	return "", nil
 }
 
-func (rt *Manager) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
-	if rt == nil || rt.app == nil || fn == nil {
+func (rt *Runtime) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
+	if rt == nil || rt.app == nil || observer == nil {
 		return nil
 	}
-	return rt.app.SubscribeEvents(fn)
+	return rt.app.ObserveEvents(observer)
 }
 
-// EmitEvent publishes an already-formed runtime event through the App-owned
+// Publish publishes an already-formed runtime event through the App-owned
 // AOP bus, applying the same timestamp and sequence stamping as agent events.
-func (rt *Manager) EmitEvent(event *aop.Event) {
+func (rt *Runtime) Publish(event *aop.Event) {
 	if rt == nil || rt.app == nil || event == nil {
 		return
 	}
-	rt.app.Emit(event)
+	rt.app.Publish(event)
 }
 
-func (rt *Manager) session(sessionID string) (*Session, error) {
+func (rt *Runtime) session(sessionID string) (*Session, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("agent runtime is not configured")
 	}
@@ -771,7 +748,7 @@ func (rt *Manager) session(sessionID string) (*Session, error) {
 	return &Session{state: state}, nil
 }
 
-func (rt *Manager) RunSession(ctx context.Context, sessionID string, input RunInput) (*Run, error) {
+func (rt *Runtime) RunSession(ctx context.Context, sessionID string, input RunInput) (*Run, error) {
 	session, err := rt.session(sessionID)
 	if err != nil {
 		return nil, err
@@ -779,7 +756,7 @@ func (rt *Manager) RunSession(ctx context.Context, sessionID string, input RunIn
 	return session.Run(ctx, input)
 }
 
-func (rt *Manager) CommandSession(ctx context.Context, sessionID, line string) (*types.CommandResult, error) {
+func (rt *Runtime) CommandSession(ctx context.Context, sessionID, line string) (*types.CommandResult, error) {
 	session, err := rt.session(sessionID)
 	if err != nil {
 		return nil, err
@@ -787,7 +764,7 @@ func (rt *Manager) CommandSession(ctx context.Context, sessionID, line string) (
 	return session.Command(ctx, line)
 }
 
-func (rt *Manager) CancelRun(turnID string) error {
+func (rt *Runtime) CancelRun(turnID string) error {
 	if rt == nil {
 		return fmt.Errorf("agent runtime is not configured")
 	}
@@ -802,7 +779,7 @@ func (rt *Manager) CancelRun(turnID string) error {
 	return nil
 }
 
-func (rt *Manager) CancelSessionRun(sessionID, turnID string) error {
+func (rt *Runtime) CancelSessionRun(sessionID, turnID string) error {
 	if rt == nil {
 		return fmt.Errorf("agent runtime is not configured")
 	}
@@ -825,7 +802,7 @@ func (rt *Manager) CancelSessionRun(sessionID, turnID string) error {
 
 // WaitOperations waits for all Runs and asynchronous control operations that
 // were admitted before the call. Transports use it to drain before shutdown.
-func (rt *Manager) WaitOperations() {
+func (rt *Runtime) WaitOperations() {
 	if rt != nil {
 		rt.operations.Wait()
 	}
@@ -844,8 +821,12 @@ func (s *Session) Command(ctx context.Context, line string) (*types.CommandResul
 	if state == nil {
 		return nil, fmt.Errorf("session is not configured")
 	}
-	if name := commandName(line); name == "/clear" || name == "/compact" {
-		return s.rotateCommand(ctx, line)
+	if declaration, ok := state.runtime.commandIndex[commandName(line)]; ok && declaration.rotation {
+		args, err := commands.SplitCommandLine(line)
+		if err != nil {
+			return nil, err
+		}
+		return declaration.invoke(ctx, s, args[1:])
 	}
 	done := make(chan commandOutcome, 1)
 	op := &sessionOperation{
@@ -923,8 +904,8 @@ func (s *Session) baseState() *sessionState {
 }
 
 func commandName(line string) string {
-	fields := strings.Fields(strings.TrimSpace(line))
-	if len(fields) == 0 {
+	fields, err := commands.SplitCommandLine(strings.TrimSpace(line))
+	if err != nil || len(fields) == 0 {
 		return ""
 	}
 	return fields[0]
@@ -1029,7 +1010,7 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	return newState, nil
 }
 
-func (rt *Manager) sessionRunActive(sessionID string) bool {
+func (rt *Runtime) sessionRunActive(sessionID string) bool {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	for _, run := range rt.runs {
@@ -1079,7 +1060,7 @@ func emitContinuationMessages(state *sessionState, messages []*aop.Message) {
 		if message.Role == "tool" {
 			for _, content := range message.Content {
 				if result := content.GetToolResult(); result != nil {
-					state.runtime.app.Emit(&aop.Event{
+					state.runtime.app.Publish(&aop.Event{
 						SessionId: state.id, Emitter: state.agentName,
 						Payload: &aop.Event_ToolResult{ToolResult: proto.CloneOf(result)},
 					})
@@ -1087,7 +1068,7 @@ func emitContinuationMessages(state *sessionState, messages []*aop.Message) {
 			}
 			continue
 		}
-		state.runtime.app.Emit(&aop.Event{
+		state.runtime.app.Publish(&aop.Event{
 			SessionId: state.id, Emitter: state.agentName,
 			Payload: &aop.Event_Message{Message: proto.CloneOf(message)},
 		})
@@ -1274,7 +1255,7 @@ func (s *sessionState) releaseOperation() {
 	s.mu.Unlock()
 }
 
-func (rt *Manager) runSession(session *sessionState) {
+func (rt *Runtime) runSession(session *sessionState) {
 	defer rt.wg.Done()
 	defer close(session.done)
 	for {
@@ -1312,17 +1293,17 @@ func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
 	}}}
 	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
-	s.runtime.app.Emit(event)
+	s.runtime.app.Publish(event)
 }
 
-func (rt *Manager) pendingLimit() int {
+func (rt *Runtime) pendingLimit() int {
 	if rt != nil && rt.maxPending > 0 {
 		return rt.maxPending
 	}
 	return DefaultSessionPendingLimit
 }
 
-func (rt *Manager) pushAsync(message inboxpkg.Message) error {
+func (rt *Runtime) pushAsync(message inboxpkg.Message) error {
 	if rt == nil {
 		return fmt.Errorf("agent runtime is not configured")
 	}
@@ -1340,7 +1321,7 @@ func (rt *Manager) pushAsync(message inboxpkg.Message) error {
 	return state.inbox.Push(message)
 }
 
-func (rt *Manager) nextRuntimeID(prefix string) string {
+func (rt *Runtime) nextRuntimeID(prefix string) string {
 	rt.mu.Lock()
 	rt.requestSeq++
 	id := fmt.Sprintf("%s-%d", prefix, rt.requestSeq)
@@ -1348,11 +1329,11 @@ func (rt *Manager) nextRuntimeID(prefix string) string {
 	return id
 }
 
-func (rt *Manager) nextContinuationID(logicalID string) string {
+func (rt *Runtime) nextContinuationID(logicalID string) string {
 	return logicalID + "-" + rt.nextRuntimeID(fmt.Sprintf("session-%d", time.Now().UnixNano()))
 }
 
-func (rt *Manager) releaseRun(run *Run) {
+func (rt *Runtime) releaseRun(run *Run) {
 	if run == nil {
 		return
 	}
@@ -1360,7 +1341,7 @@ func (rt *Manager) releaseRun(run *Run) {
 	rt.operations.Done()
 }
 
-func (rt *Manager) finishRun(run *Run, result *agent.Result, err error) {
+func (rt *Runtime) finishRun(run *Run, result *agent.Result, err error) {
 	if run == nil {
 		return
 	}
@@ -1369,7 +1350,7 @@ func (rt *Manager) finishRun(run *Run, result *agent.Result, err error) {
 	rt.operations.Done()
 }
 
-func (rt *Manager) unregisterRun(run *Run) {
+func (rt *Runtime) unregisterRun(run *Run) {
 	run.cancel()
 	rt.mu.Lock()
 	if rt.runs[run.turnID] == run {
@@ -1378,7 +1359,7 @@ func (rt *Manager) unregisterRun(run *Run) {
 	rt.mu.Unlock()
 }
 
-func (rt *Manager) providerSnapshot() (agent.Provider, string, telemetry.Logger) {
+func (rt *Runtime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.config.Provider, rt.config.Model, rt.config.Logger

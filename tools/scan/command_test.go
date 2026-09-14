@@ -18,6 +18,7 @@ import (
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
@@ -1678,13 +1679,13 @@ func TestCleanupGogoTempFilesIgnoresMissingFile(t *testing.T) {
 }
 
 func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	cmd := New(&engine.Set{}, WithEvents(bus))
 
 	var events []*aop.Event
-	unsub := bus.Subscribe(func(event *aop.Event) {
+	unsub := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		events = append(events, event)
-	})
+	}))
 	defer unsub.Cancel()
 
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
@@ -1717,10 +1718,10 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 }
 
 func TestEmitStructuredDataPublishesNativeArtifactAndLoot(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	cmd := New(&engine.Set{}, WithEvents(bus))
 	var events []*aop.Event
-	unsub := bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
+	unsub := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
 	defer unsub.Cancel()
 
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{

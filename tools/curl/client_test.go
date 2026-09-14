@@ -16,7 +16,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
@@ -61,14 +61,14 @@ func TestResponseEmitsAIScanArtifact(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	var artifact *toolpb.Artifact
-	bus.Subscribe(func(event *aop.Event) {
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		decoded := new(toolpb.Artifact)
 		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
 			artifact = decoded
 		}
-	})
+	}))
 	req, err := Parse([]string{srv.URL})
 	if err != nil {
 		t.Fatal(err)

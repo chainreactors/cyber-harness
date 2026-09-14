@@ -7,17 +7,25 @@ import (
 	"strings"
 	"sync"
 
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	cstx "github.com/chainreactors/libcstx/go"
 )
 
-type cstxArtifactIngestor struct {
+// ArtifactStore is the persistence capability required by ArtifactImporter.
+// It is intentionally smaller than the management API's SCOStore: importing
+// observations can append nodes but cannot query or delete them.
+type ArtifactStore interface {
+	UpsertSCONodes(context.Context, string, []json.RawMessage) error
+}
+
+type ArtifactImporter struct {
 	mu        sync.Mutex
-	store     SCOStore
+	store     ArtifactStore
 	runtime   *cstx.CSTX
 	artifacts []string
 }
 
-func NewArtifactIngestor(store SCOStore) (ArtifactIngestor, error) {
+func NewArtifactImporter(store ArtifactStore) (*ArtifactImporter, error) {
 	if store == nil {
 		return nil, fmt.Errorf("artifact ingestor: SCO store is required")
 	}
@@ -34,14 +42,18 @@ func NewArtifactIngestor(store SCOStore) (ArtifactIngestor, error) {
 		_ = runtime.Close()
 		return nil, fmt.Errorf("list CSTX EASM artifacts: %w", err)
 	}
-	return &cstxArtifactIngestor{store: store, runtime: runtime, artifacts: artifacts}, nil
+	return &ArtifactImporter{store: store, runtime: runtime, artifacts: artifacts}, nil
 }
 
-func (i *cstxArtifactIngestor) NormalizeArtifact(ctx context.Context, operationID, artifact string, data []byte) (uint64, uint64, error) {
-	artifact = strings.TrimSpace(artifact)
+func (i *ArtifactImporter) ImportArtifact(ctx context.Context, operationID string, value *toolpb.Artifact) (uint64, uint64, error) {
+	if value == nil {
+		return 0, 0, fmt.Errorf("artifact is required")
+	}
+	artifact := strings.TrimSpace(value.GetTool())
 	if artifact == "" {
 		return 0, 0, fmt.Errorf("artifact is required")
 	}
+	data := value.GetData()
 	if len(data) == 0 {
 		return 0, 0, nil
 	}
@@ -90,11 +102,11 @@ func (i *cstxArtifactIngestor) NormalizeArtifact(ctx context.Context, operationI
 	return uint64(len(raw)), uint64(len(result.NodeIDs) - len(raw)), nil
 }
 
-func (i *cstxArtifactIngestor) SupportedArtifacts() []string {
+func (i *ArtifactImporter) ArtifactTypes() []string {
 	return append([]string(nil), i.artifacts...)
 }
 
-func (i *cstxArtifactIngestor) Close() error {
+func (i *ArtifactImporter) Close() error {
 	if i == nil || i.runtime == nil {
 		return nil
 	}

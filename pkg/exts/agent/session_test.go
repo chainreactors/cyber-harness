@@ -1,9 +1,10 @@
-package session
+package agent
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -151,7 +152,7 @@ func TestSessionAdmissionRejectsCanceledContexts(t *testing.T) {
 				stopSession()
 			}
 			state := &sessionState{
-				runtime: &Manager{}, ctx: sessionCtx,
+				runtime: &Runtime{}, ctx: sessionCtx,
 				ops: make(chan *sessionOperation, DefaultSessionPendingLimit),
 			}
 			operation := &sessionOperation{}
@@ -190,7 +191,7 @@ func TestSessionRotationOnlyRebindsExplicitHandle(t *testing.T) {
 func TestSessionAdmissionAndCancellationDrainEveryAcceptedOperation(t *testing.T) {
 	for iteration := 0; iteration < 100; iteration++ {
 		ctx, cancel := context.WithCancel(t.Context())
-		rt := &Manager{}
+		rt := &Runtime{}
 		state := &sessionState{
 			runtime: rt, ctx: ctx, cancel: cancel,
 			ops: make(chan *sessionOperation, DefaultSessionPendingLimit), done: make(chan struct{}),
@@ -256,7 +257,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, provider)
 	var all []*aop.Event
-	unsubscribe := rt.Subscribe(func(event *aop.Event) { all = append(all, event) })
+	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { all = append(all, event) }))
 	defer unsubscribe.Cancel()
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
@@ -317,7 +318,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
 	events := make(chan *aop.Event, 16)
-	unsubscribe := rt.Subscribe(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) })
+	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) }))
 	defer unsubscribe.Cancel()
 
 	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{SessionId: "session-1"})
@@ -394,11 +395,11 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 	before := session.MessagesSnapshot()
 	var commandEvent *aop.Event
-	rt.Subscribe(func(event *aop.Event) {
+	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event.GetMessage() != nil && event.TurnId == "" {
 			commandEvent = event
 		}
-	})
+	}))
 	result, err := session.Command(context.Background(), "!printf COMMAND_OK")
 	if err != nil {
 		t.Fatal(err)
@@ -467,7 +468,7 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newBareRuntime(t, nil, provider)
 	var events []*aop.Event
-	rt.Subscribe(func(event *aop.Event) { events = append(events, event) })
+	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -516,11 +517,11 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended := make(chan *aop.Event, 1)
-	rt.Subscribe(func(event *aop.Event) {
+	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event.SessionId == "session-1" && event.GetTurnEnded() != nil {
 			ended <- event
 		}
-	})
+	}))
 	if err := session.state.inbox.Push(inbox.NewSystemMessage("automatic work")); err != nil {
 		t.Fatal(err)
 	}
@@ -541,11 +542,11 @@ func TestNilProviderRunDoesNotAutoRetry(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	var mu sync.Mutex
 	var events []*aop.Event
-	rt.Subscribe(func(event *aop.Event) {
+	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-	})
+	}))
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -576,7 +577,7 @@ func TestNilProviderIdlePushDoesNotLoop(t *testing.T) {
 	var mu sync.Mutex
 	var events []*aop.Event
 	ended := make(chan struct{}, 1)
-	rt.Subscribe(func(event *aop.Event) {
+	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -586,7 +587,7 @@ func TestNilProviderIdlePushDoesNotLoop(t *testing.T) {
 			default:
 			}
 		}
-	})
+	}))
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -622,7 +623,7 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 	return starts, ends
 }
 
-func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Manager {
+func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Runtime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	reg := commands.NewRegistry(nil)
@@ -653,11 +654,15 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	application.Commands = reg
 	application.Tools = tools
 	application.Bash = bash
-	rt := &Manager{
+	rt := &Runtime{
 		primarySessionID: "main-repl", app: application, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		config:    agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
 		closeDone: make(chan struct{}), loaded: true,
+	}
+	rt.commands, rt.commandIndex, err = commandDeclarations(nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_ = terminalSet.Close(context.Background())

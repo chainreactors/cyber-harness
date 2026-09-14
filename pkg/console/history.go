@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 )
 
 func listSavedSessions(dir string) ([]SavedSession, error) {
@@ -25,7 +25,7 @@ func listSavedSessions(dir string) ([]SavedSession, error) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		state, err := sessionext.ReadHistory(path)
+		state, err := agentext.ReadHistory(path)
 		if err != nil {
 			continue
 		}

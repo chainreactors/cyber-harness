@@ -10,7 +10,6 @@ import (
 	"github.com/chainreactors/aiscan/core/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -21,7 +20,7 @@ const (
 )
 
 type aopEmitter struct {
-	bus              aop.EventEmitter
+	bus              aop.EventPublisher
 	agentName        string
 	sessionID        string
 	turnID           string
@@ -32,11 +31,10 @@ type aopEmitter struct {
 }
 
 type emitState struct {
-	seq        atomic.Uint64
 	messageSeq atomic.Int64
 }
 
-func newAOPEmitter(bus aop.EventEmitter, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
+func newAOPEmitter(bus aop.EventPublisher, agentName, sessionID, parentSessionID, parentToolCallID string, detail *types.DelegationDetail, msgCounter int64) *aopEmitter {
 	em := &aopEmitter{
 		bus: bus, agentName: agentName, sessionID: sessionID,
 		parentSessionID: parentSessionID, parentToolCallID: parentToolCallID,
@@ -55,14 +53,10 @@ func (e *aopEmitter) turn(turnID string) *aopEmitter {
 }
 
 func (e *aopEmitter) emit(event *aop.Event) {
-	seq := e.state.seq.Add(1)
-	event.Id = fmt.Sprintf("e-%d", seq)
-	event.EmittedAt = timestamppb.Now()
 	event.SessionId = e.sessionID
 	event.TurnId = e.turnID
 	event.Emitter = e.agentName
-	event.Seq = seq
-	e.bus.Emit(event)
+	e.bus.Publish(event)
 }
 
 func (e *aopEmitter) emitWithExt(event *aop.Event, value proto.Message) {

@@ -17,7 +17,7 @@ import (
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
@@ -52,7 +52,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	return console.RunTask(ctx, rt, option, "task", "task", task, sessionext.RunInput{
+	return console.RunTask(ctx, rt, option, "task", "task", task, agentext.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 }
@@ -74,7 +74,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -177,11 +177,11 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}
 	startedAt := time.Now()
 	emitSessionStarted(application, sessionID, emitter, &aop.SessionStarted{}, types.SessionHistory_MODE_INHERIT)
-	application.Emit(&aop.Event{
+	application.Publish(&aop.Event{
 		SessionId: sessionID, TurnId: turnID, Emitter: emitter,
 		Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}},
 	})
-	application.Emit(&aop.Event{
+	application.Publish(&aop.Event{
 		SessionId: sessionID, TurnId: turnID, Emitter: emitter,
 		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: callID, Name: emitter, Arguments: arguments}},
 	})
@@ -192,21 +192,21 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 			DurationMs: uint64(time.Since(startedAt).Milliseconds()),
 		}
 		stopReason := string(agent.StopReasonCompleted)
-		closeReason := sessionext.SessionCloseCompleted
+		closeReason := agentext.SessionCloseCompleted
 		if runErr != nil {
 			result.Output = []*aop.Content{aop.Text(runErr.Error())}
 			stopReason = string(agent.StopReasonError)
-			closeReason = sessionext.SessionCloseError
+			closeReason = agentext.SessionCloseError
 		}
 		if isCanceled {
 			stopReason = string(agent.StopReasonCanceled)
-			closeReason = sessionext.SessionCloseCanceled
+			closeReason = agentext.SessionCloseCanceled
 		}
-		application.Emit(&aop.Event{
+		application.Publish(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
 			Payload: &aop.Event_ToolResult{ToolResult: result},
 		})
-		application.Emit(&aop.Event{
+		application.Publish(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
 			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: stopReason}},
 		})
@@ -264,8 +264,8 @@ func scannerCommandSupportsDebug(name string) bool {
 func emitSessionStarted(application *apppkg.App, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
-	application.Emit(event)
+	application.Publish(event)
 }
 func emitSessionEnded(application *apppkg.App, sessionID, agentName, reason string) {
-	application.Emit(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
+	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }

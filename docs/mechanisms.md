@@ -60,7 +60,7 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/session/manager.go`, `agent/agent.go`
+**文件**: `pkg/web/service/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
 
 ---
 
@@ -71,7 +71,7 @@ Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；AIScan 专
 `type.googleapis.com/aiscan.agent.AgentRunOptions` 表达。普通对话和 evaluator 复用同一
 Run/Turn 生命周期。
 
-**文件**: `proto/types/agent.proto`, `pkg/exts/session/protocol.go`, `pkg/web/service/service.go`
+**文件**: `proto/types/agent.proto`, `pkg/exts/agent/protocol.go`, `pkg/web/service/service.go`
 
 ---
 
@@ -247,7 +247,7 @@ AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通�
 
 Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，由 `eventoutput` Extension 经同一个 EventBus 写入 ProtoJSONL。`-o/--output` 显式选择新的事件输出文件；`-r/--resume` 与 `/resume` 只读取历史并创建 continuation，不修改源文件，也不隐式启用或切换输出。`/clear` 和 `/compact` 只改变会话状态。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
 
-**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/eventoutput`, `pkg/exts/session/session_jsonl.go`
+**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/eventoutput`, `pkg/exts/agent/session_jsonl.go`
 
 ---
 

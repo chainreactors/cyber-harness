@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"fmt"
@@ -44,8 +44,14 @@ func DefaultRuntimeInfo() *aop.AgentRuntimeInfo {
 // skill commands plus every "!verb" registered in the node's command registry.
 // The web splits the two prefixes into their respective popups, while both stay
 // sourced from the same node-level catalog used by the TUI.
-func CommandCatalog(app *apppkg.App) []*types.CommandSpec {
-	specs := RuntimeCommandSpecs()
+func (rt *Runtime) CommandCatalog() []*types.CommandSpec {
+	if rt == nil {
+		return nil
+	}
+	return commandCatalog(rt.app, rt.CommandSpecs(true))
+}
+
+func commandCatalog(app *apppkg.App, specs []*types.CommandSpec) []*types.CommandSpec {
 	if app != nil {
 		specs = append(specs, RegistryCommandCatalog(app.Commands, app.Skills)...)
 	}
@@ -159,7 +165,7 @@ func AgentStatus(option *cfg.Option, app *apppkg.App, ioa *ioatools.Runtime) *ao
 // ReloadConfig hot-swaps the LLM provider from a pushed protobuf
 // config. A build failure leaves the current provider in place and is
 // reported through the returned error.
-func ReloadConfig(distribute *types.DistributeConfig, rt *Manager, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
+func ReloadConfig(distribute *types.DistributeConfig, rt *Runtime, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
 	if rt == nil {
 		return nil, "", fmt.Errorf("agent runtime is not configured")
 	}

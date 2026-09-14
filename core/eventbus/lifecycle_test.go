@@ -154,8 +154,7 @@ func TestCancelDiscardsQueueButWaitsForCallback(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		defer close(release)
 		var values []int
-		var dropped uint64
-		s, err := bus.SubscribeAsync(SubscribeOptions[int]{Buffer: 4, OnDrop: func(n uint64) { dropped = n }}, func(value int) error {
+		s, err := bus.SubscribeAsync(SubscribeOptions[int]{Buffer: 4}, func(value int) error {
 			values = append(values, value)
 			close(entered)
 			<-release
@@ -177,8 +176,8 @@ func TestCancelDiscardsQueueButWaitsForCallback(t *testing.T) {
 		if err := s.Close(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if len(values) != 1 || values[0] != 1 || dropped != 1 {
-			t.Fatalf("values=%v dropped=%d", values, dropped)
+		if len(values) != 1 || values[0] != 1 || s.Dropped() != 1 {
+			t.Fatalf("values=%v dropped=%d", values, s.Dropped())
 		}
 	})
 }

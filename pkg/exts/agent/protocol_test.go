@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -86,7 +86,7 @@ func TestInlineHostSharesRuntimeAcrossReconnect(t *testing.T) {
 	}
 }
 
-func handleRuntimeMessage(t *testing.T, rt *Manager, id string, message protobuf.Message) *aop.Envelope {
+func handleRuntimeMessage(t *testing.T, rt *Runtime, id string, message protobuf.Message) *aop.Envelope {
 	t.Helper()
 	request := aop.MustWrap(id, "", message)
 	var response *aop.Envelope

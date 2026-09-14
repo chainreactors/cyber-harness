@@ -15,16 +15,16 @@ import (
 
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/web"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, ingestor webservice.ArtifactIngestor, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
+func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler) {
 	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
-	pool := webservice.NewAgentPool(service.Hub())
-	pool.SetArtifactIngestor(ingestor)
+	pool := webservice.NewAgentPool(service.Hub(), ingestor)
 	service.SetAgentPool(pool)
 	return service, pool, web.NewHandler(service, nil, nil)
 }
@@ -58,7 +58,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	ingestor, err := webservice.NewArtifactIngestor(store)
+	ingestor, err := webservice.NewArtifactImporter(store)
 	if err != nil {
 		logger.Errorf("init artifact normalization: %v", err)
 		os.Exit(1)

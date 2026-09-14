@@ -4,7 +4,7 @@
 
 ## 结果
 
-- Profile 是唯一 `extension.Set` 所有者；App 不生成 Entry，也不拥有子图。
+- 每个组合根只有一个 `extension.Set`；Profile 不复制其发布或关闭状态，App 不生成 Entry，也不拥有子图。
 - `pkg/toolset.Registry` 与 `pkg/commands.Registry` 共享 `core/registry.Store[T]`，互不依赖。
 - 同名批次原子失败；激活后不可变；Close 拒绝、取消、drain，超时可重试。
 - `core/hooks.Registry` 覆盖 Tool、Command、Process、File、HTTP 的真实执行边界。
@@ -12,11 +12,12 @@
 - `core/events.Stream` 是唯一 AOP stamping 入口；Observe 生成类型化观测，EventOutput 单独落盘。
 - 文件能力只剩 `pkg/exts/files` + `tools/files`；旧文件工具、审计和双观察管线已删除。
 - `tools/*` 不依赖 Extension 宿主；`pkg/exts/proxy` 只适配 Proxy Hub，Traffic handler 由连接 Mux 直接拥有。
-- App 只发布 `Emit` 和只读订阅，不暴露第二个可写 EventBus。
+- App 只发布 `Publish` 和类型化只读观察，不暴露第二个可写 EventBus。
 - ToolNode 没有通用连接 Extension 工厂；只有实际支持的 core/tool 协议。
 - Agent 只依赖 `tool.Executor`；无 Agent 的文件 Profile 保持 headless 依赖闭包。
 - `extension.Scope` 不含 owner ID、资源 Ref 或服务定位；只表达初始化、寿命和注册撤销。
-- Files、Proxy、IOA、App、Session 与 Agent 均分离生命周期所有者和业务访问面；不存在
+- Files、Proxy、IOA 与 App 均分离生命周期所有者和业务访问面；Agent Extension 发布一个
+  同时覆盖受控 Loop 与 Session 的 Runtime，不再保留独立 Session Extension。不存在
   Borrow/Handle/seal 适配层，业务对象不提供 Load/Open/Start/Close。
 
 ## 防回归
@@ -31,7 +32,7 @@ panic 稳定错误、Observe operation 关联、EventOutput 排空和 Profile �
 
 ```powershell
 go test -count=1 ./...
-go test -race -count=1 ./core/extension ./core/registry ./core/hooks ./core/events ./core/tool/hooks ./pkg/commands ./pkg/toolset ./pkg/exts/observe ./pkg/exts/eventoutput ./pkg/exts/proxy ./pkg/exts/session ./pkg/profile ./pkg/node ./pkg/toolnode ./tools/proxy ./cmd/aiscan ./cmd/runner
+go test -race -count=1 ./core/extension ./core/registry ./core/hooks ./core/events ./core/eventbus ./core/tool/hooks ./pkg/commands ./pkg/toolset ./pkg/exts/observe ./pkg/exts/eventoutput ./pkg/exts/proxy ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/toolnode ./tools/proxy ./cmd/aiscan ./cmd/runner
 go test -tags full -run '^$' ./...
 go build -mod=readonly ./...
 ```

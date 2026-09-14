@@ -36,7 +36,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 
 	srv, _ := setupTestServerWithPool(t, svc, pool)
@@ -94,7 +94,7 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	srv, _ := setupTestServerWithPool(t, svc, pool)
 	conn := dialAgent(t, srv, "queue-agent", []string{"scan"})
@@ -156,7 +156,7 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	agent := newFakeAgent("timeout-agent", 1)
 	pool.register(agent)
@@ -220,7 +220,7 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	agent := newFakeAgent("timeout-agent", 1)
 	pool.register(agent)
@@ -258,7 +258,7 @@ func setupTestServerWithPool(t *testing.T, svc *Service, pool *AgentPool) (*http
 }
 
 func TestCancelTaskQueuesBehindFullSendChannel(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	remote := newFakeAgent("agent-1", 1)
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	remote.tasks["scan-1"] = make(chan taskResult, 1)
@@ -293,7 +293,7 @@ func TestCancelTaskQueuesBehindFullSendChannel(t *testing.T) {
 }
 
 func TestCancelTaskWaitsForSaturatedSendChannel(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	remote := newFakeAgent("agent-1", 1)
 	remote.toolCalls = map[string]struct{}{"scan-1": {}}
 	resultCh := make(chan taskResult, 1)

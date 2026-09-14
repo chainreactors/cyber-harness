@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -37,7 +37,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := sessionext.New(application.App, nil, option, telemetry.NopLogger(), sessionext.Config{
+	rt, err := agentext.New(agentext.Config{Application: application.App, Option: option, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -51,12 +51,12 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	repl, err := StartPersistent(rt.Manager, option)
+	repl, err := StartPersistent(rt.Runtime(), option)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repl.Close()
-	mgr := bashManager(rt.Manager.App().Bash)
+	mgr := bashManager(rt.Runtime().App().Bash)
 	if mgr == nil {
 		t.Fatal("pty manager unavailable")
 	}
@@ -76,7 +76,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 
 	messages := make(chan *ptypb.ProtocolMessage, 64)
-	router, err := newPTYRouter(rt.Manager.App().Bash)
+	router, err := newPTYRouter(rt.Runtime().App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
 		t.Fatalf("router close terminated resident repl: %+v ok=%v", info, ok)
 	}
-	router2, err := newPTYRouter(rt.Manager.App().Bash)
+	router2, err := newPTYRouter(rt.Runtime().App().Bash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		info, ok := mgr.Get(initial.ID)
 		return !ok || info.State != pty.StateRunning
 	})
-	session, err := rt.Manager.OpenSession(ctx, sessionext.SessionOptions{ID: "after-console"})
+	session, err := rt.Runtime().OpenSession(ctx, agentext.SessionOptions{ID: "after-console"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := sessionext.New(application.App, nil, &cfg.Option{REPLMode: "fast"}, telemetry.NopLogger(), sessionext.Config{
+	rt, err := agentext.New(agentext.Config{Application: application.App, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -198,7 +198,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	for _, info := range bashManager(rt.Manager.App().Bash).List() {
+	for _, info := range bashManager(rt.Runtime().App().Bash).List() {
 		if info.Kind == "repl" && info.Name == MainREPLName {
 			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
 		}

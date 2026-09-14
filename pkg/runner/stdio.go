@@ -8,8 +8,9 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/host"
 	"github.com/chainreactors/aiscan/pkg/profile"
 )
@@ -18,7 +19,7 @@ import (
 func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -33,9 +34,9 @@ func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, 
 	}
 	h := host.New(mux)
 	stream := host.NewStdio(input, output)
-	unsubscribe := rt.Subscribe(func(event *aop.Event) {
+	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		_ = h.Send(aop.Reply("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}), stream.Send)
-	})
+	}))
 	// One owner closes in dependency order and checks failures from the last
 	// session-ended events as well as ordinary replies.
 	defer func() {

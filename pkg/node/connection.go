@@ -6,11 +6,12 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -21,8 +22,8 @@ const DefaultWSPath = "/api/aop/node/ws"
 // Keeping publication and subscription on one object prevents a terminal event
 // from being sent both through the runtime bus and as a direct protocol reply.
 type agentEndpoint interface {
-	Subscribe(func(*aop.Event)) *eventbus.Subscription[*aop.Event]
-	EmitEvent(*aop.Event)
+	Observe(coreevents.Observer) *eventbus.Subscription[*aop.Event]
+	Publish(*aop.Event)
 }
 
 type connectionConfig struct {
@@ -41,7 +42,7 @@ type connectionConfig struct {
 	Bash     *commands.BashTool
 	// Agent owns connection-side events. Control uses the product runtime;
 	// nil denotes a tool-only node. No optional interface selects routing.
-	Control       *sessionext.Manager
+	Control       *agentext.Runtime
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
 	Logger        telemetry.Logger

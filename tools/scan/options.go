@@ -39,7 +39,7 @@ func WithProxy(proxy string) Option {
 	return func(c *Command) { c.Proxy = proxy }
 }
 
-func WithEvents(events aop.EventEmitter) Option {
+func WithEvents(events aop.EventPublisher) Option {
 	return func(c *Command) { c.Events = events }
 }
 

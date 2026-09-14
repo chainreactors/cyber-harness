@@ -13,7 +13,6 @@ import (
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	skillmount "github.com/chainreactors/aiscan/pkg/exts/skills"
-	profilepkg "github.com/chainreactors/aiscan/pkg/profile"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	files "github.com/chainreactors/aiscan/tools/files"
 )
@@ -28,11 +27,11 @@ type workspaceProfileConfig struct {
 }
 
 type workspaceProfile struct {
-	assembly *profilepkg.Assembly
-	registry *toolset.Registry
-	events   *coreevents.Stream
-	selected []string
-	skills   *skillmount.Catalog
+	extensions *extension.Set
+	registry   *toolset.Registry
+	events     *coreevents.Stream
+	selected   []string
+	skills     *skillmount.Catalog
 }
 
 func availableWorkspaceExtensions() []string { return []string{"files", "observe", "skills"} }
@@ -94,7 +93,7 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"files"}, Extension: skills})
 	}
 	entries = append(entries, extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: p.registry})
-	p.assembly, err = profilepkg.Assemble(entries...)
+	p.extensions, err = extension.New(entries...)
 	if err != nil {
 		return nil, err
 	}
@@ -110,14 +109,14 @@ func (p *workspaceProfile) Events() *coreevents.Stream {
 }
 
 func (p *workspaceProfile) Load(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
+	if p == nil || p.extensions == nil {
 		return fmt.Errorf("workspace profile is required")
 	}
-	return p.assembly.Load(ctx)
+	return p.extensions.Load(ctx)
 }
 
 func (p *workspaceProfile) Executor() (tool.Executor, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil, toolset.ErrUnavailable
 	}
 	return p.registry, nil
@@ -126,22 +125,22 @@ func (p *workspaceProfile) Executor() (tool.Executor, error) {
 // Installed reports the complete selection only while the entire composition
 // is active. Available describes compiled options without opening resources.
 func (p *workspaceProfile) Installed() []string {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil
 	}
 	return slices.Clone(p.selected)
 }
 
 func (p *workspaceProfile) SkillLocations() []string {
-	if p == nil || p.assembly == nil || !p.assembly.Available() || p.skills == nil {
+	if p == nil || p.extensions == nil || !p.extensions.Active() || p.skills == nil {
 		return nil
 	}
 	return p.skills.Locations()
 }
 
 func (p *workspaceProfile) Close(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
+	if p == nil || p.extensions == nil {
 		return nil
 	}
-	return p.assembly.Close(ctx)
+	return p.extensions.Close(ctx)
 }

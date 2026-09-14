@@ -50,9 +50,9 @@ func TestSlowSubscriptionIsolatedAndBudgetIncludesHandler(t *testing.T) {
 			b := New[string]()
 			entered := make(chan struct{})
 			gate := make(chan struct{})
-			var got, drops int
+			var got int
 			b.Subscribe(func(string) { got++ })
-			opts := SubscribeOptions[string]{Buffer: 2, OnDrop: func(n uint64) { drops = int(n) }}
+			opts := SubscribeOptions[string]{Buffer: 2}
 			if byBytes {
 				opts.Buffer = 8
 				opts.MaxBytes = 4
@@ -79,8 +79,8 @@ func TestSlowSubscriptionIsolatedAndBudgetIncludesHandler(t *testing.T) {
 			if !errors.Is(s.Err(), ErrOverflow) {
 				t.Fatalf("Close lost overflow error: %v", s.Err())
 			}
-			if got != 4 || drops != 2 {
-				t.Fatalf("healthy=%d drops=%d", got, drops)
+			if got != 4 || s.Dropped() != 2 {
+				t.Fatalf("healthy=%d drops=%d", got, s.Dropped())
 			}
 		})
 	}
@@ -88,16 +88,12 @@ func TestSlowSubscriptionIsolatedAndBudgetIncludesHandler(t *testing.T) {
 
 func TestSubscriptionPanicStopsOnlyThatSubscriber(t *testing.T) {
 	b := New[int]()
-	reported := make(chan error, 1)
-	s, err := b.SubscribeAsync(SubscribeOptions[int]{OnError: func(err error) { reported <- err }}, func(int) error { panic("broken") })
+	s, err := b.SubscribeAsync(SubscribeOptions[int]{}, func(int) error { panic("broken") })
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.Emit(1)
 	waitSubscription(t, s.Done())
-	if err := <-reported; !strings.Contains(err.Error(), "broken") {
-		t.Fatal(err)
-	}
 	if err := s.Close(context.Background()); err != nil {
 		t.Fatalf("panic retained completed subscription: %v", err)
 	}

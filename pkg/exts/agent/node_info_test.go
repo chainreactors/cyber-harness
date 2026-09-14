@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -50,7 +50,8 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
 	}
 
-	catalog := CommandCatalog(&apppkg.App{Commands: registry, Skills: store})
+	runtime := &Runtime{app: &apppkg.App{Commands: registry, Skills: store}, commands: builtinCommands()}
+	catalog := runtime.CommandCatalog()
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
 	for _, spec := range catalog {
 		got[spec.GetName()] = &struct{ usage, description string }{spec.GetUsage(), spec.GetDescription()}

@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -152,7 +152,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(application.App, nil, option, telemetry.NopLogger(), Config{Loop: agent.StandardLoop{}})
+			rt, err := New(Config{Application: application.App, Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -163,7 +163,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 			}
 			defer rtSet.Close(context.Background())
 
-			if count := strings.Count(rt.Manager.systemPrompt, "## Skill: aiscan"); count != 1 {
+			if count := strings.Count(rt.Runtime().systemPrompt, "## Skill: aiscan"); count != 1 {
 				t.Fatalf("base skill count = %d, want 1", count)
 			}
 			for _, want := range []string{
@@ -175,7 +175,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				"## Verification Standard",
 				"## Evidence & Findings",
 			} {
-				if !strings.Contains(rt.Manager.systemPrompt, want) {
+				if !strings.Contains(rt.Runtime().systemPrompt, want) {
 					t.Fatalf("system prompt missing base skill rule %q", want)
 				}
 			}
@@ -185,7 +185,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				"## Post-Scan Analysis",
 				"map the application before focused testing",
 			} {
-				if strings.Contains(rt.Manager.systemPrompt, unwanted) {
+				if strings.Contains(rt.Runtime().systemPrompt, unwanted) {
 					t.Fatalf("system prompt contains SOP guidance %q", unwanted)
 				}
 			}

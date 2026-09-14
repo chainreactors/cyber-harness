@@ -179,7 +179,7 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - EnvelopeStream transport 适配：`pkg/web/transport.go`
 - Application 业务语义（envelope 路由）：`pkg/web/api/envelope.go`
 - Agent 节点连接（AgentPool 拥有）：`pkg/web/agents_stream.go`
-- Session protocol loop：`pkg/exts/session/protocol.go`
+- Agent Runtime session protocol：`pkg/exts/agent/protocol.go`
 - stdio framing：`pkg/host/stdio.go`；入口组合：`pkg/runner/stdio.go`
 - Browser client：`web/frontend/cyber-ui/packages/aop/src/client.ts`
 - Connect boundary：`pkg/web/connect.go`

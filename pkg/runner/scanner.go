@@ -16,7 +16,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/scan"
 )
@@ -200,10 +199,10 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
-	agentExtension := agentext.New(agent.StandardLoop{})
-	runtimeResource, err := sessionext.New(application, nil, option, logger, sessionext.Config{
-		Loop: agentExtension.Loop(),
-		PromptConfig: &sessionext.PromptConfig{
+	runtimeResource, err := agentext.New(agentext.Config{
+		Application: application, Option: option, Logger: logger,
+		Loop: agent.StandardLoop{},
+		PromptConfig: &agentext.PromptConfig{
 			Tools:            application.Tools,
 			ScannerDocs:      application.Commands.UsageDocs(),
 			Skills:           application.Skills.Skills,
@@ -214,10 +213,9 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
-	runtime := runtimeResource.Manager
+	runtime := runtimeResource.Runtime()
 	runtimeSet, err := extension.New(
-		extension.Entry{ID: "agent", Extension: agentExtension},
-		extension.Entry{ID: "agent-runtime", DependsOn: []string{"agent"}, Extension: runtimeResource},
+		extension.Entry{ID: "agent", Extension: runtimeResource},
 	)
 	if err != nil {
 		return err
@@ -229,7 +227,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	defer runtimeSet.Close(context.Background())
 
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), sessionext.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
+	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentext.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {

@@ -17,7 +17,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
@@ -1375,10 +1375,10 @@ func toolCallDelta(index uint32, id, name, args string) ChatCompletionStreamEven
 	}}}
 }
 
-func testBus(handler func(*aop.Event)) *eventbus.Bus[*aop.Event] {
-	b := eventbus.New[*aop.Event]()
+func testBus(handler func(*aop.Event)) *coreevents.Stream {
+	b := coreevents.New()
 	if handler != nil {
-		b.Subscribe(handler)
+		b.Observe(coreevents.ObserverFunc(handler))
 	}
 	return b
 }

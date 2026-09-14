@@ -31,8 +31,9 @@ import (
 
 // applicationGraph declares the App-owned portion of the AIScan product graph.
 // It owns no lifecycle state; its entries are merged into the command's single
-// profile.Assembly.
+// extension.Set.
 type applicationGraph struct {
+	scanner     *scannerExtension
 	application *app.App
 	resource    *app.Resource
 	commands    *commands.Registry
@@ -171,7 +172,7 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 		return nil, err
 	}
 	entries = append(entries, editionEntries...)
-	return &applicationGraph{application: application, resource: applicationResource, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
+	return &applicationGraph{scanner: scanner, application: application, resource: applicationResource, commands: commandRegistry, tools: toolRegistry, entries: entries}, nil
 }
 
 func (a *applicationGraph) entriesFor(id string, dependencies ...string) ([]extension.Entry, string) {

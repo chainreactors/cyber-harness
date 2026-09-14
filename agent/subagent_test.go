@@ -8,7 +8,7 @@ import (
 
 	"github.com/chainreactors/aiscan/agent/inbox"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/operation"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -67,12 +67,12 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 	activeInbox := inbox.NewBuffered(DefaultInboxCapacity)
 	var mu sync.Mutex
 	var events []*aop.Event
-	bus := eventbus.New[*aop.Event]()
-	bus.Subscribe(func(event *aop.Event) {
+	bus := coreevents.New()
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-	})
+	}))
 	active := NewAgent(Config{Loop: StandardLoop{},
 		Provider:  provider,
 		Tools:     newTestTools(t),
@@ -124,9 +124,9 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 }
 
 func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	events := make(chan *aop.Event, 1)
-	bus.Subscribe(func(event *aop.Event) { events <- event })
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events <- event }))
 	em := newAOPEmitter(bus, "aiscan", "parent-session", "", "", nil, 0)
 
 	em.toolCall(&aop.ToolCall{

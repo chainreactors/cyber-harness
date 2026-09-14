@@ -8,7 +8,7 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 )
 
 type fixedProvider struct {
@@ -58,9 +58,9 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 		}}},
 	}}
 
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	var events []*aop.Event
-	bus.Subscribe(func(event *aop.Event) { events = append(events, event) })
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
 	ag := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider:  agentProvider,
 		Model:     "test",

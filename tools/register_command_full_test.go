@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/katana"
@@ -50,7 +49,7 @@ func TestRegisterAllRegistersPassiveWithUncover(t *testing.T) {
 
 func TestFullScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	recorder := newFunctionalRecorder(bus)
 	engineSet := &engine.Set{}
 	passiveEngine := &functionalPassiveEngine{}
