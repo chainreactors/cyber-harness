@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	eventOutputID = "aiscan.event-output"
+	telemetryID   = "aiscan.telemetry"
 	artifactsID   = "aiscan.artifacts"
 	observeID     = "aiscan.observe"
 	proxyID       = "aiscan.proxy"
@@ -190,8 +190,8 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 		if outputErr != nil {
 			return nil, outputErr
 		}
-		entries = append(entries, extension.Entry{ID: eventOutputID, Extension: output})
-		sourceDependencies = append(sourceDependencies, eventOutputID)
+		entries = append(entries, extension.Entry{ID: telemetryID, Extension: output})
+		sourceDependencies = append(sourceDependencies, telemetryID)
 	}
 	if config.Artifacts != nil {
 		projection, projectionErr := newArtifactProjection(events, config.Artifacts, config.Logger)

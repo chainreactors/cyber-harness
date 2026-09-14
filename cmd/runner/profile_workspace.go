@@ -74,8 +74,8 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 		if outputErr != nil {
 			return nil, outputErr
 		}
-		entries = append(entries, extension.Entry{ID: "event-output", Extension: output})
-		dependencies = append(dependencies, "event-output")
+		entries = append(entries, extension.Entry{ID: "telemetry", Extension: output})
+		dependencies = append(dependencies, "telemetry")
 	}
 	if seen["observe"] {
 		observer, observeErr := observeext.New(hookRegistry, events, observeext.Options{Kinds: []observeext.Kind{observeext.Tools, observeext.Files}})
