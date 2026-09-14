@@ -147,7 +147,9 @@ func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	event.Payload = &aop.Event_Extension{Extension: extension}
-	if err := aop.SetTypedExtension(event, &operationpb.Ref{CallId: "call-gogo-1"}); err != nil {
+	if err := aop.SetTypedExtension(event, &operationpb.Ref{
+		CallId: "call-gogo-1", Correlation: operationpb.Correlation_CORRELATION_EXPLICIT,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
@@ -389,9 +391,9 @@ func TestWSDispatchAndComplete(t *testing.T) {
 }
 
 func TestDispatchToolCallPublishesSessionCallOnce(t *testing.T) {
-	sink := &evalSink{sid: "session-1", found: true}
+	probe := &sessionProbe{sid: "session-1", found: true}
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
+	pool.SetSessionLookup(probe)
 	remote := &remoteAgent{
 		nodeState: newNodeState(), nodeID: "agent-1",
 		sendCh: make(chan *aop.Envelope, 1), done: make(chan struct{}),
@@ -402,8 +404,8 @@ func TestDispatchToolCallPublishesSessionCallOnce(t *testing.T) {
 	if _, err := pool.DispatchToolCall("agent-1", "task-1", &aop.ToolCall{Name: "bash"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(sink.aopEvents) != 1 || sink.aopEvents[0].GetToolCall() == nil {
-		t.Fatalf("session tool.call events = %+v, want exactly one hub-owned call", sink.aopEvents)
+	if len(probe.aopEvents) != 1 || probe.aopEvents[0].GetToolCall() == nil {
+		t.Fatalf("session tool.call events = %+v, want exactly one hub-owned call", probe.aopEvents)
 	}
 }
 
@@ -1316,7 +1318,7 @@ func assertTaskOpen(t *testing.T, remote *remoteAgent, ch chan taskResult) {
 
 func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
+	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}}))
@@ -1333,7 +1335,7 @@ func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 
 func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
+	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	// A mid-run AOP error is display-only; the terminal turn.end carries
@@ -1355,7 +1357,7 @@ func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 
 func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
+	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	// The agent reports the ctx error on cancel; it must not surface as a task error.
@@ -1373,7 +1375,7 @@ func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
 
 func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
+	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	forwardEvent(t, pool, remote, "task-1", sessionEvent(t, "child-1", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentSessionId: "agent-session"}}}))
@@ -1386,7 +1388,7 @@ func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
 
 func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(&evalSink{sid: "sess-1"})
+	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
 	event := sessionEvent(t, "agent-session", &aop.Event{TurnId: "task-1", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})

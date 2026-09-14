@@ -26,12 +26,13 @@ func (e *Extension) Load(scope *extension.Scope) error {
 }
 ```
 
-需要独立进程工具能力时，使用 `pkg/profile/files`：它组合具体
+需要独立进程工具能力时，使用 `cmd/runner` 的显式文件组合：它组合具体
 `pkg/exts/files.Extension`（拥有 `tools/files.Files`）和 `toolset.Registry`，完整 Load 后返回 `tool.Executor`。AOP ToolNode 只负责协议
 入口；它不创建 Agent、Runtime、App 或第二套执行循环。
 
 ```go
-profile, err := filesprofile.New(files.Config{Directory: workDir})
+// cmd/runner 中的产品装配入口；共享包不提供具体 Profile。
+profile, err := newFileProfile(files.Config{Directory: workDir})
 if err != nil { return err }
 defer profile.Close(context.Background())
 if err := profile.Load(ctx); err != nil { return err }
@@ -41,7 +42,7 @@ if err != nil { return err }
 // profile.Close 的结果，遇到 ErrCloseIncomplete 时保留实例并重试。
 ```
 
-完整 AIScan 产品使用 `pkg/profile/aiscan`。profile 在唯一 Set 中组合 App 能力和可选
+完整 AIScan 产品图声明在 `cmd/aiscan`。`pkg/profile` 只提供原子装配与发布抽象；命令入口在唯一 Set 中组合 App 能力和可选
 Session Manager；Manager 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
 只读事件订阅。事件发布统一经 `App.Emit`。需要 Agent 时入口显式选择
 `agent.StandardLoop{}`，Profile 将选定的 Loop 装入 `pkg/exts/agent`，再通过 `agent.Loop`

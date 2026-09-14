@@ -18,7 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
 	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
 	"github.com/chainreactors/aiscan/tools/toolargs"
@@ -28,7 +28,7 @@ import (
 // Mode dispatch
 // ---------------------------------------------------------------------------
 
-func RunAgentMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt ...func(func() bool)) error {
+func RunAgentMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt ...func(func() bool)) error {
 	var si func(func() bool)
 	if len(setInterrupt) > 0 {
 		si = setInterrupt[0]
@@ -37,22 +37,22 @@ func RunAgentMode(ctx context.Context, option *cfg.Option, logger telemetry.Logg
 		if option != nil && option.OutputFormat != "" && option.OutputFormat != "text" {
 			return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
 		}
-		return runInteractiveMode(ctx, option, logger, si)
+		return runInteractiveMode(ctx, factory, option, logger, si)
 	}
-	return runOneShotMode(ctx, option, logger)
+	return runOneShotMode(ctx, factory, option, logger)
 }
 
 // ---------------------------------------------------------------------------
 // Agent one-shot
 // ---------------------------------------------------------------------------
 
-func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
+func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
 	task, err := cfg.ResolveTask(option)
 	if err != nil {
 		return err
 	}
 
-	product, rt, err := loadAgentProfile(ctx, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -73,9 +73,8 @@ func runOneShotMode(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 // Agent interactive (REPL)
 // ---------------------------------------------------------------------------
 
-func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	option.SaveSession = true
-	product, rt, err := loadAgentProfile(ctx, option, logger, &sessionext.Config{
+func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -98,7 +97,7 @@ func runInteractiveMode(ctx context.Context, option *cfg.Option, logger telemetr
 // Scanner direct execution
 // ---------------------------------------------------------------------------
 
-func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
+func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
 	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
 	features, scannerArgs, err := DirectScannerRuntimeFeaturesWithDefault(rest, defaultVerify)
 	if err != nil {
@@ -129,7 +128,7 @@ func RunDirectScannerMode(ctx context.Context, option *cfg.Option, rest []string
 		defer restoreLogs()
 	}
 
-	product, err := profile.New(profile.FromOption(option, features, nil, scannerLogger))
+	product, err := factory.Build(profile.Request{Option: option, Features: features, Logger: scannerLogger})
 	if err != nil {
 		return fmt.Errorf("construct scanner profile: %w", err)
 	}

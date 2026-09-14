@@ -76,7 +76,7 @@ func TestFileConsumerOwnsChunksAndClosesBeforePublication(t *testing.T) {
 	hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
 	hub.storage.BodyMaxBytes = 8
 	stream := &bodyStream{}
-	body, err := hub.recordBody(stream)
+	body, err := hub.captureBody(stream)
 	if err != nil {
 		t.Fatal(err)
 	}

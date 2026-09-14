@@ -1,6 +1,6 @@
 //go:build full && record_ffmpeg && cgo && (windows || linux)
 
-package aiscan
+package main
 
 import (
 	"github.com/chainreactors/aiscan/core/capability"

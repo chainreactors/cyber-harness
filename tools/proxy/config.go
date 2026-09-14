@@ -52,7 +52,7 @@ func NewHub(workDir, originalProxy string, capture bool, registry *hooks.Registr
 }
 
 type correlationLease struct {
-	ref        *operationpb.Ref
+	operation  *operationpb.Ref
 	invocation operation.Invocation
 	cancel     func(error) bool
 	mu         sync.Mutex
@@ -63,7 +63,7 @@ type correlationLease struct {
 }
 
 type resolvedCorrelation struct {
-	ref        *operationpb.Ref
+	operation  *operationpb.Ref
 	invocation operation.Invocation
 	cancel     func(error) bool
 	finish     func()
@@ -82,7 +82,7 @@ func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
 	}
 	token := rand.Text()
 	lease := &correlationLease{
-		ref: operation.Correlation(ctx), invocation: operation.InvocationFromContext(ctx),
+		operation: operation.Correlation(ctx), invocation: operation.InvocationFromContext(ctx),
 		cancel: func(cause error) bool { return operation.RequestCancel(ctx, cause) },
 		done:   make(chan struct{}),
 	}
@@ -119,12 +119,12 @@ func (h *ProxyHub) resolveCorrelation(token string) resolvedCorrelation {
 			lease.mu.Lock()
 			if !lease.released {
 				lease.active++
-				ref := proto.Clone(lease.ref).(*operationpb.Ref)
+				correlation := proto.Clone(lease.operation).(*operationpb.Ref)
 				invocation, cancel := lease.invocation, lease.cancel
 				lease.mu.Unlock()
 				h.correlationMu.RUnlock()
 				var once sync.Once
-				return resolvedCorrelation{ref: ref, invocation: invocation, cancel: cancel, finish: func() {
+				return resolvedCorrelation{operation: correlation, invocation: invocation, cancel: cancel, finish: func() {
 					once.Do(func() {
 						lease.mu.Lock()
 						lease.active--
@@ -139,7 +139,7 @@ func (h *ProxyHub) resolveCorrelation(token string) resolvedCorrelation {
 		}
 		h.correlationMu.RUnlock()
 	}
-	return resolvedCorrelation{ref: &operationpb.Ref{Correlation: operationpb.Correlation_CORRELATION_UNATTRIBUTED}}
+	return resolvedCorrelation{operation: &operationpb.Ref{Correlation: operationpb.Correlation_CORRELATION_UNATTRIBUTED}}
 }
 
 func egressURL(base, token string) string {

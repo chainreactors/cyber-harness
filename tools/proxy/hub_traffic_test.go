@@ -81,8 +81,8 @@ func TestHubStampsToolID(t *testing.T) {
 	if len(flows) == 0 {
 		t.Fatal("no flow captured")
 	}
-	if flows[0].Ref.GetCallId() != "tool-abc" {
-		t.Fatalf("call id = %q, want %q", flows[0].Ref.GetCallId(), "tool-abc")
+	if flows[0].Operation.GetCallId() != "tool-abc" {
+		t.Fatalf("call id = %q, want %q", flows[0].Operation.GetCallId(), "tool-abc")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	addTestBody(t, first, Flow{
-		Ref: &operationpb.Ref{CallId: "call-1"}, Host: "example.test", ContentType: "text/plain",
+		Operation: &operationpb.Ref{CallId: "call-1"}, Host: "example.test", ContentType: "text/plain",
 		Exchange: traffic.Exchange{
 			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
 			Response: &traffic.Response{StatusCode: 200},
@@ -137,7 +137,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	}
 	defer second.Close()
 	flows := second.Query(QueryOpts{})
-	if len(flows) != 1 || flows[0].Ref.GetCallId() != "call-1" {
+	if len(flows) != 1 || flows[0].Operation.GetCallId() != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}
 	if flows[0].Response == nil || second.files[flows[0].ID][1] != 10 || len(flows[0].Response.Body) != 0 {

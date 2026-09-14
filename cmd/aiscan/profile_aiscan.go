@@ -1,15 +1,10 @@
-// Package aiscan is the AIScan composition root. It constructs a fixed extension
-// graph and owns every edition-selected capability extension.
-package aiscan
+package main
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/aop"
@@ -26,20 +21,21 @@ import (
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	proxyext "github.com/chainreactors/aiscan/pkg/exts/proxy"
 	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	profilepkg "github.com/chainreactors/aiscan/pkg/profile"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 )
 
 const (
-	EventOutputID = "aiscan.event-output"
-	ObserveID     = "aiscan.observe"
-	ProxyID       = "aiscan.proxy"
-	ApplicationID = "aiscan.application"
-	IOAID         = "aiscan.ioa"
-	AgentID       = "aiscan.agent"
-	RuntimeID     = "aiscan.runtime"
+	eventOutputID = "aiscan.event-output"
+	observeID     = "aiscan.observe"
+	proxyID       = "aiscan.proxy"
+	applicationID = "aiscan.application"
+	ioaID         = "aiscan.ioa"
+	agentID       = "aiscan.agent"
+	runtimeID     = "aiscan.runtime"
 )
 
-type Config struct {
+type aiscanProfileConfig struct {
 	Option      *cfg.Option
 	Application apppkg.Config
 	IOA         *ioatools.Config
@@ -50,9 +46,9 @@ type Config struct {
 	Output  string
 }
 
-func FromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *sessionext.Config, logger telemetry.Logger) Config {
+func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *sessionext.Config, logger telemetry.Logger) aiscanProfileConfig {
 	application := apppkg.AppConfig(option, features, logger)
-	return Config{
+	return aiscanProfileConfig{
 		Option: option, Application: application,
 		IOA: ioatools.ConfigFromOption(option), Runtime: cloneConfig(runtimeConfig), Logger: logger,
 		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
@@ -63,14 +59,7 @@ func resolveOutputPath(option *cfg.Option) string {
 	if option == nil {
 		return ""
 	}
-	if path := strings.TrimSpace(option.OutputFile); path != "" {
-		return path
-	}
-	if option.Ephemeral || !option.SaveSession {
-		return ""
-	}
-	name := "session-" + time.Now().Format("20060102-150405.000000000") + ".jsonl"
-	return filepath.Join(cfg.DataDir(), "sessions", name)
+	return strings.TrimSpace(option.OutputFile)
 }
 
 func parseObserve(value string) []observeext.Kind {
@@ -83,21 +72,20 @@ func parseObserve(value string) []observeext.Kind {
 	return result
 }
 
-// Profile owns one fixed graph through Set. App and runtime are active business
-// entry points; Set alone owns their Load/Close ordering.
-type Profile struct {
-	set    *extension.Set
-	access sync.RWMutex
-	// Publication state prevents exposing a partially loaded or closing graph.
-	// It does not track individual instance lifetimes; Set owns those states.
-	active  bool
-	closing bool
-	app     *apppkg.App
-	runtime *sessionext.Manager
-	proxy   *proxyext.Extension
+// aiscanProfile is the concrete product graph declared by the AIScan command.
+// Shared packages see only profile.Application.
+type aiscanProfile struct {
+	assembly *profilepkg.Assembly
+	app      *apppkg.App
+	runtime  *sessionext.Manager
+	proxy    *proxyext.Extension
 }
 
-func New(config Config) (*Profile, error) {
+var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (profilepkg.Application, error) {
+	return newAIScanProfile(profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger))
+}
+
+func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	if config.Option == nil {
 		return nil, fmt.Errorf("aiscan profile option is required")
 	}
@@ -133,11 +121,11 @@ func New(config Config) (*Profile, error) {
 		agentExtension = agentext.New(selectedLoop)
 		managedLoop = agentExtension.Loop()
 	}
-	assembly, err := newApplicationAssembly(config.Application, hookRegistry, events, proxyHub, managedLoop, workDir)
+	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, managedLoop, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("construct AIScan application: %w", err)
 	}
-	application := assembly.application
+	application := applicationGraph.application
 
 	var entries []extension.Entry
 	var sourceDependencies []string
@@ -146,8 +134,8 @@ func New(config Config) (*Profile, error) {
 		if outputErr != nil {
 			return nil, outputErr
 		}
-		entries = append(entries, extension.Entry{ID: EventOutputID, Extension: output})
-		sourceDependencies = append(sourceDependencies, EventOutputID)
+		entries = append(entries, extension.Entry{ID: eventOutputID, Extension: output})
+		sourceDependencies = append(sourceDependencies, eventOutputID)
 	}
 	var observer *observeext.Extension
 	if len(config.Observe) > 0 {
@@ -156,27 +144,27 @@ func New(config Config) (*Profile, error) {
 		if observeErr != nil {
 			return nil, observeErr
 		}
-		entries = append(entries, extension.Entry{ID: ObserveID, DependsOn: append([]string(nil), sourceDependencies...), Extension: observer})
-		sourceDependencies = append(sourceDependencies, ObserveID)
+		entries = append(entries, extension.Entry{ID: observeID, DependsOn: append([]string(nil), sourceDependencies...), Extension: observer})
+		sourceDependencies = append(sourceDependencies, observeID)
 	}
-	entries = append(entries, extension.Entry{ID: ProxyID, DependsOn: append([]string(nil), sourceDependencies...), Extension: proxyExtension})
-	applicationDependencies := append([]string{ProxyID}, sourceDependencies...)
+	entries = append(entries, extension.Entry{ID: proxyID, DependsOn: append([]string(nil), sourceDependencies...), Extension: proxyExtension})
+	applicationDependencies := append([]string{proxyID}, sourceDependencies...)
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
 		ioa, err = ioaext.New(*config.IOA, application.Commands, config.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("construct IOA extension: %w", err)
 		}
-		entries = append(entries, extension.Entry{ID: IOAID, Extension: ioa})
-		applicationDependencies = append(applicationDependencies, IOAID)
+		entries = append(entries, extension.Entry{ID: ioaID, Extension: ioa})
+		applicationDependencies = append(applicationDependencies, ioaID)
 	}
 	// The profile contributes all capability entries directly to its sole Set.
 	// Registries activate after every declaration and drain before resources.
-	applicationEntries, applicationReadyID := assembly.graph(ApplicationID, applicationDependencies...)
+	applicationEntries, applicationReadyID := applicationGraph.entriesFor(applicationID, applicationDependencies...)
 	entries = append(entries, applicationEntries...)
 	if agentExtension != nil {
 		entries = append(entries, extension.Entry{
-			ID: AgentID, DependsOn: []string{applicationReadyID}, Extension: agentExtension,
+			ID: agentID, DependsOn: []string{applicationReadyID}, Extension: agentExtension,
 		})
 	}
 	var run *sessionext.Manager
@@ -188,7 +176,7 @@ func New(config Config) (*Profile, error) {
 		dependencies := []string{applicationReadyID}
 		if config.Runtime.Loop != nil {
 			config.Runtime.Loop = managedLoop
-			dependencies = append(dependencies, AgentID)
+			dependencies = append(dependencies, agentID)
 		}
 		runResource, runErr := sessionext.New(application, ioaRuntime, config.Option, config.Logger, *config.Runtime)
 		err = runErr
@@ -197,15 +185,15 @@ func New(config Config) (*Profile, error) {
 		}
 		run = runResource.Manager
 		entries = append(entries, extension.Entry{
-			ID: RuntimeID, DependsOn: dependencies,
+			ID: runtimeID, DependsOn: dependencies,
 			Extension: runResource,
 		})
 	}
-	set, err := extension.New(entries...)
+	assembled, err := profilepkg.Assemble(entries...)
 	if err != nil {
 		return nil, err
 	}
-	return &Profile{set: set, app: application, runtime: run, proxy: proxyExtension}, nil
+	return &aiscanProfile{assembly: assembled, app: application, runtime: run, proxy: proxyExtension}, nil
 }
 
 func cloneConfig(config *sessionext.Config) *sessionext.Config {
@@ -221,43 +209,28 @@ func cloneConfig(config *sessionext.Config) *sessionext.Config {
 	return &cloned
 }
 
-func (p *Profile) Load(ctx context.Context) error {
+func (p *aiscanProfile) Load(ctx context.Context) error {
 	if p == nil {
 		return fmt.Errorf("aiscan profile is required")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := p.set.Load(ctx); err != nil {
-		return err
-	}
-	p.access.Lock()
-	if !p.closing {
-		p.active = true
-	}
-	p.access.Unlock()
-	return nil
+	return p.assembly.Load(ctx)
 }
 
-func (p *Profile) App() (*apppkg.App, error) {
+func (p *aiscanProfile) App() (*apppkg.App, error) {
 	if p == nil {
 		return nil, fmt.Errorf("aiscan profile is required")
 	}
-	p.access.RLock()
-	defer p.access.RUnlock()
-	if !p.active || p.closing || p.app == nil {
+	if p.assembly == nil || !p.assembly.Available() || p.app == nil {
 		return nil, fmt.Errorf("aiscan profile is not active")
 	}
 	return p.app, nil
 }
 
-func (p *Profile) Runtime() (*sessionext.Manager, error) {
+func (p *aiscanProfile) Runtime() (*sessionext.Manager, error) {
 	if p == nil {
 		return nil, fmt.Errorf("aiscan profile is required")
 	}
-	p.access.RLock()
-	defer p.access.RUnlock()
-	if !p.active || p.closing {
+	if p.assembly == nil || !p.assembly.Available() {
 		return nil, fmt.Errorf("aiscan profile is not active")
 	}
 	if p.runtime == nil {
@@ -268,30 +241,21 @@ func (p *Profile) Runtime() (*sessionext.Manager, error) {
 
 // RegisterResourceNamespaces installs protocols backed by resources owned by
 // this active profile. Session namespaces remain owned by the runtime.
-func (p *Profile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
+func (p *aiscanProfile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
 	if p == nil {
 		return fmt.Errorf("aiscan profile is required")
 	}
-	p.access.RLock()
-	if !p.active || p.closing || p.proxy == nil {
-		p.access.RUnlock()
+	if p.assembly == nil || !p.assembly.Available() || p.proxy == nil {
 		return fmt.Errorf("aiscan profile is not active")
 	}
-	proxy := p.proxy
-	p.access.RUnlock()
-	return proxy.RegisterNamespaces(mux)
+	return p.proxy.RegisterNamespaces(mux)
 }
 
-func (p *Profile) Close(ctx context.Context) error {
+func (p *aiscanProfile) Close(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	p.access.Lock()
-	p.closing = true
-	p.active = false
-	p.access.Unlock()
-	return p.set.Close(ctx)
+	return p.assembly.Close(ctx)
 }
+
+var _ profilepkg.Application = (*aiscanProfile)(nil)

@@ -101,7 +101,7 @@ func proxyDialFor(proxyURL string) (zombiepkg.DialFunc, error) {
 }
 
 // zombie core only starts its result consumer when a file output is present,
-// while workers always publish to the result channel. Supply the system sink
+// while workers always publish to the result channel. Supply the null device
 // for normal stdout-only runs so successful and failed attempts cannot deadlock.
 func ensureOutputDrain(args []string) []string {
 	if toolargs.HasFlag(args, "-f") || toolargs.HasFlag(args, "--file") {

@@ -1,4 +1,4 @@
-// Package observe converts public execution hooks into typed AOP facts.
+// Package observe converts public execution hooks into typed AOP observations.
 package observe
 
 import (
@@ -125,7 +125,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	return nil
 }
 
-func eventFor(ctx context.Context, payload proto.Message, ref *operationpb.Ref, sidecars ...proto.Message) (*aop.Event, error) {
+func eventFor(ctx context.Context, payload proto.Message, correlation *operationpb.Ref, sidecars ...proto.Message) (*aop.Event, error) {
 	encoded, err := anypb.New(payload)
 	if err != nil {
 		return nil, err
@@ -135,8 +135,8 @@ func eventFor(ctx context.Context, payload proto.Message, ref *operationpb.Ref, 
 		SessionId: invocation.SessionID, TurnId: invocation.TurnID, Emitter: invocation.Emitter,
 		Payload: &aop.Event_Extension{Extension: encoded},
 	}
-	if ref != nil {
-		if err := aop.SetTypedExtension(event, ref); err != nil {
+	if correlation != nil {
+		if err := aop.SetTypedExtension(event, correlation); err != nil {
 			return nil, err
 		}
 	}
@@ -150,8 +150,8 @@ func eventFor(ctx context.Context, payload proto.Message, ref *operationpb.Ref, 
 	return event, nil
 }
 
-func (e *Extension) emit(ctx context.Context, payload proto.Message, ref *operationpb.Ref, sidecars ...proto.Message) {
-	event, err := eventFor(ctx, payload, ref, sidecars...)
+func (e *Extension) emit(ctx context.Context, payload proto.Message, correlation *operationpb.Ref, sidecars ...proto.Message) {
+	event, err := eventFor(ctx, payload, correlation, sidecars...)
 	if err != nil {
 		if e.diagnose != nil {
 			e.diagnose(fmt.Errorf("observe encode: %w", err))
@@ -292,11 +292,11 @@ func failure(err error) *operationpb.Failure {
 }
 
 func (e *Extension) processSnapshot(ctx context.Context, event toolhooks.ProcessEvent) {
-	if !e.FileOptions().Enabled {
+	if !e.fileOptions().Enabled {
 		return
 	}
 	id := event.Operation.GetOperationId()
-	before, err := TakeSnapshot(event.Directory, e.FileOptions())
+	before, err := TakeSnapshot(event.Directory, e.fileOptions())
 	e.mu.Lock()
 	if err == nil && !e.closed {
 		e.snapshots[id] = before
@@ -316,7 +316,7 @@ func (e *Extension) finishSnapshot(ctx context.Context, event toolhooks.ProcessC
 	if !ok {
 		return
 	}
-	after, err := TakeSnapshot(event.Process.Directory, e.FileOptions())
+	after, err := TakeSnapshot(event.Process.Directory, e.fileOptions())
 	if err != nil {
 		e.snapshotError(ctx, event.Operation, event.Process.Directory, err)
 		return
@@ -329,14 +329,14 @@ func (e *Extension) finishSnapshot(ctx context.Context, event toolhooks.ProcessC
 	}
 }
 
-func (e *Extension) snapshotError(ctx context.Context, ref *operationpb.Ref, directory string, err error) {
+func (e *Extension) snapshotError(ctx context.Context, correlation *operationpb.Ref, directory string, err error) {
 	e.emit(ctx, &filepb.Access{
 		Id: aop.EnvelopeID(), Source: filepb.AccessSource_ACCESS_SOURCE_SNAPSHOT,
 		Path: directory, WorkDir: directory, Error: err.Error(), Timestamp: timestamppb.Now(),
-	}, ref)
+	}, correlation)
 }
 
-func (e *Extension) FileOptions() FileOptions {
+func (e *Extension) fileOptions() FileOptions {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	result := e.file

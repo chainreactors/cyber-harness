@@ -63,8 +63,28 @@ func TestSQLiteStoreRejectsUnversionedSchema(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreRejectsLegacyRequestJournalSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-journal.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE aop_request_journal (request_id TEXT PRIMARY KEY);
+		PRAGMA user_version = 1;
+	`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	if _, err := NewSQLiteStore(path); err == nil || !strings.Contains(err.Error(), "unsupported sqlite schema version 1") {
+		t.Fatalf("NewSQLiteStore() error = %v, want explicit legacy schema rejection", err)
+	}
+}
+
 func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v2.db")
+	path := filepath.Join(t.TempDir(), "v3.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +99,7 @@ func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
 			updated_at TEXT NOT NULL
 		);
 		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
-		PRAGMA user_version = 2;
+		PRAGMA user_version = 3;
 	`); err != nil {
 		_ = db.Close()
 		t.Fatal(err)
@@ -99,7 +119,7 @@ func TestSQLiteStoreRejectsHistoricalSchemaVersion(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE historical_data (id TEXT PRIMARY KEY);
-		PRAGMA user_version = 3;
+		PRAGMA user_version = 4;
 	`); err != nil {
 		_ = db.Close()
 		t.Fatal(err)

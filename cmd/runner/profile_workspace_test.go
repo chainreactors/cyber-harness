@@ -1,4 +1,4 @@
-package workspace_test
+package main
 
 import (
 	"bufio"
@@ -14,7 +14,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	"github.com/chainreactors/aiscan/pkg/profile/workspace"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -26,7 +25,7 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(logs, "events.jsonl")
-	p, err := workspace.New(workspace.Config{Extensions: []string{"skills", "observe", "files"}, Files: files.Config{Directory: dir}, Output: path, SkillsDirectory: skills})
+	p, err := newWorkspaceProfile(workspaceProfileConfig{Extensions: []string{"skills", "observe", "files"}, Files: files.Config{Directory: dir}, Output: path, SkillsDirectory: skills})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestSelectedExtensionsOperateAndDrainThroughProfile(t *testing.T) {
 
 func TestSelectionRejectsInvalidConfigurationWithoutSideEffects(t *testing.T) {
 	for _, ids := range [][]string{{"unknown"}, {"files", "files"}, {"skills"}, {}, {"files", "skills"}} {
-		p, err := workspace.New(workspace.Config{Extensions: ids, Files: files.Config{Directory: t.TempDir()}})
+		p, err := newWorkspaceProfile(workspaceProfileConfig{Extensions: ids, Files: files.Config{Directory: t.TempDir()}})
 		if err == nil {
 			p.Close(context.Background())
 			t.Fatalf("accepted invalid selection: %v", ids)
@@ -113,7 +112,7 @@ func TestSelectionRejectsInvalidConfigurationWithoutSideEffects(t *testing.T) {
 	}
 	root := t.TempDir()
 	path := filepath.Join(root, "not-created", "events.jsonl")
-	if profile, err := workspace.New(workspace.Config{Files: files.Config{Directory: root}, Output: path}); err != nil {
+	if profile, err := newWorkspaceProfile(workspaceProfileConfig{Files: files.Config{Directory: root}, Output: path}); err != nil {
 		t.Fatalf("output should be independently selectable: %v", err)
 	} else {
 		_ = profile.Close(context.Background())
@@ -124,7 +123,7 @@ func TestSelectionRejectsInvalidConfigurationWithoutSideEffects(t *testing.T) {
 }
 
 func TestProfilesHaveIndependentSelectionAndFailureCleanup(t *testing.T) {
-	p, err := workspace.New(workspace.Config{Files: files.Config{Directory: t.TempDir(), ReadOnly: true}})
+	p, err := newWorkspaceProfile(workspaceProfileConfig{Files: files.Config{Directory: t.TempDir(), ReadOnly: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +131,7 @@ func TestProfilesHaveIndependentSelectionAndFailureCleanup(t *testing.T) {
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bad, err := workspace.New(workspace.Config{Extensions: []string{"files", "skills"}, Files: files.Config{Directory: t.TempDir()}, SkillsDirectory: filepath.Join(t.TempDir(), "missing")})
+	bad, err := newWorkspaceProfile(workspaceProfileConfig{Extensions: []string{"files", "skills"}, Files: files.Config{Directory: t.TempDir()}, SkillsDirectory: filepath.Join(t.TempDir(), "missing")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API
-// borrows this business interface and owns no profiles or staged resources.
+// uses this business interface and owns no profiles or staged resources.
 type ConfigBackend interface {
 	GetDistributeConfig(context.Context) (string, bool, *types.DistributeConfig, error)
 	SaveConfig(context.Context, *types.DistributeConfig) (*types.ConfigView, error)
@@ -192,6 +192,6 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
 	view.Ioa = &types.IOAView{Url: config.GetIoa().GetUrl(), TokenConfigured: config.GetIoa().GetToken() != "", NodeName: config.GetIoa().GetNodeName(), Space: config.GetIoa().GetSpace()}
-	view.Agent = &types.AgentConfig{Tools: append([]string(nil), config.GetAgent().GetTools()...), Timeout: config.GetAgent().GetTimeout(), SaveSession: config.GetAgent().GetSaveSession()}
+	view.Agent = &types.AgentConfig{Tools: append([]string(nil), config.GetAgent().GetTools()...), Timeout: config.GetAgent().GetTimeout()}
 	return view
 }

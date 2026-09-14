@@ -11,10 +11,10 @@ import (
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/aiscan/aop"
-	configpkg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -179,21 +179,21 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 	}
 }
 
-type evalSink struct {
+type sessionProbe struct {
 	sid       string
 	found     bool
 	aopEvents []*aop.Event
 }
 
-func (s *evalSink) TaskSession(string) (string, bool) { return s.sid, s.found }
-func (s *evalSink) BroadcastAOPEvent(_ string, event *aop.Event) {
+func (s *sessionProbe) TaskSession(string) (string, bool) { return s.sid, s.found }
+func (s *sessionProbe) BroadcastAOPEvent(_ string, event *aop.Event) {
 	s.aopEvents = append(s.aopEvents, event)
 }
 
 func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
-	sink := &evalSink{sid: "sess-eval", found: true}
+	probe := &sessionProbe{sid: "sess-eval", found: true}
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
+	pool.SetSessionLookup(probe)
 	remote := &remoteAgent{nodeState: newNodeState(), nodeID: "agent-1", name: "worker"}
 
 	event := &aop.Event{
@@ -204,37 +204,37 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	_ = types.SetCompactDetail(event, &types.CompactDetail{TokensBefore: 1000, TokensAfter: 400, KeptMessages: 8})
 	pool.forwardAOPFrame(remote, "turn-1", event)
 
-	if len(sink.aopEvents) == 0 {
+	if len(probe.aopEvents) == 0 {
 		t.Fatal("AOP event was not forwarded")
 	}
-	evalDetail, ok, err := types.GetEvalDetail(sink.aopEvents[0])
+	evalDetail, ok, err := types.GetEvalDetail(probe.aopEvents[0])
 	if err != nil || !ok {
-		t.Fatalf("eval extension = %#v, %v, %v", sink.aopEvents[0].Extensions, ok, err)
+		t.Fatalf("eval extension = %#v, %v, %v", probe.aopEvents[0].Extensions, ok, err)
 	}
 	if evalDetail.Round != 1 || !evalDetail.Pass || evalDetail.Reason != "found SQLi" {
 		t.Fatalf("eval detail = %#v", evalDetail)
 	}
-	compactDetail, ok, err := types.GetCompactDetail(sink.aopEvents[0])
+	compactDetail, ok, err := types.GetCompactDetail(probe.aopEvents[0])
 	if err != nil || !ok || compactDetail.TokensBefore != 1000 || compactDetail.KeptMessages != 8 {
 		t.Fatalf("compact detail = %#v, %v, %v", compactDetail, ok, err)
 	}
 }
 
 func TestForwardStandaloneScanAOPDoesNotCreateChatHistory(t *testing.T) {
-	sink := &evalSink{}
+	probe := &sessionProbe{}
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
+	pool.SetSessionLookup(probe)
 	event := &aop.Event{SessionId: "scan-not-chat", Emitter: "worker", Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}}}
 	pool.forwardAOPFrame(&remoteAgent{nodeState: newNodeState()}, "scan-not-chat", event)
-	if len(sink.aopEvents) != 0 {
-		t.Fatalf("standalone scan AOP was forwarded to chat history: %+v", sink.aopEvents)
+	if len(probe.aopEvents) != 0 {
+		t.Fatalf("standalone scan AOP was forwarded to chat history: %+v", probe.aopEvents)
 	}
 }
 
 func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
-	sink := &evalSink{}
+	probe := &sessionProbe{}
 	pool := NewAgentPool(NewHub())
-	pool.SetSessionLookup(sink)
+	pool.SetSessionLookup(probe)
 	state := newNodeState()
 	state.openSessions["session-command"] = struct{}{}
 	remote := &remoteAgent{nodeState: state}
@@ -248,17 +248,37 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 
 	pool.forwardAOPFrame(remote, "", event)
 
-	if len(sink.aopEvents) != 1 || sink.aopEvents[0].GetMessage().GetId() != "command-result" {
-		t.Fatalf("uncorrelated command event was not forwarded: %+v", sink.aopEvents)
+	if len(probe.aopEvents) != 1 || probe.aopEvents[0].GetMessage().GetId() != "command-result" {
+		t.Fatalf("uncorrelated command event was not forwarded: %+v", probe.aopEvents)
 	}
 }
 
-func newRecordingProfile(t *testing.T) (*profile.Profile, *apppkg.App, func() bool) {
+type recordingProfile struct {
+	assembly *profile.Assembly
+	app      *apppkg.App
+}
+
+func (p *recordingProfile) Load(ctx context.Context) error  { return p.assembly.Load(ctx) }
+func (p *recordingProfile) Close(ctx context.Context) error { return p.assembly.Close(ctx) }
+func (p *recordingProfile) App() (*apppkg.App, error) {
+	if !p.assembly.Available() {
+		return nil, errors.New("profile is unavailable")
+	}
+	return p.app, nil
+}
+func (*recordingProfile) Runtime() (*sessionext.Manager, error) {
+	return nil, errors.New("test profile has no runtime")
+}
+func (*recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error { return nil }
+
+func newRecordingProfile(t *testing.T) (profile.Application, *apppkg.App, func() bool) {
 	t.Helper()
-	p, err := profile.New(profile.Config{Option: &configpkg.Option{}, Application: apppkg.Config{SkipEngines: true}})
+	resource := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	assembly, err := profile.Assemble(extension.Entry{ID: "application", Extension: resource})
 	if err != nil {
 		t.Fatal(err)
 	}
+	p := &recordingProfile{assembly: assembly, app: resource.App}
 	t.Cleanup(func() { _ = p.Close(context.Background()) })
 	if err := p.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -300,7 +320,7 @@ func TestServiceCloseRetainsLeasedProfileAndRetries(t *testing.T) {
 	leased, release := svc.acquireApp()
 	defer release()
 	if leased != app {
-		t.Fatal("wrong borrowed app")
+		t.Fatal("wrong shared app")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

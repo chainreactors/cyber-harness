@@ -108,8 +108,7 @@ make full                                                  # frontend + full edi
 ```
 
 The standalone agent executable is no longer a maintained build or release
-target. Reference wiring remains in `examples/agent` and can be run manually
-with `go run ./examples/agent --help`. `make full` requires Node.js/npm and a
+target. The single AIScan product entry is `cmd/aiscan`. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
 assets are embedded into the binary. The native `record` tool is not included
 in the default full build; SDK and tool developers can build it explicitly with

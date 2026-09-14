@@ -25,8 +25,8 @@ func New(workDir, originalProxy string, capture bool, registry *hooks.Registry, 
 	return &Extension{resource: resource}, nil
 }
 
-// Hub returns the loaded extension's borrow-only routing/query capability. It
-// intentionally has no lifecycle methods.
+// Hub returns the routing/query capability. It intentionally has no lifecycle
+// methods.
 func (e *Extension) Hub() *proxytool.ProxyHub {
 	if e == nil || e.resource == nil {
 		return nil
@@ -34,9 +34,8 @@ func (e *Extension) Hub() *proxytool.ProxyHub {
 	return e.resource.ProxyHub
 }
 
-// RegisterNamespaces installs this extension's resource-control protocols on
-// one connection. The connection owns the registration lifetime; Hub continues
-// to own the underlying proxy state and storage.
+// RegisterNamespaces publishes the resource protocols owned by this extension.
+// Callers never receive a lifecycle-capable proxy resource.
 func (e *Extension) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	return proxytool.RegisterTrafficNamespace(mux, e.Hub())
 }

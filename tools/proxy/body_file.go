@@ -23,7 +23,7 @@ type bodyFile struct {
 	err         error
 }
 
-func (h *ProxyHub) recordBody(stream *bodyStream) (*bodyFile, error) {
+func (h *ProxyHub) captureBody(stream *bodyStream) (*bodyFile, error) {
 	if h.stopping.Load() {
 		return nil, errors.New("traffic: capture is stopping")
 	}
@@ -34,7 +34,7 @@ func (h *ProxyHub) recordBody(stream *bodyStream) (*bodyFile, error) {
 	select {
 	case h.bodySlots <- struct{}{}:
 	default:
-		return nil, fmt.Errorf("traffic: concurrent body recorder limit exceeded")
+		return nil, fmt.Errorf("traffic: concurrent body capture limit exceeded")
 	}
 	body := &bodyFile{slots: h.bodySlots}
 	limit := h.storage.BodyMaxBytes

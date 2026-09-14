@@ -15,12 +15,11 @@ Read 返回自有字节；Write 在返回前借用输入。所有本地路径必
 
 真实 IO 完成时直接发 `core/tool/hooks.FileEvent`。数据只在同步 hook dispatch 期间借用；
 未安装 hook 时不计算 digest、不序列化、不复制。`pkg/exts/observe` 在被选择时计算成功写入
-的 digest，并生成带 `aop.operation.Ref` 的 AOP file Access 事实。没有独立 FileAudit、
-Journal、filetools 或 workspacefiles 路径。
+的 digest，并生成带 `aop.operation.Ref` 的 AOP file Access 事实。没有独立文件日志、
+外围补记器或另一条文件事件路径。
 
 | Package | Role |
 | --- | --- |
 | `tools/files` | 文件实现与 Tool 声明 |
 | `pkg/exts/files` | 生命周期与 Registry 贡献 |
-| `pkg/profile/files` | 最小 headless 组合 |
-| `pkg/profile/workspace` | runner 的 files/observe/skills 显式组合 |
+| `cmd/runner` | runner 的 files/observe/skills 显式组合 |

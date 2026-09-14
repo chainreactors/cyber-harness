@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"google.golang.org/protobuf/proto"
@@ -47,7 +47,7 @@ func (s *Service) SaveConfig(ctx context.Context, config *types.DistributeConfig
 
 // closePending runs under configGate. A failed drain keeps the candidate owned.
 func (s *Service) closePending(ctx context.Context) error {
-	if s.pending == nil {
+	if profile.IsNil(s.pending) {
 		return nil
 	}
 	err := s.pending.Close(ctx)
@@ -92,16 +92,16 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 	// Candidate cleanup has its own budget: the request may already be canceled.
 	// An unfinished candidate remains owned here for Close or the next Save.
 	defer func() {
-		if s.pending != nil {
+		if !profile.IsNil(s.pending) {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			resultErr = errors.Join(resultErr, s.closePending(cleanupCtx))
 		}
 	}()
-	var next *profile.Profile
+	var next profile.Application
 	if s.buildProfile != nil {
 		next, err = s.buildProfile(ctx, prepared)
-		if next != nil {
+		if !profile.IsNil(next) {
 			s.appMu.Lock()
 			_, owned := s.profiles[next]
 			s.appMu.Unlock()
@@ -109,11 +109,13 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 				return nil, errors.Join(err, fmt.Errorf("profile builder returned an already owned profile"))
 			}
 		}
-		s.pending = next
+		if !profile.IsNil(next) {
+			s.pending = next
+		}
 		if err != nil {
 			return nil, managementapi.NewError(managementapi.CodeFailedPrecondition, fmt.Errorf("reload aiscan runtime: %w", err))
 		}
-		if next == nil {
+		if profile.IsNil(next) {
 			return nil, fmt.Errorf("reload aiscan runtime returned no app")
 		}
 		if _, err := next.App(); err != nil {
@@ -124,7 +126,7 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		return nil, err
 	}
 	committed = true
-	if next != nil {
+	if !profile.IsNil(next) {
 		if err := s.swapProfile(next); err != nil {
 			return nil, fmt.Errorf("config committed but activation failed: %w", err)
 		}

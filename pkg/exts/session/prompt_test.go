@@ -163,7 +163,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 			}
 			defer rtSet.Close(context.Background())
 
-			if count := strings.Count(rt.systemPrompt, "## Skill: aiscan"); count != 1 {
+			if count := strings.Count(rt.Manager.systemPrompt, "## Skill: aiscan"); count != 1 {
 				t.Fatalf("base skill count = %d, want 1", count)
 			}
 			for _, want := range []string{
@@ -175,7 +175,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				"## Verification Standard",
 				"## Evidence & Findings",
 			} {
-				if !strings.Contains(rt.systemPrompt, want) {
+				if !strings.Contains(rt.Manager.systemPrompt, want) {
 					t.Fatalf("system prompt missing base skill rule %q", want)
 				}
 			}
@@ -185,7 +185,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				"## Post-Scan Analysis",
 				"map the application before focused testing",
 			} {
-				if strings.Contains(rt.systemPrompt, unwanted) {
+				if strings.Contains(rt.Manager.systemPrompt, unwanted) {
 					t.Fatalf("system prompt contains SOP guidance %q", unwanted)
 				}
 			}

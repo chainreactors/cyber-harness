@@ -499,7 +499,7 @@ func (p *AgentPool) dispatchMessage(nodeID, taskID string, message protobuf.Mess
 }
 
 // BroadcastConfigReload sends the committed protobuf config on the same FIFO as
-// every other application message. Agents never fetch a second REST DTO.
+// every other application message. Agents do not fetch a parallel REST shape.
 func (p *AgentPool) BroadcastConfigReload(config *types.DistributeConfig) int {
 	if config == nil {
 		return 0

@@ -2,12 +2,12 @@
 
 `session.New(application, ioa, option, logger, config)` 构造无副作用的 `Resource`。
 AIScan Profile 将它放在已加载 App 和选定的 Agent 扩展之后，由同一 `core/extension.Set` 管理，
-只向调用方借出 `Resource.Manager`。`Resource` 是唯一拥有 Load/Close 的扩展；
+只向调用方发布 `Resource.Manager`。`Resource` 是唯一拥有 Load/Close 的扩展；
 `Manager` 只提供会话操作，不能关闭宿主，也不实现另一套 Extension。
 
 Manager 拥有 Session、Run、Inbox、调度器、有界请求准入、取消、历史重建和自己的 IOA
 订阅。Agent 执行通过 Profile 注入的 `agent.Loop` 调用，其宿主生命周期由 `pkg/exts/agent`
-拥有。App、Provider、Tool、Command、Loop 与可选 IOA Service 都是借入资源；Manager 不关闭它们，
+拥有。App、Provider、Tool、Command、Loop 与可选 IOA Runtime 都由 Profile 注入并拥有；Manager 不关闭它们，
 也不创建嵌套生命周期图。
 
 ## API 与数据流
@@ -42,6 +42,9 @@ Session 句柄绑定具体实例，不再按逻辑 ID 自动重绑定。显式�
 发起操作的句柄；其他旧句柄必须重新 `EnsureSession`。不再公开 `Session.Agent()`，
 调用方通过 Session API 操作和读取状态，不能取得内部可变 Agent。
 
+`/clear` 和 `/compact` 只经 `Session.Command` 的会话轮换入口处理；排队命令分发器
+不再保留原地清空或压缩历史的另一套实现。历史不足时的压缩仍是无副作用的空操作。
+
 `Config.Loop` 为 nil 时不启用推理，会话状态和控制命令仍可使用；失败执行不会将输入遗留
 到 Inbox。Loop 由 Profile 选择，
 不提供会话级覆盖入口；Session 不绕过已安装的 Agent 生命周期扩展。
@@ -49,5 +52,5 @@ Session 句柄绑定具体实例，不再按逻辑 ID 自动重绑定。显式�
 `Config.PrimarySessionID` 默认 `task`；交互入口显式选择 `main-repl`。Manager 不识别终端模式，
 也不创建 Console。
 
-当前边界清理不等于全部状态实现迁移：会话内部仍使用 `agent.Agent` 保存跨轮数据，
-业务执行适配及旧 Agent 实现的移除不属于本轮通用生命周期修复。
+会话内部的 `agent.Agent` 只保存跨轮领域状态，不是宿主、Extension 或第二套生命周期图；
+其寿命完全受 Manager 的 Session 状态约束。

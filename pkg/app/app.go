@@ -52,7 +52,7 @@ type App struct {
 // Resource owns App initialization and shutdown. Profiles retain Resource and
 // publish App, whose API contains no lifecycle operations.
 type Resource struct {
-	*App
+	App *App
 }
 
 var _ extension.Extension = (*Resource)(nil)

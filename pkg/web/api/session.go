@@ -23,13 +23,15 @@ const (
 
 var ErrTurnNotFound = errors.New("turn not found")
 
-type RequestJournal interface {
+// RequestLedger is the idempotency boundary for mutating AOP requests. It is
+// not an event output or observation store.
+type RequestLedger interface {
 	LoadAOPRequest(context.Context, string, string, []byte, proto.Message) (bool, bool, error)
 	SaveAOPRequest(context.Context, string, string, []byte, proto.Message) error
 }
 
 type SessionStore interface {
-	RequestJournal
+	RequestLedger
 	ListSessionPage(context.Context, int, int, bool) ([]*types.SessionRecord, bool, error)
 	GetSession(context.Context, string) (*types.SessionRecord, error)
 	CreateSession(context.Context, *types.SessionRecord) error
@@ -128,7 +130,7 @@ func (s *Sessions) OpenSession(ctx context.Context, requestID string, request *a
 	replayed := new(aop.OpenSessionResponse)
 	hash, found, conflict, err := BeginRequest(ctx, s.store, "OpenSession", requestID, request, replayed)
 	if err != nil {
-		return nil, fmt.Errorf("load request journal: %w", err)
+		return nil, fmt.Errorf("load request ledger: %w", err)
 	}
 	if found {
 		return replayed, nil
@@ -138,7 +140,7 @@ func (s *Sessions) OpenSession(ctx context.Context, requestID string, request *a
 	}
 	finish := func(response *aop.OpenSessionResponse) (*aop.OpenSessionResponse, error) {
 		if err := FinishRequest(ctx, s.store, "OpenSession", requestID, hash, response); err != nil {
-			return nil, fmt.Errorf("save request journal: %w", err)
+			return nil, fmt.Errorf("save request ledger: %w", err)
 		}
 		return response, nil
 	}
@@ -220,7 +222,7 @@ func (s *Sessions) RunTurn(ctx context.Context, requestID string, request *aop.R
 	replayed := new(aop.RunTurnResponse)
 	hash, found, conflict, err := BeginRequest(ctx, s.store, "RunTurn", requestID, request, replayed)
 	if err != nil {
-		return nil, fmt.Errorf("load request journal: %w", err)
+		return nil, fmt.Errorf("load request ledger: %w", err)
 	}
 	if found {
 		return replayed, nil
@@ -230,7 +232,7 @@ func (s *Sessions) RunTurn(ctx context.Context, requestID string, request *aop.R
 	}
 	finish := func(response *aop.RunTurnResponse) (*aop.RunTurnResponse, error) {
 		if err := FinishRequest(ctx, s.store, "RunTurn", requestID, hash, response); err != nil {
-			return nil, fmt.Errorf("save request journal: %w", err)
+			return nil, fmt.Errorf("save request ledger: %w", err)
 		}
 		return response, nil
 	}
@@ -293,7 +295,7 @@ func (s *Sessions) CancelTurn(ctx context.Context, requestID string, request *ao
 	replayed := new(aop.CancelTurnResponse)
 	hash, found, conflict, err := BeginRequest(ctx, s.store, "CancelTurn", requestID, request, replayed)
 	if err != nil {
-		return nil, fmt.Errorf("load request journal: %w", err)
+		return nil, fmt.Errorf("load request ledger: %w", err)
 	}
 	if found {
 		return replayed, nil
@@ -303,7 +305,7 @@ func (s *Sessions) CancelTurn(ctx context.Context, requestID string, request *ao
 	}
 	finish := func(response *aop.CancelTurnResponse) (*aop.CancelTurnResponse, error) {
 		if err := FinishRequest(ctx, s.store, "CancelTurn", requestID, hash, response); err != nil {
-			return nil, fmt.Errorf("save request journal: %w", err)
+			return nil, fmt.Errorf("save request ledger: %w", err)
 		}
 		return response, nil
 	}
@@ -339,7 +341,7 @@ func (s *Sessions) CloseSession(ctx context.Context, requestID string, request *
 	replayed := new(aop.CloseSessionResponse)
 	hash, found, conflict, err := BeginRequest(ctx, s.store, "CloseSession", requestID, request, replayed)
 	if err != nil {
-		return nil, fmt.Errorf("load request journal: %w", err)
+		return nil, fmt.Errorf("load request ledger: %w", err)
 	}
 	if found {
 		return replayed, nil
@@ -349,7 +351,7 @@ func (s *Sessions) CloseSession(ctx context.Context, requestID string, request *
 	}
 	finish := func(response *aop.CloseSessionResponse) (*aop.CloseSessionResponse, error) {
 		if err := FinishRequest(ctx, s.store, "CloseSession", requestID, hash, response); err != nil {
-			return nil, fmt.Errorf("save request journal: %w", err)
+			return nil, fmt.Errorf("save request ledger: %w", err)
 		}
 		return response, nil
 	}
@@ -586,7 +588,7 @@ func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequ
 	}
 }
 
-func BeginRequest(ctx context.Context, store RequestJournal, method, requestID string, request, response proto.Message) ([]byte, bool, bool, error) {
+func BeginRequest(ctx context.Context, store RequestLedger, method, requestID string, request, response proto.Message) ([]byte, bool, bool, error) {
 	raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(request)
 	if err != nil {
 		return nil, false, false, err
@@ -596,7 +598,7 @@ func BeginRequest(ctx context.Context, store RequestJournal, method, requestID s
 	return digest[:], found, conflict, err
 }
 
-func FinishRequest(ctx context.Context, store RequestJournal, method, requestID string, hash []byte, response proto.Message) error {
+func FinishRequest(ctx context.Context, store RequestLedger, method, requestID string, hash []byte, response proto.Message) error {
 	return store.SaveAOPRequest(ctx, requestID, method, hash, response)
 }
 

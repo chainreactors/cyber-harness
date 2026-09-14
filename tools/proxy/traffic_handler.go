@@ -85,7 +85,7 @@ func (h *trafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send a
 func (h *trafficHandler) sendFlow(replyTo string, send aop.SendFunc, flow Flow) error {
 	env, err := aop.Wrap(trafficEnvID(), replyTo, &traffic.ProtocolMessage{
 		Message: &traffic.ProtocolMessage_FlowRecord{FlowRecord: &traffic.FlowRecord{
-			Operation: flow.Ref,
+			Operation: flow.Operation,
 			Flow:      h.hub.store.flowToProto(&flow),
 		}},
 	})
@@ -110,7 +110,7 @@ func (h *trafficHandler) snapshot(errMsg string) *traffic.State {
 		if errMsg != "" {
 			errMsg += "; "
 		}
-		errMsg += "traffic metadata recorder stopped: " + err.Error()
+		errMsg += "traffic index unavailable: " + err.Error()
 	}
 	s := h.hub.state
 	mode := traffic.CaptureMode_CAPTURE_MODE_RELAY

@@ -24,5 +24,5 @@ accepted and put the Extension after its resources in the same `extension.Set`. 
 Loop remains usable without the lifecycle plugin when its caller owns execution.
 
 ```text
-go test -race ./pkg/exts/agent ./pkg/profile/aiscan ./pkg/exts/session
+go test -race ./pkg/exts/agent ./pkg/profile ./pkg/exts/session ./cmd/aiscan
 ```

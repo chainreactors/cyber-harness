@@ -27,7 +27,7 @@ type SQLiteStore struct {
 }
 
 // The shipped schema is a single canonical layout. Version drift is an error.
-const sqliteSchemaVersion = 1
+const sqliteSchemaVersion = 2
 
 var (
 	dbJSONMarshal   = protojson.MarshalOptions{UseProtoNames: true}
@@ -42,9 +42,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	orm := bun.NewDB(db, sqlitedialect.New())
-	if err := initializeSchemaV1(orm, db); err != nil {
+	if err := initializeSchema(orm, db); err != nil {
 		_ = orm.Close()
-		return nil, fmt.Errorf("initialize sqlite schema v1: %w", err)
+		return nil, fmt.Errorf("initialize sqlite schema v%d: %w", sqliteSchemaVersion, err)
 	}
 	var foreignKeys int
 	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
@@ -57,9 +57,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db, orm: orm}, nil
 }
 
-// initializeSchemaV1 creates the only supported schema for a brand-new empty
+// initializeSchema creates the only supported schema for a brand-new empty
 // database. It never upgrades or repairs an existing database.
-func initializeSchemaV1(orm *bun.DB, db *sql.DB) error {
+func initializeSchema(orm *bun.DB, db *sql.DB) error {
 	var version int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
@@ -68,7 +68,7 @@ func initializeSchemaV1(orm *bun.DB, db *sql.DB) error {
 		return nil
 	}
 	if version != 0 {
-		return fmt.Errorf("unsupported sqlite schema version %d; database must be recreated with canonical schema v1", version)
+		return fmt.Errorf("unsupported sqlite schema version %d; database must be recreated with canonical schema v%d", version, sqliteSchemaVersion)
 	}
 	var tables int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).Scan(&tables); err != nil {
@@ -84,7 +84,7 @@ func initializeSchemaV1(orm *bun.DB, db *sql.DB) error {
 			(*sessionModel)(nil),
 			(*aopEventModel)(nil),
 			(*sessionScanModel)(nil),
-			(*requestJournalModel)(nil),
+			(*requestLedgerModel)(nil),
 			(*scoNodeModel)(nil),
 			(*scoObservationModel)(nil),
 		}
@@ -150,7 +150,7 @@ func (s *SQLiteStore) LoadAOPRequest(ctx context.Context, requestID, method stri
 	if s == nil || strings.TrimSpace(requestID) == "" || response == nil {
 		return false, false, nil
 	}
-	var model requestJournalModel
+	var model requestLedgerModel
 	err = s.orm.NewSelect().Model(&model).Where("request_id = ?", requestID).Limit(1).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, false, nil
@@ -175,7 +175,7 @@ func (s *SQLiteStore) SaveAOPRequest(ctx context.Context, requestID, method stri
 	if err != nil {
 		return err
 	}
-	_, err = s.orm.NewInsert().Model(&requestJournalModel{
+	_, err = s.orm.NewInsert().Model(&requestLedgerModel{
 		RequestID: requestID, Method: method, RequestHash: requestHash,
 		ResponseJSON: raw, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}).Exec(ctx)

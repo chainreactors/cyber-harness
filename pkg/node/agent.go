@@ -16,17 +16,17 @@ import (
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/console"
 	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 )
 
-func RunWebSocket(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, option, logger)
+func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
+	return runRemoteAgent(ctx, factory, option, logger)
 }
 
-func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Logger) error {
+func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
 	if err := resolveRemoteAgentURLs(option); err != nil {
 		return err
 	}
@@ -38,12 +38,10 @@ func runRemoteAgent(ctx context.Context, option *cfg.Option, logger telemetry.Lo
 	features := apppkg.RuntimeFeatures{
 		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
 	}
-	option.SaveSession = true
-	profileConfig := profile.FromOption(option, features, &sessionext.Config{
-		PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{},
-	}, logger)
-	profileConfig.IOA = remoteIOAConfig(option)
-	product, err := profile.New(profileConfig)
+	product, err := factory.Build(profile.Request{
+		Option: option, Features: features, Logger: logger,
+		Runtime: &sessionext.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
+	})
 	if err != nil {
 		return err
 	}
@@ -229,19 +227,4 @@ func webNodeID(option *cfg.Option) (string, error) {
 		return nodeID, nil
 	}
 	return "", fmt.Errorf("node_id is required; set --node-id or --node-name")
-}
-
-func remoteIOAConfig(option *cfg.Option) *ioatools.Config {
-	if option == nil || option.IOAURL == "" {
-		return nil
-	}
-	return &ioatools.Config{
-		URL:              option.IOAURL,
-		NodeID:           option.IOANodeID,
-		NodeName:         option.IOANodeName,
-		Space:            option.Space,
-		RegisterCommands: true,
-		AutoRegister:     true,
-		NodeMeta:         map[string]any{"client": "aiscan", "transport": "websocket"},
-	}
 }

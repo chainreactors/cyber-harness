@@ -11,13 +11,14 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/host"
+	"github.com/chainreactors/aiscan/pkg/profile"
 )
 
 // RunStdio assembles the product runtime around the transport-only host.
-func RunStdio(ctx context.Context, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
+func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}

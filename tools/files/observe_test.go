@@ -14,10 +14,11 @@ import (
 
 func TestFileHookReportsCommittedOperationsAndFailures(t *testing.T) {
 	registry := corehooks.New()
-	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 4}, registry)
+	resource, err := New(Config{Directory: t.TempDir(), MaxBytes: 4}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := resource.Files
 	var got []toolhooks.FileEvent
 	sub := toolhooks.FileAccessObserved.On(registry, "test", func(ctx context.Context, event toolhooks.FileEvent) (struct{}, error) {
 		if event.Err == nil && ctx.Err() != nil {
@@ -28,7 +29,7 @@ func TestFileHookReportsCommittedOperationsAndFailures(t *testing.T) {
 		return struct{}{}, nil
 	})
 	defer sub.Close(context.Background())
-	fSet := filesystemSet(t, f)
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -67,17 +68,18 @@ func TestFileHookReportsCommittedOperationsAndFailures(t *testing.T) {
 		}
 	}
 	if string(got[2].Data) != "two" {
-		t.Fatal("hook did not copy borrowed bytes")
+		t.Fatal("hook did not copy callback-scoped bytes")
 	}
 }
 
 func TestCloseRetainsRootUntilFileHookCompletes(t *testing.T) {
 	registry := corehooks.New()
-	f, err := New(Config{Directory: t.TempDir()}, registry)
+	resource, err := New(Config{Directory: t.TempDir()}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fSet := filesystemSet(t, f)
+	f := resource.Files
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +94,7 @@ func TestCloseRetainsRootUntilFileHookCompletes(t *testing.T) {
 	<-entered
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	closeErr := f.Close(ctx)
+	closeErr := resource.Close(ctx)
 	subscriptionErr := sub.Close(ctx)
 	close(release)
 	writeErr := <-writeDone

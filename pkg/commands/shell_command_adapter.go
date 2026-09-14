@@ -208,7 +208,7 @@ func (b *shellCommandAdapter) handle(parent context.Context, conn net.Conn) {
 	stdout := &shellCommandAdapterStreamWriter{writer: writer, frameType: "stdout"}
 	stderr := &shellCommandAdapterStreamWriter{writer: writer, frameType: "stderr"}
 	execution := newExecution(nil, command.Name, normalizeNoColor(command.Name, header.Args), header.Dir, nil)
-	execution.ID = operation.InvocationFromContext(ctx).CallID
+	execution.bindID(operation.InvocationFromContext(ctx).CallID)
 	execution.setIO(stdinReader, stdout, stderr)
 	_, runErr := b.registry.Execute(ctx, command.Name, execution)
 	_ = stdinReader.Close()

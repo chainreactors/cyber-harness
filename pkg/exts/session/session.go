@@ -189,19 +189,6 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 			"Runtime commands:\n  /status\n  /clear\n  /compact [focus]\n  /eval [criteria|off]\n  /loop [interval prompt|list|stop name]\n  !<command>")
 	case "/status":
 		return commandText(line, CommandPresentationPreformatted, s.statusText())
-	case "/clear":
-		s.state.agent.Reset()
-		return commandText(line, CommandPresentationPlain, "Context cleared.")
-	case "/compact":
-		if len(s.state.agent.MessagesSnapshot()) < 4 {
-			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).")
-		}
-		result, err := s.state.agent.Compact(ctx, agent.CompactConfig{CustomInstructions: strings.TrimSpace(strings.Join(values, " "))})
-		if err != nil {
-			return commandOutcome{err: err}
-		}
-		return commandText(line, CommandPresentationPlain, fmt.Sprintf(
-			"Compacted: ~%d -> ~%d tokens (%d messages kept)", result.TokensBefore, result.TokensAfter, result.KeptMessages))
 	case "/eval", "/goal":
 		criteria := strings.TrimSpace(strings.Join(values, " "))
 		switch criteria {

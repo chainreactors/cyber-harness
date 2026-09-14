@@ -204,7 +204,7 @@ func (a *captureAddon) Requestheaders(f *mitmproxy.Flow) {
 		return
 	}
 	// Successful CONNECT and WebSocket handshakes are connection-level
-	// lifecycles. Inner HTTPS requests and the separate WebSocket recorder are
+	// lifecycles. Inner HTTPS requests and the separate WebSocket capture are
 	// responsible for their own records; retaining this outer request would
 	// otherwise leak a pending capture until the process exits.
 	if strings.EqualFold(f.Request.Method, http.MethodConnect) ||
@@ -274,7 +274,7 @@ type captureState struct {
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 	correlation := hub.resolveCorrelation(correlationTokenOf(f))
 	flow := Flow{
-		Timestamp: f.StartTime, Ref: correlation.ref, Invocation: correlation.invocation,
+		Timestamp: f.StartTime, Operation: correlation.operation, Invocation: correlation.invocation,
 		cancel: correlation.cancel, release: correlation.finish,
 	}
 	if f.ConnContext != nil && f.ConnContext.ClientConn != nil {
@@ -312,7 +312,7 @@ func (s *captureState) bodyReader(in io.Reader, side string) io.Reader {
 	if s.bodies[i] == nil {
 		s.bodies[i] = &bodyStream{}
 		var err error
-		s.files[i], err = s.hub.recordBody(s.bodies[i])
+		s.files[i], err = s.hub.captureBody(s.bodies[i])
 		s.captureErr = errors.Join(s.captureErr, err)
 	}
 	return io.TeeReader(in, s.bodies[i])
@@ -422,10 +422,10 @@ func appendPreview(dst, src []byte, max int) []byte {
 
 // Flow is the hub's stored capture: the canonical exchange plus the hub-only
 // metadata (attribution, timing, TLS) the mitm query verbs filter and format
-// on. Ref is the sole wire correlation authority.
+// on. Operation is the sole wire correlation authority.
 type Flow struct {
 	traffic.Exchange
-	Ref         *operationpb.Ref
+	Operation   *operationpb.Ref
 	Invocation  operation.Invocation
 	Timestamp   time.Time
 	Host        string

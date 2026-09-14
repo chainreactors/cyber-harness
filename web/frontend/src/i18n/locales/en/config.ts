@@ -59,7 +59,6 @@ export default {
   space: 'Space',
   timeout: 'Timeout (seconds)',
   optionalTools: 'Optional Tools',
-  autoSaveSessions: 'Auto-save sessions',
   // placeholder hints
   configuredKeep: 'configured; leave blank to keep',
   apiKeyRequired: 'API key required',

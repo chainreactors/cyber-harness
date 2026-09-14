@@ -272,7 +272,9 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
 	var output bytes.Buffer
-	_, err = New().Run(ctx, &commands.Execution{
+	command := New()
+	command.WorkDir = t.TempDir()
+	_, err = command.Run(ctx, &commands.Execution{
 		Args:   []string{"-u", srv.URL, "-hl", "-d", "2", "-timeout", "15", "-ct", "45s", "-j"},
 		Stdout: &output,
 		Stderr: &output,

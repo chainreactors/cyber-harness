@@ -3,56 +3,6 @@
 
 ## Table of Contents
 
-- [aop/chat.proto](#aop_chat-proto)
-    - [CancelTurnRequest](#aop-CancelTurnRequest)
-    - [CancelTurnResponse](#aop-CancelTurnResponse)
-    - [CloseSessionRequest](#aop-CloseSessionRequest)
-    - [CloseSessionResponse](#aop-CloseSessionResponse)
-    - [EventDelivery](#aop-EventDelivery)
-    - [ListEventsRequest](#aop-ListEventsRequest)
-    - [ListEventsResponse](#aop-ListEventsResponse)
-    - [OpenSessionRequest](#aop-OpenSessionRequest)
-    - [OpenSessionResponse](#aop-OpenSessionResponse)
-    - [Rejection](#aop-Rejection)
-    - [RunTurnRequest](#aop-RunTurnRequest)
-    - [RunTurnResponse](#aop-RunTurnResponse)
-    - [Session](#aop-Session)
-    - [TurnReceipt](#aop-TurnReceipt)
-    - [WatchEventsRequest](#aop-WatchEventsRequest)
-  
-- [aop/content.proto](#aop_content-proto)
-    - [Annotation](#aop-Annotation)
-    - [Content](#aop-Content)
-    - [MediaContent](#aop-MediaContent)
-    - [Message](#aop-Message)
-    - [ReasoningContent](#aop-ReasoningContent)
-    - [Resource](#aop-Resource)
-    - [TextContent](#aop-TextContent)
-    - [ToolCall](#aop-ToolCall)
-    - [ToolDefinition](#aop-ToolDefinition)
-    - [ToolResult](#aop-ToolResult)
-  
-- [aop/envelope.proto](#aop_envelope-proto)
-    - [Envelope](#aop-Envelope)
-  
-- [aop/event.proto](#aop_event-proto)
-    - [Event](#aop-Event)
-    - [MessageDelta](#aop-MessageDelta)
-    - [ProtocolError](#aop-ProtocolError)
-    - [ProviderFrame](#aop-ProviderFrame)
-    - [ProviderMetadata](#aop-ProviderMetadata)
-    - [SessionEnded](#aop-SessionEnded)
-    - [SessionStarted](#aop-SessionStarted)
-    - [Status](#aop-Status)
-    - [TokenUsage](#aop-TokenUsage)
-    - [TokenUsage.DetailEntry](#aop-TokenUsage-DetailEntry)
-    - [ToolCallDelta](#aop-ToolCallDelta)
-    - [TurnEnded](#aop-TurnEnded)
-    - [TurnStarted](#aop-TurnStarted)
-  
-    - [DeltaOperation](#aop-DeltaOperation)
-    - [Direction](#aop-Direction)
-  
 - [aop/protocol.proto](#aop_protocol-proto)
     - [AgentAccepted](#aop-AgentAccepted)
     - [AgentHello](#aop-AgentHello)
@@ -61,20 +11,18 @@
     - [AgentStatus](#aop-AgentStatus)
     - [CancelOperation](#aop-CancelOperation)
     - [ProtocolMessage](#aop-ProtocolMessage)
-  
-- [aop/value.proto](#aop_value-proto)
-    - [EncodedValue](#aop-EncodedValue)
-  
+
 - [aop/exec/protocol.proto](#aop_exec_protocol-proto)
     - [Output](#aop-exec-Output)
     - [ProtocolMessage](#aop-exec-ProtocolMessage)
     - [Request](#aop-exec-Request)
     - [Request.EnvEntry](#aop-exec-Request-EnvEntry)
     - [Result](#aop-exec-Result)
-  
+
     - [Stream](#aop-exec-Stream)
-  
+
 - [aop/file/protocol.proto](#aop_file_protocol-proto)
+    - [Access](#aop-file-Access)
     - [Entry](#aop-file-Entry)
     - [ListRequest](#aop-file-ListRequest)
     - [MkdirRequest](#aop-file-MkdirRequest)
@@ -83,7 +31,21 @@
     - [Result](#aop-file-Result)
     - [UploadRequest](#aop-file-UploadRequest)
     - [WriteRequest](#aop-file-WriteRequest)
-  
+
+    - [AccessOp](#aop-file-AccessOp)
+    - [AccessSource](#aop-file-AccessSource)
+
+- [aop/operation/protocol.proto](#aop_operation_protocol-proto)
+    - [Completed](#aop-operation-Completed)
+    - [Decision](#aop-operation-Decision)
+    - [Failure](#aop-operation-Failure)
+    - [Ref](#aop-operation-Ref)
+    - [Started](#aop-operation-Started)
+
+    - [Correlation](#aop-operation-Correlation)
+    - [DecisionAction](#aop-operation-DecisionAction)
+    - [FailureKind](#aop-operation-FailureKind)
+
 - [aop/pty/protocol.proto](#aop_pty_protocol-proto)
     - [Attach](#aop-pty-Attach)
     - [Attached](#aop-pty-Attached)
@@ -103,804 +65,38 @@
     - [Session](#aop-pty-Session)
     - [Sessions](#aop-pty-Sessions)
     - [State](#aop-pty-State)
-  
+
 - [aop/sco/protocol.proto](#aop_sco_protocol-proto)
     - [Nodes](#aop-sco-Nodes)
     - [ProtocolMessage](#aop-sco-ProtocolMessage)
-  
+
 - [aop/tool/protocol.proto](#aop_tool_protocol-proto)
+    - [Artifact](#aop-tool-Artifact)
     - [Call](#aop-tool-Call)
+    - [Loot](#aop-tool-Loot)
     - [Progress](#aop-tool-Progress)
     - [ProtocolMessage](#aop-tool-ProtocolMessage)
-  
+
+- [aop/traffic/protocol.proto](#aop_traffic_protocol-proto)
+    - [CaptureConfig](#aop-traffic-CaptureConfig)
+    - [CaptureState](#aop-traffic-CaptureState)
+    - [Configure](#aop-traffic-Configure)
+    - [Flow](#aop-traffic-Flow)
+    - [FlowFilter](#aop-traffic-FlowFilter)
+    - [FlowRecord](#aop-traffic-FlowRecord)
+    - [Header](#aop-traffic-Header)
+    - [HttpRequest](#aop-traffic-HttpRequest)
+    - [HttpResponse](#aop-traffic-HttpResponse)
+    - [ProtocolMessage](#aop-traffic-ProtocolMessage)
+    - [Query](#aop-traffic-Query)
+    - [RoutingConfig](#aop-traffic-RoutingConfig)
+    - [RoutingState](#aop-traffic-RoutingState)
+    - [State](#aop-traffic-State)
+
+    - [CaptureMode](#aop-traffic-CaptureMode)
+    - [RoutingMode](#aop-traffic-RoutingMode)
+
 - [Scalar Value Types](#scalar-value-types)
-
-
-
-<a name="aop_chat-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## aop/chat.proto
-
-
-
-<a name="aop-CancelTurnRequest"></a>
-
-### CancelTurnRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| turn_id | [string](#string) |  |  |
-| reason | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-CancelTurnResponse"></a>
-
-### CancelTurnResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| accepted | [TurnReceipt](#aop-TurnReceipt) |  |  |
-| rejected | [Rejection](#aop-Rejection) |  |  |
-
-
-
-
-
-
-<a name="aop-CloseSessionRequest"></a>
-
-### CloseSessionRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| reason | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-CloseSessionResponse"></a>
-
-### CloseSessionResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| accepted | [Session](#aop-Session) |  |  |
-| rejected | [Rejection](#aop-Rejection) |  |  |
-
-
-
-
-
-
-<a name="aop-EventDelivery"></a>
-
-### EventDelivery
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| cursor | [string](#string) |  |  |
-| event | [Event](#aop-Event) |  |  |
-
-
-
-
-
-
-<a name="aop-ListEventsRequest"></a>
-
-### ListEventsRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| after_cursor | [string](#string) |  |  |
-| limit | [uint32](#uint32) |  |  |
-
-
-
-
-
-
-<a name="aop-ListEventsResponse"></a>
-
-### ListEventsResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| events | [EventDelivery](#aop-EventDelivery) | repeated |  |
-| next_cursor | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-OpenSessionRequest"></a>
-
-### OpenSessionRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| node_id | [string](#string) |  |  |
-| title | [string](#string) |  |  |
-| parent_session_id | [string](#string) |  |  |
-| parent_tool_call_id | [string](#string) |  |  |
-| extensions | [google.protobuf.Any](#google-protobuf-Any) | repeated |  |
-
-
-
-
-
-
-<a name="aop-OpenSessionResponse"></a>
-
-### OpenSessionResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| accepted | [Session](#aop-Session) |  |  |
-| rejected | [Rejection](#aop-Rejection) |  |  |
-
-
-
-
-
-
-<a name="aop-Rejection"></a>
-
-### Rejection
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| code | [string](#string) |  |  |
-| message | [string](#string) |  |  |
-| retryable | [bool](#bool) |  |  |
-
-
-
-
-
-
-<a name="aop-RunTurnRequest"></a>
-
-### RunTurnRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| turn_id | [string](#string) |  |  |
-| input | [Message](#aop-Message) |  |  |
-| continue_session | [bool](#bool) |  |  |
-| max_turns | [uint32](#uint32) |  |  |
-| extensions | [google.protobuf.Any](#google-protobuf-Any) | repeated |  |
-
-
-
-
-
-
-<a name="aop-RunTurnResponse"></a>
-
-### RunTurnResponse
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| accepted | [TurnReceipt](#aop-TurnReceipt) |  |  |
-| rejected | [Rejection](#aop-Rejection) |  |  |
-
-
-
-
-
-
-<a name="aop-Session"></a>
-
-### Session
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  |  |
-| state | [string](#string) |  |  |
-| node_id | [string](#string) |  |  |
-| title | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-TurnReceipt"></a>
-
-### TurnReceipt
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| turn_id | [string](#string) |  |  |
-| state | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-WatchEventsRequest"></a>
-
-### WatchEventsRequest
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| session_id | [string](#string) |  |  |
-| after_cursor | [string](#string) |  |  |
-
-
-
-
-
- 
-
- 
-
- 
-
- 
-
-
-
-<a name="aop_content-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## aop/content.proto
-
-
-
-<a name="aop-Annotation"></a>
-
-### Annotation
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [string](#string) |  |  |
-| start | [uint64](#uint64) |  |  |
-| end | [uint64](#uint64) |  |  |
-| title | [string](#string) |  |  |
-| uri | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-Content"></a>
-
-### Content
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| text | [TextContent](#aop-TextContent) |  |  |
-| reasoning | [ReasoningContent](#aop-ReasoningContent) |  |  |
-| refusal | [string](#string) |  |  |
-| media | [MediaContent](#aop-MediaContent) |  |  |
-| tool_call | [ToolCall](#aop-ToolCall) |  |  |
-| tool_result | [ToolResult](#aop-ToolResult) |  |  |
-
-
-
-
-
-
-<a name="aop-MediaContent"></a>
-
-### MediaContent
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| kind | [string](#string) |  |  |
-| resource | [Resource](#aop-Resource) |  |  |
-| transcript | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-Message"></a>
-
-### Message
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  |  |
-| role | [string](#string) |  |  |
-| name | [string](#string) |  |  |
-| content | [Content](#aop-Content) | repeated |  |
-
-
-
-
-
-
-<a name="aop-ReasoningContent"></a>
-
-### ReasoningContent
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| text | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-Resource"></a>
-
-### Resource
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| data | [bytes](#bytes) |  |  |
-| uri | [string](#string) |  |  |
-| media_type | [string](#string) |  |  |
-| filename | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-TextContent"></a>
-
-### TextContent
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| text | [string](#string) |  |  |
-| annotations | [Annotation](#aop-Annotation) | repeated |  |
-
-
-
-
-
-
-<a name="aop-ToolCall"></a>
-
-### ToolCall
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  |  |
-| name | [string](#string) |  |  |
-| kind | [string](#string) |  |  |
-| arguments | [EncodedValue](#aop-EncodedValue) |  |  |
-| working_directory | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-ToolDefinition"></a>
-
-### ToolDefinition
-ToolDefinition is the provider-neutral function/tool contract advertised by
-an Agent. Provider adapters translate this schema at their wire boundary.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [string](#string) |  |  |
-| name | [string](#string) |  |  |
-| description | [string](#string) |  |  |
-| input_schema | [EncodedValue](#aop-EncodedValue) |  |  |
-
-
-
-
-
-
-<a name="aop-ToolResult"></a>
-
-### ToolResult
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| call_id | [string](#string) |  |  |
-| output | [Content](#aop-Content) | repeated |  |
-| is_error | [bool](#bool) |  |  |
-| name | [string](#string) |  |  |
-| duration_ms | [uint64](#uint64) |  |  |
-| terminate | [bool](#bool) |  |  |
-
-
-
-
-
- 
-
- 
-
- 
-
- 
-
-
-
-<a name="aop_envelope-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## aop/envelope.proto
-
-
-
-<a name="aop-Envelope"></a>
-
-### Envelope
-Envelope is the only AOP wire envelope. Business namespaces are carried by
-Any and never extend this message with a global oneof.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  |  |
-| reply_to | [string](#string) |  |  |
-| delivery_cursor | [string](#string) |  |  |
-| payload | [google.protobuf.Any](#google-protobuf-Any) |  |  |
-
-
-
-
-
- 
-
- 
-
- 
-
- 
-
-
-
-<a name="aop_event-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## aop/event.proto
-
-
-
-<a name="aop-Event"></a>
-
-### Event
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| id | [string](#string) |  |  |
-| emitted_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| session_id | [string](#string) |  |  |
-| turn_id | [string](#string) |  |  |
-| emitter | [string](#string) |  |  |
-| seq | [uint64](#uint64) |  |  |
-| extensions | [google.protobuf.Any](#google-protobuf-Any) | repeated |  |
-| session_started | [SessionStarted](#aop-SessionStarted) |  |  |
-| session_ended | [SessionEnded](#aop-SessionEnded) |  |  |
-| turn_started | [TurnStarted](#aop-TurnStarted) |  |  |
-| turn_ended | [TurnEnded](#aop-TurnEnded) |  |  |
-| message | [Message](#aop-Message) |  |  |
-| message_delta | [MessageDelta](#aop-MessageDelta) |  |  |
-| tool_call | [ToolCall](#aop-ToolCall) |  |  |
-| tool_call_delta | [ToolCallDelta](#aop-ToolCallDelta) |  |  |
-| tool_result | [ToolResult](#aop-ToolResult) |  |  |
-| usage | [TokenUsage](#aop-TokenUsage) |  |  |
-| error | [ProtocolError](#aop-ProtocolError) |  |  |
-| status | [Status](#aop-Status) |  |  |
-| provider_frame | [ProviderFrame](#aop-ProviderFrame) |  |  |
-| extension | [google.protobuf.Any](#google-protobuf-Any) |  |  |
-
-
-
-
-
-
-<a name="aop-MessageDelta"></a>
-
-### MessageDelta
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| message_id | [string](#string) |  |  |
-| content_index | [uint32](#uint32) |  |  |
-| operation | [DeltaOperation](#aop-DeltaOperation) |  |  |
-| text | [string](#string) |  |  |
-| reasoning | [string](#string) |  |  |
-| refusal | [string](#string) |  |  |
-| data | [bytes](#bytes) |  |  |
-| tool_arguments | [string](#string) |  |  |
-| content | [Content](#aop-Content) |  |  |
-
-
-
-
-
-
-<a name="aop-ProtocolError"></a>
-
-### ProtocolError
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| code | [string](#string) |  |  |
-| message | [string](#string) |  |  |
-| retryable | [bool](#bool) |  |  |
-
-
-
-
-
-
-<a name="aop-ProviderFrame"></a>
-
-### ProviderFrame
-ProviderFrame preserves one exact provider body or stream frame.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| provider | [string](#string) |  |  |
-| protocol | [string](#string) |  |  |
-| event_type | [string](#string) |  |  |
-| direction | [Direction](#aop-Direction) |  |  |
-| transport | [string](#string) |  |  |
-| payload | [bytes](#bytes) |  |  |
-| media_type | [string](#string) |  |  |
-| metadata | [ProviderMetadata](#aop-ProviderMetadata) | repeated |  |
-
-
-
-
-
-
-<a name="aop-ProviderMetadata"></a>
-
-### ProviderMetadata
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  |  |
-| value | [bytes](#bytes) |  |  |
-
-
-
-
-
-
-<a name="aop-SessionEnded"></a>
-
-### SessionEnded
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| reason | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-SessionStarted"></a>
-
-### SessionStarted
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| model | [string](#string) |  |  |
-| parent_session_id | [string](#string) |  |  |
-| parent_tool_call_id | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-Status"></a>
-
-### Status
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| state | [string](#string) |  |  |
-
-
-
-
-
-
-<a name="aop-TokenUsage"></a>
-
-### TokenUsage
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| input_tokens | [uint64](#uint64) |  |  |
-| output_tokens | [uint64](#uint64) |  |  |
-| total_tokens | [uint64](#uint64) |  |  |
-| model | [string](#string) |  |  |
-| detail | [TokenUsage.DetailEntry](#aop-TokenUsage-DetailEntry) | repeated |  |
-
-
-
-
-
-
-<a name="aop-TokenUsage-DetailEntry"></a>
-
-### TokenUsage.DetailEntry
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| key | [string](#string) |  |  |
-| value | [uint64](#uint64) |  |  |
-
-
-
-
-
-
-<a name="aop-ToolCallDelta"></a>
-
-### ToolCallDelta
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| call_id | [string](#string) |  |  |
-| index | [uint32](#uint32) |  |  |
-| name | [string](#string) |  |  |
-| arguments | [bytes](#bytes) |  |  |
-
-
-
-
-
-
-<a name="aop-TurnEnded"></a>
-
-### TurnEnded
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| stop_reason | [string](#string) |  |  |
-| error | [ProtocolError](#aop-ProtocolError) |  |  |
-| usage | [TokenUsage](#aop-TokenUsage) |  |  |
-| context_tokens | [uint64](#uint64) |  |  |
-
-
-
-
-
-
-<a name="aop-TurnStarted"></a>
-
-### TurnStarted
-
-
-
-
-
-
- 
-
-
-<a name="aop-DeltaOperation"></a>
-
-### DeltaOperation
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| DELTA_OPERATION_UNSPECIFIED | 0 |  |
-| DELTA_OPERATION_START | 1 |  |
-| DELTA_OPERATION_APPEND | 2 |  |
-| DELTA_OPERATION_REPLACE | 3 |  |
-| DELTA_OPERATION_END | 4 |  |
-
-
-
-<a name="aop-Direction"></a>
-
-### Direction
-
-
-| Name | Number | Description |
-| ---- | ------ | ----------- |
-| DIRECTION_UNSPECIFIED | 0 |  |
-| DIRECTION_REQUEST | 1 |  |
-| DIRECTION_RESPONSE | 2 |  |
-
-
- 
-
- 
-
- 
 
 
 
@@ -1057,46 +253,13 @@ packages define their own ProtocolMessage and do not modify this one.
 
 
 
- 
-
- 
-
- 
-
- 
-
-
-
-<a name="aop_value-proto"></a>
-<p align="right"><a href="#top">Top</a></p>
-
-## aop/value.proto
-
-
-
-<a name="aop-EncodedValue"></a>
-
-### EncodedValue
-EncodedValue carries genuinely opaque data whose schema is not protobuf,
-notably provider/tool JSON arguments and JSON Schema documents.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| data | [bytes](#bytes) |  |  |
-| media_type | [string](#string) |  |  |
 
 
 
 
 
- 
 
- 
 
- 
-
- 
 
 
 
@@ -1190,7 +353,7 @@ notably provider/tool JSON arguments and JSON Schema documents.
 
 
 
- 
+
 
 
 <a name="aop-exec-Stream"></a>
@@ -1205,11 +368,11 @@ notably provider/tool JSON arguments and JSON Schema documents.
 | STREAM_STDERR | 2 |  |
 
 
- 
 
- 
 
- 
+
+
+
 
 
 
@@ -1217,6 +380,31 @@ notably provider/tool JSON arguments and JSON Schema documents.
 <p align="right"><a href="#top">Top</a></p>
 
 ## aop/file/protocol.proto
+
+
+
+<a name="aop-file-Access"></a>
+
+### Access
+Access is one observed file access.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  |  |
+| op | [AccessOp](#aop-file-AccessOp) |  |  |
+| source | [AccessSource](#aop-file-AccessSource) |  |  |
+| path | [string](#string) |  | path is absolute; work_dir is the execution&#39;s working directory, carried so a consumer can present the path relative to it without guessing. |
+| work_dir | [string](#string) |  |  |
+| size | [int64](#int64) |  | file size after the access |
+| bytes | [int64](#int64) |  | bytes read or written by this access, 0 when unknown |
+| edits | [uint32](#uint32) |  | patch count for EDIT |
+| digest | [string](#string) |  | sha256 of the content after a write, when computed |
+| error | [string](#string) |  |  |
+| timestamp | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+
+
+
 
 
 
@@ -1296,6 +484,8 @@ notably provider/tool JSON arguments and JSON Schema documents.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | path | [string](#string) |  |  |
+| offset | [int64](#int64) |  | offset and limit enable bounded reads for large artifacts. A zero limit preserves the original whole-file behavior for older clients. |
+| limit | [int32](#int32) |  |  |
 
 
 
@@ -1316,6 +506,8 @@ notably provider/tool JSON arguments and JSON Schema documents.
 | data | [bytes](#bytes) |  |  |
 | entries | [Entry](#aop-file-Entry) | repeated |  |
 | media_type | [string](#string) |  |  |
+| offset | [int64](#int64) |  | offset is the position of data within the file; size remains the total file size. eof marks the final chunk. |
+| eof | [bool](#bool) |  |  |
 
 
 
@@ -1355,13 +547,206 @@ notably provider/tool JSON arguments and JSON Schema documents.
 
 
 
- 
 
- 
 
- 
 
- 
+<a name="aop-file-AccessOp"></a>
+
+### AccessOp
+AccessOp is what happened to the path. EDIT is a targeted patch and WRITE a
+full-content overwrite; both are distinguished from CREATE, which says the
+path did not exist beforehand.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ACCESS_OP_UNSPECIFIED | 0 |  |
+| ACCESS_OP_READ | 1 |  |
+| ACCESS_OP_WRITE | 2 |  |
+| ACCESS_OP_EDIT | 3 |  |
+| ACCESS_OP_CREATE | 4 |  |
+| ACCESS_OP_DELETE | 5 |  |
+
+
+
+<a name="aop-file-AccessSource"></a>
+
+### AccessSource
+AccessSource is how the access was observed, which is also how far it can be
+trusted. TOOL is an exact record taken inside the tool that performed it.
+SNAPSHOT is derived by diffing the work dir around a shell execution: the
+path and the operation are real, but attribution to that execution is an
+inference, and reads are invisible to it entirely. CONTROL is a file request
+this node served for a peer rather than anything the agent did.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ACCESS_SOURCE_UNSPECIFIED | 0 |  |
+| ACCESS_SOURCE_TOOL | 1 |  |
+| ACCESS_SOURCE_SNAPSHOT | 2 |  |
+| ACCESS_SOURCE_CONTROL | 3 |  |
+
+
+
+
+
+
+
+
+
+
+<a name="aop_operation_protocol-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## aop/operation/protocol.proto
+
+
+
+<a name="aop-operation-Completed"></a>
+
+### Completed
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| kind | [string](#string) |  |  |
+| name | [string](#string) |  |  |
+| started_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  | Absent means the underlying operation never started (denial, cancellation before admission, or a start failure). |
+| failure | [Failure](#aop-operation-Failure) |  | Absent means the execution boundary returned normally. Domain success is still defined by ToolResult, CommandResult or the native process state. |
+
+
+
+
+
+
+<a name="aop-operation-Decision"></a>
+
+### Decision
+Decision is the common observation shape for a policy decision. Policy-specific
+rationale is carried as a typed Event extension owned by that policy.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| point | [string](#string) |  |  |
+| policy | [string](#string) |  |  |
+| action | [DecisionAction](#aop-operation-DecisionAction) |  |  |
+| failure | [Failure](#aop-operation-Failure) |  |  |
+
+
+
+
+
+
+<a name="aop-operation-Failure"></a>
+
+### Failure
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| kind | [FailureKind](#aop-operation-FailureKind) |  |  |
+| message | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="aop-operation-Ref"></a>
+
+### Ref
+Ref is the single wire authority for execution correlation. SessionID,
+TurnID and emitter remain on the enclosing aop.Event.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| call_id | [string](#string) |  |  |
+| operation_id | [string](#string) |  |  |
+| parent_operation_id | [string](#string) |  |  |
+| resource_id | [string](#string) |  |  |
+| correlation | [Correlation](#aop-operation-Correlation) |  |  |
+
+
+
+
+
+
+<a name="aop-operation-Started"></a>
+
+### Started
+Started and Completed are open AOP extension payloads. kind is a stable,
+extension-defined identifier such as &#34;tool&#34;, &#34;command&#34; or &#34;process&#34;; it is
+not a closed enum. Event.emitted_at is the actual transition timestamp.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| kind | [string](#string) |  |  |
+| name | [string](#string) |  |  |
+
+
+
+
+
+
+
+
+<a name="aop-operation-Correlation"></a>
+
+### Correlation
+Correlation reports whether the source carried a trustworthy operation
+identity. An explicitly created root operation remains EXPLICIT even when it
+has no SessionID or CallID. UNATTRIBUTED means the source could not resolve
+the origin and must never be rebound to a newer call.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CORRELATION_UNSPECIFIED | 0 |  |
+| CORRELATION_EXPLICIT | 1 |  |
+| CORRELATION_UNATTRIBUTED | 2 |  |
+
+
+
+<a name="aop-operation-DecisionAction"></a>
+
+### DecisionAction
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| DECISION_ACTION_UNSPECIFIED | 0 |  |
+| DECISION_ACTION_ALLOW | 1 |  |
+| DECISION_ACTION_DENY | 2 |  |
+| DECISION_ACTION_CANCEL | 3 |  |
+
+
+
+<a name="aop-operation-FailureKind"></a>
+
+### FailureKind
+FailureKind is deliberately small. Extensions express narrower semantics as
+their own typed messages in aop.Event.extensions instead of extending a
+central outcome taxonomy.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| FAILURE_KIND_UNSPECIFIED | 0 |  |
+| FAILURE_KIND_ERROR | 1 |  |
+| FAILURE_KIND_DENIED | 2 |  |
+| FAILURE_KIND_START_FAILED | 3 |  |
+| FAILURE_KIND_CANCELED | 4 |  |
+| FAILURE_KIND_TIMEOUT | 5 |  |
+| FAILURE_KIND_PANIC | 6 |  |
+
+
+
+
+
+
+
 
 
 
@@ -1691,13 +1076,13 @@ notably provider/tool JSON arguments and JSON Schema documents.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -1739,13 +1124,13 @@ schema into AOP. Each entry uses the declared media type.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
 
 
 
@@ -1753,6 +1138,28 @@ schema into AOP. Each entry uses the declared media type.
 <p align="right"><a href="#top">Top</a></p>
 
 ## aop/tool/protocol.proto
+
+
+
+<a name="aop-tool-Artifact"></a>
+
+### Artifact
+Artifact carries one scanner-native structured record. Nodes remain thin:
+only the server normalizes these records into canonical SCO documents.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| tool | [string](#string) |  |  |
+| kind | [string](#string) |  |  |
+| target | [string](#string) |  |  |
+| data | [bytes](#bytes) |  |  |
+| media_type | [string](#string) |  |  |
+| timestamp | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| result_id | [string](#string) |  |  |
+
+
+
 
 
 
@@ -1773,6 +1180,29 @@ schema into AOP. Each entry uses the declared media type.
 
 
 
+<a name="aop-tool-Loot"></a>
+
+### Loot
+Loot marks a scanner-native artifact as valuable without replacing or
+duplicating the observed artifact. result_id joins the marker to Artifact.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| result_id | [string](#string) |  |  |
+| tool | [string](#string) |  |  |
+| kind | [string](#string) |  |  |
+| target | [string](#string) |  |  |
+| priority | [string](#string) |  |  |
+| tags | [string](#string) | repeated |  |
+| description | [string](#string) |  |  |
+| verification_status | [string](#string) |  |  |
+
+
+
+
+
+
 <a name="aop-tool-Progress"></a>
 
 ### Progress
@@ -1785,6 +1215,7 @@ schema into AOP. Each entry uses the declared media type.
 | target | [string](#string) |  |  |
 | timestamp | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
 | text | [string](#string) |  |  |
+| call_id | [string](#string) |  |  |
 
 
 
@@ -1806,13 +1237,316 @@ schema into AOP. Each entry uses the declared media type.
 
 
 
- 
 
- 
 
- 
 
- 
+
+
+
+
+
+
+
+<a name="aop_traffic_protocol-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## aop/traffic/protocol.proto
+
+
+
+<a name="aop-traffic-CaptureConfig"></a>
+
+### CaptureConfig
+CaptureConfig sets the hub&#39;s capture behaviour. It flips the runtime record
+flag; the listener address never changes so in-flight children are unaffected.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [CaptureMode](#aop-traffic-CaptureMode) |  |  |
+| decrypt_https | [bool](#bool) |  | intercept CONNECT to MITM-decrypt HTTPS |
+| filter | [FlowFilter](#aop-traffic-FlowFilter) |  | record only matching flows |
+
+
+
+
+
+
+<a name="aop-traffic-CaptureState"></a>
+
+### CaptureState
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [CaptureMode](#aop-traffic-CaptureMode) |  |  |
+| capturing | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-Configure"></a>
+
+### Configure
+Configure declares desired routing and/or capture state. An absent sub-message
+leaves that facet unchanged; the handler replies with the resulting State.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| routing | [RoutingConfig](#aop-traffic-RoutingConfig) |  |  |
+| capture | [CaptureConfig](#aop-traffic-CaptureConfig) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-Flow"></a>
+
+### Flow
+Flow is one captured request/response exchange. Its nested shape mirrors the
+consumer&#39;s http.exchange form so a consumer can map it directly. Correlation
+is carried once by aop.operation.Ref on the containing AOP Event. Fields 2-11
+were the former embedded correlation and pre-nesting flat shape.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| id | [string](#string) |  |  |
+| error | [string](#string) |  |  |
+| complete | [bool](#bool) |  |  |
+| timestamp | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
+| request | [HttpRequest](#aop-traffic-HttpRequest) |  |  |
+| response | [HttpResponse](#aop-traffic-HttpResponse) |  | absent when no response was received |
+
+
+
+
+
+
+<a name="aop-traffic-FlowFilter"></a>
+
+### FlowFilter
+FlowFilter bounds which flows are recorded (CaptureConfig) or returned (Query).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| host | [string](#string) |  | host substring |
+| status | [string](#string) |  | status class or code, e.g. &#34;2xx&#34;, &#34;404&#34;, &#34;5xx&#34; |
+| type | [string](#string) |  | Content-Type substring |
+| last | [uint32](#uint32) |  | return only the last N flows (Query) |
+
+
+
+
+
+
+<a name="aop-traffic-FlowRecord"></a>
+
+### FlowRecord
+FlowRecord is the resource-query representation. Live observations use the
+same Flow as Event.extension and carry this Ref in Event.extensions.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| operation | [aop.operation.Ref](#aop-operation-Ref) |  |  |
+| flow | [Flow](#aop-traffic-Flow) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-Header"></a>
+
+### Header
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  |  |
+| value | [string](#string) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-HttpRequest"></a>
+
+### HttpRequest
+HttpRequest is the request half of an exchange.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| method | [string](#string) |  |  |
+| url | [string](#string) |  |  |
+| protocol | [string](#string) |  |  |
+| headers | [Header](#aop-traffic-Header) | repeated |  |
+| body | [bytes](#bytes) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-HttpResponse"></a>
+
+### HttpResponse
+HttpResponse is the response half of an exchange. It is optional on Flow: a
+request that never got a response (timeout, refused connection, one-way
+capture) has no response half.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| status_code | [int32](#int32) |  |  |
+| reason_phrase | [string](#string) |  |  |
+| headers | [Header](#aop-traffic-Header) | repeated |  |
+| body | [bytes](#bytes) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-ProtocolMessage"></a>
+
+### ProtocolMessage
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| configure | [Configure](#aop-traffic-Configure) |  |  |
+| query | [Query](#aop-traffic-Query) |  |  |
+| state | [State](#aop-traffic-State) |  |  |
+| flow_record | [FlowRecord](#aop-traffic-FlowRecord) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-Query"></a>
+
+### Query
+Query requests a snapshot: the current State and/or the recorded flows.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| state | [bool](#bool) |  | request current State |
+| flows | [bool](#bool) |  | request recorded flows (batched Flow replies) |
+| filter | [FlowFilter](#aop-traffic-FlowFilter) |  | filter for flows = true |
+
+
+
+
+
+
+<a name="aop-traffic-RoutingConfig"></a>
+
+### RoutingConfig
+RoutingConfig steers the egress chain (State in tools/proxy). Fields beyond
+mode/url/selector are the auto-mode subscription filters.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| mode | [RoutingMode](#aop-traffic-RoutingMode) |  |  |
+| url | [string](#string) |  | proxy URL (PROXY) or subscription URL (SUBSCRIBE/AUTO) |
+| selector | [string](#string) |  | node name or 1-based index (SWITCH) |
+| type | [string](#string) |  | protocol filter, e.g. &#34;trojan,vless&#34; (AUTO) |
+| name | [string](#string) |  | node name keyword (AUTO) |
+| country | [string](#string) |  | ISO 3166-1 alpha-2 filter, e.g. &#34;HK,JP&#34; (AUTO) |
+| strategy | [string](#string) |  | adaptive|url-test|round-robin|random (AUTO) |
+
+
+
+
+
+
+<a name="aop-traffic-RoutingState"></a>
+
+### RoutingState
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| active_node | [string](#string) |  |  |
+| egress_url | [string](#string) |  |  |
+| auto | [bool](#bool) |  |  |
+
+
+
+
+
+
+<a name="aop-traffic-State"></a>
+
+### State
+State is the runner&#39;s reply to Configure/Query.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| routing | [RoutingState](#aop-traffic-RoutingState) |  |  |
+| capture | [CaptureState](#aop-traffic-CaptureState) |  |  |
+| error | [string](#string) |  |  |
+
+
+
+
+
+
+
+
+<a name="aop-traffic-CaptureMode"></a>
+
+### CaptureMode
+CaptureMode selects what the hub does with traffic it routes. RELAY forwards
+undecrypted and records nothing; RECORD intercepts (MITM) and stores flows.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CAPTURE_MODE_UNSPECIFIED | 0 | leave capture unchanged (Configure) |
+| CAPTURE_MODE_RELAY | 1 | route only: no interception, no record |
+| CAPTURE_MODE_RECORD | 2 | intercept &#43; record |
+
+
+
+<a name="aop-traffic-RoutingMode"></a>
+
+### RoutingMode
+RoutingMode selects how the egress chain is set. UNSPECIFIED leaves routing
+unchanged so a Configure can steer capture without touching the proxy.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| ROUTING_MODE_UNSPECIFIED | 0 |  |
+| ROUTING_MODE_DIRECT | 1 | revert to the original/direct egress |
+| ROUTING_MODE_PROXY | 2 | single proxy URL (url) |
+| ROUTING_MODE_SUBSCRIBE | 3 | load a clash subscription (url), no switch |
+| ROUTING_MODE_AUTO | 4 | subscription &#43; adaptive load balancing |
+| ROUTING_MODE_SWITCH | 5 | switch active node within a loaded subscription |
+| ROUTING_MODE_CLEAR | 6 | clear subscription, revert to original |
+
+
+
+
+
+
+
 
 
 
@@ -1835,4 +1569,3 @@ schema into AOP. Each entry uses the declared media type.
 | <a name="bool" /> bool |  | bool | boolean | boolean | bool | bool | boolean | TrueClass/FalseClass |
 | <a name="string" /> string | A string must always contain UTF-8 encoded or 7-bit ASCII text. | string | String | str/unicode | string | string | string | String (UTF-8) |
 | <a name="bytes" /> bytes | May contain any arbitrary sequence of bytes. | string | ByteString | str | []byte | ByteString | string | String (ASCII-8BIT) |
-

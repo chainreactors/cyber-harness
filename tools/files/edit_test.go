@@ -42,11 +42,12 @@ func TestEditsUseOriginalAndRejectAmbiguousChanges(t *testing.T) {
 
 func TestEditBoundPreservesFileAndReportsOneOperation(t *testing.T) {
 	registry := corehooks.New()
-	f, err := New(Config{Directory: t.TempDir(), MaxBytes: 8}, registry)
+	resource, err := New(Config{Directory: t.TempDir(), MaxBytes: 8}, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fSet := filesystemSet(t, f)
+	f := resource.Files
+	fSet := filesystemSet(t, resource)
 	if err := fSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +79,9 @@ func TestEditBoundPreservesFileAndReportsOneOperation(t *testing.T) {
 	if len(observed) != 1 || observed[0].Op != filepb.AccessOp_ACCESS_OP_EDIT || observed[0].Err != nil || string(observed[0].Data) != "done" {
 		t.Fatalf("successful edit observation: %+v", observed)
 	}
-	ro, _ := New(Config{Directory: f.config.Directory, ReadOnly: true}, nil)
-	roSet := filesystemSet(t, ro)
+	roResource, _ := New(Config{Directory: f.config.Directory, ReadOnly: true}, nil)
+	ro := roResource.Files
+	roSet := filesystemSet(t, roResource)
 	if err := roSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

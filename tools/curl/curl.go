@@ -11,11 +11,11 @@ import (
 	"github.com/chainreactors/aiscan/tools/toolargs"
 )
 
-// Command is a pure-Go, evidence-first reimplementation of curl. It exposes a
+// Command is a pure-Go, observation-native reimplementation of curl. It exposes a
 // curl-shaped flag surface so the agent uses it exactly as it would use system
 // curl (this command shadows the system binary), while every request routes
 // through the runner's MITM hub — attributed by tool-call id and captured as
-// http.exchange evidence — and carries a browser-shaped header set by default
+// typed HTTP observation — and carries a browser-shaped header set by default
 // instead of announcing itself as a scanner.
 type Command struct {
 	toolargs.Base
@@ -50,7 +50,7 @@ func (c *Command) WithEvents(events aop.EventEmitter) *Command {
 func (c *Command) Name() string { return "curl" }
 
 func (c *Command) Usage() string {
-	return `curl - transfer a URL (pure-Go, browser-naturalized, evidence-first)
+	return `curl - transfer a URL (pure-Go, browser-naturalized, observation-native)
 
 Usage: curl [options] <url>
 
@@ -89,12 +89,12 @@ Supported options:
       --version, -V            Print the compatibility version and exit
 
 Unlisted flags are rejected rather than silently ignored. Requests are routed
-through the runner proxy and recorded as HTTP evidence; a browser User-Agent and
+through the runner proxy and published as a typed HTTP observation; a browser User-Agent and
 header set are applied unless you override them.`
 }
 
 func (c *Command) QuickReference() string {
-	return `### curl — HTTP requests (pure-Go, browser-naturalized, evidence-first)
+	return `### curl — HTTP requests (pure-Go, browser-naturalized, observation-native)
   curl <url>                     GET a URL
   curl -X POST -d 'a=1' <url>    POST form data
   curl -H 'Authorization: ...' <url>

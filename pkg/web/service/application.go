@@ -10,7 +10,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
+	profile "github.com/chainreactors/aiscan/pkg/profile"
 	web "github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 )
@@ -31,7 +31,7 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 	}
 	s.appMu.Lock()
 	p := s.profile
-	if p == nil {
+	if profile.IsNil(p) {
 		s.appMu.Unlock()
 		return nil, func() {}
 	}
@@ -63,8 +63,8 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 
 // swapProfile transfers ownership only after validation. Retirement errors are
 // retained by Service; they do not undo publication of a new profile.
-func (s *Service) swapProfile(next *profile.Profile) error {
-	if s == nil || next == nil {
+func (s *Service) swapProfile(next profile.Application) error {
+	if s == nil || profile.IsNil(next) {
 		return fmt.Errorf("service and profile are required")
 	}
 	if _, err := next.App(); err != nil {
@@ -101,7 +101,7 @@ func (s *Service) applicationChangedLocked() {
 	s.appChanged = make(chan struct{})
 }
 
-func (s *Service) closeApplication(ctx context.Context, p *profile.Profile) error {
+func (s *Service) closeApplication(ctx context.Context, p profile.Application) error {
 	select {
 	case s.profileClose <- struct{}{}:
 		defer func() { <-s.profileClose }()

@@ -169,7 +169,6 @@ misc:
 | `--output-format <格式>` | One-shot stdout：`text`、`json` 或 `stream-json` |
 | `--json` | One-shot `--output-format=json` 的别名 |
 | `-r, --resume <路径>` | 只读 AOP 历史并创建 continuation，不修改源文件或隐式开启输出 |
-| `--ephemeral` | 不自动持久化交互会话；显式 `--output` 仍然生效 |
 
 `context_window` 使用真实整数，例如 128K 窗口填写 `128000`，不是 `128K`。所有正整数都可保存；Web 设置页会对小于 8192 的值显示非阻塞风险提示。
 

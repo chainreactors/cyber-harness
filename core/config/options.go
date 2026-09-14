@@ -95,7 +95,6 @@ type AgentOptions struct {
 	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
-	SaveSession           bool     `long:"save-session" config:"save_session" description:"Auto-select a .aiscan/sessions/*.jsonl recording path"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
 }
 
@@ -154,7 +153,6 @@ type MiscOptions struct {
 	OutputFormat string `long:"output-format" description:"One-shot agent output format: text, json, stream-json" default:"text"`
 	JSON         bool   `long:"json" description:"Alias for one-shot agent --output-format=json"`
 	Observe      string `long:"observe" description:"Comma-separated observations: tools,commands,processes,files,http"`
-	Ephemeral    bool   `long:"ephemeral" description:"Do not persist session history unless --output is explicit"`
 	Debug        bool   `long:"debug" config:"debug" description:"Enable debug logging"`
 	Verbose      []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
 	Quiet        bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`

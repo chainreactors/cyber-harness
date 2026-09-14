@@ -30,13 +30,14 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-func TestAppBorrowsProfileRegistries(t *testing.T) {
+func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
 	hookRegistry := hooks.New()
 	commandRegistry := commands.NewRegistry(hookRegistry)
 	toolRegistry := toolset.NewRegistry(hookRegistry)
-	application := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
+	resource := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
 		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
 	})
+	application := resource.App
 	if application.Commands != commandRegistry || application.Tools != toolRegistry || application.Hooks != hookRegistry {
 		t.Fatal("application replaced profile-owned registries")
 	}
@@ -134,10 +135,11 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
+	appResource := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
+	app := appResource.App
 	appSet := extensiontest.Set(t,
 		extension.Entry{ID: "output", Extension: recorder},
-		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: app},
+		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: appResource},
 	)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)

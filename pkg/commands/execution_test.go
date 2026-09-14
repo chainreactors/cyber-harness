@@ -30,7 +30,7 @@ func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := newExecution(manager, "parent", nil, t.TempDir(), nil)
-	parent.bindSession(info.ID)
+	parent.bindID(info.ID)
 	var child *Execution
 	registry, _ := loadTestRegistry(t, commandGroup("child", "test", Command{Name: "child", Run: func(_ context.Context, execution *Execution) (any, error) {
 		child = execution
@@ -65,6 +65,33 @@ func TestInvocationIDDoesNotImplyTerminalSession(t *testing.T) {
 		if snapshot, ok := execution.Session(); ok || snapshot.ID != "" {
 			t.Fatalf("invented terminal session: %+v, %v", snapshot, ok)
 		}
+	}
+}
+
+func TestCommandCorrelationWaitsForManagedSessionIdentity(t *testing.T) {
+	execution := newExecution(nil, "probe", nil, "", nil)
+	result := make(chan string, 1)
+	go func() {
+		id, err := execution.waitID(t.Context())
+		if err != nil {
+			result <- "error: " + err.Error()
+			return
+		}
+		result <- id
+	}()
+	select {
+	case id := <-result:
+		t.Fatalf("session identity returned before bind: %q", id)
+	case <-time.After(20 * time.Millisecond):
+	}
+	execution.bindID("session-1")
+	select {
+	case id := <-result:
+		if id != "session-1" {
+			t.Fatalf("session identity = %q", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("session identity did not unblock after bind")
 	}
 }
 

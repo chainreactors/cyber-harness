@@ -43,7 +43,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("open artifact ingestor: %v", err)
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
-	service, _, handler := newHeadlessHandler(store, nil, ingestor, "test-token")
+	service, _, handler := newHeadlessHandler(store, ingestor, "test-token")
 	t.Cleanup(func() {
 		if err := service.Close(context.Background()); err != nil {
 			t.Error(err)

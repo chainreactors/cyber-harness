@@ -120,7 +120,7 @@ var ProcessStartedControl = corehooks.Point[ProcessEvent, Cancellation]{
 var ProcessStartedObserved = corehooks.Point[ProcessEvent, struct{}]{Kind: "process.started"}
 var ProcessCompleted = corehooks.Point[ProcessCompletion, struct{}]{Kind: "process.completed"}
 
-// FileEvent.Data is borrowed until synchronous dispatch returns. Consumers
+// FileEvent.Data is valid until synchronous dispatch returns. Consumers
 // retaining it must copy it. Expensive digesting only belongs in an installed
 // observer.
 type FileEvent struct {

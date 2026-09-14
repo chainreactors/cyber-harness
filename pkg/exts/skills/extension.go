@@ -23,15 +23,45 @@ type Extension struct {
 	root            *os.Root
 	mounted, closed bool
 	attempted       bool
-	names           []string
+	catalog         *Catalog
+}
+
+// Catalog is the lifecycle-free, read-only projection published by a skills
+// extension.
+type Catalog struct {
+	mu    sync.RWMutex
+	names []string
 }
 
 func New(filesystem *files.Files, directory string) (*Extension, error) {
 	if filesystem == nil || !filepath.IsAbs(directory) {
 		return nil, fmt.Errorf("skills require a file service and absolute directory")
 	}
-	return &Extension{files: filesystem, directory: directory}, nil
+	return &Extension{files: filesystem, directory: directory, catalog: &Catalog{}}, nil
 }
+
+func (m *Extension) Catalog() *Catalog {
+	if m == nil {
+		return nil
+	}
+	return m.catalog
+}
+
+func (c *Catalog) Locations() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.names...)
+}
+
+func (c *Catalog) replace(names []string) {
+	c.mu.Lock()
+	c.names = append(c.names[:0], names...)
+	c.mu.Unlock()
+}
+
 func (m *Extension) Load(scope *coreextension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
@@ -99,18 +129,13 @@ func (m *Extension) Load(scope *coreextension.Scope) error {
 	}
 	m.mounted = true
 	slices.Sort(names)
-	m.names = names
+	m.catalog.replace(names)
 	return nil
-}
-func (m *Extension) Locations() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string(nil), m.names...)
 }
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
 	m.closed = true
-	m.names = nil
+	m.catalog.replace(nil)
 	mounted := m.mounted
 	m.mu.Unlock()
 	if mounted {

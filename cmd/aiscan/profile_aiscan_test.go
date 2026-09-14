@@ -1,9 +1,8 @@
-package aiscan_test
+package main
 
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile/aiscan"
 )
 
 type profileLoop func(context.Context, agent.Config) (*agent.Result, error)
@@ -58,7 +56,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	})
-	p, err := profile.New(config)
+	p, err := newAIScanProfile(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +136,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	config := minimalConfig(nil)
 	config.Runtime = &sessionext.Config{} // Sessions are selected, reasoning is not.
-	p, err := profile.New(config)
+	p, err := newAIScanProfile(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,18 +162,18 @@ func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	}
 }
 
-func minimalConfig(runtime *sessionext.Config) profile.Config {
+func minimalConfig(runtime *sessionext.Config) aiscanProfileConfig {
 	if runtime != nil {
 		runtime.Loop = agent.StandardLoop{}
 	}
-	return profile.Config{
+	return aiscanProfileConfig{
 		Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Runtime: runtime,
 		Application: apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()},
 	}
 }
 
 func TestApplicationOnlyProfile(t *testing.T) {
-	p, err := profile.New(minimalConfig(nil))
+	p, err := newAIScanProfile(minimalConfig(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,8 +207,8 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	}
 }
 
-func TestRuntimeBorrowsProfileApplication(t *testing.T) {
-	p, err := profile.New(minimalConfig(&sessionext.Config{}))
+func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
+	p, err := newAIScanProfile(minimalConfig(&sessionext.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +224,7 @@ func TestRuntimeBorrowsProfileApplication(t *testing.T) {
 		t.Fatal(err)
 	}
 	if run.App() != application {
-		t.Fatal("Runtime did not borrow profile application")
+		t.Fatal("Runtime did not use the profile application")
 	}
 	if err := p.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -234,7 +232,7 @@ func TestRuntimeBorrowsProfileApplication(t *testing.T) {
 }
 
 func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
-	p, err := profile.New(minimalConfig(&sessionext.Config{}))
+	p, err := newAIScanProfile(minimalConfig(&sessionext.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,24 +255,17 @@ func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
 
 func TestFromOptionOwnsEventOutputSelection(t *testing.T) {
 	base := &cfg.Option{}
-	if got := profile.FromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
+	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
 		t.Fatalf("one-shot output = %q", got)
 	}
 
-	base.SaveSession = true
-	auto := profile.FromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output
-	if filepath.Ext(auto) != ".jsonl" || !strings.Contains(filepath.ToSlash(auto), "/sessions/") {
-		t.Fatalf("automatic output = %q", auto)
-	}
-
 	base.Resume = "source.jsonl"
-	base.Ephemeral = true
-	if got := profile.FromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
-		t.Fatalf("ephemeral resume selected output %q", got)
+	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
+		t.Fatalf("resume selected output %q", got)
 	}
 
 	base.OutputFile = "explicit.jsonl"
-	if got := profile.FromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "explicit.jsonl" {
+	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "explicit.jsonl" {
 		t.Fatalf("explicit output = %q", got)
 	}
 }

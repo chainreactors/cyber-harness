@@ -8,6 +8,7 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	searchtools "github.com/chainreactors/aiscan/tools/search"
+	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // Extension owns search tool declarations and command registrations.
@@ -15,8 +16,6 @@ type Extension struct {
 	commands *commands.Registry
 	tools    *toolset.Registry
 	config   Config
-	tool     *searchtools.WebSearchTool
-	entries  []commands.Command
 }
 
 type ProxyEndpoint interface {
@@ -28,6 +27,9 @@ type Config struct {
 	Search     func(context.Context, string, int) (string, error)
 	TavilyKeys string
 	Proxy      ProxyEndpoint
+	// ResolveIndex is evaluated during Load, after any engine dependency has
+	// published its association index. Nil installs the command with no catalog.
+	ResolveIndex func() *association.Index
 }
 
 func New(toolRegistry *toolset.Registry, cmdRegistry *commands.Registry, config Config) (*Extension, error) {
@@ -56,21 +58,25 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		Run:             fetch.Run,
 	}
 
-	cyberhub := searchtools.NewCyberhubSearch(nil)
+	var index *association.Index
+	if e.config.ResolveIndex != nil {
+		index = e.config.ResolveIndex()
+	}
+	cyberhub := searchtools.NewCyberhubSearch(index)
 	cyberhubCommand := commands.Command{
 		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
 		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/search.md",
 		Run:             cyberhub.Run,
 	}
-	e.tool = searchtools.NewWebSearchTool(e.config.Search, tavily)
-	e.entries = []commands.Command{fetchCommand, cyberhubCommand}
+	searchTool := searchtools.NewWebSearchTool(e.config.Search, tavily)
+	entries := []commands.Command{fetchCommand, cyberhubCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := e.tools.Register(scope, e.tool); err != nil {
+	if err := e.tools.Register(scope, searchTool); err != nil {
 		return err
 	}
-	if err := e.commands.Register(scope, "search", e.entries...); err != nil {
+	if err := e.commands.Register(scope, "search", entries...); err != nil {
 		return err
 	}
 	return nil
