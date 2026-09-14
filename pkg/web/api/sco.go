@@ -32,11 +32,7 @@ type ArtifactImporter interface {
 	ArtifactTypes() []string
 }
 
-func NewSCO(store SCOStore, importers ...ArtifactImporter) *SCO {
-	var artifacts ArtifactImporter
-	if len(importers) > 0 {
-		artifacts = importers[0]
-	}
+func NewSCO(store SCOStore, artifacts ArtifactImporter) *SCO {
 	return &SCO{store: store, artifacts: artifacts}
 }
 
@@ -119,7 +115,7 @@ func (s *SCO) ImportNodes(ctx context.Context, request *types.ImportNodesRequest
 		return nil, Errorf(CodeInvalidArgument, "artifact is required")
 	}
 	if s.artifacts == nil {
-		return nil, Errorf(CodeFailedPrecondition, "artifact normalization is unavailable")
+		return nil, Errorf(CodeFailedPrecondition, "artifact import is unavailable")
 	}
 	operationID := strings.TrimSpace(request.GetOperationId())
 	if operationID == "" {

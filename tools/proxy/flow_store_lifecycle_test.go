@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/aiscan/core/eventbus"
 )
 
-func TestStoreCloseTimeoutKeepsJournalUntilRetry(t *testing.T) {
+func TestStoreCloseTimeoutKeepsMetadataIndexUntilRetry(t *testing.T) {
 	dir := t.TempDir()
 	synctest.Test(t, func(t *testing.T) {
 		s := NewFlowStore(8)
@@ -44,7 +44,7 @@ func TestStoreCloseTimeoutKeepsJournalUntilRetry(t *testing.T) {
 			t.Fatalf("Close = %v", err)
 		}
 		if _, err := file.Stat(); err != nil {
-			t.Fatalf("journal released before callback finished: %v", err)
+			t.Fatalf("metadata index released before callback finished: %v", err)
 		}
 		if s.indexSub != sub {
 			t.Fatal("timeout lost subscription ownership")
@@ -53,14 +53,14 @@ func TestStoreCloseTimeoutKeepsJournalUntilRetry(t *testing.T) {
 		<-sub.Done()
 		// Callback completion does not delegate file release to a hidden worker.
 		if _, err := file.Stat(); err != nil {
-			t.Fatalf("journal closed without retry: %v", err)
+			t.Fatalf("metadata index closed without retry: %v", err)
 		}
 		// The expired waiting context is irrelevant once the drain is complete.
 		if err := s.closeContext(ctx); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := file.WriteString("after close"); !errors.Is(err, os.ErrClosed) {
-			t.Fatalf("journal remains open after retry: %v", err)
+			t.Fatalf("metadata index remains open after retry: %v", err)
 		}
 	})
 }
@@ -74,7 +74,7 @@ func TestStoreCloseReportsProcessingFailureOnceAndReleasesFile(t *testing.T) {
 	if err := s.indexSub.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	want := errors.New("journal processing failed")
+	want := errors.New("metadata index processing failed")
 	var err error
 	s.indexSub, err = s.events.SubscribeAsync(eventbus.SubscribeOptions[Flow]{}, func(Flow) error { return want })
 	if err != nil {
@@ -86,7 +86,7 @@ func TestStoreCloseReportsProcessingFailureOnceAndReleasesFile(t *testing.T) {
 		t.Fatalf("Close = %v", err)
 	}
 	if _, err := file.WriteString("after close"); !errors.Is(err, os.ErrClosed) {
-		t.Fatalf("journal not released: %v", err)
+		t.Fatalf("metadata index not released: %v", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("terminal error repeated: %v", err)

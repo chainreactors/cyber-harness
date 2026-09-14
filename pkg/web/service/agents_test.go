@@ -603,9 +603,9 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	if message.GetRole() != "system" || !strings.Contains(message.GetContent()[0].GetText().GetText(), "File uploaded: note.txt") || !strings.Contains(message.GetContent()[0].GetText().GetText(), result.Path) {
 		t.Fatalf("unexpected persisted upload event: %+v", events[0])
 	}
-	// The English Content is only a fallback; the localizable contract lives in
-	// Typed metadata carries {code, params} so the message stays translatable
-	// after reload without a second JSON DTO.
+	// The English Content is only a fallback. Typed metadata carries
+	// {code, params}, so the message stays translatable after reload without a
+	// second wire representation.
 	webExtension, ok, err := types.GetWebMessage(events[0])
 	if err != nil || !ok {
 		t.Fatalf("web extension = %+v, ok = %v, err = %v", webExtension, ok, err)
