@@ -32,10 +32,10 @@ func NewRegistry(registry *hooks.Registry) *Registry {
 	return &Registry{hooks: registry, store: coreregistry.New[Command]()}
 }
 
-// Register atomically adds commands owned by scope. Registration is valid only
-// before the registry extension is loaded; ownership transfers to scope.
-func (r *Registry) Register(scope *extension.Scope, group string, commands ...Command) error {
-	if r == nil || r.store == nil || scope == nil || len(commands) == 0 {
+// Register atomically adds fixed declarations before activation. The registry
+// retains them for the whole composition; command resources remain borrowed.
+func (r *Registry) Register(source, group string, commands ...Command) error {
+	if r == nil || r.store == nil || len(commands) == 0 {
 		return ErrInvalidCommand
 	}
 	values := make([]coreregistry.Value[Command], 0, len(commands))
@@ -51,15 +51,8 @@ func (r *Registry) Register(scope *extension.Scope, group string, commands ...Co
 		seen[name] = struct{}{}
 		values = append(values, coreregistry.Value[Command]{Name: name, Value: command})
 	}
-	retract, err := r.store.Register(group, values...)
-	if err != nil {
-		return err
-	}
-	if err := scope.Track(retract); err != nil {
-		retract()
-		return err
-	}
-	return nil
+	_, err := r.store.Register(source, group, values...)
+	return err
 }
 
 func (r *Registry) Load(scope *extension.Scope) error {

@@ -93,7 +93,19 @@ type Scanner interface {
 }
 
 // New constructs an inert application around extensions selected by its profile.
-func New(rc Config, dependencies Dependencies) *Resource {
+func New(rc Config, dependencies Dependencies) (*Resource, error) {
+	if dependencies.Hooks == nil {
+		return nil, fmt.Errorf("application requires profile hooks")
+	}
+	if dependencies.Events == nil {
+		return nil, fmt.Errorf("application requires profile events")
+	}
+	if dependencies.Commands == nil {
+		return nil, fmt.Errorf("application requires profile command registry")
+	}
+	if dependencies.Tools == nil {
+		return nil, fmt.Errorf("application requires profile tool registry")
+	}
 	if rc.Capabilities.Empty() {
 		rc.Capabilities = edition.Catalog()
 	}
@@ -101,29 +113,13 @@ func New(rc Config, dependencies Dependencies) *Resource {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	events := dependencies.Events
-	if events == nil {
-		events = coreevents.New()
-	}
-	registry := dependencies.Hooks
-	if registry == nil {
-		registry = hooks.New()
-	}
-	commandRegistry := dependencies.Commands
-	if commandRegistry == nil {
-		commandRegistry = commands.NewRegistry(registry)
-	}
-	toolRegistry := dependencies.Tools
-	if toolRegistry == nil {
-		toolRegistry = toolset.NewRegistry(registry)
-	}
 	a := &App{
 		config: rc, logger: logger,
-		Hooks: registry, events: events,
-		Progress: eventbus.New[*toolpb.Progress](), Commands: commandRegistry,
-		Tools: toolRegistry, Bash: dependencies.Bash, scanner: dependencies.Scanner,
+		Hooks: dependencies.Hooks, events: dependencies.Events,
+		Progress: eventbus.New[*toolpb.Progress](), Commands: dependencies.Commands,
+		Tools: dependencies.Tools, Bash: dependencies.Bash, scanner: dependencies.Scanner,
 	}
-	return &Resource{App: a}
+	return &Resource{App: a}, nil
 }
 
 // Load initializes application state. Capability resources and registries are
@@ -150,7 +146,7 @@ func (r *Resource) Load(scope *extension.Scope) error {
 	}
 	logger := a.Logger()
 	rc := a.config
-	store, diagnostics := skills.LoadAll(rc.CLISkillPaths, rc.Capabilities)
+	store, diagnostics := skills.LoadAll(rc.CLISkillPaths, rc.Capabilities, rc.SkillBundles...)
 	a.Skills = store
 	a.SkillDiagnostics = diagnostics
 

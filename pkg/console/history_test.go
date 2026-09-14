@@ -54,7 +54,7 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 
 func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentext.Runtime {
 	t.Helper()
-	a := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	a := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 	aSet := loadConsoleApplication(t, t.Context(), a)
 	a.App.SetProvider(provider, agent.ProviderConfig{Model: "test"})

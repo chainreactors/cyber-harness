@@ -18,6 +18,8 @@ import (
 )
 
 type Command struct {
+	builders         []CapabilityBuilder
+	profileExtenders []ProfileExtender
 	toolargs.Base
 	engines     *engine.Set
 	parent      *agent.Agent
@@ -115,7 +117,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		defer restoreDebug()
 		c.Logger.Debugf("scanner debug enabled")
 	}
-	profile, err := profileForFlags(flags)
+	profile, err := profileForFlags(flags, c.profileExtenders...)
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}

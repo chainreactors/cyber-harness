@@ -40,11 +40,10 @@ const (
 )
 
 type item struct {
-	extension   Extension
-	deps        []string
-	state       state
-	scope       *Scope
-	cleanupDone bool
+	extension Extension
+	deps      []string
+	state     state
+	scope     *Scope
 }
 
 // Set serializes the lifecycle of a fixed dependency graph. A failed Load seals
@@ -261,26 +260,14 @@ func (s *Set) closeReverse(ctx context.Context, ids []string) error {
 			continue
 		}
 		it.state = stoppingState
-		var stopErr error
 		if it.scope != nil {
-			stopErr = it.scope.stop()
-			if stopErr != nil {
-				errs = append(errs, fmt.Errorf("stop extension %s: %w", id, errors.Join(ErrCloseIncomplete, stopErr)))
-			}
+			it.scope.stop()
 		}
-		if !it.cleanupDone {
-			if err := incompleteOnCancellation(invokeClose(it.extension, ctx)); err != nil {
-				errs = append(errs, fmt.Errorf("close extension %s: %w", id, err))
-				if errors.Is(err, ErrCloseIncomplete) {
-					continue
-				}
+		if err := incompleteOnCancellation(invokeClose(it.extension, ctx)); err != nil {
+			errs = append(errs, fmt.Errorf("close extension %s: %w", id, err))
+			if errors.Is(err, ErrCloseIncomplete) {
+				continue
 			}
-			it.cleanupDone = true
-		}
-		if stopErr != nil {
-			// A panicking revocation leaves registration state uncertain. Close
-			// still gets a chance to drain, but dependencies stay protected.
-			continue
 		}
 		it.state = closedState
 	}

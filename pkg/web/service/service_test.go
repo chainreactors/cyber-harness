@@ -17,6 +17,7 @@ import (
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
@@ -254,14 +255,14 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 }
 
 type recordingProfile struct {
-	assembly *profile.Assembly
-	app      *apppkg.App
+	extensions *extension.Set
+	app        *apppkg.App
 }
 
-func (p *recordingProfile) Load(ctx context.Context) error  { return p.assembly.Load(ctx) }
-func (p *recordingProfile) Close(ctx context.Context) error { return p.assembly.Close(ctx) }
+func (p *recordingProfile) Load(ctx context.Context) error  { return p.extensions.Load(ctx) }
+func (p *recordingProfile) Close(ctx context.Context) error { return p.extensions.Close(ctx) }
 func (p *recordingProfile) App() (*apppkg.App, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil, errors.New("recording profile is not active")
 	}
 	return p.app, nil
@@ -270,7 +271,7 @@ func (p *recordingProfile) Runtime() (*agentext.Runtime, error) {
 	return nil, errors.New("recording profile has no runtime")
 }
 func (p *recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return errors.New("recording profile is not active")
 	}
 	return nil
@@ -280,12 +281,12 @@ var _ profile.Application = (*recordingProfile)(nil)
 
 func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
 	t.Helper()
-	resource := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
-	assembly, err := profile.Assemble(extension.Entry{ID: "application", Extension: resource})
+	resource := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	extensions, err := extension.New(extension.Entry{ID: "application", Extension: resource})
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := &recordingProfile{assembly: assembly, app: resource.App}
+	value := &recordingProfile{extensions: extensions, app: resource.App}
 	t.Cleanup(func() { _ = value.Close(context.Background()) })
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -373,3 +374,9 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 		t.Fatal("service retained rejected candidate")
 	}
 }
+
+func (*recordingProfile) AgentStatus() *aop.AgentStatus { return &aop.AgentStatus{} }
+
+func (*recordingProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
+
+func (*recordingProfile) Capabilities() []string {return nil}

@@ -12,7 +12,12 @@ open history, subscribe to events or start tasks.
 Only `Extension.Load` and `Extension.Close` control installation lifetime.
 `Runtime()` exposes session operations and also implements `agent.Loop`; the
 Runtime cannot close its owner. The extension does not create
-an inner extension graph or close the injected App/IOA resources.
+an inner extension graph or close the injected App resources.
+
+`Deliver(ctx, inbox.Message)` admits peer or other external input into the primary
+or sole open session. It rejects unopened, ambiguous, full or closing destinations;
+it never creates sessions. IOA subscription and handoff belong to the independent
+IOA client extension. Node names and prompt preambles are supplied by the profile.
 
 Load binds execution to `Scope.Lifetime`, not the initialization context. Close
 seals loop admission, cancels sessions and direct loop calls, and waits for actual

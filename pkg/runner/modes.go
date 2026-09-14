@@ -90,7 +90,7 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 	if setInterrupt != nil {
 		setInterrupt(func() bool { return false })
 	}
-	return console.AttachLocalREPL(ctx, rt, option)
+	return console.AttachLocalREPL(ctx, rt, option, product.ConsoleBindings())
 }
 
 // ---------------------------------------------------------------------------

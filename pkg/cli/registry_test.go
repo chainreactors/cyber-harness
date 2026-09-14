@@ -1,0 +1,72 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	flags "github.com/jessevdk/go-flags"
+	"strings"
+	"testing"
+)
+
+func TestThirdExtensionDeclarationsAreInertAndPresenceAware(t *testing.T) {
+	parser := flags.NewNamedParser("fixture-host", flags.HelpFlag)
+	r := New(parser)
+	calls := 0
+	if err := r.Command("fixture", "fixture inspect", "Inspect fixture", &struct{}{}, Action{Run: func(context.Context, Environment) error { calls++; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	options := &struct {
+		Name    string `long:"fixture-name" config:"name"`
+		Count   int    `long:"fixture-count" config:"count"`
+		Enabled bool   `long:"fixture-enabled" config:"enabled"`
+		Token   string `long:"fixture-token" config:"token" default:"sensitive" default-mask:"***"`
+	}{}
+	if err := r.Group("fixture", "fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: options}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parser.ParseArgs([]string{"fixture", "inspect", "--fixture-name=", "--fixture-count=0"}); err != nil {
+		t.Fatal(err)
+	}
+	var help bytes.Buffer
+	parser.WriteHelp(&help)
+	if strings.Contains(help.String(), "sensitive") || !strings.Contains(help.String(), "fixture-name") {
+		t.Fatalf("invalid help: %s", help.String())
+	}
+	if calls != 0 {
+		t.Fatal("declaration or parsing ran action")
+	}
+	values := r.Values()["fixture"]
+	if len(values) != 2 || values["name"] != "" || values["count"] != 0 {
+		t.Fatalf("explicit values = %#v", values)
+	}
+	if r.Selected() == nil {
+		t.Fatal("action missing")
+	}
+	if err := r.Selected().Run(t.Context(), Environment{}); err != nil || calls != 1 {
+		t.Fatalf("run = %v, calls %d", err, calls)
+	}
+	absent := flags.NewNamedParser("empty", 0)
+	rest, _ := absent.ParseArgs([]string{"fixture", "inspect"})
+	if len(rest) != 2 || New(absent).Selected() != nil {
+		t.Fatal("unregistered command consumed")
+	}
+}
+
+func TestDuplicateCommandsAndFlagsRejectedBeforeParsing(t *testing.T) {
+	r := New(flags.NewNamedParser("host", 0))
+	if err := r.Command("fixture", "fixture", "", &struct{}{}, Action{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Command("fixture", "fixture", "", &struct{}{}, Action{}); err == nil {
+		t.Fatal("duplicate command accepted")
+	}
+	for i := range 2 {
+		err := r.Group("fixture", "fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: &struct {
+			Value string `long:"value"`
+		}{}})
+		if (err != nil) != (i == 1) {
+			t.Fatalf("registration %d: %v", i, err)
+		}
+	}
+}

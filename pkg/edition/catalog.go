@@ -14,13 +14,12 @@ import (
 	"github.com/chainreactors/aiscan/tools/zombie"
 )
 
-func Catalog() capability.Catalog {
+func Catalog(extra ...capability.Descriptor) capability.Catalog {
 	descriptors := []capability.Descriptor{
 		{ID: "core", Kind: capability.KindTool, Group: "core"},
 		{ID: "arsenal", Kind: capability.KindTool, Group: "arsenal"},
 		{ID: "search", Kind: capability.KindTool, Group: "search", Optional: true, Default: true},
 		{ID: "proxy", Kind: capability.KindService, Group: "proxy"},
-		{ID: "ioa", Kind: capability.KindService, Group: "ioa"},
 		{ID: "curl", Kind: capability.KindScanner, Group: "scanner", CLIName: "curl", Summary: "curl", UsageLine: "  curl           HTTP requests (pure-Go, browser-naturalized)", Usage: func() string { return curl.New().Usage() }},
 		{ID: "gogo", Kind: capability.KindScanner, Group: "scanner", CLIName: "gogo", Summary: "gogo", UsageLine: "  gogo           Run gogo directly", Usage: func() string { return gogo.New(nil).Usage() }},
 		{ID: "neutron", Kind: capability.KindScanner, Group: "scanner", CLIName: "neutron", Summary: "neutron", UsageLine: "  neutron        Run neutron directly", Usage: func() string { return neutron.New(nil, nil).Usage() }},
@@ -30,5 +29,6 @@ func Catalog() capability.Catalog {
 		{ID: "scan", Kind: capability.KindScanner, Group: "scanner", CLIName: "scan", Summary: "scan", Usage: scan.Usage},
 	}
 	descriptors = append(descriptors, platformCapabilities()...)
+	descriptors = append(descriptors, extra...)
 	return capability.Must(descriptors...)
 }

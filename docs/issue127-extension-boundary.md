@@ -5,13 +5,14 @@
 
 ## 单一生命周期图
 
-每个命令入口声明并拥有一张固定的 `core/extension.Set` 图。需要被 Web、Node 或 Runner
+每个独立运行时由命令入口声明并拥有一张固定的 `core/extension.Set` 图。Web 宿主的
+IOA Server 图与可替换的应用 Profile 图寿命不同，不共享实例，也不由 Extension 创建子 Set。
+需要被 Web、Node 或 Runner
 复用的 AIScan 图由命令入口的具体 Profile 持有业务能力，通过 `pkg/profile.Application`
-供 host 使用。`profile.Assembly` 只委托同一个 Set，不保存产品能力，也不增加
-active/closing 状态；具体 `aiscanProfile` 位于 `cmd/aiscan`，发布状态统一读取
-`Assembly.Available()`（其来源是 `Set.Active()`）。构造函数注入真实依赖，
+供 host 使用。具体 Profile 直接持有 Set，不增加 Assembly 包装或 active/closing 状态；
+具体 `aiscanProfile` 位于 `cmd/aiscan`，发布状态统一读取 `Set.Active()`。构造函数注入真实依赖，
 `Entry.DependsOn` 只决定 Load 与逆序 Close；`extension.Scope` 只提供初始化 context、
-寿命 context 和同步撤销跟踪，不是服务容器，也不生成 owner ID 或资源 Ref。
+寿命 context，不是服务容器，也不生成 owner ID 或资源 Ref。
 
 构造必须无副作用。实例所有权在 Load 时取得，完全关闭后释放。Load/Close panic 由 Set
 转换为错误；Load 失败会逆序回滚；Close 请求发起时立即撤销 `Active` 发布门，再关闭依赖者。Extension.Close 返回 context
@@ -118,3 +119,16 @@ Files、Proxy、IOA 在原始实现中拆分为生命周期 `Resource` 与业务
 - 原始实现不关闭由 Profile 拥有的 Registry；业务能力对象不提供资源关闭入口。
 
 架构测试固定以上边界；默认/full 编译和 lifecycle/race 测试是交付门禁。
+
+## IOA 客户端与服务端
+
+IOA 只有两个扩展：`pkg/exts/ioa/client` 与 `pkg/exts/ioa/server`。
+客户端统一拥有注册重试、收信订阅、handoff Consumer 和命令贡献；协议 skills 通过
+静态 `skills.Bundle` 由 Profile 注入 App。Agent 和通用 Skills 不导入 IOA SDK。
+客户端先于 Command Registry 和 Agent 加载，最后关闭。Agent 的 `Deliver` 是通用业务准入，
+Profile 传入检查 `Set.Active()` 的投递函数；它可以在任何时候拒绝调用，
+不把 Agent 的资源寿命借给客户端。Agent 关闭后，客户端仍排空已接纳的 handoff 事件。
+
+服务端扩展只拥有 Store、Service、认证以及请求/SSE 的准入、取消和排空。
+HTTP listener 由命令入口持有，独立 serve 和 Web 分别挂载根路径和 `/ioa/`。
+Web 的服务端扩展保持宿主寿命，配置重载只替换应用 Profile；扩展之间不互相导入。

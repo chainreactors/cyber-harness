@@ -27,11 +27,12 @@ type agentEndpoint interface {
 }
 
 type connectionConfig struct {
-	ServerURL    string
-	WSPath       string
-	Name         string
-	Token        string
-	Capabilities []string
+	ServerURL         string
+	WSPath            string
+	Name              string
+	Token             string
+	Capabilities      []string
+	ExtraCapabilities []string
 
 	// JSONFrames switches the wire codec from binary protobuf to standard
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).

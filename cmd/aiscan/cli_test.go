@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	clientext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
 	"reflect"
 	"slices"
 	"strings"
@@ -145,8 +146,8 @@ func TestParseCLIIOAKeepsQueryJSONFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
-	if !parsed.Option.IOAJSON {
-		t.Fatalf("IOA options = %#v, want query JSON", parsed.Option.IOAOptions)
+	if parsed.Action == nil {
+		t.Fatalf("IOA options = %#v, want query JSON", parsed.Action)
 	}
 	if parsed.Option.JSON {
 		t.Fatal("IOA --json was captured as the agent output flag")
@@ -639,7 +640,7 @@ func TestParseCLIAgentIOAFlag(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeAgent)
 	}
 	opt := parsed.Option
-	if !opt.Debug || opt.Prompt != "scan localhost" || opt.Space != "case-1" || opt.Heartbeat != 5 || opt.Model != "gpt-4o" || opt.CyberhubMode != "override" {
+	if !opt.Debug || opt.Prompt != "scan localhost" || readClientOptions(t, &opt).Space != "case-1" || opt.Heartbeat != 5 || opt.Model != "gpt-4o" || opt.CyberhubMode != "override" {
 		t.Fatalf("option = %#v", opt)
 	}
 	if !reflect.DeepEqual(opt.Skills, []string{"aiscan"}) {
@@ -662,7 +663,7 @@ func TestParseCLIAgentServerURL(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeAgent)
 	}
 	opt := parsed.Option
-	if opt.ServerURL != "http://token@127.0.0.1:8080" || opt.IOAURL != "http://ioa-token@ioa.example:8765" || opt.Space != "case-1" || opt.IOANodeName != "worker-1" {
+	if opt.ServerURL != "http://token@127.0.0.1:8080" || readClientOptions(t, &opt).URL != "http://ioa-token@ioa.example:8765" || readClientOptions(t, &opt).Space != "case-1" || opt.NodeName != "worker-1" {
 		t.Fatalf("option = %#v", opt)
 	}
 }
@@ -687,12 +688,12 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
-	if parsed.Mode != cfg.RunModeIOAServe {
-		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeIOAServe)
+	if parsed.Action == nil || !parsed.Action.Persistent {
+		t.Fatalf("missing persistent action: %+v", parsed)
 	}
 	opt := parsed.Option
-	if opt.IOAURL != "http://127.0.0.1:9999" {
-		t.Fatalf("option.IOAURL = %q, want %q", opt.IOAURL, "http://127.0.0.1:9999")
+	if opt.Extensions["ioa.server"]["url"] != "http://127.0.0.1:9999" {
+		t.Fatalf("option.IOAURL = %q, want %q", readClientOptions(t, &opt).URL, "http://127.0.0.1:9999")
 	}
 }
 
@@ -767,10 +768,8 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		cfg.DefaultCyberhubKey = "HUBKEY"
 		cfg.DefaultCyberhubMode = "override"
 		cfg.DefaultTavilyKeys = "BUILTIN_TAVILY"
-		cfg.DefaultIOAURL = "http://ioa:8765"
-		cfg.DefaultIOANodeID = "node-1"
-		cfg.DefaultIOANodeName = "worker-1"
-		cfg.DefaultSpace = "case-1"
+		cfg.DefaultNodeID = "node-1"
+		cfg.DefaultNodeName = "worker-1"
 
 		opt := &cfg.Option{}
 		cfg.ApplyDefaults(opt)
@@ -791,8 +790,8 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		if !appCfg.Provider.Enabled || !appCfg.Provider.Optional {
 			t.Fatalf("provider config = %#v", appCfg.Provider)
 		}
-		if opt.IOAURL != cfg.DefaultIOAURL || opt.IOANodeID != cfg.DefaultIOANodeID || opt.IOANodeName != cfg.DefaultIOANodeName || opt.Space != cfg.DefaultSpace {
-			t.Fatal("compiled IOA defaults were not resolved")
+		if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {
+			t.Fatal("compiled node defaults were not resolved")
 		}
 	})
 }
@@ -813,10 +812,8 @@ func withDefaults(t *testing.T, fn func()) {
 		{&cfg.DefaultCyberhubMode, cfg.DefaultCyberhubMode},
 		{&cfg.DefaultVerify, cfg.DefaultVerify},
 		{&cfg.DefaultTavilyKeys, cfg.DefaultTavilyKeys},
-		{&cfg.DefaultIOAURL, cfg.DefaultIOAURL},
-		{&cfg.DefaultIOANodeID, cfg.DefaultIOANodeID},
-		{&cfg.DefaultIOANodeName, cfg.DefaultIOANodeName},
-		{&cfg.DefaultSpace, cfg.DefaultSpace},
+		{&cfg.DefaultNodeID, cfg.DefaultNodeID},
+		{&cfg.DefaultNodeName, cfg.DefaultNodeName},
 	}
 	t.Cleanup(func() {
 		for _, s := range saved {
@@ -824,4 +821,13 @@ func withDefaults(t *testing.T, fn func()) {
 		}
 	})
 	fn()
+}
+
+func readClientOptions(t *testing.T, option *cfg.Option) clientext.Options {
+	t.Helper()
+	value, err := clientext.ReadOptions(option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }

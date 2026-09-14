@@ -19,6 +19,7 @@ import (
 )
 
 type ServiceConfig struct {
+	ConfigAPI   managementapi.ConfigOptions
 	Store       *SQLiteStore
 	Profile     profile.Application
 	ConfigStore ConfigStore
@@ -103,7 +104,7 @@ func NewService(cfg ServiceConfig) *Service {
 		svc.profile = cfg.Profile
 		svc.profiles[cfg.Profile] = 0
 	}
-	configAPI := managementapi.NewConfig(svc)
+	configAPI := managementapi.NewConfig(svc, cfg.ConfigAPI)
 	svc.api = &managementapi.API{
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,

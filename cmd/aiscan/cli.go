@@ -16,7 +16,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/console"
+	hostcli "github.com/chainreactors/aiscan/pkg/cli"
 	"github.com/chainreactors/aiscan/pkg/edition"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -47,17 +47,16 @@ type webCommand struct {
 	NoAgent            bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
 	cfg.LLMOptions     `group:"LLM Options"`
 	cfg.ScannerOptions `group:"Scanner Options"`
-	cfg.IOAOptions     `group:"Server Options"`
+	cfg.NodeOptions    `group:"Server Options"`
 	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 type cliOptions struct {
+	registry        *hostcli.Registry `no-flag:"true"`
 	cfg.MiscOptions `group:"Miscellaneous Options"`
 	Timeout         int          `long:"timeout" description:"Overall timeout in seconds"`
 	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
-	Serve           serveCommand `command:"serve" description:"Run the standalone agent server"`
 	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
-	IOA             ioaCommand   `command:"ioa" description:"Server management commands" hidden:"true"`
 	cfg.ScannerCommands
 }
 
@@ -65,53 +64,18 @@ type agentCommand struct {
 	cfg.LLMOptions     `group:"LLM Options"`
 	cfg.ScannerOptions `group:"Scanner Options"`
 	cfg.AgentOptions   `no-flag:"true"`
-	cfg.IOAOptions     `group:"Server Options"`
+	cfg.NodeOptions    `group:"Server Options"`
 	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 func (agentCommand) Usage() string { return "[OPTIONS]" }
 
-type serveCommand struct {
-	Token string `long:"token" description:"Access key for the server (auto-generated if empty)"`
-	Addr  string `long:"addr" default:"127.0.0.1:8765" description:"HTTP listen address"`
-}
-
-type ioaCommand struct {
-	cfg.IOAOptions `group:"Server Options"`
-	QueryJSON      bool           `long:"json" description:"Output query results in JSON format"`
-	Serve          struct{}       `command:"serve" description:"Run the standalone agent server"`
-	Spaces         struct{}       `command:"spaces" description:"List all spaces"`
-	Messages       ioaMessagesCmd `command:"messages" description:"List start messages in a space"`
-	Context        ioaContextCmd  `command:"context" description:"View message thread/context"`
-	Nodes          ioaNodesCmd    `command:"nodes" description:"List nodes"`
-}
-
-type ioaMessagesCmd struct {
-	Positional struct {
-		Space string `positional-arg-name:"space"`
-	} `positional-args:"yes" required:"yes"`
-}
-
-type ioaContextCmd struct {
-	Positional struct {
-		Space     string `positional-arg-name:"space"`
-		MessageID string `positional-arg-name:"message-id"`
-	} `positional-args:"yes" required:"yes"`
-}
-
-type ioaNodesCmd struct {
-	Positional struct {
-		Space string `positional-arg-name:"space"`
-	} `positional-args:"yes"`
-}
-
 type parsedCLI struct {
 	Option      cfg.Option
 	Mode        cfg.RunMode
 	ScannerArgs []string
-	IOAArgs     cfg.IOAClientArgs
+	Action      *hostcli.Action
 	WebOpts     webCommand
-	ServeOpts   serveCommand
 	Help        bool
 }
 
@@ -129,7 +93,7 @@ func aiscan() {
 		return
 	}
 	if option.InitConfig {
-		if err := os.WriteFile(cfg.DefaultConfigName, []byte(cfg.InitDefaultConfig()), 0o644); err != nil {
+		if err := os.WriteFile(cfg.DefaultConfigName, []byte(productDefaultConfig()), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
@@ -146,13 +110,17 @@ func aiscan() {
 	if parsed.Help {
 		return
 	}
-	if parsed.Mode == cfg.RunModeNoCommand {
+	if parsed.Mode == cfg.RunModeNoCommand && parsed.Action == nil {
 		fmt.Fprintf(os.Stderr, "error: missing subcommand: use %s\n", cliCommandSummary())
 		os.Exit(1)
 	}
 
 	cfgPath, err := runner.ResolveRuntimeConfig(&option)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		os.Exit(1)
+	}
+	if err := applyProductIdentity(&option); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
@@ -168,8 +136,8 @@ func aiscan() {
 		ctx    context.Context
 		cancel context.CancelFunc
 	)
-	switch parsed.Mode {
-	case cfg.RunModeIOAServe, runModeWeb:
+	switch {
+	case parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent:
 		ctx, cancel = context.WithCancel(context.Background())
 	default:
 		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
@@ -177,6 +145,13 @@ func aiscan() {
 	defer cancel()
 
 	sigHandler := setupSignalHandler(cancel, logger)
+	if parsed.Action != nil {
+		if err := parsed.Action.Run(ctx, hostcli.Environment{Config: &option, Logger: logger, Out: os.Stdout, Err: os.Stderr}); err != nil {
+			logger.Errorf("command failed: %s", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
@@ -192,16 +167,6 @@ func aiscan() {
 		}
 		if err := webServeFunc(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
 			logger.Errorf("web server failed: %s", err)
-			os.Exit(1)
-		}
-	case cfg.RunModeIOAServe:
-		if err := runner.RunIOAServe(ctx, &option, logger); err != nil {
-			logger.Errorf("server failed: %s", err)
-			os.Exit(1)
-		}
-	case cfg.RunModeIOASpaces, cfg.RunModeIOAMessages, cfg.RunModeIOAContext, cfg.RunModeIOANodes:
-		if err := console.RunIOAClientCommand(ctx, parsed.Mode, &option, parsed.IOAArgs, logger); err != nil {
-			logger.Errorf("server command failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
@@ -224,6 +189,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
 				option := cfg.Option{MiscOptions: cli.MiscOptions}
+				finalizeProductOptions(&option, nil)
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
@@ -240,6 +206,9 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	mode := selectedMode(parser)
 	option := buildOption(&cli, parser)
+	action := cli.registry.Selected()
+	option.Extensions = cli.registry.Values()
+	finalizeProductOptions(&option, action)
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
 	}
@@ -247,7 +216,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 		return parsedCLI{}, err
 	}
 
-	if mode == cfg.RunModeNoCommand {
+	if mode == cfg.RunModeNoCommand && action == nil {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
 
@@ -266,19 +235,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 		return parsedCLI{Option: option, Mode: runModeWeb, WebOpts: cli.Web}, nil
 	}
 
-	if mode == cfg.RunModeIOAServe && parser.Active != nil && parser.Active.Name == "serve" {
-		serveOpts := cli.Serve
-		if serveOpts.Token != "" {
-			option.IOAToken = serveOpts.Token
-		}
-		if option.IOAURL == "" && serveOpts.Addr != "" {
-			option.IOAURL = "http://" + serveOpts.Addr
-		}
-		return parsedCLI{Option: option, Mode: cfg.RunModeIOAServe, ServeOpts: serveOpts}, nil
-	}
-
-	ioaArgs := extractIOAArgs(&cli, mode)
-	return parsedCLI{Option: option, Mode: mode, IOAArgs: ioaArgs}, nil
+	return parsedCLI{Option: option, Mode: mode, Action: action}, nil
 }
 
 func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsedCLI, error) {
@@ -301,6 +258,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}
 
 	option := cfg.Option{MiscOptions: cli.MiscOptions}
+	finalizeProductOptions(&option, nil)
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -432,16 +390,13 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 		opt.LLMOptions = cli.Agent.LLMOptions
 		opt.ScannerOptions = cli.Agent.ScannerOptions
 		opt.AgentOptions = cli.Agent.AgentOptions
-		opt.IOAOptions = cli.Agent.IOAOptions
+		opt.NodeOptions = cli.Agent.NodeOptions
 		opt.ReconOptions = cli.Agent.ReconOptions
 	case "web":
 		opt.LLMOptions = cli.Web.LLMOptions
 		opt.ScannerOptions = cli.Web.ScannerOptions
-		opt.IOAOptions = cli.Web.IOAOptions
+		opt.NodeOptions = cli.Web.NodeOptions
 		opt.ReconOptions = cli.Web.ReconOptions
-	case "ioa":
-		opt.IOAOptions = cli.IOA.IOAOptions
-		opt.IOAJSON = cli.IOA.QueryJSON
 	}
 
 	return opt
@@ -449,12 +404,19 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
+	cli.registry = hostcli.New(parser)
+	if err := declareProductCLI(cli.registry); err != nil {
+		panic(err)
+	}
 	// Install inert declarations before Parse/WriteHelp. Extension Load is not
 	// part of command-line discovery, including defaults and aliases.
 	for _, group := range agentext.FlagGroups(&cli.Agent.AgentOptions) {
 		if _, err := parser.Find("agent").AddGroup(group.Name, group.Description, group.Options); err != nil {
 			panic(fmt.Sprintf("invalid agent flag declaration: %v", err))
 		}
+	}
+	if err := cli.registry.Seal(); err != nil {
+		panic(err)
 	}
 	parser.SubcommandsOptional = true
 	parser.Usage = fmt.Sprintf(`[OPTIONS] <command>
@@ -469,12 +431,6 @@ Commands:
 
 Advanced scanners:
 %s
-
-Server management:
-  ioa spaces     List all spaces
-  ioa messages   List start messages in a space
-  ioa context    View message thread/context
-  ioa nodes      List nodes
 
 Examples:
   aiscan scan -i 127.0.0.1
@@ -613,7 +569,9 @@ var rootOnlyFlagValueArity = map[string]int{
 var rootFlagValueArity = buildRootFlagValueArity()
 
 func buildRootFlagValueArity() map[string]int {
-	m := make(map[string]int, len(scannerKnownFlags)*2)
+	var cli cliOptions
+	_ = newCLIParser(&cli, 0)
+	m := cli.registry.ValueArity()
 	for _, f := range scannerKnownFlags {
 		for _, name := range f.names {
 			m[name] = f.arity
@@ -643,27 +601,11 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	if active == nil {
 		return cfg.RunModeNoCommand
 	}
-	if active.Name == "ioa" && active.Active != nil {
-		switch active.Active.Name {
-		case "serve":
-			return cfg.RunModeIOAServe
-		case "spaces":
-			return cfg.RunModeIOASpaces
-		case "messages":
-			return cfg.RunModeIOAMessages
-		case "context":
-			return cfg.RunModeIOAContext
-		case "nodes":
-			return cfg.RunModeIOANodes
-		}
-	}
 	switch active.Name {
 	case "agent":
 		return cfg.RunModeAgent
 	case "web":
 		return runModeWeb
-	case "serve":
-		return cfg.RunModeIOAServe
 	default:
 		if edition.Catalog().CLIAvailable(active.Name) {
 			return cfg.RunModeScanner
@@ -681,21 +623,6 @@ func selectedScanner(parser *goflags.Parser) string {
 		return active.Name
 	}
 	return ""
-}
-
-func extractIOAArgs(cli *cliOptions, mode cfg.RunMode) cfg.IOAClientArgs {
-	switch mode {
-	case cfg.RunModeIOAMessages:
-		return cfg.IOAClientArgs{Space: cli.IOA.Messages.Positional.Space}
-	case cfg.RunModeIOAContext:
-		return cfg.IOAClientArgs{
-			Space:     cli.IOA.Context.Positional.Space,
-			MessageID: cli.IOA.Context.Positional.MessageID,
-		}
-	case cfg.RunModeIOANodes:
-		return cfg.IOAClientArgs{Space: cli.IOA.Nodes.Positional.Space}
-	}
-	return cfg.IOAClientArgs{}
 }
 
 func applyScannerRootArgs(args []string, option *cfg.Option) ([]string, error) {

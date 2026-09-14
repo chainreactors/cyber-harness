@@ -3,21 +3,23 @@ package console
 import (
 	"bytes"
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
-	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"io"
 	"strings"
 	"sync"
+
+	aop "github.com/chainreactors/aiscan/aop"
+	cfg "github.com/chainreactors/aiscan/core/config"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
-func runRemoteConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl) error {
+func runRemoteConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl, bindings *consoleapi.Bindings) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
 	}
 	writer := &remoteTerminalWriter{w: output}
-	return newAgentConsole(ctx, rt, session, option, rlterm.Stream(input, writer, writer, control)).Start()
+	return newAgentConsole(ctx, rt, session, option, rlterm.Stream(input, writer, writer, control), bindings).Start()
 }
 func isSessionBootstrapEvent(event *aop.Event) bool {
 	if event == nil || event.TurnId != "" {

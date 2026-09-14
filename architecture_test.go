@@ -184,7 +184,8 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 	}
 	for _, rel := range []string{
 		filepath.Join("pkg", "exts", "files", "extension.go"),
-		filepath.Join("pkg", "exts", "ioa", "extension.go"),
+		filepath.Join("pkg", "exts", "ioa", "client", "extension.go"),
+		filepath.Join("pkg", "exts", "ioa", "server", "extension.go"),
 		filepath.Join("pkg", "exts", "proxy", "extension.go"),
 	} {
 		source := readRepositoryFile(t, root, rel)
@@ -295,7 +296,9 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			assertNoImportPrefix(t, filepath.Join(extRoot, entry.Name()), modulePath+"/pkg/exts")
+			// A feature may organize its own CLI, configuration and presentation
+			// adapters in subpackages; dependencies on other features stay forbidden.
+			assertNoImportPrefix(t, filepath.Join(extRoot, entry.Name()), modulePath+"/pkg/exts", modulePath+"/pkg/exts/"+entry.Name())
 		}
 	}
 	forbidden := "extension.ErrCloseIncomplete"
@@ -386,17 +389,19 @@ func TestProfileDelegatesLifecycleToExtensionSet(t *testing.T) {
 			t.Errorf("profile duplicates lifecycle or adds a parallel host abstraction: %q", obsolete)
 		}
 	}
-	for _, required := range []string{"type Application interface", "type Assembly struct", "type Factory func", "*extension.Set", ".Active()", "a.extensions.Load(ctx)", "a.extensions.Close(ctx)"} {
+	for _, required := range []string{"type Application interface", "type Factory func"} {
 		if !strings.Contains(abstraction, required) {
-			t.Errorf("generic profile assembler is missing %q", required)
+			t.Errorf("product profile contract is missing %q", required)
 		}
 	}
+	assertNoImportPrefix(t, filepath.Join(root, "pkg", "profile"), modulePath+"/core/extension")
 	extensionSource := readRepositoryFile(t, root, filepath.Join("core", "extension", "extension.go"))
 	if !strings.Contains(extensionSource, "func (s *Set) Active() bool") {
 		t.Fatal("extension.Set does not own graph publication state")
 	}
 
 	for _, rel := range []string{
+		filepath.Join("cmd", "aiscan", "profile_aiscan.go"),
 		filepath.Join("cmd", "runner", "profile_files.go"),
 		filepath.Join("cmd", "runner", "profile_workspace.go"),
 	} {
@@ -1177,7 +1182,7 @@ func assertNoFirstPartyImports(t *testing.T, tree string, forbidden map[string]b
 	}
 }
 
-func assertNoImportPrefix(t *testing.T, tree, forbidden string) {
+func assertNoImportPrefix(t *testing.T, tree, forbidden string, allowed ...string) {
 	t.Helper()
 	root := repositoryRoot(t)
 	err := filepath.WalkDir(tree, func(path string, entry fs.DirEntry, err error) error {
@@ -1193,6 +1198,16 @@ func assertNoImportPrefix(t *testing.T, tree, forbidden string) {
 		}
 		for _, importPath := range imports {
 			if importPath == forbidden || strings.HasPrefix(importPath, forbidden+"/") {
+				permitted := false
+				for _, prefix := range allowed {
+					if importPath == prefix || strings.HasPrefix(importPath, prefix+"/") {
+						permitted = true
+						break
+					}
+				}
+				if permitted {
+					continue
+				}
 				t.Errorf("forbidden dependency %q in %s", importPath, relative(root, path))
 			}
 		}
@@ -1536,5 +1551,35 @@ func isDebtScannable(path string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func TestIOAExtensionsAreIndependent(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, tree := range []string{"core", "agent", "skills", "pkg/exts/agent", "pkg/profile", "pkg/console", "pkg/node", "pkg/probe", "pkg/web"} {
+		assertNoImportPrefix(t, filepath.Join(root, tree), "github.com/chainreactors/ioa")
+		assertNoImportPrefix(t, filepath.Join(root, tree), modulePath+"/tools/ioa")
+	}
+	assertNoImportPrefix(t, filepath.Join(root, "pkg/exts/ioa/client"), modulePath+"/pkg/exts/ioa/server")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg/exts/ioa/client"), modulePath+"/tools/ioa/server")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg/exts/ioa/client"), "github.com/chainreactors/ioa/server")
+	assertNoImportPrefix(t, filepath.Join(root, "pkg/exts/ioa/server"), modulePath+"/pkg/exts/ioa/client")
+	for _, tree := range []string{"pkg/console", "pkg/node", "pkg/runner", "pkg/probe", "pkg/web", "cmd/aiscan"} {
+		assertNoImportPrefix(t, filepath.Join(root, tree), "github.com/chainreactors/ioa/client")
+		assertNoImportPrefix(t, filepath.Join(root, tree), "github.com/chainreactors/ioa/server")
+	}
+}
+
+func TestGenericHostsHaveNoTransitiveIOADependency(t *testing.T) {
+	command := exec.Command("go", "list", "-deps", "./core/...", "./agent/...", "./pkg/profile", "./pkg/console/...", "./pkg/node", "./pkg/probe", "./pkg/web/...", "./skills")
+	command.Dir = repositoryRoot(t)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dependency graph: %v\n%s", err, output)
+	}
+	for _, name := range strings.Fields(string(output)) {
+		if strings.HasPrefix(name, "github.com/chainreactors/ioa") || strings.HasPrefix(name, modulePath+"/tools/ioa") || strings.HasPrefix(name, modulePath+"/pkg/exts/ioa") {
+			t.Fatalf("generic hosts transitively depend on %s", name)
+		}
 	}
 }

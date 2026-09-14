@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/chainreactors/aiscan/agent"
 	"github.com/chainreactors/aiscan/agent/provider"
@@ -12,21 +11,17 @@ import (
 	"github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
 	app "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	commandext "github.com/chainreactors/aiscan/pkg/exts/commands"
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	scannerext "github.com/chainreactors/aiscan/pkg/exts/scanner"
 	searchext "github.com/chainreactors/aiscan/pkg/exts/search"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
-	toolsext "github.com/chainreactors/aiscan/pkg/exts/tools"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	arsenal "github.com/chainreactors/aiscan/tools/arsenal"
 	"github.com/chainreactors/aiscan/tools/files"
 	looptool "github.com/chainreactors/aiscan/tools/loop"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
 // applicationGraph declares the App-owned portion of the AIScan product graph.
@@ -78,22 +73,23 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 		)
 	}
 
-	var scanner *scannerExtension
+	var application *app.App
+	var scanner *scannerext.Extension
 	if !config.SkipEngines {
-		scanner = newScannerExtension(commandRegistry, config, loop, workDir, proxyURL, config.Logger)
+		scanner = scannerext.New(func() *app.App { return application }, commandRegistry, config, loop, workDir, proxyURL, config.Logger)
 	}
 	var scannerHandle app.Scanner
 	if scanner != nil {
 		scannerHandle = scanner
 	}
-	applicationResource := app.New(config, app.Dependencies{
+	applicationResource, err := app.New(config, app.Dependencies{
 		Hooks: registry, Events: stream, Commands: commandRegistry, Tools: toolRegistry,
 		Bash: bash, Scanner: scannerHandle,
 	})
-	application := applicationResource.App
-	if scanner != nil {
-		scanner.application = application
+	if err != nil {
+		return nil, err
 	}
+	application = applicationResource.App
 
 	if plan.Has("core") {
 		subagent := agent.NewSubAgentTool(func(name string) (agent.AgentType, error) {
@@ -113,37 +109,27 @@ func newApplicationGraph(config app.Config, registry *hooks.Registry, stream *ev
 				Background:      skill.AgentBackground,
 			}, nil
 		})
-		subagentContribution, err := toolsext.New(toolRegistry, subagent)
-		if err != nil {
+		if err := toolRegistry.Register("agent", subagent); err != nil {
 			return nil, err
 		}
-		loopContribution, err := commandext.New(commandRegistry, "loop", looptool.NewCommand())
-		if err != nil {
+		if err := commandRegistry.Register("loop", "loop", looptool.NewCommand()); err != nil {
 			return nil, err
 		}
-		entries = append(entries,
-			extension.Entry{ID: "subagent", Extension: subagentContribution},
-			extension.Entry{ID: "loop.commands", Extension: loopContribution},
-		)
 	}
 	if plan.Has("proxy") {
 		values := proxytool.NewCommands(commandRegistry.Run, proxy, config.Scanner.Proxy)
-		contribution, err := commandext.New(commandRegistry, "proxy", values...)
-		if err != nil {
+		if err := commandRegistry.Register("proxy", "proxy", values...); err != nil {
 			return nil, err
 		}
-		entries = append(entries, extension.Entry{ID: "proxy.commands", Extension: contribution})
 	}
 	if plan.Has("arsenal") {
 		value, err := arsenal.NewCommand()
 		if err != nil {
 			application.Logger().Warnf("arsenal init: %v", err)
 		} else {
-			contribution, err := commandext.New(commandRegistry, "arsenal", value)
-			if err != nil {
+			if err := commandRegistry.Register("arsenal", "arsenal", value); err != nil {
 				return nil, err
 			}
-			entries = append(entries, extension.Entry{ID: "arsenal.commands", Extension: contribution})
 		}
 	}
 	if plan.Has("search") {
@@ -203,117 +189,6 @@ func (a *applicationGraph) entriesFor(id string, dependencies ...string) ([]exte
 	return entries, toolRegistryID
 }
 
-type scannerExtension struct {
-	mu          sync.Mutex
-	commands    *commands.Registry
-	application *app.App
-	appConfig   app.Config
-	loop        agent.Loop
-	workDir     string
-	proxyURL    string
-	logger      telemetry.Logger
-	engines     *engine.Set
-	ready       chan struct{}
-	readyOnce   sync.Once
-	err         error
-	initialized bool
-}
-
-func newScannerExtension(commands *commands.Registry, config app.Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) *scannerExtension {
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	return &scannerExtension{commands: commands, appConfig: config, loop: loop, workDir: workDir, proxyURL: proxyURL, logger: logger, ready: make(chan struct{})}
-}
-
-func (e *scannerExtension) Load(scope *extension.Scope) (err error) {
-	if e == nil || e.application == nil || e.commands == nil || scope == nil {
-		return fmt.Errorf("scanner extension is not configured")
-	}
-	defer func() {
-		e.mu.Lock()
-		e.err = err
-		e.mu.Unlock()
-		e.readyOnce.Do(func() { close(e.ready) })
-	}()
-	e.engines = initEngines(scope.Init(), e.appConfig.Scanner, e.logger)
-	e.mu.Lock()
-	e.initialized = e.engines != nil
-	e.mu.Unlock()
-	values, err := buildScannerCommands(e.application, e.engines, e.appConfig, e.loop, e.workDir, e.proxyURL, e.logger)
-	if err != nil || len(values) == 0 {
-		return err
-	}
-	return e.commands.Register(scope, "scanner", values...)
-}
-
-func (e *scannerExtension) Close(context.Context) error {
-	if e == nil {
-		return nil
-	}
-	if e.engines != nil {
-		e.engines.Close()
-		e.engines = nil
-	}
-	e.mu.Lock()
-	e.initialized = false
-	e.mu.Unlock()
-	return nil
-}
-
-func (e *scannerExtension) Wait(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	select {
-	case <-e.ready:
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		return e.err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (e *scannerExtension) State() string {
-	select {
-	case <-e.ready:
-		e.mu.Lock()
-		initialized := e.initialized
-		e.mu.Unlock()
-		if !initialized {
-			return "failed"
-		}
-	default:
-		return "loading"
-	}
-	if len(e.commands.GroupNames("scanner")) > 0 {
-		return "ready"
-	}
-	return "degraded"
-}
-
-func initEngines(ctx context.Context, config app.ScannerConfig, logger telemetry.Logger) *engine.Set {
-	engines, err := engine.InitWithOptions(ctx, resources.Options{
-		CyberhubURL: config.CyberhubURL,
-		APIKey:      config.CyberhubKey,
-		Mode:        config.CyberhubMode,
-		Proxy:       config.Proxy,
-	}, logger)
-	if err != nil {
-		logger.Warnf("scanner engines init error=%q action=continue_without_scanners", err)
-		return nil
-	}
-	engines.SetupUncover(engine.ReconOptions{
-		FofaKey:      config.FofaKey,
-		HunterAPIKey: config.HunterAPIKey,
-		IngressProxy: config.ReconProxy,
-		Limit:        config.ReconLimit,
-		Credentials:  config.UncoverCredentials,
-	}, logger)
-	return engines
-}
-
 func providerWebSearch(application *app.App) func(context.Context, string, int) (string, error) {
 	model, _ := application.ProviderState()
 	searcher, ok := model.(provider.WebSearchProvider)
@@ -356,6 +231,3 @@ func linkedBaseGroups(catalog capability.Catalog) []string {
 	}
 	return groups
 }
-
-var _ extension.Extension = (*scannerExtension)(nil)
-var _ app.Scanner = (*scannerExtension)(nil)

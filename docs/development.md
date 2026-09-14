@@ -1,10 +1,16 @@
 # AIScan 扩展开发手册
 
 新增结构化能力时，先阅读 [`tools/README.md`](../tools/README.md)。工具实现
-`core/tool.Tool`，由 profile 构造实际插件，在插件 Load 中显式注册；工具执行不依赖 Agent、Runtime
+`core/tool.Tool`，静态声明可由 Profile 直接注册，需要资源就绪的声明在 Extension.Load 中注册；工具执行不依赖 Agent、Runtime
 或模型。
 
 ## 工具与命令的边界
+
+Flags、Config、静态 Skill、协议定义和宿主绑定同样是扩展点，不受 Tool/Command 分类限制。
+Flags 复用 `config.FlagGroup` 和普通 Options；入口先声明选项，再解析配置并选择运行扩展。
+Config 复用现有 struct/tag、加载、优先级和默认值机制，Profile 将结果注入具体功能。
+help、配置模板生成和参数校验不要求 Extension.Load。完整接入约定见
+[静态扩展设计](extension-minimal-design.md)。
 
 原生 Tool 适合模型或外部框架直接调用：它提供名称、描述、AOP 定义和
 `Execute(context.Context, string)`。需要文件、代理、扫描引擎、IOA 或工作目录的
@@ -17,7 +23,7 @@ Pseudo-command 仍适合通过 `bash` 暴露已有命令行语义。命令实现
 
 ```go
 func (e *Extension) Load(scope *extension.Scope) error {
-    return e.commands.Register(scope, "scanner", commands.Command{
+    return e.commands.Register("scanner", commands.Command{
         Name: "whatweb", Usage: "whatweb <url>",
         Run: func(ctx context.Context, execution *commands.Execution) (any, error) {
             return runWhatweb(ctx, execution)
@@ -43,14 +49,14 @@ if err != nil { return err }
 ```
 
 完整 AIScan 产品图和具体 `aiscanProfile` 都声明在 `cmd/aiscan`。`pkg/profile.Application`
-是 host 契约，`Assembly` 只委托 Set；命令入口在唯一 Set 中组合 App 能力和可选
+是 host 契约，具体 Profile 直接持有 Set；命令入口在唯一 Set 中组合 App 能力和可选
 Agent Runtime。Runtime 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
 类型化事件观察；事件发布统一经 `App.Publish`。需要 Agent 时入口显式选择
 `agent.StandardLoop{}`，`pkg/exts/agent.Extension` 将受控 Loop 与 Session 宿主统一发布为一个
 Runtime。该扩展负责运行准入、寿命取消和排空；没有 Loop 时工具和命令仍可用，
 Agent Run 会明确返回未配置错误，不隐藏回退到默认 Loop。
 
-拥有独立资源或注册的适配器实现 `core/extension.Extension` 的 `Load`/`Close`；底层资源和
+需要初始化或清理的适配器实现 `core/extension.Extension` 的 `Load`/`Close`；底层资源和
 Agent Loop 保留普通实现。Profile 的固定 Entry 集合按依赖顺序装载、逆序关闭。
 App 的能力贡献者也必须并入该集合，不能在 App 或
 其他 Extension 内创建第二个 Set。依赖通过构造函数传递，`DependsOn` 只表达生命周期

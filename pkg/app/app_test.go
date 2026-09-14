@@ -34,7 +34,7 @@ func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
 	hookRegistry := hooks.New()
 	commandRegistry := commands.NewRegistry(hookRegistry)
 	toolRegistry := toolset.NewRegistry(hookRegistry)
-	resource := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
+	resource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{
 		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
 	})
 	application := resource.App
@@ -135,7 +135,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	appResource := New(Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
+	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, Dependencies{Events: events})
 	app := appResource.App
 	appSet := extensiontest.Set(t,
 		extension.Entry{ID: "output", Extension: recorder},

@@ -203,9 +203,9 @@ fi
 LDFLAGS="-s -w"
 
 add_ldflag() {
-    local var="$1" val="$2"
+    local var="$1" val="$2" target="${3:-$MODULE}"
     if [ -n "$val" ]; then
-        LDFLAGS="$LDFLAGS -X '${MODULE}.${var}=${val}'"
+        LDFLAGS="$LDFLAGS -X '${target}.${var}=${val}'"
     fi
 }
 
@@ -217,9 +217,10 @@ add_ldflag DefaultScannerProxy  "$CFG_SCANNER_PROXY"
 add_ldflag DefaultCyberhubURL  "$CFG_CYBERHUB_URL"
 add_ldflag DefaultCyberhubKey  "$CFG_CYBERHUB_KEY"
 add_ldflag DefaultCyberhubMode "$CFG_CYBERHUB_MODE"
-add_ldflag DefaultIOAURL       "$CFG_IOA_URL"
-add_ldflag DefaultIOANodeName  "$CFG_IOA_NODE_NAME"
-add_ldflag DefaultSpace        "$CFG_IOA_SPACE"
+add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
+add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
+add_ldflag DefaultNodeName    "$CFG_IOA_NODE_NAME"
+add_ldflag DefaultSpace       "$CFG_IOA_SPACE" "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
 add_ldflag DefaultVerify       "$CFG_VERIFY"
 add_ldflag DefaultVerifyTimeout "$CFG_VERIFY_TIMEOUT"
 add_ldflag DefaultTavilyKeys   "$CFG_TAVILY_KEYS"

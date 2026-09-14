@@ -461,16 +461,6 @@ func summarizeToolArguments(name, arguments string) string {
 			return joinAgentSummaryParts(typeName, prefixedArg("mode=", mode), prompt)
 		}
 		return joinAgentSummaryParts(action, stringArg(args, "name"))
-	case "ioa_space":
-		return truncate.Clip(stringArg(args, "name"), agentStatusPreviewLimit)
-	case "ioa_send":
-		return truncate.Clip(prefixedArg("space ", stringArg(args, "space_id")), agentStatusPreviewLimit)
-	case "ioa_read":
-		return truncate.Clip(joinAgentSummaryParts(
-			prefixedArg("space ", stringArg(args, "space_id")),
-			prefixedArg("message ", stringArg(args, "message_id")),
-			prefixedArg("after ", stringArg(args, "after")),
-		), agentStatusPreviewLimit)
 	default:
 		return truncate.Clip(firstNonEmptyArg(args, "target", "url", "input", "path", "name"), agentStatusPreviewLimit)
 	}
@@ -505,12 +495,6 @@ func formatToolArguments(name, arguments string) []toolArgLine {
 		return collectArgs(args, "query", "num")
 	case "subagent":
 		return collectSubagentArgs(args)
-	case "ioa_space":
-		return collectArgs(args, "name")
-	case "ioa_send":
-		return collectArgs(args, "space_id", "message")
-	case "ioa_read":
-		return collectArgs(args, "space_id", "message_id", "after")
 	default:
 		return collectAllArgs(args)
 	}

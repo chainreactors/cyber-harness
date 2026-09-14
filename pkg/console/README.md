@@ -3,10 +3,10 @@
 Console 直接接收 `*agent.Runtime` 和 `*agent.Session`，使用外部终端库 `github.com/chainreactors/tui`。
 Agent Runtime 不保存输出接口、PTY Manager 或终端模式。
 
-- `AttachLocalREPL(ctx, rt, option)`：直接使用进程终端，避免把 readline 控制序列写入可重放 PTY 缓冲。
-- `StartPersistent(rt, option)`：在 App 的 Bash Manager 中创建一个持久 REPL。传输断开只解除监视，重连复用同一终端。
+- `AttachLocalREPL(ctx, rt, option, bindings)`：直接使用进程终端，避免把 readline 控制序列写入可重放 PTY 缓冲。
+- `StartPersistent(rt, option, bindings)`：在 App 的 Bash Manager 中创建一个持久 REPL。传输断开只解除监视，重连复用同一终端。
 - `RunTask(...)`：拥有一次静态展示与事件订阅，调用已有 Session/Run，在会话关闭后注销订阅。
-- IOA CLI 展示入口在本包；IOA 服务端启动仍属于 runner 的产品入口。
+- 可选命令、补全和状态行通过 `pkg/console/api.Bindings` 注入；Console 不依赖任何协作协议。IOA 的展示适配位于 `pkg/exts/ioa/client/console`。
 
 返回的 `REPL` 只保存自己的 cancel 和完成 channel。这两个状态保证显式关闭可取消并等待
 终端任务结束；它们不包装 Runtime 数据，也不关闭 Profile 拥有的 Runtime、App 或 Bash Manager。

@@ -45,7 +45,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	return e.registry.Register(scope, tools...)
+	return e.registry.Register("files", tools...)
 }
 
 func (e *Extension) Close(ctx context.Context) error {

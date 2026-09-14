@@ -33,7 +33,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
@@ -51,7 +51,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	repl, err := StartPersistent(rt.Runtime(), option)
+	repl, err := StartPersistent(rt.Runtime(), option, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())

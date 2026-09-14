@@ -74,10 +74,10 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := m.commands.Register(scope, "terminal", m.tmux); err != nil {
+	if err := m.commands.Register("terminal", "terminal", m.tmux); err != nil {
 		return err
 	}
-	if err := m.tools.Register(scope, m.bash); err != nil {
+	if err := m.tools.Register("terminal", m.bash); err != nil {
 		return err
 	}
 	m.registered = true

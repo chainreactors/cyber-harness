@@ -5,6 +5,7 @@ import (
 	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/aiscan/skills"
 )
 
 type Config struct {
@@ -14,6 +15,7 @@ type Config struct {
 	Tools         ToolConfig
 	Logger        telemetry.Logger
 	CLISkillPaths []string
+	SkillBundles  []skills.Bundle
 	SkipEngines   bool
 }
 

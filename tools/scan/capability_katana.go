@@ -28,49 +28,51 @@ const (
 	capKatanaDeep  = "katana_deep"
 )
 
-func init() {
-	RegisterProfileExtender(func(mode string, p *profile) {
-		switch mode {
-		case scanModeQuick:
-			p.Capabilities[capKatanaCrawl] = struct{}{}
-			if p.CrawlDepth > 1 {
-				p.CrawlDepth = 1
+func KatanaOptions() []Option {
+	return []Option{
+		WithProfileExtenders(func(mode string, p *profile) {
+			switch mode {
+			case scanModeQuick:
+				p.Capabilities[capKatanaCrawl] = struct{}{}
+				if p.CrawlDepth > 1 {
+					p.CrawlDepth = 1
+				}
+			case scanModeFull:
+				p.Capabilities[capKatanaCrawl] = struct{}{}
+				p.Capabilities[capKatanaDeep] = struct{}{}
 			}
-		case scanModeFull:
-			p.Capabilities[capKatanaCrawl] = struct{}{}
-			p.Capabilities[capKatanaDeep] = struct{}{}
-		}
-	})
+		}),
 
-	RegisterCapabilityBuilder(func(c *Command, f flags, opts scanOptions, p profile) []pipeline.Capability {
-		var caps []pipeline.Capability
-		katanaWebRoutes := wrapRoutes(acceptsTarget(targetWeb), webSources()...)
-		if p.Enabled(capKatanaCrawl) {
-			depth := p.CrawlDepth
-			if depth <= 0 {
-				depth = 2
+		WithCapabilityBuilders(func(c *Command, f flags, opts scanOptions, p profile) []pipeline.Capability {
+			var caps []pipeline.Capability
+			katanaWebRoutes := wrapRoutes(acceptsTarget(targetWeb), webSources()...)
+			if p.Enabled(capKatanaCrawl) {
+				depth := p.CrawlDepth
+				if depth <= 0 {
+					depth = 2
+				}
+				caps = append(caps, wrapCapability(
+					capKatanaCrawl,
+					katanaWebRoutes,
+					2,
+					func(ctx context.Context, e event, emit func(event)) {
+						runKatanaCrawl(ctx, c, e, depth, false, emit)
+					},
+				))
 			}
-			caps = append(caps, wrapCapability(
-				capKatanaCrawl,
-				katanaWebRoutes,
-				2,
-				func(ctx context.Context, e event, emit func(event)) {
-					runKatanaCrawl(ctx, c, e, depth, false, emit)
-				},
-			))
-		}
-		if p.Enabled(capKatanaDeep) {
-			caps = append(caps, wrapCapability(
-				capKatanaDeep,
-				katanaWebRoutes,
-				1,
-				func(ctx context.Context, e event, emit func(event)) {
-					runKatanaCrawl(ctx, c, e, 3, true, emit)
-				},
-			))
-		}
-		return caps
-	})
+			if p.Enabled(capKatanaDeep) {
+				caps = append(caps, wrapCapability(
+					capKatanaDeep,
+					katanaWebRoutes,
+					1,
+					func(ctx context.Context, e event, emit func(event)) {
+						runKatanaCrawl(ctx, c, e, 3, true, emit)
+					},
+				))
+			}
+			return caps
+		}),
+	}
 }
 
 func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode bool, emit func(event)) {

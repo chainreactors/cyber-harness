@@ -102,8 +102,8 @@ type profile struct {
 	AllowBroadPOC bool
 }
 
-func profileForFlags(flags flags) (profile, error) {
-	profile, err := profileForMode(flags.Mode)
+func profileForFlags(flags flags, extenders ...ProfileExtender) (profile, error) {
+	profile, err := profileForMode(flags.Mode, extenders...)
 	if err != nil {
 		return profile, err
 	}
@@ -111,7 +111,7 @@ func profileForFlags(flags flags) (profile, error) {
 	return profile, nil
 }
 
-func profileForMode(mode string) (profile, error) {
+func profileForMode(mode string, extenders ...ProfileExtender) (profile, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
 		mode = scanModeQuick
@@ -148,7 +148,7 @@ func profileForMode(mode string) (profile, error) {
 	default:
 		return profile{}, fmt.Errorf("unknown scan mode %q, expected quick or full", mode)
 	}
-	for _, ext := range profileExtenders {
+	for _, ext := range extenders {
 		ext(mode, &p)
 	}
 	return p, nil

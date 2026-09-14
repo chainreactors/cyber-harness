@@ -7,21 +7,26 @@ import (
 	"strings"
 
 	"github.com/chainreactors/aiscan/agent"
+	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/capability"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	"github.com/chainreactors/aiscan/pkg/edition"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
-	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa"
+	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
+	ioaconsole "github.com/chainreactors/aiscan/pkg/exts/ioa/client/console"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	proxyext "github.com/chainreactors/aiscan/pkg/exts/proxy"
 	profilepkg "github.com/chainreactors/aiscan/pkg/profile"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	"github.com/chainreactors/aiscan/skills"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 )
@@ -32,7 +37,7 @@ const (
 	observeID     = "aiscan.observe"
 	proxyID       = "aiscan.proxy"
 	applicationID = "aiscan.application"
-	ioaID         = "aiscan.ioa"
+	ioaID         = "aiscan.ioa-client"
 	agentID       = "aiscan.agent"
 )
 
@@ -48,13 +53,17 @@ type aiscanProfileConfig struct {
 	Artifacts managementapi.ArtifactImporter
 }
 
-func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *agentext.Config, logger telemetry.Logger) aiscanProfileConfig {
+func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *agentext.Config, logger telemetry.Logger) (aiscanProfileConfig, error) {
+	ioaConfig, err := ioaext.ConfigFromOption(option)
+	if err != nil {
+		return aiscanProfileConfig{}, err
+	}
 	application := apppkg.AppConfig(option, features, logger)
 	return aiscanProfileConfig{
 		Option: option, Application: application,
-		IOA: ioatools.ConfigFromOption(option), Runtime: cloneConfig(runtimeConfig), Logger: logger,
+		IOA: ioaConfig, Runtime: cloneConfig(runtimeConfig), Logger: logger,
 		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
-	}
+	}, nil
 }
 
 func resolveOutputPath(option *cfg.Option) string {
@@ -75,19 +84,34 @@ func parseObserve(value string) []observeext.Kind {
 }
 
 type aiscanProfile struct {
-	assembly *profilepkg.Assembly
-	app      *apppkg.App
-	runtime  *agentext.Runtime
-	proxy    *proxytool.ProxyHub
+	extensions *extension.Set
+	app        *apppkg.App
+	runtime    *agentext.Runtime
+	proxy      *proxytool.ProxyHub
+	ioa        *ioatools.Runtime
+	console    *consoleapi.Bindings
 }
 
 var _ profilepkg.Application = (*aiscanProfile)(nil)
 
 var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (profilepkg.Application, error) {
-	return newAIScanProfile(profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger))
+	if request.Option == nil {
+		return nil, fmt.Errorf("aiscan profile option is required")
+	}
+	for key, fields := range request.Option.Extensions {
+		if _, err := productSections(false).Decode(key, fields); err != nil {
+			return nil, err
+		}
+	}
+	config, err := profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger)
+	if err != nil {
+		return nil, err
+	}
+	return newAIScanProfile(config)
 }
 
 func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
+	product := &aiscanProfile{}
 	if config.Option == nil {
 		return nil, fmt.Errorf("aiscan profile option is required")
 	}
@@ -96,8 +120,23 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	}
 	if config.Application.Capabilities.Empty() {
 		config.Application.Capabilities = edition.Catalog()
+
+	}
+	if config.IOA != nil && !config.Application.Capabilities.Enabled("ioa") {
+		config.Application.Capabilities = capability.Must(append(config.Application.Capabilities.All(), ioaext.Descriptor())...)
 	}
 	config.Runtime = cloneConfig(config.Runtime)
+	nodeName := config.Option.NodeName
+	if config.IOA != nil && config.IOA.NodeName != "" {
+		nodeName = config.IOA.NodeName
+	}
+	nodeName = cfg.ResolveNodeName(nodeName)
+	if config.IOA != nil {
+		ioaConfig := *config.IOA
+		ioaConfig.NodeName = nodeName
+		config.IOA = &ioaConfig
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve AIScan working directory: %w", err)
@@ -117,6 +156,13 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	scannerLoop := runtimeLoop
 	if scannerLoop == nil && config.Application.Scanner.AIEnabled {
 		scannerLoop = agent.StandardLoop{}
+	}
+	if config.IOA != nil {
+		bundle, diagnostics := ioaext.Skills()
+		if len(diagnostics) > 0 {
+			return nil, fmt.Errorf("load IOA skills: %v", diagnostics)
+		}
+		config.Application.SkillBundles = append(append([]skills.Bundle(nil), config.Application.SkillBundles...), bundle)
 	}
 	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, scannerLoop, workDir)
 	if err != nil {
@@ -156,7 +202,16 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	applicationDependencies := append([]string{proxyID}, sourceDependencies...)
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
-		ioa, err = ioaext.New(*config.IOA, application.Commands, config.Logger)
+		deps := ioaext.Dependencies{Commands: application.Commands, Events: events, Logger: config.Logger}
+		if config.Runtime != nil {
+			deps.Deliver = func(ctx context.Context, message inbox.Message) error {
+				if product.extensions == nil || !product.extensions.Active() {
+					return agentext.ErrUnavailable
+				}
+				return product.runtime.Deliver(ctx, message)
+			}
+		}
+		ioa, err = ioaext.New(*config.IOA, deps)
 		if err != nil {
 			return nil, fmt.Errorf("construct IOA extension: %w", err)
 		}
@@ -171,10 +226,16 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	var ioaRuntime *ioatools.Runtime
 	if ioa != nil {
 		ioaRuntime = ioa.Runtime()
+		product.console = ioaconsole.Bind(ioaRuntime, config.IOA.Space, config.IOA.URL)
 	}
 	if config.Runtime != nil {
 		agentConfig := *config.Runtime
-		agentConfig.Application, agentConfig.IOA = application, ioaRuntime
+		agentConfig.Application = application
+		agentConfig.NodeName = nodeName
+		if config.IOA != nil && config.IOA.Space != "" {
+			agentConfig.Preamble = strings.TrimSpace(agentConfig.Preamble + "\n" + ioaext.Preamble(*config.IOA))
+		}
+
 		agentConfig.Option, agentConfig.Logger = config.Option, config.Logger
 		agentConfig.Loop = runtimeLoop
 		agentExtension, err := agentext.New(agentConfig)
@@ -187,29 +248,30 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 			Extension: agentExtension,
 		})
 	}
-	assembly, err := profilepkg.Assemble(entries...)
+	extensions, err := extension.New(entries...)
 	if err != nil {
 		return nil, err
 	}
-	return &aiscanProfile{assembly: assembly, app: application, runtime: run, proxy: proxyHub}, nil
+	product.extensions, product.app, product.runtime, product.proxy, product.ioa = extensions, application, run, proxyHub, ioaRuntime
+	return product, nil
 }
 
 func (p *aiscanProfile) Load(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
+	if p == nil || p.extensions == nil {
 		return fmt.Errorf("AIScan profile is required")
 	}
-	return p.assembly.Load(ctx)
+	return p.extensions.Load(ctx)
 }
 
 func (p *aiscanProfile) App() (*apppkg.App, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() || p.app == nil {
+	if p == nil || p.extensions == nil || !p.extensions.Active() || p.app == nil {
 		return nil, fmt.Errorf("AIScan profile is not active")
 	}
 	return p.app, nil
 }
 
 func (p *aiscanProfile) Runtime() (*agentext.Runtime, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil, fmt.Errorf("AIScan profile is not active")
 	}
 	if p.runtime == nil {
@@ -219,17 +281,17 @@ func (p *aiscanProfile) Runtime() (*agentext.Runtime, error) {
 }
 
 func (p *aiscanProfile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return fmt.Errorf("AIScan profile is not active")
 	}
 	return proxytool.RegisterTrafficNamespace(mux, p.proxy)
 }
 
 func (p *aiscanProfile) Close(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
+	if p == nil || p.extensions == nil {
 		return nil
 	}
-	return p.assembly.Close(ctx)
+	return p.extensions.Close(ctx)
 }
 
 func cloneConfig(config *agentext.Config) *agentext.Config {
@@ -243,4 +305,31 @@ func cloneConfig(config *agentext.Config) *agentext.Config {
 		cloned.PromptConfig = &prompt
 	}
 	return &cloned
+}
+
+func (p *aiscanProfile) AgentStatus() *aop.AgentStatus {
+	if p == nil || p.extensions == nil || !p.extensions.Active() {
+		return &aop.AgentStatus{}
+	}
+	status := agentext.AgentStatus(p.app)
+	if p.ioa != nil {
+		collaboration := p.ioa.Status()
+		status.Bound, status.Space = collaboration.Bound, collaboration.Space
+	}
+	return status
+}
+
+// ConsoleBindings lends the selected presentation contributions.
+func (p *aiscanProfile) ConsoleBindings() *consoleapi.Bindings {
+	if p == nil || p.extensions == nil || !p.extensions.Active() || p.ioa == nil {
+		return nil
+	}
+	return p.console
+}
+
+func (p *aiscanProfile) Capabilities() []string {
+	if p == nil || p.ioa == nil || !p.extensions.Active() {
+		return nil
+	}
+	return []string{"ioa"}
 }

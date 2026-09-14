@@ -148,7 +148,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+			application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())

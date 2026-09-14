@@ -19,9 +19,26 @@ type ConfigBackend interface {
 	ActivateConfig(context.Context, string) (*types.ConfigView, error)
 }
 
-type Config struct{ backend ConfigBackend }
+type ConfigOptions struct {
+	Probes   *probe.Registry
+	Sections *configpkg.Sections
+	Project  func(*types.DistributeConfig, *types.ConfigView)
+}
+type Config struct {
+	backend ConfigBackend
+	options ConfigOptions
+}
 
-func NewConfig(backend ConfigBackend) *Config { return &Config{backend: backend} }
+func NewConfig(backend ConfigBackend, options ...ConfigOptions) *Config {
+	var selected ConfigOptions
+	if len(options) > 0 {
+		selected = options[0]
+	}
+	if selected.Probes == nil {
+		selected.Probes = probe.New()
+	}
+	return &Config{backend: backend, options: selected}
+}
 
 func (c *Config) GetConfig(ctx context.Context, _ *types.GetConfigRequest) (*types.GetConfigResponse, error) {
 	view, err := c.View(ctx)
@@ -80,7 +97,7 @@ func (c *Config) TestConnection(ctx context.Context, request *types.TestConnecti
 		return nil, Errorf(CodeInvalidArgument, "request is required")
 	}
 	stored, _ := c.Distribute(ctx)
-	checks, err := probe.TestConn(ctx, request.GetSection(), request.GetConfig(), stored)
+	checks, err := c.options.Probes.Test(ctx, request.GetSection(), request.GetConfig(), stored)
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
@@ -95,7 +112,14 @@ func (c *Config) View(ctx context.Context) (*types.ConfigView, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ConfigView(config, path, loaded), nil
+	view := ConfigView(config, path, loaded)
+	if c.options.Sections != nil {
+		view.Extensions = c.options.Sections.ProtoViews(config.GetExtensions())
+	}
+	if c.options.Project != nil {
+		c.options.Project(config, view)
+	}
+	return view, nil
 }
 
 func (c *Config) Distribute(ctx context.Context) (*types.DistributeConfig, error) {
@@ -191,7 +215,6 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
 	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
-	view.Ioa = &types.IOAView{Url: config.GetIoa().GetUrl(), TokenConfigured: config.GetIoa().GetToken() != "", NodeName: config.GetIoa().GetNodeName(), Space: config.GetIoa().GetSpace()}
 	view.Agent = &types.AgentConfig{Tools: append([]string(nil), config.GetAgent().GetTools()...), Timeout: config.GetAgent().GetTimeout()}
 	return view
 }

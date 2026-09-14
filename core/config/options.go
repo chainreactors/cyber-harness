@@ -13,11 +13,14 @@ import (
 var Version = "dev"
 
 type Option struct {
+	Resolved       *Resolved `no-flag:"true" config:"-"`
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	TrafficOptions `group:"Traffic Options" config:"traffic"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
-	IOAOptions     `group:"Server Options" config:"ioa"`
+	NodeOptions    `group:"Node Options" config:"node"`
+	Extensions     Values    `no-flag:"true" config:"extensions"`
+	Sections       *Sections `no-flag:"true" config:"-"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
 	OutputOptions  `group:"Output Options" config:"output"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
@@ -133,13 +136,9 @@ func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
 	}
 }
 
-type IOAOptions struct {
-	IOAURL      string `long:"ioa-url" config:"url" description:"Optional independent IOA URL (defaults to <server-url>/ioa for Web agents)"`
-	IOAToken    string `long:"server-token" config:"token" description:"Server access key (auto-generated if empty)"`
-	IOANodeID   string `long:"node-id" description:"Existing node id for agent tools"`
-	IOANodeName string `long:"node-name" config:"node_name" description:"Node name when auto-registering"`
-	Space       string `long:"space" config:"space" description:"Space name" default:"default"`
-	IOAJSON     bool   `no-flag:"true"`
+type NodeOptions struct {
+	NodeID   string `long:"node-id" config:"id" description:"Existing node ID"`
+	NodeName string `long:"node-name" config:"name" description:"Node name"`
 }
 
 type MiscOptions struct {
@@ -163,20 +162,10 @@ type MiscOptions struct {
 type RunMode string
 
 const (
-	RunModeAgent       RunMode = "agent"
-	RunModeIOAServe    RunMode = "ioa serve"
-	RunModeIOASpaces   RunMode = "ioa spaces"
-	RunModeIOAMessages RunMode = "ioa messages"
-	RunModeIOAContext  RunMode = "ioa context"
-	RunModeIOANodes    RunMode = "ioa nodes"
-	RunModeScanner     RunMode = "scanner"
-	RunModeNoCommand   RunMode = ""
+	RunModeAgent     RunMode = "agent"
+	RunModeScanner   RunMode = "scanner"
+	RunModeNoCommand RunMode = ""
 )
-
-type IOAClientArgs struct {
-	Space     string
-	MessageID string
-}
 
 func HasAgentOneShotInput(opt *Option) bool {
 	if strings.TrimSpace(opt.Prompt) != "" || opt.TaskFile != "" || len(opt.Inputs) > 0 {

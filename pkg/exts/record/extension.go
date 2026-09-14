@@ -48,7 +48,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	if err := m.registry.Register(scope, recorder); err != nil {
+	if err := m.registry.Register("record", recorder); err != nil {
 		recorder.Close()
 		return fmt.Errorf("register record tool: %w", err)
 	}

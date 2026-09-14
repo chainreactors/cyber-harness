@@ -25,7 +25,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	status := AgentStatus(nil, app, nil)
+	status := AgentStatus(app)
 	if status.GetProvider() != "openai" || status.GetModel() != "gpt-test" {
 		t.Fatalf("status provider/model = %+v", status)
 	}

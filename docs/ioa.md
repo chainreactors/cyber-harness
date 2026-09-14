@@ -1,402 +1,133 @@
-# IOA：Intelligent Operation Architecture
+# IOA 客户端与服务端扩展
 
-IOA 是 aiscan 的多 agent 协作架构。它通过一个轻量 HTTP server 和消息空间（Space），让多个 aiscan 实例以自治 agent 的身份协同工作——每个 agent 独立决策，通过消息交换情报、分配任务、汇报结果。
+IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。AIScan 通过两个独立扩展集成：
 
----
-
-## 目录
-
-- [核心概念](#核心概念)
-- [架构总览](#架构总览)
-- [数据模型](#数据模型)
-- [IOA worker 生命周期](#ioa-worker-生命周期)
-- [消息路由](#消息路由)
-- [Heartbeat 机制](#heartbeat-机制)
-- [Peer 消息](#peer-消息)
-- [IOA 工具](#ioa-工具)
-- [多 Worker 协作模式](#多-worker-协作模式)
-- [使用指南](#使用指南)
-- [配置参考](#配置参考)
-
----
-
-## 核心概念
-
-| 概念 | 说明 |
-| --- | --- |
-| **Space** | 协作空间。一次渗透测试、一个目标网段可以是一个 Space。所有参与的 Node 在同一个 Space 中交换消息 |
-| **Node** | 自治工作节点。每个 `aiscan agent --ioa-url <url>` 实例注册为一个 Node，拥有独立的 LLM agent 和工具集 |
-| **Message** | Space 中的消息。可以是任务分派、情报共享、结果汇报或协调指令 |
-| **Ref** | 消息引用。通过 `refs.nodes` 定向发送给特定节点，通过 `refs.messages` 建立会话线程 |
-| **Task** | 标记为任务的消息。Node 收到 Task 后自动启动 agent 执行 |
-
----
-
-## 架构总览
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                      IOA Server                          │
-│              HTTP API + SSE + SQLite                     │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │                   Space: case-1                     │ │
-│  │                                                     │ │
-│  │  msg1: [scanner-1] joined, skills: scan,gogo       │ │
-│  │  msg2: [recon-1] joined, skills: spray,neutron     │ │
-│  │  msg3: → scanner-1: "扫描 10.0.0.0/24 端口"        │ │
-│  │  msg4: [scanner-1] accepted task                    │ │
-│  │  msg5: → recon-1: "对 Web 目标做指纹识别"           │ │
-│  │  msg6: [scanner-1] result: 发现 12 个服务...        │ │
-│  │  msg7: [recon-1] result: 识别到 nginx, tomcat...    │ │
-│  └─────────────────────────────────────────────────────┘ │
-└──────────┬───────────────────┬───────────────────────────┘
-           │ SSE + Poll        │ SSE + Poll
-     ┌─────▼──────┐      ┌────▼───────┐
-     │  scanner-1 │      │  recon-1   │
-     │  (Node)    │      │  (Node)    │
-     │            │      │            │
-     │  LLM Agent │      │  LLM Agent │
-     │  gogo      │      │  spray     │
-     │  zombie    │      │  neutron   │
-     └────────────┘      └────────────┘
-```
-
-IOA Server 本身不做决策——它只是消息总线。所有智能都在 Node 端的 LLM agent 中。
-
----
-
-## 数据模型
-
-### Space
-
-Space 是消息的容器，类似聊天室。一个 Space 对应一次协作任务。
-
-```bash
-# 创建/获取 Space
-aiscan ioa spaces --ioa-url http://127.0.0.1:8765
-```
-
-### Node
-
-Node 是注册到 IOA Server 的工作节点。注册时携带元数据：
-
-```json
-{
-  "client": "aiscan",
-  "hostname": "scanner-host",
-  "capabilities": ["scan", "gogo", "spray"]
-}
-```
-
-每个 Node 同一时间只执行一个 Task，其余排队等待。
-
-### Message
-
-Message 是 Space 中的通信单元，结构化为 `SwarmMessage`：
-
-| 字段 | 类型 | 说明 |
+| 扩展 | 所有权 | 对外业务能力 |
 | --- | --- | --- |
-| `content` | string | 消息文本（自然语言任务描述或结果） |
-| `targets` | []string | 相关目标（IP、URL 等） |
-| `task` | bool | 是否为任务分派 |
+| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Runtime()`：查询、状态，无 SDK 句柄和 Start/Close |
+| `pkg/exts/ioa/server` | Store、Service、认证、HTTP/SSE 请求排空 | `Server()`，无 Start/Close |
 
-### Ref（引用）
+客户端与服务端使用 IOA HTTP 协议通信。原始实现在 `tools/ioa` 与 `tools/ioa/server`，
+不依赖 Extension 宿主。连接目标仍由 `--ioa-url` 决定；Web Agent 未指定时使用
+`<server-url>/ioa`。Web/AOP 的节点路由与 IOA 身份仍是两个独立协议边界。
 
-Ref 是消息路由和线程化的核心：
+## 客户端装配
 
-| 引用类型 | 说明 |
-| --- | --- |
-| `refs.nodes` | 定向发送。只有指定的 Node 会处理此消息 |
-| `refs.messages` | 线程引用。建立消息之间的上下文关联 |
-| `refs.spaces` | 跨 Space 引用 |
-
----
-
-## IOA worker 生命周期
-
-`aiscan agent --ioa-url <url>` 启动一个持久运行的 IOA worker：
-
-### 1. 启动
-
-```
-注册 Node → 加入 Space → 发布 Profile → SSE 订阅
+```text
+Command Registry ── ioa 命令 ──→ IOA Client
+AOP Event Stream ── handoff ───→ IOA Client
+Agent Inbox      ←─ peer 消息 ─ IOA Client
+Console / CLI    ── Reader ───→ IOA Client
 ```
 
-Node 启动时向 Space 发布自己的 Profile（名称、意图、技能、主机名），让其他 Node 了解自己的能力。
+Profile 构造客户端并注入 Command Registry、共享的 Event Stream 和可选的投递函数。
+客户端不导入 Agent Extension，Agent 不导入 IOA SDK。
+没有投递函数时仍可使用命令和 skills，不启动自动收信。
 
-### 2. 消息监听
+加载顺序为 IOA Client → App/贡献者 → Command Registry → Tool Registry → Agent；
+关闭顺序相反。只有整张 Profile 图发布后，投递函数才允许调用 Agent 的 `Deliver`。
+该入口选择主会话，否则选择唯一会话；无会话、多会话歧义、关闭或队列满时返回错误。
+不会自动创建会话。忙碌会话接收追加输入，空闲会话通过既有 Inbox 机制自动执行。
 
-IOA worker 通过两个通道获取消息：
+注册、加入配置 Space 失败会重试，随后建立 SSE；订阅断开也会重连。
+注册和订阅寿命不受初始化 context 结束影响。自身消息按当前 Node ID 过滤。
+`ioa space` 切换的是命令当前 Space；自动收信和 handoff 继续使用启动配置中的 Space。
 
-- **SSE（Server-Sent Events）**：实时推送，低延迟
-- **定期轮询（Poll）**：每 2 秒补偿 SSE 可能的消息丢失
+handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/return 内容和引用关系。
+队列上限为 256 个事件、16 MiB。发送失败被记录，不终止后续事件消费；队列溢出会停止
+该订阅并记录错误和丢弃数量。`Runtime.Status()` 提供 Bound、Space、LastError 和 Dropped。
+关闭时先取消并等待收信，再排空 handoff，最后释放客户端资源；超时可通过 Set.Close 重试。
+已完成资源回收但输出失败时返回普通错误，不再报告资源未关闭。
 
-使用 watermark（`lastSeenID`）+ dispatched set 双重去重，保证消息不丢失也不重复处理。
+当前没有离线补投或可靠 outbox。没有会话时拒绝输入，网络发送失败不自动重发。
 
-### 3. 任务执行
+本地与远程 Console 只接收 `pkg/console/api.Bindings`。客户端的 `console` 子包持有 Reader，
+提供 `/spaces`、`/nodes`、`/messages`、`/context`、补全和状态行，复用同一个已注册身份。
+Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭客户端；查询随扩展关闭而取消并排空。
 
-收到 Task 后：
+独立查询 CLI 在 `cmd/aiscan` 装配仅含 client ext 的图；连通性探测使用一次性的只读 client ext，
+支持已有 bearer token，且不自动注册节点。Console、Node、Runner 和 Web 不直接构造 IOA SDK。
 
-```
-routeIncoming() → startTask() → 发送 Accept 确认 → 启动 Agent 执行 → completeTask() → 发布结果
-```
 
-- Agent 执行期间拥有完整的 LLM 工具链（扫描器、文件操作、IOA 工具等）
-- 执行结果通过 `refs.messages` 引用原始 Task 消息，形成线程
-- 同一时间只执行一个 Task，新 Task 自动排队
+## 启动声明与配置
 
-### 4. 关闭
+只有 client/server 两个生命周期扩展。`client/cli`、`client/console`、`client/probe` 和
+`server/cli` 是静态适配代码，不创建第三个 Extension，也不加入另一套生命周期。
+`cmd/aiscan/ioa_composition.go` 在解析参数前注册它们；运行时选择仍由具体 Profile 决定。
 
-- 第一次 Ctrl+C：等待当前 Task 完成后退出
-- 第二次 Ctrl+C：立即退出
+- `core/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
+- `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
+- `pkg/probe.Registry` 只执行显式注册的探测；普通 Web API 不包含 IOA 分支。
+- `pkg/profile.Application` 只发布通用 ConsoleBindings、Capabilities 和完整 AgentStatus。
+- `pkg/web.Route` 由产品传入；`/ioa/` 及浏览器身份桥接由 server 扩展与产品组合根装配。
 
----
-
-## 消息路由
-
-Node 收到消息后，按以下规则路由：
-
-```
-消息到达
-  │
-  ├─ 是自己发的？ → 跳过
-  │
-  ├─ refs.nodes 指定了其他节点？ → 跳过
-  │
-  ├─ 是历史消息（启动前已存在）？ → 跳过
-  │
-  ├─ task=true 或 refs.nodes 包含自己？
-  │   ├─ 当前空闲 → 立即执行
-  │   └─ 当前忙碌 → 加入待办队列
-  │
-  └─ 普通消息 + 当前正在执行 Task？
-      → 转为 Peer 消息注入 Agent 上下文
-```
-
-**定向消息**通过 `refs.nodes` 只发给指定 Node。**广播消息**（无 `refs.nodes`）所有空闲 Node 都可以接收。
-
----
-
-## Heartbeat 机制
-
-Heartbeat 让 Worker 在没有任务时也能主动审视协作上下文并采取行动。
-
-```bash
-aiscan agent --ioa-url http://127.0.0.1:8765 --heartbeat 5 --space case-1 \
-  -p "持续观察上下文，协调各节点扫描进度"
-```
-
-### 工作方式
-
-每隔 N 分钟：
-
-1. 读取 Space 中最近的消息（默认最近 50 条）
-2. 构造结构化 prompt，包含：Space 信息、Node 自身能力、近期消息上下文
-3. 交给 Agent 判断下一步行动
-4. Agent 可以：执行本地工具、发送 IOA 消息协调其他 Node、或决定无需行动
-
-### 适用场景
-
-- **协调者角色**：一个 Node 专门负责审视全局进度，分配任务
-- **持续监控**：定期检查是否有新情报需要处理
-- **自愈**：发现某个 Node 长时间无响应时主动接管
-
----
-
-## Peer 消息
-
-当 Worker 正在执行 Task 时，其他 Node 发来的非 Task 消息会作为 Peer 消息注入当前 Agent 的上下文：
-
-```xml
-<swarm_peer sender="recon-1" message_id="msg-007">
-发现 10.0.0.5 运行 Apache Tomcat 9.0.50，建议优先检查 CVE-2021-42013
-</swarm_peer>
-```
-
-这意味着 Agent 在执行任务过程中可以实时接收来自其他 Node 的情报，并据此调整自己的行为。
-
----
-
-## IOA 工具
-
-当 Agent 连接 IOA 时，以下工具自动注册到 Agent 的工具集中：
-
-| 工具 | 说明 |
-| --- | --- |
-| `ioa send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
-| `ioa read` | 读取 Space 中的消息（支持过滤） |
-| `ioa space` | 获取或创建 Space |
-| `ioa_node` | 注册 Node 或查询 Node 信息 |
-
-### ioa send 示例
-
-Agent 可以通过 `ioa send` 给其他 Node 分配任务：
-
-```json
-{
-  "space_id": "space-001",
-  "content": "对 10.0.0.5:8080 的 Tomcat 执行 critical 级别 POC 检测",
-  "targets": ["10.0.0.5:8080"],
-  "refs": {
-    "nodes": ["scanner-node-id"]
-  }
-}
-```
-
----
-
-## 多 Worker 协作模式
-
-### 模式一：手动分工
-
-人工为每个 Node 设定明确的职责分工：
-
-```bash
-# 终端 1：IOA Server
-aiscan ioa serve
-
-# 终端 2：端口扫描 Worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 \
-  --ioa-node-name port-scanner \
-  -s gogo -p "负责端口和服务发现"
-
-# 终端 3：Web 探测 Worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 \
-  --ioa-node-name web-recon \
-  -s spray -s neutron -p "负责 Web 指纹识别和漏洞检测"
-
-# 终端 4：弱口令 Worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 \
-  --ioa-node-name cred-tester \
-  -s zombie -p "负责弱口令检测"
-```
-
-然后通过 IOA 消息发起任务：
-
-```bash
-# 通过交互式 agent 发送任务
-aiscan agent --ioa-url http://127.0.0.1:8765
-> 在 pentest-001 中给 port-scanner 分配任务：扫描 10.0.0.0/24 全端口
-```
-
-### 模式二：协调者 + 执行者
-
-一个 Heartbeat Worker 作为协调者，自动分配任务给其他 Worker：
-
-```bash
-# 协调者（每 5 分钟审视一次）
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 \
-  --heartbeat 5 \
-  --ioa-node-name coordinator \
-  -p "你是协调者。审视当前进度，给空闲的 scanner 和 recon 节点分配下一步任务。目标网段：10.0.0.0/24"
-
-# 执行者们
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 --ioa-node-name scanner -s scan
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-001 --ioa-node-name recon -s spray -s neutron
-```
-
-### 模式三：One-shot Agent 接入 IOA
-
-One-shot Agent 也可以接入 IOA，用于临时参与协作或查看状态：
-
-```bash
-# 临时参与，执行完退出
-aiscan agent --ioa-url http://127.0.0.1:8765 \
-  -p "在 pentest-001 中查看当前进度，补充对 10.0.0.5 的深度扫描" \
-  -i 10.0.0.5
-```
-
----
-
-## 使用指南
-
-### 启动 IOA Server
-
-```bash
-# 默认 http://127.0.0.1:8765，数据库 ./ioa.db
-aiscan ioa serve
-
-# 自定义
-aiscan ioa serve --ioa-url http://0.0.0.0:8765 --ioa-db /data/ioa.db
-```
-
-### 启动 IOA worker
-
-```bash
-aiscan agent --ioa-url <url> [OPTIONS]
-```
-
-| 参数 | 说明 | 默认值 |
-| --- | --- | --- |
-| `--ioa-url` | IOA Server 地址 | `http://127.0.0.1:8765` |
-| `--space` | 加入的 Space 名 | `default` |
-| `--ioa-node-name` | 节点名称 | 自动生成 |
-| `--ioa-node-id` | 使用已有节点 ID | — |
-| `--heartbeat` | Heartbeat 间隔（分钟），0 禁用 | `0` |
-| `-p` | 节点意图描述 | — |
-| `-s` | 加载的 skill | — |
-| `--timeout` | 单次任务超时 | `3600` |
-
-### 查询 IOA 状态
-
-```bash
-# 列出 Space
-aiscan ioa spaces --ioa-url http://127.0.0.1:8765
-
-# 列出 Space 中的消息
-aiscan ioa messages pentest-001 --ioa-url http://127.0.0.1:8765
-
-# 查看消息上下文（线程）
-aiscan ioa context pentest-001 <message-id> --ioa-url http://127.0.0.1:8765
-
-# 列出所有节点
-aiscan ioa nodes --ioa-url http://127.0.0.1:8765
-
-# 列出 Space 内的节点
-aiscan ioa nodes pentest-001 --ioa-url http://127.0.0.1:8765
-
-# JSON 输出
-aiscan ioa spaces --ioa-url http://127.0.0.1:8765 --json
-```
-
-### 交互式 REPL 中的 IOA 命令
-
-在 `aiscan agent` 交互模式下：
-
-```
-aiscan> /spaces
-aiscan> /messages pentest-001
-aiscan> /context pentest-001 msg-123
-aiscan> /nodes pentest-001
-```
-
----
-
-## 配置参考
-
-### CLI 参数
-
-| 参数 | 说明 |
-| --- | --- |
-| `--ioa-url` | IOA Server URL |
-| `--ioa-node-id` | 已有节点 ID |
-| `--ioa-node-name` | 注册节点名 |
-| `--ioa-db` | SQLite 数据库路径（仅 `ioa serve`） |
-| `--space` | Space 名称 |
-| `--json` | IOA 查询 JSON 输出 |
-| `--ioa-url` | 启用 IOA worker 模式 |
-| `--heartbeat` | Heartbeat 间隔（分钟） |
-
-### 配置文件
+新配置使用独立命名空间：
 
 ```yaml
-ioa:
-  url: "http://127.0.0.1:8765"
-  db: "./ioa.db"
-  node_name: "my-scanner"
-  space: "default"
+node:
+  name: worker
+extensions:
+  ioa.client:
+    url: http://access-key@localhost:8765
+    space: team
+  ioa.server:
+    url: http://127.0.0.1:8765
+    token: server-access-key
 ```
 
-### 环境变量
+继续接受 `--ioa-url`、`--server-token`、`--space`、`--node-name`、`ioa ...`、`ioa serve`、
+`serve --addr/--token`。旧 YAML `ioa:` 在客户端命令映射为 `ioa.client`，独立服务端命令映射为
+`ioa.server`；服务端忽略旧节中的客户端 space/node_name。旧 `ioa.node_name` 在产品边界兼容到
+通用节点名称。客户端、服务端声明均可独立安装。
 
-IOA 相关参数暂无独立环境变量，通过配置文件或 CLI 参数指定。
+扩展字段按显式 CLI > 文件 > 类型默认值解析，通用配置原有环境变量优先级保持不变。
+`build.sh` 的 IOA 编译默认值注入 client/server 包；通用节点名称注入 `core/config.DefaultNodeName`。
+字段缺失与显式空字符串、false、0 不等价；`url: ""` 禁用自动推导的客户端连接。
+同一字段的旧别名与新路径值冲突、未注册的扩展键、未知字段和非法类型在启动前报错。
+
+Web protobuf 增加 `extensions` 数据及脱敏视图；旧 IOA protobuf 字段只作兼容输入/输出。
+保存时保留未提交的扩展节及空白密钥，保留相同端点 URL 中被视图隐藏的凭据；换主机不复制凭据。
+保存的客户端配置继续使用 `ioa:` YAML 拼写，并保留显式空值。配置校验与候选 Profile 加载成功后
+才提交；应用 Profile 可替换，宿主 IOA Server 持续存在。远端现有 Provider 重载仍保持原语义，
+扩展连接变化需要重建该节点的 Profile。没有自动生成扩展表单或运行时热注册。
+
+通用 core、Agent、Profile、Console、Node、Probe、Web 与 skills 的生产依赖闭包不包含 IOA SDK、
+`tools/ioa` 或 IOA 扩展。架构测试同时检查直接 import 与传递依赖，兼容协议 DTO 不携带运行时行为。
+
+## Skills
+
+客户端提供静态 `skills.Bundle`，由 Profile 在构造 App 时选择。
+未安装客户端时，不加载 IOA 使用说明或协议 skills。
+
+- 使用说明：`aiscan://skills/ioa/SKILL.md`
+- 协议定义：`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`
+- 协议 schema：`ioa://skills/<name>/schema.json`
+
+覆盖顺序为内置 → 扩展 Bundle → `.aiscan/skills` → `.agent/skills` → CLI 路径。
+Bundle 不提供热注册或另一套生命周期。
+
+## 服务端托管
+
+独立 `aiscan ioa serve` 和 Web 都安装同一个服务端扩展，分别挂载根路径和 `/ioa/`。
+服务端默认使用内存 SQLite；业务 Store 与 Web 管理数据库不合并。
+构造时不打开数据库。扩展加载后才发布业务能力；未加载和关闭后的 handler 返回 503。
+关闭先拒绝新请求、取消 SSE、等待请求退出，最后关闭 Store；等待超时保留 Store 供重试。
+
+HTTP listener 和 `http.Server` 由命令入口持有。server 扩展的 `BrowserHandler` 注册浏览器身份并桥接认证；原生 bearer 身份仍保留。上游 `NewHTTPHandler` 统一装配认证、REST/SSE 和
+`/mcp`；独立 `ioa serve` 显式启用 MCP，Web 维持原有 REST/SSE 路由。
+
+Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profile，不清空空间、消息和身份。
+扩展不创建子 Set，各运行时之间不共享 Extension 实例。
+
+## 开发验证
+
+本次同时修改相邻 `internet-of-agent` 仓库，增加 `server.NewHTTPHandler`。
+根目录 `go.work` 使用相对路径联调 AIScan、AOP 和该仓库，不修改模块缓存。
+上游发布该接口后，将 `go.mod` 中 IOA 依赖固定到对应版本并移除这个联调 workspace。
+
+```text
+go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service
+go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./skills
+go test -tags full ./cmd/aiscan ./pkg/web/service
+go test github.com/chainreactors/ioa/server
+```

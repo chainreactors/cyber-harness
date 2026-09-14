@@ -39,10 +39,10 @@ func NewRegistry(hooks *hooks.Registry) *Registry {
 	return &Registry{hooks: hooks, store: coreregistry.New[registeredTool]()}
 }
 
-// Register atomically adds tools owned by scope. Registration is valid only
-// before the registry extension is loaded; ownership transfers to scope.
-func (r *Registry) Register(scope *extension.Scope, tools ...tool.Tool) error {
-	if r == nil || r.store == nil || scope == nil || len(tools) == 0 {
+// Register atomically adds fixed declarations before activation. The registry
+// retains them for the whole composition; tool resources remain borrowed.
+func (r *Registry) Register(source string, tools ...tool.Tool) error {
+	if r == nil || r.store == nil || len(tools) == 0 {
 		return coreregistry.ErrInvalid
 	}
 	values := make([]coreregistry.Value[registeredTool], 0, len(tools))
@@ -67,15 +67,8 @@ func (r *Registry) Register(scope *extension.Scope, tools ...tool.Tool) error {
 			},
 		})
 	}
-	retract, err := r.store.Register("", values...)
-	if err != nil {
-		return err
-	}
-	if err := scope.Track(retract); err != nil {
-		retract()
-		return err
-	}
-	return nil
+	_, err := r.store.Register(source, "", values...)
+	return err
 }
 
 func (r *Registry) Load(scope *extension.Scope) error {

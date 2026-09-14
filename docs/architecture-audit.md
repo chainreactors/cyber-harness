@@ -4,7 +4,7 @@
 
 ## 结果
 
-- 每个组合根只有一个 `extension.Set`；`pkg/profile` 只提供接口与 `Assembly`，具体
+- 每个组合根只有一个 `extension.Set`；`pkg/profile` 只提供产品接口与 Factory，具体
   `aiscanProfile` 位于 `cmd/aiscan`，且不复制 Set 的发布或关闭状态。App 不生成 Entry，也不拥有子图。
 - `pkg/toolset.Registry` 与 `pkg/commands.Registry` 共享 `core/registry.Store[T]`，互不依赖。
 - 同名批次原子失败；激活后不可变；Close 拒绝、取消、drain，超时可重试。
@@ -16,7 +16,7 @@
 - App 只发布 `Publish` 和类型化只读观察，不暴露第二个可写 EventBus。
 - ToolNode 没有通用连接 Extension 工厂；只有实际支持的 core/tool 协议。
 - Agent 只依赖 `tool.Executor`；无 Agent 的文件 Profile 保持 headless 依赖闭包。
-- `extension.Scope` 不含 owner ID、资源 Ref 或服务定位；只表达初始化、寿命和注册撤销。
+- `extension.Scope` 不含 owner ID、资源 Ref 或服务定位；只提供初始化和寿命上下文；资源清理由 Extension.Close 负责。
 - Files、Proxy、IOA 与 App 均分离生命周期所有者和业务访问面；Agent Extension 发布一个
   同时覆盖受控 Loop 与 Session 的 Runtime，不再保留独立 Session Extension。不存在
   Borrow/Handle/seal 适配层，业务对象不提供 Load/Open/Start/Close。

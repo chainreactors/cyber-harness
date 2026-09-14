@@ -12,7 +12,6 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	toolsext "github.com/chainreactors/aiscan/pkg/exts/tools"
 	"github.com/chainreactors/aiscan/pkg/toolnode"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
@@ -20,13 +19,11 @@ import (
 func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
 	bash := commands.NewBashTool(workDir, 300, nil)
 	registry := toolset.NewRegistry(nil)
-	ext, err := toolsext.New(registry, bash)
-	if err != nil {
+	if err := registry.Register("terminal", bash); err != nil {
 		panic(err)
 	}
 	set, err := extension.New(
-		extension.Entry{ID: "tools", Extension: ext},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"tools"}, Extension: registry},
+		extension.Entry{ID: "tool-registry", Extension: registry},
 	)
 	if err != nil {
 		panic(err)

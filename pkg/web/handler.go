@@ -2,12 +2,24 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
 type Handler struct{ handler http.Handler }
 
-func NewHandler(service Service, ioaHandler http.Handler, static http.Handler) *Handler {
+type Route struct {
+	Pattern string
+	Handler http.Handler
+}
+
+func NewHandler(service Service, static http.Handler, routes ...Route) (handler *Handler, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			handler = nil
+			err = fmt.Errorf("register HTTP routes: %v", value)
+		}
+	}()
 	auth := service.Auth()
 	mux := http.NewServeMux()
 	auth.RegisterRoutes(mux)
@@ -20,8 +32,8 @@ func NewHandler(service Service, ioaHandler http.Handler, static http.Handler) *
 			mux.Handle(NodeWebSocketPath, handler)
 		}
 	}
-	if ioaHandler != nil {
-		mux.Handle("/ioa/", http.StripPrefix("/ioa", ioaHandler))
+	for _, route := range routes {
+		mux.Handle(route.Pattern, route.Handler)
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -30,7 +42,7 @@ func NewHandler(service Service, ioaHandler http.Handler, static http.Handler) *
 	if static != nil {
 		mux.Handle("/", static)
 	}
-	return &Handler{handler: auth.Middleware(mux)}
+	return &Handler{handler: auth.Middleware(mux)}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

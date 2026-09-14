@@ -1,5 +1,5 @@
 // Package probe verifies connectivity to aiscan's external dependencies
-// (cyberhub, recon providers, search, IOA, and the LLM) using a supplied config.
+// (cyberhub, recon providers, search, and the LLM) using a supplied config.
 // Probe failures are reported inside the result structs rather than as returned
 // errors; a returned error only signals an unknown/untestable section.
 package probe
@@ -16,11 +16,9 @@ import (
 	"strings"
 	"time"
 
-	ioaclient "github.com/chainreactors/ioa/client"
-	"github.com/chainreactors/sdk/pkg/cyberhub"
-
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/tools/search"
+	"github.com/chainreactors/sdk/pkg/cyberhub"
 )
 
 // connProbeTimeout bounds a single connectivity check so an unreachable or
@@ -48,8 +46,6 @@ func TestConn(ctx context.Context, section string, in, stored *types.DistributeC
 		return testRecon(ctx, in, stored), nil
 	case "search":
 		return testSearch(ctx, in, stored), nil
-	case "ioa":
-		return testIOA(ctx, in, stored), nil
 	default:
 		return nil, fmt.Errorf("section %q has no connection to test", section)
 	}
@@ -110,30 +106,6 @@ func testSearch(ctx context.Context, in, stored *types.DistributeConfig) []*type
 		probeCtx, cancel := context.WithTimeout(ctx, connProbeTimeout)
 		defer cancel()
 		return search.ProbeTavily(probeCtx, first, "")
-	})}
-}
-
-func testIOA(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
-	ioaURL := fallbackStr(in.GetIoa().GetUrl(), stored.GetIoa().GetUrl())
-	token := fallbackStr(in.GetIoa().GetToken(), stored.GetIoa().GetToken())
-	return []*types.ConnectionCheck{runCheck("ioa", func() (string, error) {
-		if strings.TrimSpace(ioaURL) == "" {
-			return "", fmt.Errorf("ioa url is empty")
-		}
-		client, err := newIOAProbeClient(ioaURL, token)
-		if err != nil {
-			return "", err
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, connProbeTimeout)
-		defer cancel()
-		// ListSpaces is a read-only authenticated call: it proves the server is
-		// reachable and the token is accepted without the side effect of
-		// registering a node (which EnsureRegistered would do on every click).
-		spaces, err := client.ListSpaces(probeCtx)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("connected · %d space(s)", len(spaces)), nil
 	})}
 }
 
@@ -263,15 +235,6 @@ func probeHunter(ctx context.Context, key, proxy string) (string, error) {
 		return "", fmt.Errorf("Hunter returned code %d", r.Code)
 	}
 	return fmt.Sprintf("key valid · %d total", r.Data.Total), nil
-}
-
-func newIOAProbeClient(rawURL, token string) (*ioaclient.Client, error) {
-	if strings.TrimSpace(token) != "" {
-		return ioaclient.NewClientWithToken(rawURL, token)
-	}
-	// No explicit token: NewClient still extracts an access key from a
-	// userinfo-style URL (http://token@host:port).
-	return ioaclient.NewClient(rawURL, "")
 }
 
 // --- helpers ---

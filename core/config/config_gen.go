@@ -64,7 +64,7 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 		field := t.Field(i)
 		fieldVal := v.Field(i)
 		configTag := field.Tag.Get("config")
-		if configTag == "" {
+		if configTag == "" || configTag == "-" || configTag == "extensions" {
 			continue
 		}
 

@@ -15,7 +15,6 @@ import (
 	"github.com/chainreactors/aiscan/pkg/commands"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -143,17 +142,13 @@ func commandDescription(store *skills.Store, location string) string {
 	return strings.TrimSpace(frontmatter.Description)
 }
 
-// AgentStatus reports the node's provider/model/IOA binding for pool views.
-func AgentStatus(option *cfg.Option, app *apppkg.App, ioa *ioatools.Runtime) *aop.AgentStatus {
+// AgentStatus reports Agent provider/model health; the profile adds product status.
+func AgentStatus(app *apppkg.App) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
-	if option != nil {
-		status.Space = option.Space
-	}
 	if app != nil {
 		_, providerConfig := app.ProviderState()
 		status.Provider = providerConfig.Provider
 		status.Model = providerConfig.Model
-		status.Bound = ioa != nil && ioa.Client() != nil && ioa.Client().Bound()
 		health := app.LLMHealth()
 		if health.State == apppkg.LLMHealthFailed || (health.State == apppkg.LLMHealthNotConfigured && health.Error != "") {
 			status.ConfigError = statusOneLine(health.Error, 240)

@@ -13,10 +13,10 @@ import (
 func TestRegistryRejectsDuplicateCommands(t *testing.T) {
 	registry := NewRegistry(nil)
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register(scope, "one", Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+		return registry.Register("test", "one", Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
 	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register(scope, "two",
+		return registry.Register("test", "two",
 			Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 			Command{Name: "scan", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 		)

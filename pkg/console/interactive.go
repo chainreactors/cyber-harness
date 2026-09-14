@@ -23,9 +23,9 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/spf13/cobra"
@@ -51,6 +51,7 @@ type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
 	runtime        *agentext.Runtime
+	bindings       *consoleapi.Bindings
 	session        *agentext.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
@@ -64,7 +65,7 @@ type AgentConsole struct {
 	// the input buffer or creating a duplicate prompt between reads.
 	readlineActive atomic.Bool
 	// startupNotice, when set, is rendered once below the welcome banner (e.g.
-	// an IOA-unavailable degradation warning). Set by the caller before Start.
+	// an optional capability degradation warning). Set by the caller before Start.
 	startupNotice string
 	sessionDir    string
 
@@ -85,7 +86,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal, bindings *consoleapi.Bindings) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}
@@ -126,6 +127,7 @@ func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentex
 		ctx:          ctx,
 		option:       option,
 		runtime:      rt,
+		bindings:     bindings,
 		session:      session,
 		cancel:       cancel,
 		submitCtx:    submitCtx,
@@ -487,7 +489,10 @@ func (r *AgentConsole) allCommands() []*cobra.Command {
 	cmds := r.builtinCommands()
 	cmds = append(cmds, r.skillCommands()...)
 	cmds = append(cmds, r.providerCommands()...)
-	return append(cmds, r.ioaCommands()...)
+	if r.bindings != nil && r.bindings.Commands != nil {
+		cmds = append(cmds, r.bindings.Commands(consoleapi.View{Out: r.stdout, Err: r.stderr, Table: r.printBoxTable})...)
+	}
+	return cmds
 }
 
 func (r *AgentConsole) builtinCommands() []*cobra.Command {
@@ -600,67 +605,6 @@ func (r *AgentConsole) providerCommands() []*cobra.Command {
 	}
 }
 
-func (r *AgentConsole) ioaCommands() []*cobra.Command {
-	return []*cobra.Command{
-		{
-			Use: "/spaces", Short: "List all spaces",
-			Args: cobra.NoArgs,
-			RunE: func(c *cobra.Command, _ []string) error {
-				ctx := c.Context()
-				client, err := r.ioaClient()
-				if err != nil {
-					return err
-				}
-				return r.renderIOASpaces(ctx, client)
-			},
-		},
-		{
-			Use: "/messages", Short: "List start messages in a space",
-			Args: cobra.ExactArgs(1), DisableFlagParsing: true,
-			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				client, err := r.ioaClient()
-				if err != nil {
-					return err
-				}
-				return r.renderIOAMessages(ctx, client, args[0])
-			},
-		},
-		{
-			Use: "/context", Short: "View message thread/context",
-			DisableFlagParsing: true,
-			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				fields := splitArgs(args)
-				if len(fields) < 2 {
-					return fmt.Errorf("usage: /context <space> <message-id>")
-				}
-				client, err := r.ioaClient()
-				if err != nil {
-					return err
-				}
-				return RunIOAContext(ctx, client, r.option, cfg.IOAClientArgs{Space: fields[0], MessageID: fields[1]}, r.stdout, r.stderr)
-			},
-		},
-		{
-			Use: "/nodes", Short: "List nodes (optionally scoped to a space)",
-			DisableFlagParsing: true,
-			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				client, err := r.ioaClient()
-				if err != nil {
-					return err
-				}
-				space := ""
-				if len(args) > 0 {
-					space = args[0]
-				}
-				return r.renderIOANodes(ctx, client, space)
-			},
-		},
-	}
-}
-
 func (r *AgentConsole) ensureOutput() *AgentOutput {
 	if r.output == nil {
 		r.output = NewAgentOutput(r.option)
@@ -718,23 +662,6 @@ func (r *AgentConsole) forceExit() {
 	// Called on readline's key handling goroutine, so acceptance is serialized
 	// with input processing and exits only this Console, never the host process.
 	r.console.Shell().History.Accept(false, false, io.EOF)
-}
-
-func (r *AgentConsole) ioaClient() (*ioaclient.Client, error) {
-	ioaURL := r.option.IOAURL
-	if ioaURL == "" {
-		return nil, fmt.Errorf("server not configured: use --server-url")
-	}
-	client, err := ioaclient.NewClient(ioaURL, "")
-	if err != nil {
-		return nil, err
-	}
-	if client.AccessKey() != "" {
-		if err := client.EnsureRegistered(context.Background(), "aiscan-tui", "", nil); err != nil {
-			return nil, fmt.Errorf("server auth: %w", err)
-		}
-	}
-	return client, nil
 }
 
 func (r *AgentConsole) renderProviders() string {
@@ -1181,39 +1108,21 @@ func (r *AgentConsole) atCompleteAction(c carapace.Context) carapace.Action {
 	raw := c.Value[1:]
 	fileAction := atFuzzyFileAction(raw)
 	c.Value = raw
-	nodeAction := r.atNodeCompleteAction(c)
+	nodeAction := r.extensionCompleteAction(c)
 	return carapace.Batch(fileAction, nodeAction).ToA()
 }
 
-func (r *AgentConsole) atNodeCompleteAction(c carapace.Context) carapace.Action {
-	if r.option == nil || r.option.IOAURL == "" {
+func (r *AgentConsole) extensionCompleteAction(c carapace.Context) carapace.Action {
+	if r.bindings == nil || r.bindings.Complete == nil {
 		return carapace.ActionValues()
 	}
-	client, err := r.ioaClient()
-	if err != nil {
-		return carapace.ActionValues()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
 	defer cancel()
-	if r.option.Space != "" {
-		space, err := client.ResolveSpace(ctx, r.option.Space)
-		if err == nil {
-			var names []string
-			for _, n := range space.Nodes {
-				names = append(names, "@"+n.Name)
-			}
-			return carapace.ActionValues(names...).NoSpace()
-		}
-	}
-	nodes, err := client.ListNodes(ctx)
-	if err != nil {
-		return carapace.ActionValues()
-	}
-	var names []string
-	for _, n := range nodes {
-		names = append(names, "@"+n.Name)
-	}
-	return carapace.ActionValues(names...).NoSpace()
+	return carapace.ActionValues(r.bindings.Complete(ctx, c.Value)...).NoSpace()
+}
+func (r *AgentConsole) printBoxTable(title string, rows [][]string) {
+	enabled := r.output != nil && r.output.color.Enabled
+	fmt.Fprint(r.stdout, r.renderPanel(title, renderBoxTable(rows, enabled), enabled))
 }
 
 func agentConsoleHistoryPath() string {

@@ -11,18 +11,11 @@ import (
 
 const DefaultConfigName = "aiscan.yaml"
 
-func init() {
-	gkcfg.WithOptions(func(opt *gkcfg.Options) {
-		opt.DecoderConfig.TagName = "config"
-		opt.ParseDefault = true
-	})
-	gkcfg.AddDriver(yamldrv.Driver)
-}
-
 func newConfigLoader() *gkcfg.Config {
 	c := gkcfg.New("aiscan")
 	c.WithOptions(func(opt *gkcfg.Options) {
 		opt.DecoderConfig.TagName = "config"
+		opt.ParseDefault = true
 	})
 	c.AddDriver(yamldrv.Driver)
 	return c
@@ -113,12 +106,8 @@ func mergeOption(dst, src *Option) {
 	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
 	dst.ServerURL = ResolveString(dst.ServerURL, src.ServerURL)
 	dst.Transport = ResolveString(dst.Transport, src.Transport)
-	dst.IOAURL = ResolveString(dst.IOAURL, src.IOAURL)
-	dst.IOAToken = ResolveString(dst.IOAToken, src.IOAToken)
-	dst.IOANodeName = ResolveString(dst.IOANodeName, src.IOANodeName)
-	if (dst.Space == "" || dst.Space == "default") && src.Space != "" {
-		dst.Space = src.Space
-	}
+	dst.NodeName = ResolveString(dst.NodeName, src.NodeName)
+	dst.NodeID = ResolveString(dst.NodeID, src.NodeID)
 	if len(dst.Providers) == 0 && len(src.Providers) > 0 {
 		dst.Providers = src.Providers
 	}

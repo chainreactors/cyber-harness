@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,8 +16,6 @@ import (
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/skills"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
-	ioaclient "github.com/chainreactors/ioa/client"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,44 +23,43 @@ import (
 // ---------------------------------------------------------------------------
 
 type Runtime struct {
-	commands           []Command
-	commandIndex       map[string]Command
-	loop               *loopRuntime
-	option             *cfg.Option
-	logger             telemetry.Logger
-	runtimeConfig      Config
-	primarySessionID   string
-	app                *apppkg.App
-	nodeName           string
-	systemPrompt       string
-	heartbeat          time.Duration
-	config             agent.Config
-	resumeMessages     []*aop.Message
-	resumeSessionID    string
-	ctx                context.Context
-	cancel             context.CancelFunc
-	providerMu         sync.Mutex
-	mu                 sync.RWMutex
-	sessions           map[string]*sessionState
-	runs               map[string]*Run
-	requestSeq         uint64
-	closeOnce          sync.Once
-	closeDone          chan struct{}
-	closeErr           error
-	lifecycle          sync.Mutex
-	loaded             bool
-	closing            bool
-	wg                 sync.WaitGroup
-	operations         sync.WaitGroup
-	maxPending         int
-	unsubscribeHandoff func()
-	ioa                *ioatools.Runtime
+	commands         []Command
+	commandIndex     map[string]Command
+	loop             *loopRuntime
+	option           *cfg.Option
+	logger           telemetry.Logger
+	runtimeConfig    Config
+	primarySessionID string
+	app              *apppkg.App
+	nodeName         string
+	systemPrompt     string
+	heartbeat        time.Duration
+	config           agent.Config
+	resumeMessages   []*aop.Message
+	resumeSessionID  string
+	ctx              context.Context
+	cancel           context.CancelFunc
+	providerMu       sync.Mutex
+	mu               sync.RWMutex
+	sessions         map[string]*sessionState
+	runs             map[string]*Run
+	requestSeq       uint64
+	closeOnce        sync.Once
+	closeDone        chan struct{}
+	closeErr         error
+	lifecycle        sync.Mutex
+	loaded           bool
+	closing          bool
+	wg               sync.WaitGroup
+	operations       sync.WaitGroup
+	maxPending       int
 }
 
 type Config struct {
 	Commands         []Command
 	Application      *apppkg.App
-	IOA              *ioatools.Runtime
+	NodeName         string
+	Preamble         string
 	Option           *cfg.Option
 	Logger           telemetry.Logger
 	PrimarySessionID string
@@ -71,16 +69,17 @@ type Config struct {
 	Loop agent.Loop
 }
 
-// IOA returns the optional collaboration runtime. Its type has no lifecycle;
-// the profile retains the owning resource.
-func (rt *Runtime) IOA() *ioatools.Runtime {
-	if rt == nil {
-		return nil
-	}
-	return rt.ioa
-}
-
 const baseAgentSkillName = "aiscan"
+
+// NodeName is the profile-selected name shared by sessions and node transports.
+func (rt *Runtime) NodeName() string {
+	if rt == nil {
+		return ""
+	}
+	rt.lifecycle.Lock()
+	defer rt.lifecycle.Unlock()
+	return rt.nodeName
+}
 
 // Load activates session work under scope.Lifetime. Init bounds initialization
 // only; caller contexts cannot extend the owning extension's lifetime.
@@ -128,7 +127,10 @@ func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), option.Resume)
 	}
 
-	nodeName := ioatools.ResolveNodeName(option.IOANodeName)
+	nodeName := rc.NodeName
+	if nodeName == "" {
+		nodeName = "aiscan"
+	}
 	rt.nodeName = nodeName
 	executor := coretool.EmptyExecutor()
 	if rt.app.Tools != nil {
@@ -140,13 +142,13 @@ func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 		ScannerDocs: rt.app.Commands.UsageDocs(),
 		Skills:      rt.app.Skills.Skills,
 		NodeName:    nodeName,
-		Space:       option.Space,
 	}
 	if rc.PromptConfig != nil {
 		promptConfig := *rc.PromptConfig
 		promptConfig.LoadedSkills = append([]LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
 		pc = &promptConfig
 	}
+	pc.CustomPreamble = strings.TrimSpace(pc.CustomPreamble + "\n" + rc.Preamble)
 	skillNames := option.Skills
 	if !pc.ScannerAgentMode {
 		skillNames = append([]string{baseAgentSkillName}, skillNames...)
@@ -182,30 +184,6 @@ func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 		Hooks:                 rt.app.Hooks,
 		CaptureProviderFrames: option.CaptureProviderFrames,
 		MessageCounter:        resumeCounter,
-	}
-
-	ioaSpace := option.Space
-	var ioaClient *ioaclient.Client
-	var ioaStream ioaclient.StreamAPI
-	if rt.ioa != nil {
-		ioaClient, ioaStream = rt.ioa.Client(), rt.ioa.Stream()
-	}
-	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, rt, ioaClient, ioaSpace, logger)
-	if !isNilIOADependency(ioaStream) && option.Space != "" {
-		nodeID := ""
-		if ioaClient != nil {
-			nodeID = ioaClient.NodeID()
-		}
-		spaceInfo, err := ioaStream.Space(rt.ctx, option.Space, "aiscan agent")
-		if err != nil {
-			logger.Warnf("ioa space resolve: %s", err)
-		} else {
-			rt.wg.Add(1)
-			telemetry.SafeGo("ioa-space-subscription", func() {
-				defer rt.wg.Done()
-				subscribeIOASpace(rt.ctx, ioaStream, spaceInfo.ID, nodeID, rt.pushAsync, logger)
-			})
-		}
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -275,9 +253,6 @@ func (rt *Runtime) close(ctx context.Context) error {
 			}
 			rt.wg.Wait()
 			rt.operations.Wait()
-			if rt.unsubscribeHandoff != nil {
-				rt.unsubscribeHandoff()
-			}
 			rt.lifecycle.Lock()
 			rt.loaded = false
 			rt.lifecycle.Unlock()

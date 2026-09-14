@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	clientext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -163,7 +164,7 @@ func TestArtifactProjectionDoesNotBlockAOPPublisher(t *testing.T) {
 }
 
 func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
-	base := &cfg.Option{IOAOptions: cfg.IOAOptions{Space: "case-1"}}
+	base := &cfg.Option{Extensions: cfg.Values{clientext.ConfigKey: {"space": "case-1"}}}
 	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
 	if err != nil {
 		t.Fatal(err)
@@ -171,30 +172,28 @@ func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
 	if option.ServerURL != "http://promo-demo@127.0.0.1:18080" {
 		t.Fatalf("server URL = %q", option.ServerURL)
 	}
-	if option.IOAURL != "http://promo-demo@127.0.0.1:18080/ioa" {
-		t.Fatalf("IOA URL = %q, want embedded same-origin endpoint", option.IOAURL)
+	if readClientOptions(t, &option).URL != "http://promo-demo@127.0.0.1:18080/ioa" {
+		t.Fatalf("IOA URL = %q, want embedded same-origin endpoint", readClientOptions(t, &option).URL)
 	}
-	if option.IOANodeName != "local" || option.Space != "case-1" {
-		t.Fatalf("embedded identity = name %q space %q", option.IOANodeName, option.Space)
+	if option.NodeName != "local" || readClientOptions(t, &option).Space != "case-1" {
+		t.Fatalf("embedded identity = name %q space %q", option.NodeName, readClientOptions(t, &option).Space)
 	}
-	if base.ServerURL != "" || base.IOAURL != "" || base.IOANodeName != "" {
+	if base.ServerURL != "" || readClientOptions(t, base).URL != "" || base.NodeName != "" {
 		t.Fatalf("base option was mutated: %+v", base)
 	}
 }
 
 func TestEmbeddedAgentOptionPreservesExplicitIOAAndNode(t *testing.T) {
 	base := &cfg.Option{
-		IOAOptions: cfg.IOAOptions{
-			IOAURL:      "http://ioa-token@127.0.0.1:18765",
-			IOANodeName: "coordinator",
-		},
+		Extensions:  cfg.Values{clientext.ConfigKey: {"url": "http://ioa-token@127.0.0.1:18765"}},
+		NodeOptions: cfg.NodeOptions{NodeName: "coordinator"},
 	}
 	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if option.IOAURL != base.IOAURL || option.IOANodeName != "coordinator" {
-		t.Fatalf("explicit IOA configuration was not preserved: %+v", option.IOAOptions)
+	if readClientOptions(t, &option).URL != readClientOptions(t, base).URL || option.NodeName != "coordinator" {
+		t.Fatalf("explicit IOA configuration was not preserved: %+v", option.Extensions)
 	}
 }
 

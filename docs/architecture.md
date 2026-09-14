@@ -5,9 +5,9 @@ Profile。当前边界和待验收项见 [Issue 127 约定](issue127-extension-b
 
 ## 组合与关闭
 
-`cmd/aiscan` 与 `cmd/runner` 声明各自固定的 Extension 图并创建唯一的
-`core/extension.Set`。可复用 host 通过 `pkg/profile.Application` 访问命令入口的具体组合；
-`profile.Assembly` 只委托同一个 Set，不保存产品能力，也不实现第二套生命周期状态。具体
+`cmd/aiscan` 与 `cmd/runner` 为每个独立运行时声明固定的 Extension 图和唯一的
+`core/extension.Set`。Web 的 IOA Server 属于宿主图，寿命独立于可替换的应用 Profile。可复用 host 通过 `pkg/profile.Application` 访问命令入口的具体组合；
+具体 Profile 直接持有 Set，不另设 Assembly 包装。
 `aiscanProfile` 位于 `cmd/aiscan`，显式发布 App、Runtime 与 Proxy 能力。依赖通过构造参数传入，
 `DependsOn` 只表达资源寿命：依赖先加载、依赖者先关闭。共享包不包含任何具体产品 Profile。
 
@@ -26,6 +26,17 @@ flowchart TB
 关闭顺序反向执行：入口停止，两个 Registry 拒绝新工作、取消并 drain，资源 Extension
 随后释放。Close 返回 `ErrCloseIncomplete` 时保留依赖，重试继续原关闭过程。具体入口负责
 构造能力并声明 Entries；App 只提供产品访问面，不选择扩展，也不创建嵌套 Set。
+
+## 可选能力的声明边界
+
+配置、CLI、Console 展示、探测和 HTTP 路由都是启动前收集的静态贡献，不是生命周期扩展。
+`core/config.Sections`、`pkg/cli.Registry`、`pkg/console/api.Bindings`、`pkg/probe.Registry`
+和 `pkg/web.Route` 各自只服务一个明确入口。配置节装入 `Option.Extensions` / protobuf
+`extensions`，通用层不按扩展名称选择实现。产品入口负责旧参数和配置别名的兼容。
+
+IOA 只有独立的 client/server 两个扩展。通用 Profile 不再暴露 IOA Reader，Node 只转发产品
+贡献的 capability 和完整状态快照，通用 skills 不包含 IOA 内容。具体装配与兼容说明见
+[IOA](ioa.md)。启动声明、资源生命周期和运行中的业务能力不互相冒充。
 
 ## 两类执行运行时
 
@@ -77,7 +88,7 @@ App/Profile 的资源。
 | `tools/*` | 原始能力实现 |
 | `agent/` | Agent loop |
 | `pkg/app` | 产品状态与访问面 |
-| `pkg/profile` | 通用 host 契约与无产品状态的 `Assembly` |
+| `pkg/profile` | 产品 Application/Factory/Request 契约 |
 | `cmd/aiscan`、`cmd/runner` | 各可执行产品的具体 Profile 与唯一组合根 |
 | `pkg/exts/agent` | Agent Runtime 的唯一生命周期适配与 Session 宿主 |
 

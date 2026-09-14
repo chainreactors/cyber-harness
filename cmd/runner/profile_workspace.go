@@ -84,6 +84,7 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 		return nil, err
 	}
 	entries = append(entries, extension.Entry{ID: "files", DependsOn: dependencies, Extension: f})
+	toolDependencies := []string{"files"}
 	if seen["skills"] {
 		skills, err := skillmount.New(f.Files(), config.SkillsDirectory)
 		if err != nil {
@@ -91,8 +92,9 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 		}
 		p.skills = skills.Catalog()
 		entries = append(entries, extension.Entry{ID: "skills", DependsOn: []string{"files"}, Extension: skills})
+		toolDependencies = append(toolDependencies, "skills")
 	}
-	entries = append(entries, extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: p.registry})
+	entries = append(entries, extension.Entry{ID: "tool-registry", DependsOn: toolDependencies, Extension: p.registry})
 	p.extensions, err = extension.New(entries...)
 	if err != nil {
 		return nil, err

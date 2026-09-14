@@ -135,11 +135,7 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 	if s.agents != nil {
 		s.agents.BroadcastConfigReload(prepared.Config)
 	}
-	path, loaded, current, err := s.GetDistributeConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return managementapi.ConfigView(current, path, loaded), nil
+	return s.api.Config.View(ctx)
 }
 
 func (s *Service) ActivateConfig(ctx context.Context, id string) (*types.ConfigView, error) {

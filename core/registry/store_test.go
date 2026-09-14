@@ -9,7 +9,7 @@ import (
 
 func TestStoreRegistersAtomicallyAndPublishesOnActivate(t *testing.T) {
 	store := New[string]()
-	retract, err := store.Register("shared",
+	retract, err := store.Register("test", "shared",
 		Value[string]{Name: "one", Value: "first"},
 		Value[string]{Name: "two", Value: "second"},
 	)
@@ -19,7 +19,7 @@ func TestStoreRegistersAtomicallyAndPublishesOnActivate(t *testing.T) {
 	if _, ok := store.Get("one"); ok || len(store.Names()) != 0 {
 		t.Fatal("collecting registry published values")
 	}
-	if _, err := store.Register("shared",
+	if _, err := store.Register("test", "shared",
 		Value[string]{Name: "fresh", Value: "fresh"},
 		Value[string]{Name: "one", Value: "duplicate"},
 	); !errors.Is(err, ErrDuplicate) {
@@ -31,7 +31,7 @@ func TestStoreRegistersAtomicallyAndPublishesOnActivate(t *testing.T) {
 	if !slices.Equal(store.Names(), []string{"one", "two"}) || !slices.Equal(store.GroupNames("shared"), []string{"one", "two"}) {
 		t.Fatalf("published names=%v group=%v", store.Names(), store.GroupNames("shared"))
 	}
-	if _, err := store.Register("", Value[string]{Name: "late", Value: "late"}); !errors.Is(err, ErrUnavailable) {
+	if _, err := store.Register("test", "", Value[string]{Name: "late", Value: "late"}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("late registration = %v", err)
 	}
 	retract()
@@ -48,7 +48,7 @@ func TestStoreRegistersAtomicallyAndPublishesOnActivate(t *testing.T) {
 
 func TestStoreCloseCancelsAndDrainsAcquiredCalls(t *testing.T) {
 	store := New[string]()
-	if _, err := store.Register("", Value[string]{Name: "hold", Value: "value"}); err != nil {
+	if _, err := store.Register("test", "", Value[string]{Name: "hold", Value: "value"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Activate(t.Context()); err != nil {
@@ -78,7 +78,7 @@ func TestStoreCloseCancelsAndDrainsAcquiredCalls(t *testing.T) {
 
 func TestStoreRetractsFailedBatchBeforeActivation(t *testing.T) {
 	store := New[int]()
-	retract, err := store.Register("group", Value[int]{Name: "one", Value: 1})
+	retract, err := store.Register("test", "group", Value[int]{Name: "one", Value: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

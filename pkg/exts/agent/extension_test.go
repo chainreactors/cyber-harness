@@ -10,9 +10,13 @@ import (
 
 	"github.com/chainreactors/aiscan/agent"
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/hooks"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/aiscan/pkg/commands"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
 type loopFunc func(context.Context, agent.Config) (*agent.Result, error)
@@ -271,7 +275,14 @@ func TestFailedLoadAndPanickingLoopReleaseOwnership(t *testing.T) {
 }
 
 func newLoopExtension(loop agent.Loop) (*agentext.Extension, *apppkg.Resource) {
-	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	hookRegistry := hooks.New()
+	application, err := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{
+		Hooks: hookRegistry, Events: events.New(),
+		Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
+	})
+	if err != nil {
+		panic(err)
+	}
 	value, err := agentext.New(agentext.Config{Application: application.App, Option: &cfg.Option{}, Loop: loop})
 	if err != nil {
 		panic(err)

@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	URL              string
+	Token            string
 	NodeID           string
 	NodeName         string
 	Space            string
@@ -23,21 +24,28 @@ type Config struct {
 	Identity         protocols.Identity
 }
 
-// Runtime exposes the live IOA client APIs used by Agent sessions. It has no
+// Runtime exposes IOA queries and collaboration status. It has no
 // lifecycle operations; Resource is the sole owner of startup and shutdown.
 type Runtime struct {
 	mu     sync.RWMutex
 	config Config
 	logger telemetry.Logger
 
-	client    *ioaclient.Client
-	stream    ioaclient.StreamAPI
-	cancel    context.CancelFunc
-	retry     chan struct{}
-	loaded    bool
-	closed    bool
-	attempted bool
-	binding   *spaceBinding
+	client       *ioaclient.Client
+	cancel       context.CancelFunc
+	retry        chan struct{}
+	loaded       bool
+	closed       bool
+	attempted    bool
+	binding      *spaceBinding
+	receiveSpace *spaceBinding
+	ready        chan struct{}
+	lifetime     context.Context
+	statusMu     sync.Mutex
+	lastError    error
+	dropped      uint64
+	queries      sync.WaitGroup
+	done         chan struct{}
 }
 
 // Resource owns one Runtime's client connection and registration retry. The
@@ -52,7 +60,7 @@ func New(config Config, logger telemetry.Logger) *Resource {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Resource{Runtime: &Runtime{config: config, logger: logger, binding: &spaceBinding{}}}
+	return &Resource{Runtime: &Runtime{config: config, logger: logger, binding: &spaceBinding{}, receiveSpace: &spaceBinding{}, ready: make(chan struct{})}}
 }
 
 func cloneNodeMeta(source map[string]any) map[string]any {
@@ -102,41 +110,50 @@ func (r *Resource) Start(ctx context.Context) error {
 		}
 	}
 	lifetime, cancel := context.WithCancel(context.Background())
-	m.client, m.stream, m.cancel = client, client, cancel
-	if m.config.AutoRegister {
-		if err := client.EnsureRegistered(ctx, m.config.NodeName, "", m.config.NodeMeta); err != nil {
-			if ctx.Err() != nil {
-				cancel()
-				return ctx.Err()
-			}
-			m.logger.Warnf("ioa registration pending: %s", err)
-			m.retry = make(chan struct{})
-			telemetry.SafeGo("ioa-registration-retry", func() {
-				defer close(m.retry)
-				m.retryRegistration(lifetime)
-			})
-			m.loaded = true
-			return nil
+	m.client, m.cancel = client, cancel
+	m.lifetime = lifetime
+	if err := m.setup(ctx); err != nil {
+		if ctx.Err() != nil {
+			cancel()
+			return ctx.Err()
 		}
+		m.ReportError(err)
+		m.retry = make(chan struct{})
+		telemetry.SafeGo("ioa-registration-retry", func() {
+			defer close(m.retry)
+			m.retryRegistration(lifetime)
+		})
+	} else {
+		close(m.ready)
 	}
-	m.configureSpace(ctx)
 	m.loaded = true
 	return nil
 }
 
+func (m *Runtime) setup(ctx context.Context) error {
+	if m.config.AutoRegister {
+		if err := m.client.EnsureRegistered(ctx, m.config.NodeName, "", m.config.NodeMeta); err != nil {
+			return err
+		}
+	}
+	return m.configureSpace(ctx)
+}
+
 func (m *Runtime) retryRegistration(ctx context.Context) {
 	for attempt := 0; ; attempt++ {
-		delay := registrationRetryDelay(attempt)
+		timer := time.NewTimer(registrationRetryDelay(attempt))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-time.After(delay):
+		case <-timer.C:
 		}
-		if m.client.EnsureRegistered(ctx, m.config.NodeName, "", m.config.NodeMeta) == nil {
-			m.logger.Infof("ioa node registered: %s", m.client.NodeID())
-			m.configureSpace(ctx)
-			return
+		if err := m.setup(ctx); err != nil {
+			m.ReportError(err)
+			continue
 		}
+		close(m.ready)
+		return
 	}
 }
 
@@ -150,40 +167,100 @@ func registrationRetryDelay(attempt int) time.Duration {
 	return time.Second << uint(attempt)
 }
 
-func (m *Runtime) configureSpace(ctx context.Context) {
+func (m *Runtime) configureSpace(ctx context.Context) error {
 	if m.config.Space == "" || m.client == nil || !m.client.Bound() {
-		return
+		return nil
 	}
 	info, err := m.client.Space(ctx, m.config.Space, "aiscan agent")
 	if err != nil {
+		return err
+	}
+	m.binding.initialize(info.ID)
+	m.receiveSpace.set(info.ID)
+	return nil
+}
+
+// WaitReady waits for configured registration and space resolution.
+func (m *Runtime) WaitReady(ctx context.Context) error {
+	m.mu.RLock()
+	lifetime := m.lifetime
+	closed := m.closed
+	m.mu.RUnlock()
+	if closed || lifetime == nil {
+		return fmt.Errorf("IOA client is unavailable")
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-lifetime.Done():
+		return lifetime.Err()
+	case <-m.ready:
+		return nil
+	}
+}
+
+func (m *Runtime) ReceiveSpace() string { return m.receiveSpace.get() }
+
+type Status struct {
+	Bound     bool
+	Space     string
+	LastError string
+	Dropped   uint64
+}
+
+func (m *Runtime) Status() Status {
+	if m == nil {
+		return Status{}
+	}
+	m.mu.RLock()
+	status := Status{Space: m.config.Space, Bound: !m.closed && m.client != nil && m.client.Bound()}
+	m.mu.RUnlock()
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	if m.lastError != nil {
+		status.LastError = m.lastError.Error()
+	}
+	status.Dropped = m.dropped
+	return status
+}
+
+// ReportError records a collaboration failure without changing Agent execution.
+func (m *Runtime) ReportError(err error) {
+	if err == nil {
 		return
 	}
-	m.binding.set(info.ID)
+	m.statusMu.Lock()
+	m.lastError = err
+	m.statusMu.Unlock()
+	m.logger.Warnf("ioa: %s", err)
+}
+
+func (m *Runtime) ReportDropped(count uint64) {
+	m.statusMu.Lock()
+	m.dropped = count
+	m.statusMu.Unlock()
 }
 
 func newIOAClient(config Config) (*ioaclient.Client, error) {
 	if config.URL == "" {
 		return nil, nil
 	}
+	if config.Token != "" {
+		return ioaclient.NewClientWithToken(config.URL, config.Token)
+	}
 	return ioaclient.NewClient(config.URL, config.NodeID)
 }
 
-func (m *Runtime) Client() *ioaclient.Client {
-	if m == nil {
+// Client lends the SDK handle to the owning extension. Hosts receive Runtime
+// or Reader and cannot acquire the underlying SDK client.
+func (r *Resource) Client() *ioaclient.Client {
+	if r == nil || r.Runtime == nil {
 		return nil
 	}
+	m := r.Runtime
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.client
-}
-
-func (m *Runtime) Stream() ioaclient.StreamAPI {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.stream
 }
 
 func (r *Resource) Commands() []commands.Command {
@@ -200,7 +277,7 @@ func (r *Resource) Commands() []commands.Command {
 	return root.commands()
 }
 
-// Close cancels registration work and waits for the owned retry to finish.
+// Close rejects new queries, cancels requests and registration, and joins them.
 func (r *Resource) Close(ctx context.Context) error {
 	if r == nil || r.Runtime == nil {
 		return nil
@@ -215,19 +292,24 @@ func (r *Resource) Close(ctx context.Context) error {
 		if m.cancel != nil {
 			m.cancel()
 		}
+		m.done = make(chan struct{})
+		go func() {
+			if m.retry != nil {
+				<-m.retry
+			}
+			m.queries.Wait()
+			close(m.done)
+		}()
 	}
-	retry := m.retry
+	done := m.done
 	m.mu.Unlock()
-	if retry == nil {
-		return nil
-	}
 	select {
-	case <-retry:
+	case <-done:
 		return nil
 	default:
 	}
 	select {
-	case <-retry:
+	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

@@ -55,34 +55,6 @@ func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	}
 }
 
-func TestMergeOptionSpaceDefault(t *testing.T) {
-	dst := Option{}
-	dst.Space = "default"
-
-	src := Option{}
-	src.Space = "production"
-
-	mergeOption(&dst, &src)
-
-	if dst.Space != "production" {
-		t.Errorf("Space: got %q, want %q (config should override go-flags default)", dst.Space, "production")
-	}
-}
-
-func TestMergeOptionSpaceExplicitCLI(t *testing.T) {
-	dst := Option{}
-	dst.Space = "cli-space"
-
-	src := Option{}
-	src.Space = "config-space"
-
-	mergeOption(&dst, &src)
-
-	if dst.Space != "cli-space" {
-		t.Errorf("Space: got %q, want %q (CLI should win)", dst.Space, "cli-space")
-	}
-}
-
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `
@@ -117,8 +89,6 @@ ioa:
 		{"CyberhubKey", opt.CyberhubKey, "testkey"},
 		{"CyberhubMode", opt.CyberhubMode, "override"},
 		{"ServerURL", opt.ServerURL, "http://web:8080"},
-		{"IOAURL", opt.IOAURL, "http://ioa:8765"},
-		{"Space", opt.Space, "case-1"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -908,8 +878,8 @@ func withDefaults(t *testing.T, fn func()) {
 		&DefaultProvider, &DefaultBaseURL, &DefaultAPIKey, &DefaultModel,
 		&DefaultScannerProxy, &DefaultCyberhubURL, &DefaultCyberhubKey,
 		&DefaultCyberhubMode, &DefaultVerify,
-		&DefaultTavilyKeys, &DefaultIOAURL, &DefaultIOANodeID,
-		&DefaultIOANodeName, &DefaultSpace,
+		&DefaultTavilyKeys, &DefaultNodeID,
+		&DefaultNodeName,
 	}
 	originals := make([]string, len(saved))
 	for i, p := range saved {

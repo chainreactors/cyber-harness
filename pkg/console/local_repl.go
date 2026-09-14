@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
@@ -15,7 +16,7 @@ import (
 // attach replays buffered bytes, which can re-execute stale cursor state and
 // corrupt native scrollback. Persistent remote REPLs continue to use the PTY;
 // the ephemeral local console binds directly to the process terminal.
-func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Option) error {
+func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) error {
 	if rt == nil || rt.App() == nil {
 		return fmt.Errorf("local repl requires an agent runtime")
 	}
@@ -34,5 +35,5 @@ func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Opti
 	if option == nil {
 		option = &cfg.Option{}
 	}
-	return newAgentConsole(ctx, rt, sess, option, rlterm.Local()).Start()
+	return newAgentConsole(ctx, rt, sess, option, rlterm.Local(), bindings).Start()
 }

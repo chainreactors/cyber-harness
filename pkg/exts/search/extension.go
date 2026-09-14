@@ -73,10 +73,10 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := e.tools.Register(scope, searchTool); err != nil {
+	if err := e.tools.Register("search", searchTool); err != nil {
 		return err
 	}
-	if err := e.commands.Register(scope, "search", entries...); err != nil {
+	if err := e.commands.Register("search", "search", entries...); err != nil {
 		return err
 	}
 	return nil

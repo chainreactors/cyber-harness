@@ -482,7 +482,7 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("run did not start")
 	}
-	if err := session.state.inbox.Push(inbox.NewSystemMessage("steer now")); err != nil {
+	if err := rt.Deliver(t.Context(), inbox.NewSystemMessage("steer now")); err != nil {
 		t.Fatal(err)
 	}
 	close(provider.release)
@@ -512,7 +512,7 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 	provider := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, provider)
-	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
+	_, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 			ended <- event
 		}
 	}))
-	if err := session.state.inbox.Push(inbox.NewSystemMessage("automatic work")); err != nil {
+	if err := rt.Deliver(t.Context(), inbox.NewSystemMessage("automatic work")); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -636,7 +636,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	commandDependencies := []string{"terminal"}
 	if len(values) > 0 {
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return reg.Register(scope, "test", values...)
+			return reg.Register("test", "test", values...)
 		}}
 		entries = append(entries, extension.Entry{ID: "test-commands", Extension: contributor})
 		commandDependencies = append(commandDependencies, "test-commands")
@@ -650,7 +650,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 		t.Fatal(err)
 	}
 	bash := terminal.Bash()
-	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{}).App
+	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{}).App
 	application.Commands = reg
 	application.Tools = tools
 	application.Bash = bash

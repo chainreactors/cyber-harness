@@ -45,7 +45,7 @@ func (e *contributor) Load(scope *extension.Scope) error {
 	if e.load != nil {
 		return e.load(scope)
 	}
-	return e.registry.Register(scope, e.values...)
+	return e.registry.Register("test", e.values...)
 }
 func (e *contributor) Close(ctx context.Context) error {
 	if e.close != nil {
@@ -176,13 +176,13 @@ func TestRegistryRejectsInvalidBatchWithoutPartialState(t *testing.T) {
 	registry := toolset.NewRegistry(nil)
 	value := &contributor{registry: registry, load: func(scope *extension.Scope) error {
 		var nilTool *registryTool
-		if err := registry.Register(scope, echoTool("partial"), nilTool); err == nil {
+		if err := registry.Register("test", echoTool("partial"), nilTool); err == nil {
 			t.Fatal("accepted typed nil")
 		}
-		if err := registry.Register(scope, echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
+		if err := registry.Register("test", echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
 			t.Fatal(err)
 		}
-		return registry.Register(scope, echoTool("partial"))
+		return registry.Register("test", echoTool("partial"))
 	}}
 	set, err := extension.New(
 		extension.Entry{ID: "tools", Extension: value},

@@ -1,7 +1,7 @@
 // Package profile defines the lifecycle boundary shared by AIScan hosts.
 // Product-specific composition and capabilities belong to the executable that
-// implements Application; this package only validates factories and assembles
-// an extension graph.
+// implements Application and owns its extension.Set; this package validates
+// product factories without adding another lifecycle wrapper.
 package profile
 
 import (
@@ -11,9 +11,9 @@ import (
 
 	"github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 )
 
@@ -25,6 +25,10 @@ type Application interface {
 	App() (*apppkg.App, error)
 	Runtime() (*agentext.Runtime, error)
 	RegisterResourceNamespaces(*aop.NamespaceMux) error
+	AgentStatus() *aop.AgentStatus
+	Capabilities() []string
+	// ConsoleBindings publishes optional presentation contributions.
+	ConsoleBindings() *consoleapi.Bindings
 }
 
 // Request contains host-selected inputs. Extension selection and resource
@@ -66,37 +70,4 @@ func IsNil(value Application) bool {
 	default:
 		return false
 	}
-}
-
-// Assembly owns one fixed extension graph. core/extension.Set remains the only
-// lifecycle state machine; Assembly deliberately exposes no product resources.
-type Assembly struct {
-	extensions *extension.Set
-}
-
-func Assemble(entries ...extension.Entry) (*Assembly, error) {
-	set, err := extension.New(entries...)
-	if err != nil {
-		return nil, err
-	}
-	return &Assembly{extensions: set}, nil
-}
-
-func (a *Assembly) Load(ctx context.Context) error {
-	if a == nil || a.extensions == nil {
-		return fmt.Errorf("profile assembly is required")
-	}
-	return a.extensions.Load(ctx)
-}
-
-// Available reports whether the complete graph has been loaded and published.
-func (a *Assembly) Available() bool {
-	return a != nil && a.extensions != nil && a.extensions.Active()
-}
-
-func (a *Assembly) Close(ctx context.Context) error {
-	if a == nil || a.extensions == nil {
-		return nil
-	}
-	return a.extensions.Close(ctx)
 }

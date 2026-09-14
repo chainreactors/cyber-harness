@@ -49,7 +49,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
-	if err := m.registry.Register(scope, "browser", commands.Command{
+	if err := m.registry.Register("browser", "browser", commands.Command{
 		Name: command.Name(), Usage: command.Usage(),
 		DescriptionPath: "aiscan://skills/aiscan/okf/easm/playwright.md",
 		Run:             command.Run,

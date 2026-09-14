@@ -12,12 +12,9 @@ var (
 	DefaultCyberhubKey  = ""
 	DefaultCyberhubMode = "merge"
 
-	DefaultVerify = "auto"
-
-	DefaultIOAURL      = ""
-	DefaultIOANodeID   = ""
-	DefaultIOANodeName = ""
-	DefaultSpace       = ""
+	DefaultVerify   = "auto"
+	DefaultNodeID   = ""
+	DefaultNodeName = ""
 
 	DefaultTavilyKeys = ""
 )

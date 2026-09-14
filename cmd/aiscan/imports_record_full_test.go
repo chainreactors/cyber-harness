@@ -14,7 +14,7 @@ import (
 )
 
 func TestRecordFullCapabilitySet(t *testing.T) {
-	want := []string{"arsenal", "browser", "core", "curl", "gogo", "ioa", "katana", "neutron", "passive", "proton", "proxy", "record", "scan", "search", "spray", "zombie"}
+	want := []string{"arsenal", "browser", "core", "curl", "gogo", "katana", "neutron", "passive", "proton", "proxy", "record", "scan", "search", "spray", "zombie"}
 	if got := edition.Catalog().IDsSorted(); !slices.Equal(got, want) {
 		t.Fatalf("record full capabilities = %#v, want %#v", got, want)
 	}

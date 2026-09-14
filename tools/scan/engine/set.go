@@ -3,18 +3,13 @@ package engine
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/util"
 	"github.com/chainreactors/fingers/alias"
 	fingersLib "github.com/chainreactors/fingers/fingers"
-	neutronhttp "github.com/chainreactors/neutron/protocols/http"
-	"github.com/chainreactors/proxyclient"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
 	"github.com/chainreactors/sdk/gogo"
 	"github.com/chainreactors/sdk/neutron"
@@ -22,8 +17,6 @@ import (
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 )
-
-var neutronProxyMu sync.Mutex
 
 // ReconOptions 提供 uncover 资产测绘引擎所需的凭证与默认行为。
 type ReconOptions struct {
@@ -213,10 +206,6 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 		set.Neutron.SetCapacity(caps.Neutron)
 	}
 
-	if proxy != "" {
-		ApplyNeutronProxy(proxy)
-	}
-
 	set.Capacity = caps
 	return set, nil
 }
@@ -230,30 +219,4 @@ func fingerPOCDetail(fingers, aliases, templates int) string {
 		parts = append(parts, util.FormatNumber(aliases)+" aliases")
 	}
 	return strings.Join(parts, " · ")
-}
-
-// ApplyNeutronProxy sets neutron DefaultOption/DefaultTransport proxy. The
-// published neutron SDK does not yet support per-Config proxy, so we set the
-// process-wide defaults. Each neutron execution creates its own transport clone,
-// making this safe for concurrent use. Pass an empty string to clear.
-func ApplyNeutronProxy(proxyURL string) {
-	neutronProxyMu.Lock()
-	defer neutronProxyMu.Unlock()
-	if proxyURL == "" {
-		neutronhttp.DefaultOption.Proxy = nil
-		neutronhttp.DefaultTransport.Proxy = nil
-		neutronhttp.DefaultTransport.DialContext = nil
-		return
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return
-	}
-	dial, err := proxyclient.NewClient(u)
-	if err != nil {
-		return
-	}
-	neutronhttp.DefaultOption.Proxy = http.ProxyURL(u)
-	neutronhttp.DefaultTransport.Proxy = http.ProxyURL(u)
-	neutronhttp.DefaultTransport.DialContext = dial.DialContext
 }

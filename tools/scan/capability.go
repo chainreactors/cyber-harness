@@ -19,29 +19,20 @@ const (
 	capNeutronPOC     = "neutron_poc"
 )
 
-// CapabilityBuilder builds additional pipeline capabilities for a given
-// profile. Build-tagged packages (e.g. katana) register builders via init()
-// so the scan pipeline gains optional capabilities without the core scan
-// package importing them.
-type CapabilityBuilder func(c *Command, flags flags, opts scanOptions, profile profile) []pipeline.Capability
+// These aliases expose the existing scan domain to statically supplied builders.
+type Flags = flags
+type ScanOptions = scanOptions
+type Profile = profile
+type CapabilityBuilder func(*Command, Flags, ScanOptions, Profile) []pipeline.Capability
+type ProfileExtender func(string, *Profile)
 
-var extraCapabilityBuilders []CapabilityBuilder
-
-// RegisterCapabilityBuilder adds an optional capability builder that will be
-// invoked during buildCapabilities. Intended for build-tagged init() calls.
-func RegisterCapabilityBuilder(fn CapabilityBuilder) {
-	extraCapabilityBuilders = append(extraCapabilityBuilders, fn)
+func WithCapabilityBuilders(builders ...CapabilityBuilder) Option {
+	copied := append([]CapabilityBuilder(nil), builders...)
+	return func(c *Command) { c.builders = append(c.builders, copied...) }
 }
-
-// ProfileExtender modifies a profile's capability set for a given mode.
-// Build-tagged packages register extenders to add optional capability names.
-type ProfileExtender func(mode string, p *profile)
-
-var profileExtenders []ProfileExtender
-
-// RegisterProfileExtender adds a profile extender called during profileForMode.
-func RegisterProfileExtender(fn ProfileExtender) {
-	profileExtenders = append(profileExtenders, fn)
+func WithProfileExtenders(extenders ...ProfileExtender) Option {
+	copied := append([]ProfileExtender(nil), extenders...)
+	return func(c *Command) { c.profileExtenders = append(c.profileExtenders, copied...) }
 }
 
 func acceptsTarget(kinds ...targetKind) func(event) bool {
@@ -180,7 +171,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		c.Logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
-	for _, builder := range extraCapabilityBuilders {
+	for _, builder := range c.builders {
 		capabilities = append(capabilities, builder(c, flags, opts, profile)...)
 	}
 

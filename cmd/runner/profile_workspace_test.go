@@ -10,10 +10,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
+	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	"github.com/chainreactors/aiscan/tools/files"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -154,4 +158,69 @@ func TestProfilesHaveIndependentSelectionAndFailureCleanup(t *testing.T) {
 	if len(executor.ToolDefinitions()) != 3 {
 		t.Fatal("other profile registration changed")
 	}
+}
+
+type heldWorkspaceTool struct {
+	run func(context.Context) (*tool.Result, error)
+}
+
+func (*heldWorkspaceTool) Name() string        { return "hold-skills" }
+func (*heldWorkspaceTool) Description() string { return "holds a workspace call" }
+func (h *heldWorkspaceTool) Definition() *tool.Definition {
+	return tool.Def(h.Name(), h.Description(), struct{}{})
+}
+func (h *heldWorkspaceTool) Execute(ctx context.Context, _ string) (*tool.Result, error) {
+	return h.run(ctx)
+}
+
+func TestWorkspaceDrainProtectsSelectedSkills(t *testing.T) {
+	dir, skills := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(skills, "SKILL.md"), []byte("instructions"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		p, err := newWorkspaceProfile(workspaceProfileConfig{
+			Extensions: []string{"files", "skills"}, Files: files.Config{Directory: dir}, SkillsDirectory: skills,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started, release := make(chan struct{}), make(chan struct{})
+		t.Cleanup(func() { _ = p.Close(context.Background()) })
+		defer close(release)
+		if err := p.registry.Register("test", &heldWorkspaceTool{run: func(ctx context.Context) (*tool.Result, error) {
+			close(started)
+			<-ctx.Done()
+			<-release
+			return nil, ctx.Err()
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Load(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		callDone := make(chan error, 1)
+		go func() { _, err := p.registry.ExecuteTool(t.Context(), "hold-skills", "{}"); callDone <- err }()
+		<-started
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if err := p.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
+			t.Fatalf("Close = %v", err)
+		}
+		if got := p.skills.Locations(); !reflect.DeepEqual(got, []string{"skill://SKILL.md"}) {
+			t.Fatalf("skills released while an accepted tool call is still draining: %v", got)
+		}
+		// Release once; the deferred close above also covers assertion failures.
+		// A send lets the call return without closing the channel twice.
+		release <- struct{}{}
+		if err := <-callDone; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if err := p.Close(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if len(p.skills.Locations()) != 0 {
+			t.Fatal("retry did not close skills")
+		}
+	})
 }

@@ -20,7 +20,6 @@ type Auth interface {
 	Authenticate(*http.Request) bool
 	Middleware(http.Handler) http.Handler
 	RegisterRoutes(*http.ServeMux)
-	ShareWithIOA(string, http.Handler) http.Handler
 }
 
 // Service is the single transport-facing abstraction for AIScan Web. The root

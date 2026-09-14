@@ -19,7 +19,6 @@ import (
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
 )
 
 func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
@@ -60,7 +59,7 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 	if err != nil {
 		return err
 	}
-	repl, err := console.StartPersistent(rt, option)
+	repl, err := console.StartPersistent(rt, option, product.ConsoleBindings())
 	if err != nil {
 		return err
 	}
@@ -72,6 +71,7 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		option: option,
 		logger: logger,
 		ready:  make(chan struct{}),
+		status: product.AgentStatus,
 	}
 
 	connectionDone := make(chan struct{})
@@ -83,7 +83,7 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 
 		connection := connectionConfig{
 			ServerURL:                  option.ServerURL,
-			Name:                       ioatools.ResolveNodeName(option.IOANodeName),
+			Name:                       rt.NodeName(),
 			Registry:                   application.Commands,
 			Executor:                   application.Tools,
 			Agent:                      rt,
@@ -94,7 +94,8 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 			Chat:                       chatHandler,
 			NodeID:                     nodeID,
 			Runtime:                    agentext.DefaultRuntimeInfo(),
-			Status:                     func() *aop.AgentStatus { return agentext.AgentStatus(option, application, rt.IOA()) },
+			Status:                     product.AgentStatus,
+			ExtraCapabilities:          product.Capabilities(),
 			Menu:                       rt.CommandCatalog,
 			PTYRouter:                  func() (*terminal.Router, error) { return NewPTYRouter(application.Bash), nil },
 			Bash:                       application.Bash,
@@ -165,6 +166,7 @@ type chatAgentHandler struct {
 	logger    telemetry.Logger
 	ready     chan struct{}
 	readyOnce sync.Once
+	status    func() *aop.AgentStatus
 }
 
 func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, error) {
@@ -199,7 +201,10 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 		return result, nil
 	}
 	result.Provider = provider.Name()
-	return result, agentext.AgentStatus(h.option, h.app, h.rt.IOA())
+	if h.status != nil {
+		return result, h.status()
+	}
+	return result, agentext.AgentStatus(h.app)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,10 +225,10 @@ func webNodeID(option *cfg.Option) (string, error) {
 	if option == nil {
 		return "", fmt.Errorf("web node configuration is required")
 	}
-	if nodeID := strings.TrimSpace(option.IOANodeID); nodeID != "" {
+	if nodeID := strings.TrimSpace(option.NodeID); nodeID != "" {
 		return nodeID, nil
 	}
-	if nodeID := strings.TrimSpace(option.IOANodeName); nodeID != "" {
+	if nodeID := strings.TrimSpace(option.NodeName); nodeID != "" {
 		return nodeID, nil
 	}
 	return "", fmt.Errorf("node_id is required; set --node-id or --node-name")

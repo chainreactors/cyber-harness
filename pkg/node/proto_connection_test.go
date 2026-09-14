@@ -213,7 +213,7 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := apppkg.New(apppkg.Config{
+	app := newTestApp(t, apppkg.Config{
 		SkipEngines: true,
 		Logger:      telemetry.NopLogger(),
 	}, apppkg.Dependencies{})
@@ -633,7 +633,7 @@ func loadNodeTestApplication(t *testing.T, ctx context.Context, application *app
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	app := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 	appSet := loadNodeTestApplication(t, t.Context(), app)
 	defer appSet.Close(context.Background())
 	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})

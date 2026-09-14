@@ -15,7 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/chainreactors/aiscan/core/capability"
-	ioaskills "github.com/chainreactors/ioa/skills"
 )
 
 const uriPrefix = "aiscan://skills/"
@@ -30,7 +29,7 @@ const (
 	SourceProject  SkillSource = "project" // .aiscan/skills/
 	SourceAgent    SkillSource = "agent"   // .agent/skills/
 	SourceCLI      SkillSource = "cli"     // -s path
-	SourceIOA      SkillSource = "ioa"     // chainreactors/ioa module
+	SourceBundle   SkillSource = "bundle"  // explicitly selected extension
 )
 
 type Frontmatter struct {
@@ -62,8 +61,16 @@ type Diagnostic struct {
 	Message string
 }
 
+// Bundle is a static skill contribution selected by the composition root.
+// Readers return handled=false for locations outside their namespace.
+type Bundle struct {
+	Skills      []Skill
+	ReadVirtual func(string) (string, bool, error)
+}
+
 type Store struct {
-	Skills []Skill
+	bundles []Bundle
+	Skills  []Skill
 
 	byName  map[string]Skill
 	catalog capability.Catalog
@@ -71,7 +78,7 @@ type Store struct {
 
 // LoadAll loads skills from all sources with override support.
 // Priority (later overrides earlier): embedded < .aiscan/skills/ < .agent/skills/ < CLI paths.
-func LoadAll(cliPaths []string, catalog capability.Catalog) (*Store, []Diagnostic) {
+func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
 
@@ -79,9 +86,9 @@ func LoadAll(cliPaths []string, catalog capability.Catalog) (*Store, []Diagnosti
 	allSkills = append(allSkills, embedded...)
 	allDiags = append(allDiags, diags...)
 
-	ioaSkills, diags := loadIOAModuleSkills()
-	allSkills = append(allSkills, ioaSkills...)
-	allDiags = append(allDiags, diags...)
+	for _, bundle := range bundles {
+		allSkills = append(allSkills, bundle.Skills...)
+	}
 
 	for _, rel := range []struct {
 		dir    string
@@ -119,6 +126,7 @@ func LoadAll(cliPaths []string, catalog capability.Catalog) (*Store, []Diagnosti
 	}
 
 	store := newStoreWithOverride(allSkills)
+	store.bundles = append([]Bundle(nil), bundles...)
 	store.catalog = catalog
 	filtered := store.Skills[:0]
 	for _, skill := range store.Skills {
@@ -294,8 +302,12 @@ func (s *Store) AgentTypes() []Skill {
 
 // ReadVirtual reads a file from skill sources (embedded or local).
 func (s *Store) ReadVirtual(location string) (string, bool, error) {
-	if strings.HasPrefix(location, ioaURIPrefix) {
-		return readIOAVirtual(location)
+	for _, bundle := range s.bundles {
+		if bundle.ReadVirtual != nil {
+			if raw, handled, err := bundle.ReadVirtual(location); handled || err != nil {
+				return raw, handled, err
+			}
+		}
 	}
 	if filepath.IsAbs(location) {
 		if !s.isKnownLocalPath(location) {
@@ -382,12 +394,13 @@ func (s *Store) ReadBody(name string) string {
 	if !ok {
 		return readEmbeddedBody(name)
 	}
-	if skill.Source == SourceIOA {
-		body, err := ioaskills.ReadSkill(name)
-		if err != nil {
+	if skill.Source == SourceBundle {
+		raw, handled, err := s.ReadVirtual(skill.Location)
+		if err != nil || !handled {
 			return ""
 		}
-		return body
+		_, body := splitRaw(raw)
+		return strings.TrimSpace(body)
 	}
 	if skill.Source == SourceEmbedded || skill.Source == "" {
 		return readEmbeddedBody(name)

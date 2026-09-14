@@ -21,7 +21,7 @@ func BuildHello(name string, executor tool.Executor, nodeID string, runtimeInfo 
 	}
 	hello := &aop.AgentHello{
 		NodeId: nodeID, Name: name,
-		Capabilities: []string{"repl", "pty", "tmux", "ioa", "file", "exec", "sco"},
+		Capabilities: []string{"repl", "pty", "tmux", "file", "exec", "sco"},
 		Runtime:      runtimeInfo, Tools: executor.ToolDefinitions(),
 	}
 	return hello, nil

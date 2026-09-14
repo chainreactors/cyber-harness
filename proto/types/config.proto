@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package aiscan.config;
 
+import "google/protobuf/struct.proto";
+
 option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
 
 message DistributeConfig {
@@ -12,6 +14,13 @@ message DistributeConfig {
   SearchConfig search = 5;
   IOAConfig ioa = 6;
   AgentConfig agent = 7;
+  map<string, google.protobuf.Struct> extensions = 8;
+  NodeConfig node = 9;
+}
+
+message NodeConfig {
+  string id = 1;
+  string name = 2;
 }
 
 message LLMConfig {
@@ -121,6 +130,7 @@ message ConfigView {
   SearchView search = 7;
   IOAView ioa = 8;
   AgentConfig agent = 9;
+  map<string, ExtensionView> extensions = 10;
 }
 
 message GetConfigRequest {}
@@ -169,3 +179,8 @@ message ConnectionCheck {
 }
 
 message TestConnectionResponse { repeated ConnectionCheck checks = 1; }
+
+message ExtensionView {
+ google.protobuf.Struct values = 1;
+ repeated string configured_secrets = 2;
+}

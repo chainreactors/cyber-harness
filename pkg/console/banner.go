@@ -284,11 +284,6 @@ func (r *AgentConsole) sessionSummary() string {
 			parts = append(parts, "plain")
 		}
 	}
-	if r != nil && r.option != nil {
-		if space := strings.TrimSpace(r.option.Space); space != "" {
-			parts = append(parts, "space "+space)
-		}
-	}
 	if len(parts) == 0 {
 		return "pty"
 	}
@@ -320,11 +315,12 @@ func (r *AgentConsole) renderHelp() string {
 }
 
 func (r *AgentConsole) renderStatus() string {
-	server := "disabled"
-	if r.option != nil && r.option.IOAURL != "" {
-		server = redactIOAURL(r.option.IOAURL)
+	rows := []helpRow{{Command: "render", Detail: r.sessionSummary()}, {Command: "history", Detail: agentConsoleHistoryPath()}}
+	if r.bindings != nil && r.bindings.Status != nil {
+		for _, row := range r.bindings.Status() {
+			rows = append(rows, helpRow{Command: row.Name, Detail: row.Value})
+		}
 	}
-	rows := []helpRow{{Command: "render", Detail: r.sessionSummary()}, {Command: "server", Detail: server}, {Command: "history", Detail: agentConsoleHistoryPath()}}
 	return r.renderPanel("terminal", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
 }
 

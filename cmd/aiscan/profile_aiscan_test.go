@@ -254,17 +254,17 @@ func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
 
 func TestFromOptionOwnsEventOutputSelection(t *testing.T) {
 	base := &cfg.Option{}
-	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
+	if got := resolveOutputPath(base); got != "" {
 		t.Fatalf("one-shot output = %q", got)
 	}
 
 	base.Resume = "source.jsonl"
-	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "" {
+	if got := resolveOutputPath(base); got != "" {
 		t.Fatalf("resume selected output %q", got)
 	}
 
 	base.OutputFile = "explicit.jsonl"
-	if got := profileConfigFromOption(base, apppkg.RuntimeFeatures{}, nil, telemetry.NopLogger()).Output; got != "explicit.jsonl" {
+	if got := resolveOutputPath(base); got != "explicit.jsonl" {
 		t.Fatalf("explicit output = %q", got)
 	}
 }

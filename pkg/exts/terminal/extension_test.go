@@ -44,7 +44,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	commandRegistry := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
 	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return commandRegistry.Register(scope, "control", commands.Command{
+		return commandRegistry.Register("test", "control", commands.Command{
 			Name: "proxy",
 			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
 		})

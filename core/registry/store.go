@@ -35,9 +35,10 @@ type Value[T any] struct {
 
 // Entry is a published value with its registration metadata.
 type Entry[T any] struct {
-	Name  string
-	Group string
-	Value T
+	Source string
+	Name   string
+	Group  string
+	Value  T
 }
 
 // Store is a fixed-composition named registry. Register is allowed only before
@@ -64,10 +65,11 @@ func New[T any]() *Store[T] {
 	}
 }
 
-// Register atomically adds one batch. The returned function retracts exactly
-// that batch and is intended to be retained by extension.Scope.Track.
-func (s *Store[T]) Register(group string, values ...Value[T]) (func(), error) {
-	if s == nil || len(values) == 0 {
+// Register atomically adds one batch. The optional returned function retracts
+// that batch before activation. Fixed Profile registries discard this handle
+// and retain declarations until the whole registry closes or is discarded.
+func (s *Store[T]) Register(source, group string, values ...Value[T]) (func(), error) {
+	if s == nil || strings.TrimSpace(source) == "" || len(values) == 0 {
 		return nil, ErrInvalid
 	}
 	names := make([]string, 0, len(values))
@@ -78,7 +80,7 @@ func (s *Store[T]) Register(group string, values ...Value[T]) (func(), error) {
 			return nil, ErrInvalid
 		}
 		if _, exists := pending[name]; exists {
-			return nil, fmt.Errorf("%w: %s", ErrDuplicate, name)
+			return nil, fmt.Errorf("%w: %s (source %s repeated in batch)", ErrDuplicate, name, source)
 		}
 		pending[name] = value.Value
 		names = append(names, name)
@@ -90,13 +92,13 @@ func (s *Store[T]) Register(group string, values ...Value[T]) (func(), error) {
 		return nil, ErrUnavailable
 	}
 	for _, name := range names {
-		if _, exists := s.entries[name]; exists {
+		if previous, exists := s.entries[name]; exists {
 			s.mu.Unlock()
-			return nil, fmt.Errorf("%w: %s", ErrDuplicate, name)
+			return nil, fmt.Errorf("%w: %s (sources %s and %s)", ErrDuplicate, name, previous.Source, source)
 		}
 	}
 	for _, name := range names {
-		s.entries[name] = Entry[T]{Name: name, Group: group, Value: pending[name]}
+		s.entries[name] = Entry[T]{Source: source, Name: name, Group: group, Value: pending[name]}
 		s.order = append(s.order, name)
 		if group != "" {
 			s.groups[group] = append(s.groups[group], name)

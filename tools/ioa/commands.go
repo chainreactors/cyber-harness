@@ -31,6 +31,14 @@ func (b *spaceBinding) set(id string) {
 	b.spaceID = id
 }
 
+func (b *spaceBinding) initialize(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.spaceID == "" {
+		b.spaceID = id
+	}
+}
+
 func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []commands.Command {
 	root := &rootCommand{client: client, binding: &spaceBinding{}, nodeName: nodeName, meta: meta}
 	return root.commands()

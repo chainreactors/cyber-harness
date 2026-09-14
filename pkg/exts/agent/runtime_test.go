@@ -74,7 +74,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 }
 
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
 	application.App.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -391,7 +391,7 @@ func loadTestApplication(t *testing.T, application *apppkg.Resource) *extension.
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
 	rt, err := New(Config{Application: a.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +445,7 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	appResource := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
+	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 	app := appResource.App
 	terminal, err := terminalext.New(app.Hooks, app.Tools.(*toolset.Registry), app.Commands, terminalext.Config{
 		Directory: t.TempDir(), Timeout: 1,
@@ -868,7 +868,7 @@ func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistencePro
 func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *eventoutput.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{Events: stream})
+	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{Events: stream})
 	app := appResource.App
 	var dependencies []string
 	var entries []extension.Entry
@@ -990,7 +990,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{Events: bus})
+	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.Dependencies{Events: bus})
 	applicationEntries := applicationtest.Entries(t, a, "output")
 	aSet := extensiontest.Set(t, append([]extension.Entry{{ID: "output", Extension: output}}, applicationEntries...)...)
 	if err := aSet.Load(t.Context()); err != nil {

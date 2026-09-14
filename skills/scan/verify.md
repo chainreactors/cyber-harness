@@ -78,4 +78,4 @@ Followed by concise markdown with the exact evidence used for the decision.
 - **status**: confirmed, not_confirmed, info, or inconclusive
 - **target**: host:port or URL verified
 
-In IOA collaboration mode, use `ioa send checkpoint` instead of `finish`.
+Selected collaboration skills may contribute additional reporting instructions.

@@ -19,8 +19,12 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-func newHandler(service web.Service, ioaHandler http.Handler, static http.Handler, _ ...string) *web.Handler {
-	return web.NewHandler(service, ioaHandler, static)
+func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...string) *web.Handler {
+	handler, err := web.NewHandler(service, static)
+	if err != nil {
+		panic(err)
+	}
+	return handler
 }
 
 func registerConnectServices(mux *http.ServeMux, _ string, service web.Service) {
@@ -33,10 +37,6 @@ func newAccessKeyAuth(key string) func(http.Handler) http.Handler {
 
 func registerTestAuthRoutes(mux *http.ServeMux, key string) {
 	NewAuth(key).RegisterRoutes(mux)
-}
-
-func shareWebAuthWithIOA(accessKey, ioaToken string, next http.Handler) http.Handler {
-	return NewAuth(accessKey).ShareWithIOA(ioaToken, next)
 }
 
 func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {

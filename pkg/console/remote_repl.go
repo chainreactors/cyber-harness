@@ -8,6 +8,7 @@ import (
 	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
+	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
@@ -22,7 +23,7 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
+func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
 	if rt == nil || rt.App() == nil {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
@@ -47,7 +48,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
 		defer close(r.done)
 		defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
 		for {
-			err := runRemoteConsole(replCtx, rt, session, option, input, output, control)
+			err := runRemoteConsole(replCtx, rt, session, option, input, output, control, bindings)
 			if replCtx.Err() != nil {
 				return replCtx.Err()
 			}

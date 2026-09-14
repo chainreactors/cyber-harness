@@ -394,27 +394,26 @@ type sessionMailbox struct {
 }
 
 func (m *sessionMailbox) Push(message inboxpkg.Message) error {
-	m.mu.Lock()
-	if m.base.Closed() {
-		m.mu.Unlock()
-		return inboxpkg.ErrInboxClosed
-	}
-	if m.active {
-		err := m.base.Push(message)
-		m.mu.Unlock()
-		return err
-	}
-	err := m.base.Push(message)
-	automatic := m.automatic
-	shouldStart := err == nil && !m.automaticPending
-	if shouldStart {
-		m.automaticPending = true
-	}
-	m.mu.Unlock()
-	if err == nil && shouldStart && automatic != nil {
-		automatic()
+	kick, err := m.enqueue(message)
+	if kick != nil {
+		kick()
 	}
 	return err
+}
+
+// enqueue commits input without invoking the scheduler under admission locks.
+func (m *sessionMailbox) enqueue(message inboxpkg.Message) (func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.base.Closed() {
+		return nil, inboxpkg.ErrInboxClosed
+	}
+	err := m.base.Push(message)
+	if err != nil || m.active || m.automaticPending {
+		return nil, err
+	}
+	m.automaticPending = true
+	return m.automatic, nil
 }
 
 func (m *sessionMailbox) setActive(active bool) {
@@ -1303,9 +1302,26 @@ func (rt *Runtime) pendingLimit() int {
 	return DefaultSessionPendingLimit
 }
 
-func (rt *Runtime) pushAsync(message inboxpkg.Message) error {
+// Deliver admits external input into the primary (or sole) open session.
+// Calls before Load and after shutdown are safe and are rejected.
+// A successful call transfers ownership of the message to the session.
+func (rt *Runtime) Deliver(ctx context.Context, message inboxpkg.Message) error {
 	if rt == nil {
-		return fmt.Errorf("agent runtime is not configured")
+		return ErrUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if message.Message == nil {
+		return fmt.Errorf("inbox message is required")
+	}
+	rt.lifecycle.Lock()
+	if !rt.loaded || rt.closing || rt.ctx == nil || rt.ctx.Err() != nil {
+		rt.lifecycle.Unlock()
+		return ErrUnavailable
 	}
 	rt.mu.RLock()
 	state := rt.sessions[rt.primarySessionID]
@@ -1316,9 +1332,29 @@ func (rt *Runtime) pushAsync(message inboxpkg.Message) error {
 	}
 	rt.mu.RUnlock()
 	if state == nil {
+		rt.lifecycle.Unlock()
 		return fmt.Errorf("no open session accepts asynchronous input")
 	}
-	return state.inbox.Push(message)
+	state.mu.Lock()
+	if state.closed || state.ctx.Err() != nil {
+		state.mu.Unlock()
+		rt.lifecycle.Unlock()
+		return inboxpkg.ErrInboxClosed
+	}
+	kick, err := state.inbox.enqueue(message)
+	if err == nil {
+		rt.operations.Add(1)
+	}
+	state.mu.Unlock()
+	rt.lifecycle.Unlock()
+	if err != nil {
+		return err
+	}
+	defer rt.operations.Done()
+	if kick != nil {
+		kick()
+	}
+	return nil
 }
 
 func (rt *Runtime) nextRuntimeID(prefix string) string {

@@ -267,31 +267,6 @@ func TestReconNoCredentials(t *testing.T) {
 	}
 }
 
-func TestProbeIOASuccess(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/spaces" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "1", "name": "default", "nodes": []any{}}})
-	}))
-	defer srv.Close()
-
-	resp, err := testConn(context.Background(), &fakeConfigStore{}, "ioa", configWith(func(c *types.DistributeConfig) {
-		c.Ioa = &types.IOAConfig{Url: srv.URL, Token: "t"}
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	c, ok := findCheck(resp, "ioa")
-	if !ok || !c.Ok {
-		t.Fatalf("expected ioa ok, got %+v", resp)
-	}
-	if !strings.Contains(c.Detail, "1 space") {
-		t.Fatalf("expected space count in detail, got %q", c.Detail)
-	}
-}
-
 // stubLLMServer emulates an OpenAI-compatible /chat/completions endpoint and
 // records the Authorization header it received.
 func stubLLMServer(t *testing.T, reply string, gotAuth *string) *httptest.Server {

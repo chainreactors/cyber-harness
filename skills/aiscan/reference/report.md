@@ -112,7 +112,3 @@ Brief list so the reader knows what was checked and cleared.
 - Prioritize by severity: critical > high > medium.
 - Use plain markdown, no code fences around the report.
 - If no significant loots remain after applying verification filters, say so clearly. An honest "no confirmed vulnerabilities" is far more valuable than inflated severity.
-
-## Publishing to IOA
-
-When the session is IOA-bound, publish each confirmed finding to the current space as a `checkpoint` message (`--kind finding`, natural-language content) per `aiscan://skills/aiscan/okf/runtime/ioa-finding.md`. Cite the `result_id` in the message — it is the whole link: the IOA message is the observable notification, `findings/<result_id>.md` is the complete record. Review replies on the checkpoint (confirmed/dismissed) are the disposition trail — mirror them into the finding frontmatter on the next report update.

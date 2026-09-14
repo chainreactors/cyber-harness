@@ -18,8 +18,10 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	serverext "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	"github.com/chainreactors/aiscan/pkg/runner"
@@ -27,9 +29,9 @@ import (
 	"github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
+	ioaservice "github.com/chainreactors/aiscan/tools/ioa/server"
 	webstatic "github.com/chainreactors/aiscan/web"
 	"github.com/chainreactors/ioa/protocols"
-	ioaserver "github.com/chainreactors/ioa/server"
 )
 
 func init() {
@@ -78,6 +80,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		accessKey = protocols.NewToken()
 	}
 	service := webservice.NewService(webservice.ServiceConfig{
+		ConfigAPI:   productConfigAPI(),
 		Store:       store,
 		Profile:     product,
 		Artifacts:   ingestor,
@@ -89,6 +92,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
+			candidateOption.Sections = productSections(false)
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
@@ -126,20 +130,20 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	ioaSvc := ioaserver.NewService(ioaserver.NewMemoryStore(), accessKey)
-	ioaWebIdentity, err := ioaSvc.AuthRegister(ctx, protocols.AuthRegister{
-		Name:        "aiscan.web",
-		Description: "AIScan Web console",
-		AccessKey:   accessKey,
-		Meta:        map[string]any{"role": "web"},
-	})
+	ioaExtension := serverext.New(ioaservice.Config{AccessKey: accessKey})
+	ioaSet, err := extension.New(extension.Entry{ID: "ioa-server", Extension: ioaExtension})
 	if err != nil {
-		return fmt.Errorf("register IOA web identity: %w", err)
+		return err
 	}
-	ioaHandler := service.Auth().ShareWithIOA(
-		ioaWebIdentity.Token,
-		ioaserver.AuthMiddleware(ioaSvc)(ioaserver.NewHandler(ioaSvc)),
-	)
+	defer func() { resultErr = errors.Join(resultErr, ioaSet.Close(context.Background())) }()
+	if err := ioaSet.Load(ctx); err != nil {
+		return err
+	}
+	ioaSvc := ioaExtension.Server()
+	ioaHandler, err := serverext.BrowserHandler(ctx, ioaSvc, service.Auth().Authenticate, service.Auth().Enabled())
+	if err != nil {
+		return err
+	}
 
 	listener, err := net.Listen("tcp", opts.Addr)
 	if err != nil {
@@ -148,23 +152,22 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler := web.NewHandler(service, ioaHandler, newSPAFileServer(staticSub))
+	httpHandler, err := web.NewHandler(service, newSPAFileServer(staticSub), web.Route{Pattern: "/ioa/", Handler: http.StripPrefix("/ioa", ioaHandler)})
+	if err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr:    opts.Addr,
 		Handler: httpHandler,
 	}
 
-	go func() {
-		<-ctx.Done()
-		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutCancel()
-		_ = srv.Shutdown(shutCtx)
-	}()
-
 	logger.Infof("aiscan server listening on http://%s", listenAddr)
 	logger.Infof("  web access token: %s", accessKey)
 	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
+	embeddedCtx, stopEmbedded := context.WithCancel(ctx)
+	defer stopEmbedded()
+	embeddedDone := make(chan struct{})
 	if !opts.NoAgent {
 		// The hub's own agent comes online exactly like any node: an
 		// `aiscan agent` dialed into this server over loopback WebSocket,
@@ -174,15 +177,23 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			return err
 		}
 		telemetry.SafeGo("embedded-agent", func() {
-			if err := node.RunWebSocket(ctx, aiscanProfileFactory, &agentOption, logger); err != nil && ctx.Err() == nil {
+			defer close(embeddedDone)
+			if err := node.RunWebSocket(embeddedCtx, aiscanProfileFactory, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		})
+	} else {
+		close(embeddedDone)
 	}
-	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-		return err
-	}
-	return nil
+	return serveManagedHTTP(ctx, srv, listener, func(closeCtx context.Context) error {
+		stopEmbedded()
+		select {
+		case <-embeddedDone:
+		case <-closeCtx.Done():
+			return closeCtx.Err()
+		}
+		return ioaSet.Close(closeCtx)
+	})
 }
 
 func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Option, error) {
@@ -190,11 +201,14 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	if base != nil {
 		option = *base
 	}
+	if err := applyProductIdentity(&option); err != nil {
+		return cfg.Option{}, err
+	}
 	serverURL := &url.URL{Scheme: "http", Host: listenAddr}
 	serverURL.User = url.User(accessKey)
 	option.ServerURL = serverURL.String()
-	if option.IOANodeID == "" && option.IOANodeName == "" {
-		option.IOANodeName = "local"
+	if option.NodeID == "" && option.NodeName == "" {
+		option.NodeName = "local"
 	}
 	if err := cfg.ResolveAgentServerURLs(&option); err != nil {
 		return cfg.Option{}, fmt.Errorf("configure embedded agent: %w", err)
@@ -253,7 +267,10 @@ func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg ap
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 
-	profileConfig := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
+	profileConfig, err := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
+	if err != nil {
+		return nil, err
+	}
 	profileConfig.Application = appCfg
 	profileConfig.IOA = nil
 	profileConfig.Artifacts = artifacts
@@ -280,6 +297,8 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	if err := ctx.Err(); err != nil {
 		return "", false, nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
 		return p, false, &types.DistributeConfig{}, nil
@@ -288,8 +307,8 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	if err != nil {
 		return p, false, nil, err
 	}
-	dc := parseDistributeConfig(data)
-	return p, true, dc, nil
+	dc, err := parseProductConfig(data)
+	return p, true, dc, err
 }
 
 // parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
@@ -306,6 +325,7 @@ func parseDistributeConfig(data []byte) *types.DistributeConfig {
 }
 
 func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*webservice.PreparedConfig, error) {
+	var err error
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -319,7 +339,10 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		if err != nil {
 			return nil, err
 		}
-		current = parseDistributeConfig(data)
+		current, err = parseProductConfig(data)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		current = &types.DistributeConfig{}
 	}
@@ -332,6 +355,9 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 	cfg.NormalizeLLMConfig(incoming.Llm)
 
 	// Preserve existing secrets when incoming value is empty.
+	if incoming.Node == nil {
+		incoming.Node = current.GetNode()
+	}
 	preserveLLMProfileSecrets(incoming.Llm, current.GetLlm())
 	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *types.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
 	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *types.ReconConfig) {
@@ -339,9 +365,21 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
-	incoming.Ioa = preserveConfigSection(incoming.Ioa, current.GetIoa(), func(c *types.IOAConfig) { preserveSecret(&c.Token, current.GetIoa().GetToken()) })
+	if err := normalizeProductConfig(incoming); err != nil {
+		return nil, err
+	}
+	sections := productSections(false)
+	nextValues, currentValues := cfg.ValuesFromProto(incoming.Extensions), cfg.ValuesFromProto(current.Extensions)
+	preserveProductURLCredentials(nextValues, currentValues)
+	incoming.Extensions, err = cfg.ValuesToProto(sections.Preserve(nextValues, currentValues))
+	if err != nil {
+		return nil, err
+	}
+	if err = validateProductConfig(incoming); err != nil {
+		return nil, err
+	}
 
-	next, err := cfg.MarshalDistributeConfigYAML(incoming)
+	next, err := marshalProductConfig(incoming)
 	if err != nil {
 		return nil, err
 	}

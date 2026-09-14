@@ -82,7 +82,6 @@ func (c *Command) WithLogger(logger telemetry.Logger) *Command {
 
 func (c *Command) WithProxy(proxy string) *Command {
 	c.Proxy = proxy
-	scanengine.ApplyNeutronProxy(proxy)
 	return c
 }
 
@@ -93,7 +92,6 @@ func (c *Command) WithEvents(events aop.EventPublisher) *Command {
 
 func (c *Command) SetProxy(proxy string) {
 	c.Base.SetProxy(proxy)
-	scanengine.ApplyNeutronProxy(proxy)
 }
 
 func (c *Command) Name() string { return "neutron" }

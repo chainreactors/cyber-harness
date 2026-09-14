@@ -30,7 +30,7 @@ func TestResourceDoesNotPromoteAppBusinessMethods(t *testing.T) {
 }
 
 func TestNewIsInertUntilLoad(t *testing.T) {
-	resource := New(Config{SkipEngines: true}, Dependencies{})
+	resource := newTestApp(t, Config{SkipEngines: true}, Dependencies{})
 	a := resource.App
 	if a.Skills != nil || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("New exposed initialized application resources before Load")

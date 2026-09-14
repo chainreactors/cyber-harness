@@ -42,7 +42,7 @@ func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 		return "ok", nil
 	}}
 	contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register(scope, "test", command)
+		return registry.Register("test", "test", command)
 	}}
 	set, err := extension.New(
 		extension.Entry{ID: "command", Extension: contributor},
@@ -81,7 +81,7 @@ func loadTestRegistry(t *testing.T, groups ...testCommandGroup) (*Registry, *ext
 		entries = append(entries, extension.Entry{
 			ID: group.id,
 			Extension: extension.Func{LoadFunc: func(scope *extension.Scope) error {
-				return registry.Register(scope, group.group, group.commands...)
+				return registry.Register("test", group.group, group.commands...)
 			}},
 		})
 	}

@@ -4,5 +4,5 @@
 
 - **Update**: Unified `easm/` and `runtime/` under one root OKF v0.2 bundle.
 - **Update**: Added explicit cross-concept Markdown links for scanner workflows,
-  runtime dependencies, evidence capture, and IOA collaboration.
+  runtime dependencies and evidence capture.
 - **Update**: Moved the bundle version declaration to the root `index.md`.

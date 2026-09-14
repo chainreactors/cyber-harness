@@ -4,13 +4,14 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Message } from "@bufbuild/protobuf";
+import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
+import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file types/config.proto.
  */
 export const file_types_config: GenFile = /*@__PURE__*/
-  fileDesc("ChJ0eXBlcy9jb25maWcucHJvdG8SDWFpc2Nhbi5jb25maWcivQIKEERpc3RyaWJ1dGVDb25maWcSJQoDbGxtGAEgASgLMhguYWlzY2FuLmNvbmZpZy5MTE1Db25maWcSLwoIY3liZXJodWIYAiABKAsyHS5haXNjYW4uY29uZmlnLkN5YmVyaHViQ29uZmlnEikKBXJlY29uGAMgASgLMhouYWlzY2FuLmNvbmZpZy5SZWNvbkNvbmZpZxInCgRzY2FuGAQgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEisKBnNlYXJjaBgFIAEoCzIbLmFpc2Nhbi5jb25maWcuU2VhcmNoQ29uZmlnEiUKA2lvYRgGIAEoCzIYLmFpc2Nhbi5jb25maWcuSU9BQ29uZmlnEikKBWFnZW50GAcgASgLMhouYWlzY2FuLmNvbmZpZy5BZ2VudENvbmZpZyJYCglMTE1Db25maWcSFgoOYWN0aXZlX3Byb2ZpbGUYASABKAkSMwoJcHJvdmlkZXJzGAIgAygLMiAuYWlzY2FuLmNvbmZpZy5MTE1Qcm92aWRlckNvbmZpZyLdAQoRTExNUHJvdmlkZXJDb25maWcSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghwcm92aWRlchgDIAEoCRIQCghiYXNlX3VybBgEIAEoCRIPCgdhcGlfa2V5GAUgASgJEg0KBW1vZGVsGAYgASgJEg0KBXByb3h5GAcgASgJEhIKCm1heF90b2tlbnMYCCABKAUSFgoOY29udGV4dF93aW5kb3cYCSABKAUSDwoHdGltZW91dBgKIAEoBRITCgZpbWFnZXMYCyABKAhIAIgBAUIJCgdfaW1hZ2VzIkcKDkN5YmVyaHViQ29uZmlnEgsKA3VybBgBIAEoCRILCgNrZXkYAiABKAkSDAoEbW9kZRgDIAEoCRINCgVwcm94eRgEIAEoCSJVCgtSZWNvbkNvbmZpZxIQCghmb2ZhX2tleRgBIAEoCRIWCg5odW50ZXJfYXBpX2tleRgCIAEoCRINCgVwcm94eRgDIAEoCRINCgVsaW1pdBgEIAEoBSIcCgpTY2FuQ29uZmlnEg4KBnZlcmlmeRgBIAEoCSIjCgxTZWFyY2hDb25maWcSEwoLdGF2aWx5X2tleXMYASABKAkiSQoJSU9BQ29uZmlnEgsKA3VybBgBIAEoCRINCgV0b2tlbhgCIAEoCRIRCglub2RlX25hbWUYAyABKAkSDQoFc3BhY2UYBCABKAkiMwoLQWdlbnRDb25maWcSDQoFdG9vbHMYASADKAkSDwoHdGltZW91dBgCIAEoBUoECAMQBCLmAQoPTExNUHJvdmlkZXJWaWV3EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcHJvdmlkZXIYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSGgoSYXBpX2tleV9jb25maWd1cmVkGAUgASgIEg0KBW1vZGVsGAYgASgJEg0KBXByb3h5GAcgASgJEhIKCm1heF90b2tlbnMYCCABKAUSFgoOY29udGV4dF93aW5kb3cYCSABKAUSDwoHdGltZW91dBgKIAEoBRITCgZpbWFnZXMYCyABKAhIAIgBAUIJCgdfaW1hZ2VzIoQBCgdMTE1WaWV3EhYKDmFjdGl2ZV9wcm9maWxlGAEgASgJEi4KBmFjdGl2ZRgCIAEoCzIeLmFpc2Nhbi5jb25maWcuTExNUHJvdmlkZXJWaWV3EjEKCXByb3ZpZGVycxgDIAMoCzIeLmFpc2Nhbi5jb25maWcuTExNUHJvdmlkZXJWaWV3IlAKDEN5YmVyaHViVmlldxILCgN1cmwYASABKAkSFgoOa2V5X2NvbmZpZ3VyZWQYAiABKAgSDAoEbW9kZRgDIAEoCRINCgVwcm94eRgEIAEoCSJpCglSZWNvblZpZXcSGwoTZm9mYV9rZXlfY29uZmlndXJlZBgBIAEoCBIhChlodW50ZXJfYXBpX2tleV9jb25maWd1cmVkGAIgASgIEg0KBXByb3h5GAMgASgJEg0KBWxpbWl0GAQgASgFIiwKClNlYXJjaFZpZXcSHgoWdGF2aWx5X2tleXNfY29uZmlndXJlZBgBIAEoCCJSCgdJT0FWaWV3EgsKA3VybBgBIAEoCRIYChB0b2tlbl9jb25maWd1cmVkGAIgASgIEhEKCW5vZGVfbmFtZRgDIAEoCRINCgVzcGFjZRgEIAEoCSLLAgoKQ29uZmlnVmlldxIMCgRwYXRoGAEgASgJEg4KBmxvYWRlZBgCIAEoCBIjCgNsbG0YAyABKAsyFi5haXNjYW4uY29uZmlnLkxMTVZpZXcSLQoIY3liZXJodWIYBCABKAsyGy5haXNjYW4uY29uZmlnLkN5YmVyaHViVmlldxInCgVyZWNvbhgFIAEoCzIYLmFpc2Nhbi5jb25maWcuUmVjb25WaWV3EicKBHNjYW4YBiABKAsyGS5haXNjYW4uY29uZmlnLlNjYW5Db25maWcSKQoGc2VhcmNoGAcgASgLMhkuYWlzY2FuLmNvbmZpZy5TZWFyY2hWaWV3EiMKA2lvYRgIIAEoCzIWLmFpc2Nhbi5jb25maWcuSU9BVmlldxIpCgVhZ2VudBgJIAEoCzIaLmFpc2Nhbi5jb25maWcuQWdlbnRDb25maWciEgoQR2V0Q29uZmlnUmVxdWVzdCI+ChFHZXRDb25maWdSZXNwb25zZRIpCgZjb25maWcYASABKAsyGS5haXNjYW4uY29uZmlnLkNvbmZpZ1ZpZXciRgoTVXBkYXRlQ29uZmlnUmVxdWVzdBIvCgZjb25maWcYASABKAsyHy5haXNjYW4uY29uZmlnLkRpc3RyaWJ1dGVDb25maWciQQoUVXBkYXRlQ29uZmlnUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IiwKFkFjdGl2YXRlUHJvZmlsZVJlcXVlc3QSEgoKcHJvZmlsZV9pZBgBIAEoCSJEChdBY3RpdmF0ZVByb2ZpbGVSZXNwb25zZRIpCgZjb25maWcYASABKAsyGS5haXNjYW4uY29uZmlnLkNvbmZpZ1ZpZXcieAoPTExNUHJvYmVSZXF1ZXN0EhIKCnByb2ZpbGVfaWQYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEAoIYmFzZV91cmwYAyABKAkSDwoHYXBpX2tleRgEIAEoCRINCgVtb2RlbBgFIAEoCRINCgVwcm94eRgGIAEoCSJvCg5MTE1Qcm9iZVJlc3VsdBIKCgJvaxgBIAEoCBIQCghwcm92aWRlchgCIAEoCRINCgVtb2RlbBgDIAEoCRISCgpsYXRlbmN5X21zGAQgASgDEg0KBXJlcGx5GAUgASgJEg0KBWVycm9yGAYgASgJIlAKEExpc3RNb2RlbHNSZXN1bHQSCgoCb2sYASABKAgSEQoJc3VwcG9ydGVkGAIgASgIEg4KBm1vZGVscxgDIAMoCRINCgVlcnJvchgEIAEoCSJZChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDwoHc2VjdGlvbhgBIAEoCRIvCgZjb25maWcYAiABKAsyHy5haXNjYW4uY29uZmlnLkRpc3RyaWJ1dGVDb25maWciXgoPQ29ubmVjdGlvbkNoZWNrEgwKBG5hbWUYASABKAkSCgoCb2sYAiABKAgSEgoKbGF0ZW5jeV9tcxgDIAEoAxIOCgZkZXRhaWwYBCABKAkSDQoFZXJyb3IYBSABKAkiSAoWVGVzdENvbm5lY3Rpb25SZXNwb25zZRIuCgZjaGVja3MYASADKAsyHi5haXNjYW4uY29uZmlnLkNvbm5lY3Rpb25DaGVja0IxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy90eXBlczt0eXBlc2IGcHJvdG8z");
+  fileDesc("ChJ0eXBlcy9jb25maWcucHJvdG8SDWFpc2Nhbi5jb25maWci9wMKEERpc3RyaWJ1dGVDb25maWcSJQoDbGxtGAEgASgLMhguYWlzY2FuLmNvbmZpZy5MTE1Db25maWcSLwoIY3liZXJodWIYAiABKAsyHS5haXNjYW4uY29uZmlnLkN5YmVyaHViQ29uZmlnEikKBXJlY29uGAMgASgLMhouYWlzY2FuLmNvbmZpZy5SZWNvbkNvbmZpZxInCgRzY2FuGAQgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEisKBnNlYXJjaBgFIAEoCzIbLmFpc2Nhbi5jb25maWcuU2VhcmNoQ29uZmlnEiUKA2lvYRgGIAEoCzIYLmFpc2Nhbi5jb25maWcuSU9BQ29uZmlnEikKBWFnZW50GAcgASgLMhouYWlzY2FuLmNvbmZpZy5BZ2VudENvbmZpZxJDCgpleHRlbnNpb25zGAggAygLMi8uYWlzY2FuLmNvbmZpZy5EaXN0cmlidXRlQ29uZmlnLkV4dGVuc2lvbnNFbnRyeRInCgRub2RlGAkgASgLMhkuYWlzY2FuLmNvbmZpZy5Ob2RlQ29uZmlnGkoKD0V4dGVuc2lvbnNFbnRyeRILCgNrZXkYASABKAkSJgoFdmFsdWUYAiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0OgI4ASImCgpOb2RlQ29uZmlnEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkiWAoJTExNQ29uZmlnEhYKDmFjdGl2ZV9wcm9maWxlGAEgASgJEjMKCXByb3ZpZGVycxgCIAMoCzIgLmFpc2Nhbi5jb25maWcuTExNUHJvdmlkZXJDb25maWci3QEKEUxMTVByb3ZpZGVyQ29uZmlnEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcHJvdmlkZXIYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSDwoHYXBpX2tleRgFIAEoCRINCgVtb2RlbBgGIAEoCRINCgVwcm94eRgHIAEoCRISCgptYXhfdG9rZW5zGAggASgFEhYKDmNvbnRleHRfd2luZG93GAkgASgFEg8KB3RpbWVvdXQYCiABKAUSEwoGaW1hZ2VzGAsgASgISACIAQFCCQoHX2ltYWdlcyJHCg5DeWJlcmh1YkNvbmZpZxILCgN1cmwYASABKAkSCwoDa2V5GAIgASgJEgwKBG1vZGUYAyABKAkSDQoFcHJveHkYBCABKAkiVQoLUmVjb25Db25maWcSEAoIZm9mYV9rZXkYASABKAkSFgoOaHVudGVyX2FwaV9rZXkYAiABKAkSDQoFcHJveHkYAyABKAkSDQoFbGltaXQYBCABKAUiHAoKU2NhbkNvbmZpZxIOCgZ2ZXJpZnkYASABKAkiIwoMU2VhcmNoQ29uZmlnEhMKC3RhdmlseV9rZXlzGAEgASgJIkkKCUlPQUNvbmZpZxILCgN1cmwYASABKAkSDQoFdG9rZW4YAiABKAkSEQoJbm9kZV9uYW1lGAMgASgJEg0KBXNwYWNlGAQgASgJIjMKC0FnZW50Q29uZmlnEg0KBXRvb2xzGAEgAygJEg8KB3RpbWVvdXQYAiABKAVKBAgDEAQi5gEKD0xMTVByb3ZpZGVyVmlldxIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHByb3ZpZGVyGAMgASgJEhAKCGJhc2VfdXJsGAQgASgJEhoKEmFwaV9rZXlfY29uZmlndXJlZBgFIAEoCBINCgVtb2RlbBgGIAEoCRINCgVwcm94eRgHIAEoCRISCgptYXhfdG9rZW5zGAggASgFEhYKDmNvbnRleHRfd2luZG93GAkgASgFEg8KB3RpbWVvdXQYCiABKAUSEwoGaW1hZ2VzGAsgASgISACIAQFCCQoHX2ltYWdlcyKEAQoHTExNVmlldxIWCg5hY3RpdmVfcHJvZmlsZRgBIAEoCRIuCgZhY3RpdmUYAiABKAsyHi5haXNjYW4uY29uZmlnLkxMTVByb3ZpZGVyVmlldxIxCglwcm92aWRlcnMYAyADKAsyHi5haXNjYW4uY29uZmlnLkxMTVByb3ZpZGVyVmlldyJQCgxDeWJlcmh1YlZpZXcSCwoDdXJsGAEgASgJEhYKDmtleV9jb25maWd1cmVkGAIgASgIEgwKBG1vZGUYAyABKAkSDQoFcHJveHkYBCABKAkiaQoJUmVjb25WaWV3EhsKE2ZvZmFfa2V5X2NvbmZpZ3VyZWQYASABKAgSIQoZaHVudGVyX2FwaV9rZXlfY29uZmlndXJlZBgCIAEoCBINCgVwcm94eRgDIAEoCRINCgVsaW1pdBgEIAEoBSIsCgpTZWFyY2hWaWV3Eh4KFnRhdmlseV9rZXlzX2NvbmZpZ3VyZWQYASABKAgiUgoHSU9BVmlldxILCgN1cmwYASABKAkSGAoQdG9rZW5fY29uZmlndXJlZBgCIAEoCBIRCglub2RlX25hbWUYAyABKAkSDQoFc3BhY2UYBCABKAki2wMKCkNvbmZpZ1ZpZXcSDAoEcGF0aBgBIAEoCRIOCgZsb2FkZWQYAiABKAgSIwoDbGxtGAMgASgLMhYuYWlzY2FuLmNvbmZpZy5MTE1WaWV3Ei0KCGN5YmVyaHViGAQgASgLMhsuYWlzY2FuLmNvbmZpZy5DeWJlcmh1YlZpZXcSJwoFcmVjb24YBSABKAsyGC5haXNjYW4uY29uZmlnLlJlY29uVmlldxInCgRzY2FuGAYgASgLMhkuYWlzY2FuLmNvbmZpZy5TY2FuQ29uZmlnEikKBnNlYXJjaBgHIAEoCzIZLmFpc2Nhbi5jb25maWcuU2VhcmNoVmlldxIjCgNpb2EYCCABKAsyFi5haXNjYW4uY29uZmlnLklPQVZpZXcSKQoFYWdlbnQYCSABKAsyGi5haXNjYW4uY29uZmlnLkFnZW50Q29uZmlnEj0KCmV4dGVuc2lvbnMYCiADKAsyKS5haXNjYW4uY29uZmlnLkNvbmZpZ1ZpZXcuRXh0ZW5zaW9uc0VudHJ5Gk8KD0V4dGVuc2lvbnNFbnRyeRILCgNrZXkYASABKAkSKwoFdmFsdWUYAiABKAsyHC5haXNjYW4uY29uZmlnLkV4dGVuc2lvblZpZXc6AjgBIhIKEEdldENvbmZpZ1JlcXVlc3QiPgoRR2V0Q29uZmlnUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IkYKE1VwZGF0ZUNvbmZpZ1JlcXVlc3QSLwoGY29uZmlnGAEgASgLMh8uYWlzY2FuLmNvbmZpZy5EaXN0cmlidXRlQ29uZmlnIkEKFFVwZGF0ZUNvbmZpZ1Jlc3BvbnNlEikKBmNvbmZpZxgBIAEoCzIZLmFpc2Nhbi5jb25maWcuQ29uZmlnVmlldyIsChZBY3RpdmF0ZVByb2ZpbGVSZXF1ZXN0EhIKCnByb2ZpbGVfaWQYASABKAkiRAoXQWN0aXZhdGVQcm9maWxlUmVzcG9uc2USKQoGY29uZmlnGAEgASgLMhkuYWlzY2FuLmNvbmZpZy5Db25maWdWaWV3IngKD0xMTVByb2JlUmVxdWVzdBISCgpwcm9maWxlX2lkGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhAKCGJhc2VfdXJsGAMgASgJEg8KB2FwaV9rZXkYBCABKAkSDQoFbW9kZWwYBSABKAkSDQoFcHJveHkYBiABKAkibwoOTExNUHJvYmVSZXN1bHQSCgoCb2sYASABKAgSEAoIcHJvdmlkZXIYAiABKAkSDQoFbW9kZWwYAyABKAkSEgoKbGF0ZW5jeV9tcxgEIAEoAxINCgVyZXBseRgFIAEoCRINCgVlcnJvchgGIAEoCSJQChBMaXN0TW9kZWxzUmVzdWx0EgoKAm9rGAEgASgIEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZtb2RlbHMYAyADKAkSDQoFZXJyb3IYBCABKAkiWQoVVGVzdENvbm5lY3Rpb25SZXF1ZXN0Eg8KB3NlY3Rpb24YASABKAkSLwoGY29uZmlnGAIgASgLMh8uYWlzY2FuLmNvbmZpZy5EaXN0cmlidXRlQ29uZmlnIl4KD0Nvbm5lY3Rpb25DaGVjaxIMCgRuYW1lGAEgASgJEgoKAm9rGAIgASgIEhIKCmxhdGVuY3lfbXMYAyABKAMSDgoGZGV0YWlsGAQgASgJEg0KBWVycm9yGAUgASgJIkgKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USLgoGY2hlY2tzGAEgAygLMh4uYWlzY2FuLmNvbmZpZy5Db25uZWN0aW9uQ2hlY2siVAoNRXh0ZW5zaW9uVmlldxInCgZ2YWx1ZXMYASABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhoKEmNvbmZpZ3VyZWRfc2VjcmV0cxgCIAMoCUIxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvYWlzY2FuL3BrZy90eXBlczt0eXBlc2IGcHJvdG8z", [file_google_protobuf_struct]);
 
 /**
  * @generated from message aiscan.config.DistributeConfig
@@ -50,6 +51,16 @@ export type DistributeConfig = Message<"aiscan.config.DistributeConfig"> & {
    * @generated from field: aiscan.config.AgentConfig agent = 7;
    */
   agent?: AgentConfig | undefined;
+
+  /**
+   * @generated from field: map<string, google.protobuf.Struct> extensions = 8;
+   */
+  extensions: { [key: string]: JsonObject };
+
+  /**
+   * @generated from field: aiscan.config.NodeConfig node = 9;
+   */
+  node?: NodeConfig | undefined;
 };
 
 /**
@@ -58,6 +69,28 @@ export type DistributeConfig = Message<"aiscan.config.DistributeConfig"> & {
  */
 export const DistributeConfigSchema: GenMessage<DistributeConfig> = /*@__PURE__*/
   messageDesc(file_types_config, 0);
+
+/**
+ * @generated from message aiscan.config.NodeConfig
+ */
+export type NodeConfig = Message<"aiscan.config.NodeConfig"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message aiscan.config.NodeConfig.
+ * Use `create(NodeConfigSchema)` to create a new message.
+ */
+export const NodeConfigSchema: GenMessage<NodeConfig> = /*@__PURE__*/
+  messageDesc(file_types_config, 1);
 
 /**
  * @generated from message aiscan.config.LLMConfig
@@ -79,7 +112,7 @@ export type LLMConfig = Message<"aiscan.config.LLMConfig"> & {
  * Use `create(LLMConfigSchema)` to create a new message.
  */
 export const LLMConfigSchema: GenMessage<LLMConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 1);
+  messageDesc(file_types_config, 2);
 
 /**
  * @generated from message aiscan.config.LLMProviderConfig
@@ -146,7 +179,7 @@ export type LLMProviderConfig = Message<"aiscan.config.LLMProviderConfig"> & {
  * Use `create(LLMProviderConfigSchema)` to create a new message.
  */
 export const LLMProviderConfigSchema: GenMessage<LLMProviderConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 2);
+  messageDesc(file_types_config, 3);
 
 /**
  * @generated from message aiscan.config.CyberhubConfig
@@ -178,7 +211,7 @@ export type CyberhubConfig = Message<"aiscan.config.CyberhubConfig"> & {
  * Use `create(CyberhubConfigSchema)` to create a new message.
  */
 export const CyberhubConfigSchema: GenMessage<CyberhubConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 3);
+  messageDesc(file_types_config, 4);
 
 /**
  * @generated from message aiscan.config.ReconConfig
@@ -210,7 +243,7 @@ export type ReconConfig = Message<"aiscan.config.ReconConfig"> & {
  * Use `create(ReconConfigSchema)` to create a new message.
  */
 export const ReconConfigSchema: GenMessage<ReconConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 4);
+  messageDesc(file_types_config, 5);
 
 /**
  * @generated from message aiscan.config.ScanConfig
@@ -227,7 +260,7 @@ export type ScanConfig = Message<"aiscan.config.ScanConfig"> & {
  * Use `create(ScanConfigSchema)` to create a new message.
  */
 export const ScanConfigSchema: GenMessage<ScanConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 5);
+  messageDesc(file_types_config, 6);
 
 /**
  * @generated from message aiscan.config.SearchConfig
@@ -244,7 +277,7 @@ export type SearchConfig = Message<"aiscan.config.SearchConfig"> & {
  * Use `create(SearchConfigSchema)` to create a new message.
  */
 export const SearchConfigSchema: GenMessage<SearchConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 6);
+  messageDesc(file_types_config, 7);
 
 /**
  * @generated from message aiscan.config.IOAConfig
@@ -276,7 +309,7 @@ export type IOAConfig = Message<"aiscan.config.IOAConfig"> & {
  * Use `create(IOAConfigSchema)` to create a new message.
  */
 export const IOAConfigSchema: GenMessage<IOAConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 7);
+  messageDesc(file_types_config, 8);
 
 /**
  * @generated from message aiscan.config.AgentConfig
@@ -298,7 +331,7 @@ export type AgentConfig = Message<"aiscan.config.AgentConfig"> & {
  * Use `create(AgentConfigSchema)` to create a new message.
  */
 export const AgentConfigSchema: GenMessage<AgentConfig> = /*@__PURE__*/
-  messageDesc(file_types_config, 8);
+  messageDesc(file_types_config, 9);
 
 /**
  * @generated from message aiscan.config.LLMProviderView
@@ -365,7 +398,7 @@ export type LLMProviderView = Message<"aiscan.config.LLMProviderView"> & {
  * Use `create(LLMProviderViewSchema)` to create a new message.
  */
 export const LLMProviderViewSchema: GenMessage<LLMProviderView> = /*@__PURE__*/
-  messageDesc(file_types_config, 9);
+  messageDesc(file_types_config, 10);
 
 /**
  * @generated from message aiscan.config.LLMView
@@ -392,7 +425,7 @@ export type LLMView = Message<"aiscan.config.LLMView"> & {
  * Use `create(LLMViewSchema)` to create a new message.
  */
 export const LLMViewSchema: GenMessage<LLMView> = /*@__PURE__*/
-  messageDesc(file_types_config, 10);
+  messageDesc(file_types_config, 11);
 
 /**
  * @generated from message aiscan.config.CyberhubView
@@ -424,7 +457,7 @@ export type CyberhubView = Message<"aiscan.config.CyberhubView"> & {
  * Use `create(CyberhubViewSchema)` to create a new message.
  */
 export const CyberhubViewSchema: GenMessage<CyberhubView> = /*@__PURE__*/
-  messageDesc(file_types_config, 11);
+  messageDesc(file_types_config, 12);
 
 /**
  * @generated from message aiscan.config.ReconView
@@ -456,7 +489,7 @@ export type ReconView = Message<"aiscan.config.ReconView"> & {
  * Use `create(ReconViewSchema)` to create a new message.
  */
 export const ReconViewSchema: GenMessage<ReconView> = /*@__PURE__*/
-  messageDesc(file_types_config, 12);
+  messageDesc(file_types_config, 13);
 
 /**
  * @generated from message aiscan.config.SearchView
@@ -473,7 +506,7 @@ export type SearchView = Message<"aiscan.config.SearchView"> & {
  * Use `create(SearchViewSchema)` to create a new message.
  */
 export const SearchViewSchema: GenMessage<SearchView> = /*@__PURE__*/
-  messageDesc(file_types_config, 13);
+  messageDesc(file_types_config, 14);
 
 /**
  * @generated from message aiscan.config.IOAView
@@ -505,7 +538,7 @@ export type IOAView = Message<"aiscan.config.IOAView"> & {
  * Use `create(IOAViewSchema)` to create a new message.
  */
 export const IOAViewSchema: GenMessage<IOAView> = /*@__PURE__*/
-  messageDesc(file_types_config, 14);
+  messageDesc(file_types_config, 15);
 
 /**
  * @generated from message aiscan.config.ConfigView
@@ -555,6 +588,11 @@ export type ConfigView = Message<"aiscan.config.ConfigView"> & {
    * @generated from field: aiscan.config.AgentConfig agent = 9;
    */
   agent?: AgentConfig | undefined;
+
+  /**
+   * @generated from field: map<string, aiscan.config.ExtensionView> extensions = 10;
+   */
+  extensions: { [key: string]: ExtensionView };
 };
 
 /**
@@ -562,7 +600,7 @@ export type ConfigView = Message<"aiscan.config.ConfigView"> & {
  * Use `create(ConfigViewSchema)` to create a new message.
  */
 export const ConfigViewSchema: GenMessage<ConfigView> = /*@__PURE__*/
-  messageDesc(file_types_config, 15);
+  messageDesc(file_types_config, 16);
 
 /**
  * @generated from message aiscan.config.GetConfigRequest
@@ -575,7 +613,7 @@ export type GetConfigRequest = Message<"aiscan.config.GetConfigRequest"> & {
  * Use `create(GetConfigRequestSchema)` to create a new message.
  */
 export const GetConfigRequestSchema: GenMessage<GetConfigRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 16);
+  messageDesc(file_types_config, 17);
 
 /**
  * @generated from message aiscan.config.GetConfigResponse
@@ -592,7 +630,7 @@ export type GetConfigResponse = Message<"aiscan.config.GetConfigResponse"> & {
  * Use `create(GetConfigResponseSchema)` to create a new message.
  */
 export const GetConfigResponseSchema: GenMessage<GetConfigResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 17);
+  messageDesc(file_types_config, 18);
 
 /**
  * @generated from message aiscan.config.UpdateConfigRequest
@@ -609,7 +647,7 @@ export type UpdateConfigRequest = Message<"aiscan.config.UpdateConfigRequest"> &
  * Use `create(UpdateConfigRequestSchema)` to create a new message.
  */
 export const UpdateConfigRequestSchema: GenMessage<UpdateConfigRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 18);
+  messageDesc(file_types_config, 19);
 
 /**
  * @generated from message aiscan.config.UpdateConfigResponse
@@ -626,7 +664,7 @@ export type UpdateConfigResponse = Message<"aiscan.config.UpdateConfigResponse">
  * Use `create(UpdateConfigResponseSchema)` to create a new message.
  */
 export const UpdateConfigResponseSchema: GenMessage<UpdateConfigResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 19);
+  messageDesc(file_types_config, 20);
 
 /**
  * @generated from message aiscan.config.ActivateProfileRequest
@@ -643,7 +681,7 @@ export type ActivateProfileRequest = Message<"aiscan.config.ActivateProfileReque
  * Use `create(ActivateProfileRequestSchema)` to create a new message.
  */
 export const ActivateProfileRequestSchema: GenMessage<ActivateProfileRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 20);
+  messageDesc(file_types_config, 21);
 
 /**
  * @generated from message aiscan.config.ActivateProfileResponse
@@ -660,7 +698,7 @@ export type ActivateProfileResponse = Message<"aiscan.config.ActivateProfileResp
  * Use `create(ActivateProfileResponseSchema)` to create a new message.
  */
 export const ActivateProfileResponseSchema: GenMessage<ActivateProfileResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 21);
+  messageDesc(file_types_config, 22);
 
 /**
  * @generated from message aiscan.config.LLMProbeRequest
@@ -702,7 +740,7 @@ export type LLMProbeRequest = Message<"aiscan.config.LLMProbeRequest"> & {
  * Use `create(LLMProbeRequestSchema)` to create a new message.
  */
 export const LLMProbeRequestSchema: GenMessage<LLMProbeRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 22);
+  messageDesc(file_types_config, 23);
 
 /**
  * @generated from message aiscan.config.LLMProbeResult
@@ -744,7 +782,7 @@ export type LLMProbeResult = Message<"aiscan.config.LLMProbeResult"> & {
  * Use `create(LLMProbeResultSchema)` to create a new message.
  */
 export const LLMProbeResultSchema: GenMessage<LLMProbeResult> = /*@__PURE__*/
-  messageDesc(file_types_config, 23);
+  messageDesc(file_types_config, 24);
 
 /**
  * @generated from message aiscan.config.ListModelsResult
@@ -776,7 +814,7 @@ export type ListModelsResult = Message<"aiscan.config.ListModelsResult"> & {
  * Use `create(ListModelsResultSchema)` to create a new message.
  */
 export const ListModelsResultSchema: GenMessage<ListModelsResult> = /*@__PURE__*/
-  messageDesc(file_types_config, 24);
+  messageDesc(file_types_config, 25);
 
 /**
  * @generated from message aiscan.config.TestConnectionRequest
@@ -798,7 +836,7 @@ export type TestConnectionRequest = Message<"aiscan.config.TestConnectionRequest
  * Use `create(TestConnectionRequestSchema)` to create a new message.
  */
 export const TestConnectionRequestSchema: GenMessage<TestConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_types_config, 25);
+  messageDesc(file_types_config, 26);
 
 /**
  * @generated from message aiscan.config.ConnectionCheck
@@ -835,7 +873,7 @@ export type ConnectionCheck = Message<"aiscan.config.ConnectionCheck"> & {
  * Use `create(ConnectionCheckSchema)` to create a new message.
  */
 export const ConnectionCheckSchema: GenMessage<ConnectionCheck> = /*@__PURE__*/
-  messageDesc(file_types_config, 26);
+  messageDesc(file_types_config, 27);
 
 /**
  * @generated from message aiscan.config.TestConnectionResponse
@@ -852,4 +890,26 @@ export type TestConnectionResponse = Message<"aiscan.config.TestConnectionRespon
  * Use `create(TestConnectionResponseSchema)` to create a new message.
  */
 export const TestConnectionResponseSchema: GenMessage<TestConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_types_config, 27);
+  messageDesc(file_types_config, 28);
+
+/**
+ * @generated from message aiscan.config.ExtensionView
+ */
+export type ExtensionView = Message<"aiscan.config.ExtensionView"> & {
+  /**
+   * @generated from field: google.protobuf.Struct values = 1;
+   */
+  values?: JsonObject | undefined;
+
+  /**
+   * @generated from field: repeated string configured_secrets = 2;
+   */
+  configuredSecrets: string[];
+};
+
+/**
+ * Describes the message aiscan.config.ExtensionView.
+ * Use `create(ExtensionViewSchema)` to create a new message.
+ */
+export const ExtensionViewSchema: GenMessage<ExtensionView> = /*@__PURE__*/
+  messageDesc(file_types_config, 29);

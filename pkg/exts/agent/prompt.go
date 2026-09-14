@@ -21,7 +21,6 @@ type PromptConfig struct {
 	ScannerAgentMode bool
 	ScannerName      string
 	NodeName         string
-	Space            string
 }
 
 // LoadedSkill is a skill whose full body is embedded directly into the prompt.
@@ -50,7 +49,6 @@ type promptData struct {
 	Time     string
 	Hostname string
 	Node     string
-	Space    string
 	Windows  bool
 
 	// Tools
@@ -114,9 +112,6 @@ Hostname: {{.Hostname}}
 {{- end}}
 {{- if .Node}}
 Node: {{.Node}}
-{{- end}}
-{{- if .Space}}
-Space: {{.Space}}
 {{- end}}
 {{- if .Windows}}
 Shell: cmd.exe — do NOT use Unix shell syntax (2>&1, |, /dev/null). Pseudo-commands run in-process and need no shell redirections.
@@ -201,7 +196,6 @@ func BuildSystemPrompt(cfg *PromptConfig, agentCfg *agent.Config) string {
 		Time:             time.Now().Format(time.RFC3339),
 		Hostname:         hostname,
 		Node:             cfg.NodeName,
-		Space:            cfg.Space,
 		Windows:          runtime.GOOS == "windows",
 		ScannerDocs:      cfg.ScannerDocs,
 	}

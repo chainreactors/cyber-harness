@@ -15,6 +15,15 @@ func ResolveRuntimeConfig(option *Option, applyProcessState bool) (string, error
 	if err != nil {
 		return configPath, err
 	}
+	sections := option.Sections
+	if sections == nil {
+		sections = NewSections()
+	}
+	option.Resolved, err = sections.ResolveSnapshot(configPath, explicit.Extensions, os.LookupEnv)
+	if err != nil {
+		return configPath, err
+	}
+	option.Extensions = option.Resolved.Values()
 	applyEnvironment(option, explicit, os.LookupEnv)
 	if err := normalizeProviderOptions(option); err != nil {
 		return configPath, err

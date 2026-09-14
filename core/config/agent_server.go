@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-// ResolveAgentServerURLs validates the Web/AOP endpoint. IOA remains
-// independently configurable and falls back to the Web server's same-origin
-// /ioa endpoint when omitted.
+// ResolveAgentServerURLs validates the Web/AOP endpoint.
 func ResolveAgentServerURLs(option *Option) error {
 	if option == nil {
 		return fmt.Errorf("agent options are required")
@@ -22,9 +20,6 @@ func ResolveAgentServerURLs(option *Option) error {
 		return err
 	}
 	option.ServerURL = serverURL
-	if strings.TrimSpace(option.IOAURL) == "" {
-		option.IOAURL = deriveIOAURL(serverURL)
-	}
 	return nil
 }
 
@@ -38,14 +33,4 @@ func validateAgentServerURL(raw string) (string, error) {
 	}
 	parsed.Fragment = ""
 	return strings.TrimRight(parsed.String(), "/"), nil
-}
-
-func deriveIOAURL(serverURL string) string {
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		return ""
-	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/ioa"
-	parsed.RawPath = ""
-	return strings.TrimRight(parsed.String(), "/")
 }

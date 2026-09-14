@@ -30,4 +30,4 @@ Followed by CVE numbers, exploit availability, and remediation advice.
 - **status**: "info" when vulnerabilities are found, "not_confirmed" when none known
 - **target**: the host:port or URL you analyzed
 
-In IOA collaboration mode, use `ioa send checkpoint` instead of `finish`.
+Selected collaboration skills may contribute additional reporting instructions.

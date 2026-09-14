@@ -34,10 +34,8 @@ func TestCommandRegistrationsAreGroupedAndImmutable(t *testing.T) {
 
 func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 	r := NewRegistry(nil)
-	var retained *extension.Scope
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		retained = scope
-		return r.Register(scope, "shared", Command{Name: "one", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+		return r.Register("test", "shared", Command{Name: "one", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
 	registrySet, err := extension.New(
 		extension.Entry{ID: "first", Extension: first},
@@ -50,7 +48,7 @@ func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registrySet.Close(context.Background())
-	if err := r.Register(retained, "shared", Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }}); !errors.Is(err, ErrUnavailable) {
+	if err := r.Register("test", "shared", Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("registration after activation = %v", err)
 	}
 	if r.Has("fresh") {
@@ -59,7 +57,7 @@ func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 
 	failed := NewRegistry(nil)
 	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return failed.Register(scope, "group",
+		return failed.Register("test", "group",
 			Command{Name: "same", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 			Command{Name: "same", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 		)
@@ -132,7 +130,7 @@ func TestCommandRegistrationRejectsAmbiguousNames(t *testing.T) {
 		name := name
 		r := NewRegistry(nil)
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return r.Register(scope, "group", Command{Name: name, Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+			return r.Register("test", "group", Command{Name: name, Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 		}}
 		set, err := extension.New(
 			extension.Entry{ID: "owner", Extension: contributor},

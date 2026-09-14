@@ -114,20 +114,7 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 			return
 		}
 		agent.mu.Lock()
-		if agent.status == nil {
-			agent.status = &aop.AgentStatus{}
-		}
-		if status.Provider != "" {
-			agent.status.Provider = status.Provider
-		}
-		if status.Model != "" {
-			agent.status.Model = status.Model
-		}
-		agent.status.Bound = status.Bound
-		agent.status.ConfigError = status.ConfigError
-		if status.Space != "" {
-			agent.status.Space = status.Space
-		}
+		agent.status = protobuf.CloneOf(status)
 		agent.mu.Unlock()
 
 	case *aop.ProtocolMessage_AgentStats:

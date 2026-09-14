@@ -227,6 +227,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	} else if cc.Chat == nil {
 		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
 	}
+	hello.Capabilities = append(hello.Capabilities, cc.ExtraCapabilities...)
 	if cc.RegisterResourceNamespaces != nil && !slices.Contains(hello.Capabilities, "traffic") {
 		hello.Capabilities = append(hello.Capabilities, "traffic")
 	}

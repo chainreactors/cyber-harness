@@ -41,7 +41,7 @@ func New(config Config) (*Extension, error) {
 	}
 	rt := &Runtime{
 		commands: declared, commandIndex: index,
-		app: config.Application, ioa: config.IOA, option: config.Option,
+		app: config.Application, option: config.Option,
 		logger: config.Logger, runtimeConfig: config,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		closeDone: make(chan struct{}),

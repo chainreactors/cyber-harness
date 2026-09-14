@@ -54,7 +54,7 @@ func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := newAgentConsole(context.Background(), rt, session, option, rlterm.Stream(strings.NewReader(""), stdout, stderr, rlterm.NewControl(false, 80, 24)))
+	c := newAgentConsole(context.Background(), rt, session, option, rlterm.Stream(strings.NewReader(""), stdout, stderr, rlterm.NewControl(false, 80, 24)), nil)
 	t.Cleanup(c.Close)
 	return c
 }
