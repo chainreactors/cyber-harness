@@ -137,7 +137,7 @@ func TestBodySubscriberOverflowDoesNotBlockWriter(t *testing.T) {
 	}
 }
 
-func TestTrafficJournalContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
+func TestTrafficMetadataIndexContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFlowStore(8)
 	if err := s.SetBodyDir(dir); err != nil {
@@ -149,10 +149,10 @@ func TestTrafficJournalContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "flows.jsonl"))
 	if err != nil || len(data) == 0 {
-		t.Fatalf("journal: %q %v", data, err)
+		t.Fatalf("metadata index: %q %v", data, err)
 	}
 	if bytes.Contains(data, []byte("private-body")) || bytes.Contains(data, []byte("cHJpdmF0ZS1ib2R5")) {
-		t.Fatal("body leaked into metadata journal")
+		t.Fatal("body leaked into metadata index")
 	}
 }
 

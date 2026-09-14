@@ -13,7 +13,7 @@ FlowStore 的内部 eventbus 只驱动磁盘 metadata index，并由 FlowStore �
 
 实时 AOP 事实由 `pkg/exts/observe` 将 HTTP hook 投影到统一 Event Stream，并在 Event typed
 extensions 中携带 `aop.operation.Ref`。`pkg/exts/eventoutput` 可将它与 Agent、Tool、File、
-Process 事件写入同一 JSONL；不存在独立 traffic journal。Traffic 协议只按请求返回
+Process 事件写入同一 JSONL；Traffic 不维护第二份实时日志。Traffic 协议只按请求返回
 State 或 `FlowRecord{operation, flow}` 快照，不维护实时流，也不使用合成 session ID。
 
 线协议仍传完整 Flow 而不是 body chunks。Disk 模式按发送者逐条读取保留 body；none 模式

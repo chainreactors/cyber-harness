@@ -109,7 +109,7 @@ Files、Proxy、IOA 在原始实现中拆分为生命周期 `Resource` 与业务
 ## 禁止回归
 
 - 不恢复 `commands.Catalog`、`toolset.Catalog`、Registrar/Registration 或第二套 Registry。
-- 不恢复 `filetools`、`workspacefiles`、`toolgroup`、Journal 或独立 FileAccess 事件管线。
+- 不恢复 `filetools`、`workspacefiles`、`toolgroup`、第二套日志扩展或独立 FileAccess 事件管线。
 - App 不生成 Entries；App 和 Extension 不创建子 Set，不维护通用 cleanup bag 或服务定位器。
 - App 不暴露可写 EventBus；AOP 事件只经 `Publish` 进入唯一 Stream，观察与持久化分别使用 `Observe` 和 `Consume`。
 - 连接不能接受通用 Extension 工厂；具体 namespace 直接注册到该连接的 Mux。

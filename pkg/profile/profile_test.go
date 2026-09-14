@@ -95,4 +95,13 @@ func TestFactoryRejectsNilImplementations(t *testing.T) {
 	if _, err := factory.Build(Request{}); err == nil {
 		t.Fatal("typed nil factory result was accepted")
 	}
+	want := errors.New("construction failed")
+	factory = func(Request) (Application, error) {
+		var value *applicationProbe
+		return value, want
+	}
+	value, err := factory.Build(Request{})
+	if value != nil || !errors.Is(err, want) {
+		t.Fatalf("typed nil failure = %#v, %v; want nil, %v", value, err, want)
+	}
 }

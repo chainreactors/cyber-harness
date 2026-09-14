@@ -45,7 +45,10 @@ func (f Factory) Build(request Request) (Application, error) {
 		return nil, fmt.Errorf("profile factory is required")
 	}
 	value, err := f(request)
-	if err == nil && IsNil(value) {
+	if IsNil(value) {
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("profile factory returned nil")
 	}
 	return value, err
