@@ -42,7 +42,8 @@ if err != nil { return err }
 // profile.Close 的结果，遇到 ErrCloseIncomplete 时保留实例并重试。
 ```
 
-完整 AIScan 产品图声明在 `cmd/aiscan`。`pkg/profile` 只是已装配图的 host 访问面；命令入口在唯一 Set 中组合 App 能力和可选
+完整 AIScan 产品图和具体 `aiscanProfile` 都声明在 `cmd/aiscan`。`pkg/profile.Application`
+是 host 契约，`Assembly` 只委托 Set；命令入口在唯一 Set 中组合 App 能力和可选
 Agent Runtime。Runtime 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
 类型化事件观察；事件发布统一经 `App.Publish`。需要 Agent 时入口显式选择
 `agent.StandardLoop{}`，`pkg/exts/agent.Extension` 将受控 Loop 与 Session 宿主统一发布为一个
@@ -51,7 +52,7 @@ Agent Run 会明确返回未配置错误，不隐藏回退到默认 Loop。
 
 拥有独立资源或注册的适配器实现 `core/extension.Extension` 的 `Load`/`Close`；底层资源和
 Agent Loop 保留普通实现。Profile 的固定 Entry 集合按依赖顺序装载、逆序关闭。
-App 的 `Entries` 也必须并入该集合，不能在 App 或
+App 的能力贡献者也必须并入该集合，不能在 App 或
 其他 Extension 内创建第二个 Set。依赖通过构造函数传递，`DependsOn` 只表达生命周期
 顺序，不用于运行时查找。不要增加全局容器、通用输出接口、线协议镜像类型或仅转接用的接口。
 

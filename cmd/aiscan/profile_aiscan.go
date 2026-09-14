@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -73,11 +74,20 @@ func parseObserve(value string) []observeext.Kind {
 	return result
 }
 
-var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (*profilepkg.Profile, error) {
+type aiscanProfile struct {
+	assembly *profilepkg.Assembly
+	app      *apppkg.App
+	runtime  *agentext.Runtime
+	proxy    *proxytool.ProxyHub
+}
+
+var _ profilepkg.Application = (*aiscanProfile)(nil)
+
+var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (profilepkg.Application, error) {
 	return newAIScanProfile(profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger))
 }
 
-func newAIScanProfile(config aiscanProfileConfig) (*profilepkg.Profile, error) {
+func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	if config.Option == nil {
 		return nil, fmt.Errorf("aiscan profile option is required")
 	}
@@ -177,14 +187,49 @@ func newAIScanProfile(config aiscanProfileConfig) (*profilepkg.Profile, error) {
 			Extension: agentExtension,
 		})
 	}
-	return profilepkg.New(profilepkg.Config{
-		Entries: entries,
-		App:     application,
-		Runtime: run,
-		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
-			return proxytool.RegisterTrafficNamespace(mux, proxyHub)
-		},
-	})
+	assembly, err := profilepkg.Assemble(entries...)
+	if err != nil {
+		return nil, err
+	}
+	return &aiscanProfile{assembly: assembly, app: application, runtime: run, proxy: proxyHub}, nil
+}
+
+func (p *aiscanProfile) Load(ctx context.Context) error {
+	if p == nil || p.assembly == nil {
+		return fmt.Errorf("AIScan profile is required")
+	}
+	return p.assembly.Load(ctx)
+}
+
+func (p *aiscanProfile) App() (*apppkg.App, error) {
+	if p == nil || p.assembly == nil || !p.assembly.Available() || p.app == nil {
+		return nil, fmt.Errorf("AIScan profile is not active")
+	}
+	return p.app, nil
+}
+
+func (p *aiscanProfile) Runtime() (*agentext.Runtime, error) {
+	if p == nil || p.assembly == nil || !p.assembly.Available() {
+		return nil, fmt.Errorf("AIScan profile is not active")
+	}
+	if p.runtime == nil {
+		return nil, fmt.Errorf("AIScan profile has no Agent runtime")
+	}
+	return p.runtime, nil
+}
+
+func (p *aiscanProfile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
+	if p == nil || p.assembly == nil || !p.assembly.Available() {
+		return fmt.Errorf("AIScan profile is not active")
+	}
+	return proxytool.RegisterTrafficNamespace(mux, p.proxy)
+}
+
+func (p *aiscanProfile) Close(ctx context.Context) error {
+	if p == nil || p.assembly == nil {
+		return nil
+	}
+	return p.assembly.Close(ctx)
 }
 
 func cloneConfig(config *agentext.Config) *agentext.Config {

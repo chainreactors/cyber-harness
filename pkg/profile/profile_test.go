@@ -22,91 +22,56 @@ func (p *retryCloseProbe) Close(context.Context) error {
 	return nil
 }
 
-func TestProfilePublishesCapabilitiesOnlyWhileActive(t *testing.T) {
+type applicationProbe struct{}
+
+func (*applicationProbe) Load(context.Context) error                         { return nil }
+func (*applicationProbe) Close(context.Context) error                        { return nil }
+func (*applicationProbe) App() (*apppkg.App, error)                          { return nil, nil }
+func (*applicationProbe) Runtime() (*agentext.Runtime, error)                { return nil, nil }
+func (*applicationProbe) RegisterResourceNamespaces(*aop.NamespaceMux) error { return nil }
+
+func TestAssemblyPublishesOnlyCompleteGraph(t *testing.T) {
 	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
-	runtime := new(agentext.Runtime)
-	namespaceCalls := 0
-	value, err := New(Config{
-		Entries: []extension.Entry{{ID: "application", Extension: application}},
-		App:     application.App,
-		Runtime: runtime,
-		RegisterResourceNamespaces: func(*aop.NamespaceMux) error {
-			namespaceCalls++
-			return nil
-		},
-	})
+	assembly, err := Assemble(extension.Entry{ID: "application", Extension: application})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := value.App(); err == nil {
-		t.Fatal("unloaded profile published its application")
+	if assembly.Available() {
+		t.Fatal("unloaded assembly is available")
 	}
-	if _, err := value.Runtime(); err == nil {
-		t.Fatal("unloaded profile published its agent runtime")
-	}
-	if err := value.RegisterResourceNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
-		t.Fatal("unloaded profile published its resource namespaces")
-	}
-	if namespaceCalls != 0 {
-		t.Fatalf("namespace callback ran %d times before load", namespaceCalls)
-	}
-
-	if err := value.Load(t.Context()); err != nil {
+	if err := assembly.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := value.App(); err != nil || got != application.App {
-		t.Fatalf("App() = %p, %v; want %p", got, err, application.App)
+	if !assembly.Available() {
+		t.Fatal("loaded assembly is unavailable")
 	}
-	if got, err := value.Runtime(); err != nil || got != runtime {
-		t.Fatalf("Runtime() = %p, %v; want %p", got, err, runtime)
-	}
-	if err := value.RegisterResourceNamespaces(aop.NewNamespaceMux(t.Context())); err != nil {
+	if err := assembly.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if namespaceCalls != 1 {
-		t.Fatalf("namespace callback ran %d times, want 1", namespaceCalls)
-	}
-
-	if err := value.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := value.App(); err == nil {
-		t.Fatal("closed profile retained its application publication")
-	}
-	if _, err := value.Runtime(); err == nil {
-		t.Fatal("closed profile retained its agent runtime publication")
-	}
-	if err := value.RegisterResourceNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
-		t.Fatal("closed profile retained its resource namespace publication")
+	if assembly.Available() {
+		t.Fatal("closed assembly remained available")
 	}
 	if !application.App.Closed() {
-		t.Fatal("profile did not close its application resource")
+		t.Fatal("assembly did not close its application resource")
 	}
 }
 
-func TestProfileKeepsIncompleteCloseRetryableAndUnpublished(t *testing.T) {
-	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+func TestAssemblyKeepsIncompleteCloseRetryable(t *testing.T) {
 	probe := &retryCloseProbe{}
-	value, err := New(Config{
-		Entries: []extension.Entry{
-			{ID: "application", Extension: application},
-			{ID: "probe", DependsOn: []string{"application"}, Extension: probe},
-		},
-		App: application.App,
-	})
+	assembly, err := Assemble(extension.Entry{ID: "probe", Extension: probe})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := value.Load(t.Context()); err != nil {
+	if err := assembly.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := value.Close(t.Context()); !errors.Is(err, extension.ErrCloseIncomplete) {
+	if err := assembly.Close(t.Context()); !errors.Is(err, extension.ErrCloseIncomplete) {
 		t.Fatalf("first Close() = %v, want incomplete cleanup", err)
 	}
-	if _, err := value.App(); err == nil {
-		t.Fatal("closing profile remained published")
+	if assembly.Available() {
+		t.Fatal("closing assembly remained available")
 	}
-	if err := value.Close(t.Context()); err != nil {
+	if err := assembly.Close(t.Context()); err != nil {
 		t.Fatalf("retry Close(): %v", err)
 	}
 	if probe.attempts != 2 {
@@ -114,19 +79,20 @@ func TestProfileKeepsIncompleteCloseRetryableAndUnpublished(t *testing.T) {
 	}
 }
 
-func TestFactoryRejectsMissingImplementationsAndResults(t *testing.T) {
+func TestFactoryRejectsNilImplementations(t *testing.T) {
 	var factory Factory
 	if _, err := factory.Build(Request{}); err == nil {
 		t.Fatal("nil factory was accepted")
 	}
-	factory = func(Request) (*Profile, error) { return nil, nil }
+	factory = func(Request) (Application, error) { return nil, nil }
 	if _, err := factory.Build(Request{}); err == nil {
 		t.Fatal("nil factory result was accepted")
 	}
-}
-
-func TestNewRequiresApplicationCapability(t *testing.T) {
-	if _, err := New(Config{}); err == nil {
-		t.Fatal("profile without an application was accepted")
+	factory = func(Request) (Application, error) {
+		var value *applicationProbe
+		return value, nil
+	}
+	if _, err := factory.Build(Request{}); err == nil {
+		t.Fatal("typed nil factory result was accepted")
 	}
 }

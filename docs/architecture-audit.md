@@ -4,7 +4,8 @@
 
 ## 结果
 
-- 每个组合根只有一个 `extension.Set`；Profile 不复制其发布或关闭状态，App 不生成 Entry，也不拥有子图。
+- 每个组合根只有一个 `extension.Set`；`pkg/profile` 只提供接口与 `Assembly`，具体
+  `aiscanProfile` 位于 `cmd/aiscan`，且不复制 Set 的发布或关闭状态。App 不生成 Entry，也不拥有子图。
 - `pkg/toolset.Registry` 与 `pkg/commands.Registry` 共享 `core/registry.Store[T]`，互不依赖。
 - 同名批次原子失败；激活后不可变；Close 拒绝、取消、drain，超时可重试。
 - `core/hooks.Registry` 覆盖 Tool、Command、Process、File、HTTP 的真实执行边界。
@@ -39,3 +40,15 @@ go build -mod=readonly ./...
 
 浏览器 E2E 若被本机浏览器状态或安全软件阻断，必须作为环境失败单独报告；不能用跳过
 测试或恢复旧架构来掩盖。
+
+## 本轮收敛验证（2026-09-14）
+
+- 默认/full 全仓 build、vet；默认架构测试、core/agent/extensions 与各 host 包测试。
+- core/agent/extensions、Console、Node、Profile、命令入口的 race；full Web 与入口的 race。
+- 联合取消与排空、Loop panic、命令声明及异常隔离、flags 默认值等测试重复 race 运行 10 次。
+- `harness` 的三个 `TestUser*` 真实进程场景：配置与崩溃恢复、并发配置切换、启动恢复与确认退出。
+  场景使用隔离目录、loopback 服务及无模型配置，不调用真实 LLM。
+
+没有执行依赖真实模型的 `TestLiveLLM*` 或需启动浏览器的 `pkg/headless` 测试，
+因此这不是全仓 `go test ./...` 全通过的声明。TUI/Web 独立扩展化仍是后续工作，
+当前验证的是已有 Console/Web 入口与统一 Agent Runtime 的兼容性。

@@ -25,6 +25,12 @@ inputs and snapshots are deep copies. Evaluation uses the underlying agent
 mechanisms through the same admitted loop. `/clear` and `/compact` have one
 session-rotation implementation. Local cancellation does not stop other sessions.
 
+Observer failures are isolated and reported by the canonical event stream; they
+do not turn completed session cleanup into a failure or suppress other observers.
+A loop panic inside a session becomes a failed Run through the normal completion
+path, so queued commands and extension drain remain usable. Direct Runtime.Run
+callers still receive the loop's panic after its admission count is released.
+
 The existing AOP protocol, history format and command exposure remain unchanged.
 `Observe` reads the application's canonical event stream; output remains the
 independent eventoutput extension. Console and Node consume Runtime, never the

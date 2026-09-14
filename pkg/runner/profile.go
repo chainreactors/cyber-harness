@@ -10,7 +10,7 @@ import (
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 )
 
-func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (*profile.Profile, *agentext.Runtime, error) {
+func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (profile.Application, *agentext.Runtime, error) {
 	product, err := factory.Build(profile.Request{
 		Option: option,
 		Features: apppkg.RuntimeFeatures{

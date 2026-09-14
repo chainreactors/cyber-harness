@@ -33,6 +33,46 @@ import (
 
 type lifecycleLoop func(context.Context, agent.Config) (*agent.Result, error)
 
+func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
+	runtime := newBareRuntime(t, nil, &runtimeSemanticProvider{})
+	owner := newLoopExtension(lifecycleLoop(func(context.Context, agent.Config) (*agent.Result, error) {
+		panic("test loop failure")
+	}))
+	set := extensiontest.Set(t, extension.Entry{ID: "agent", Extension: owner})
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runtime.config.Loop = owner.Runtime()
+	session, err := runtime.EnsureSession(SessionOptions{ID: "panic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := session.Run(t.Context(), RunInput{Message: agent.TextInput("test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-run.done:
+	case <-time.After(time.Second):
+		t.Fatal("panicking loop stranded the Run")
+	}
+	result, err := run.Wait()
+	if err == nil || !strings.Contains(err.Error(), "test loop failure") || result == nil || result.Stop != agent.StopReasonError {
+		t.Fatalf("panic result: %v, %v", result, err)
+	}
+	if _, err := session.Command(t.Context(), "/status"); err != nil {
+		t.Fatalf("queue stopped: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := runtime.CloseSession(ctx, "panic", SessionCloseError); err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
 	application.App.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
@@ -243,7 +283,7 @@ func TestCloseSessionDeadlineBoundsFinalEventDelivery(t *testing.T) {
 	}
 }
 
-func TestManagerCloseReportsCompletionObserverFailureAfterCleanup(t *testing.T) {
+func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	session, err := rt.EnsureSession(SessionOptions{ID: "observer-failure"})
 	if err != nil {
@@ -256,14 +296,24 @@ func TestManagerCloseReportsCompletionObserverFailureAfterCleanup(t *testing.T) 
 		}
 	}))
 	defer subscription.Cancel()
-	if err := rt.close(t.Context()); err == nil || !strings.Contains(err.Error(), "completion observer panicked") {
-		t.Fatalf("manager close = %v", err)
+	var completions atomic.Int32
+	healthy := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+		if event.GetSessionEnded() != nil {
+			completions.Add(1)
+		}
+	}))
+	defer healthy.Cancel()
+	if err := rt.close(t.Context()); err != nil {
+		t.Fatalf("runtime close = %v", err)
 	}
 	if session.currentState() != nil || !state.inbox.Closed() {
 		t.Fatal("observer failure prevented resource cleanup")
 	}
-	if err := rt.close(t.Context()); err == nil || !strings.Contains(err.Error(), "completion observer panicked") {
-		t.Fatalf("repeated manager close lost the cleanup error: %v", err)
+	if err := rt.close(t.Context()); err != nil {
+		t.Fatalf("repeated runtime close = %v", err)
+	}
+	if completions.Load() != 1 {
+		t.Fatalf("healthy observer received %d completion events, want 1", completions.Load())
 	}
 }
 

@@ -83,7 +83,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile},
-		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (*profile.Profile, error) {
+		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
@@ -235,7 +235,7 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts managementapi.ArtifactImporter) (*profile.Profile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts managementapi.ArtifactImporter) (*aiscanProfile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
@@ -249,7 +249,7 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config, artifacts managementapi.ArtifactImporter) (*profile.Profile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config, artifacts managementapi.ArtifactImporter) (*aiscanProfile, error) {
 	appCfg.SkipEngines = true
 	appCfg.Scanner.VerifyMode = "off"
 

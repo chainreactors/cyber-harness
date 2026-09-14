@@ -17,6 +17,37 @@ import (
 
 type loopFunc func(context.Context, agent.Config) (*agent.Result, error)
 
+func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
+	value, err := agentext.New(agentext.Config{Loop: loopFunc(func(_ context.Context, config agent.Config) (*agent.Result, error) {
+		return &agent.Result{Output: config.SessionID}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := extension.New(extension.Entry{ID: "agent", Extension: value})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close(context.Background()) })
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runtime := value.Runtime()
+	result, err := runtime.Run(t.Context(), agent.Config{SessionID: "standalone"})
+	if err != nil || result.Output != "standalone" {
+		t.Fatalf("standalone loop: %v, %v", result, err)
+	}
+	if _, err := runtime.OpenSession(t.Context(), agentext.SessionOptions{ID: "absent"}); err == nil {
+		t.Fatal("loop-only installation admitted a session")
+	}
+	if err := set.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
+		t.Fatalf("closed loop: %v", err)
+	}
+}
+
 func (f loopFunc) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
 	return f(ctx, config)
 }

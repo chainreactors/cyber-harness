@@ -361,7 +361,7 @@ func TestAIScanProfileIsOnlyApplicationCompositionRoot(t *testing.T) {
 	}
 }
 
-func TestProfilePackageIsGenericAssembler(t *testing.T) {
+func TestProfileDelegatesLifecycleToExtensionSet(t *testing.T) {
 	root := repositoryRoot(t)
 	profileRoot := filepath.Join(root, "pkg", "profile")
 	err := filepath.WalkDir(profileRoot, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -383,10 +383,10 @@ func TestProfilePackageIsGenericAssembler(t *testing.T) {
 	abstraction := readRepositoryFile(t, root, filepath.Join("pkg", "profile", "profile.go"))
 	for _, obsolete := range []string{"type Profile struct", "type Config struct", "RegisterResourceNamespaces func", "sync.Mutex", "sync.RWMutex"} {
 		if strings.Contains(abstraction, obsolete) {
-			t.Errorf("generic profile package contains concrete product state: %q", obsolete)
+			t.Errorf("profile duplicates lifecycle or adds a parallel host abstraction: %q", obsolete)
 		}
 	}
-	for _, required := range []string{"type Application interface", "type Assembly struct", "func Assemble(", "type Factory func", "*extension.Set", ".Active()"} {
+	for _, required := range []string{"type Application interface", "type Assembly struct", "type Factory func", "*extension.Set", ".Active()", "a.extensions.Load(ctx)", "a.extensions.Close(ctx)"} {
 		if !strings.Contains(abstraction, required) {
 			t.Errorf("generic profile assembler is missing %q", required)
 		}

@@ -27,7 +27,7 @@ type ArtifactImporter struct {
 
 func NewArtifactImporter(store ArtifactStore) (*ArtifactImporter, error) {
 	if store == nil {
-		return nil, fmt.Errorf("artifact ingestor: SCO store is required")
+		return nil, fmt.Errorf("artifact importer: SCO store is required")
 	}
 	runtime, err := cstx.Open(context.Background(), cstx.Config{ProjectID: "aiscan"})
 	if err != nil {

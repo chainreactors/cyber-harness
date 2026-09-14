@@ -13,6 +13,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -252,16 +253,39 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 	}
 }
 
-func newRecordingProfile(t *testing.T) (*profile.Profile, *apppkg.App, func() bool) {
+type recordingProfile struct {
+	assembly *profile.Assembly
+	app      *apppkg.App
+}
+
+func (p *recordingProfile) Load(ctx context.Context) error  { return p.assembly.Load(ctx) }
+func (p *recordingProfile) Close(ctx context.Context) error { return p.assembly.Close(ctx) }
+func (p *recordingProfile) App() (*apppkg.App, error) {
+	if p == nil || p.assembly == nil || !p.assembly.Available() {
+		return nil, errors.New("recording profile is not active")
+	}
+	return p.app, nil
+}
+func (p *recordingProfile) Runtime() (*agentext.Runtime, error) {
+	return nil, errors.New("recording profile has no runtime")
+}
+func (p *recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error {
+	if p == nil || p.assembly == nil || !p.assembly.Available() {
+		return errors.New("recording profile is not active")
+	}
+	return nil
+}
+
+var _ profile.Application = (*recordingProfile)(nil)
+
+func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
 	t.Helper()
 	resource := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
-	value, err := profile.New(profile.Config{
-		Entries: []extension.Entry{{ID: "application", Extension: resource}},
-		App:     resource.App,
-	})
+	assembly, err := profile.Assemble(extension.Entry{ID: "application", Extension: resource})
 	if err != nil {
 		t.Fatal(err)
 	}
+	value := &recordingProfile{assembly: assembly, app: resource.App}
 	t.Cleanup(func() { _ = value.Close(context.Background()) })
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
