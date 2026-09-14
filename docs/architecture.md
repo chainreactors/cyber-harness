@@ -31,6 +31,16 @@ flowchart TB
 
 ## Plugin 与 Extension
 
+### EventBus 是 Core 的唯一事件原语
+
+`core/eventbus` 只提供泛型 `Bus[T]`、`Subscription[T]`、同步观察和有界异步消费。
+它不认识 AOP、Protobuf、DTO、Sink、JSONL 或任何产品事件模型。事件编号、Envelope、
+观测投影和持久化均由 Extension 通过选择具体的 `T` 实现。消费者直接实现回调并使用
+`Subscription.Flush/Close` 完成排空，不再引入第二套 Sink 生命周期。
+
+`signals` 负责 Hook；AOP 事件发布、`observe` 投影和 `eventoutput` 持久化是可选 Extension，
+它们共享 Profile 内的 typed EventBus，但任何一个都不是 Core 的隐式默认实现。
+
 每个机制由三个角色组成：Service Definition 定义 typed contract，Provider Extension
 发布实现，Consumer Extension 通过构造期解析使用它。静态 `Descriptor` 声明
 `Provides`、`Requires`、`Optional`、flags 和 config；运行时 `Registrar` 只允许向基础
