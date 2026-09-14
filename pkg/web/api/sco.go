@@ -7,6 +7,7 @@ import (
 
 	aop "github.com/chainreactors/aiscan/aop"
 	aopsco "github.com/chainreactors/aiscan/aop/sco"
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -19,21 +20,24 @@ type SCOStore interface {
 }
 
 type SCO struct {
-	store      SCOStore
-	normalizer ArtifactNormalizer
+	store     SCOStore
+	artifacts ArtifactImporter
 }
 
-type ArtifactNormalizer interface {
-	NormalizeArtifact(context.Context, string, string, []byte) (uint64, uint64, error)
-	SupportedArtifacts() []string
+// ArtifactImporter is the single server-side boundary for scanner-native
+// artifacts. The protobuf value remains canonical across local events, remote
+// AOP transport and explicit imports.
+type ArtifactImporter interface {
+	ImportArtifact(context.Context, string, *toolpb.Artifact) (uint64, uint64, error)
+	ArtifactTypes() []string
 }
 
-func NewSCO(store SCOStore, normalizers ...ArtifactNormalizer) *SCO {
-	var normalizer ArtifactNormalizer
-	if len(normalizers) > 0 {
-		normalizer = normalizers[0]
+func NewSCO(store SCOStore, importers ...ArtifactImporter) *SCO {
+	var artifacts ArtifactImporter
+	if len(importers) > 0 {
+		artifacts = importers[0]
 	}
-	return &SCO{store: store, normalizer: normalizer}
+	return &SCO{store: store, artifacts: artifacts}
 }
 
 func (s *SCO) ListNodes(ctx context.Context, request *types.ListNodesRequest) (*types.ListNodesResponse, error) {
@@ -114,14 +118,14 @@ func (s *SCO) ImportNodes(ctx context.Context, request *types.ImportNodesRequest
 	if artifact == "" {
 		return nil, Errorf(CodeInvalidArgument, "artifact is required")
 	}
-	if s.normalizer == nil {
+	if s.artifacts == nil {
 		return nil, Errorf(CodeFailedPrecondition, "artifact normalization is unavailable")
 	}
 	operationID := strings.TrimSpace(request.GetOperationId())
 	if operationID == "" {
 		operationID = "import"
 	}
-	nodes, duplicates, err := s.normalizer.NormalizeArtifact(ctx, operationID, artifact, request.GetData())
+	nodes, duplicates, err := s.artifacts.ImportArtifact(ctx, operationID, &toolpb.Artifact{Tool: artifact, Data: request.GetData()})
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
@@ -129,8 +133,8 @@ func (s *SCO) ImportNodes(ctx context.Context, request *types.ImportNodesRequest
 }
 
 func (s *SCO) ListArtifacts(context.Context, *types.ListArtifactsRequest) (*types.ListArtifactsResponse, error) {
-	if s == nil || s.normalizer == nil {
+	if s == nil || s.artifacts == nil {
 		return &types.ListArtifactsResponse{}, nil
 	}
-	return &types.ListArtifactsResponse{Artifacts: s.normalizer.SupportedArtifacts()}, nil
+	return &types.ListArtifactsResponse{Artifacts: s.artifacts.ArtifactTypes()}, nil
 }

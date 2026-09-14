@@ -19,7 +19,7 @@ type Base struct {
 	Logger  telemetry.Logger
 	Proxy   string
 	WorkDir string
-	Events  aop.EventEmitter
+	Events  aop.EventPublisher
 }
 
 func (b *Base) SetWorkDir(dir string) { b.WorkDir = dir }
@@ -89,7 +89,7 @@ func (b *Base) EmitArtifactResultCtx(ctx context.Context, resultID, tool, kind, 
 			return
 		}
 	}
-	b.Events.Emit(event)
+	b.Events.Publish(event)
 }
 
 func (b *Base) EmitLootCtx(
@@ -131,5 +131,5 @@ func (b *Base) EmitLootCtx(
 			return
 		}
 	}
-	b.Events.Emit(event)
+	b.Events.Publish(event)
 }

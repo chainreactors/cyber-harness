@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"io"
@@ -186,9 +186,9 @@ func TestMessageIDStableAcrossStreamRetry(t *testing.T) {
 }
 
 func TestStatusPreservesTypedExtension(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	var emitted *aop.Event
-	bus.Subscribe(func(event *aop.Event) { emitted = event })
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { emitted = event }))
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0)
 	emitter.status(types.CompactStateEnd, &types.CompactDetail{
 		TokensBefore: 1000,
@@ -206,9 +206,9 @@ func TestStatusPreservesTypedExtension(t *testing.T) {
 }
 
 func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	var emitted *aop.Event
-	bus.Subscribe(func(event *aop.Event) { emitted = event })
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { emitted = event }))
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0).turn("turn-1")
 	emitter.toolResult(&aop.ToolCall{Id: "call-1", Name: "scan"}, []*aop.Content{
 		aop.Text("done"),

@@ -9,8 +9,12 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-type EventEmitter interface {
-	Emit(*Event)
+// EventPublisher accepts a typed event at the application publication
+// boundary. The implementation owns envelope identity, time and sequencing;
+// producers populate payload and correlation, then transfer ownership when
+// Publish is called.
+type EventPublisher interface {
+	Publish(*Event)
 }
 
 const JSONMediaType = "application/json"

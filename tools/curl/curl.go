@@ -42,7 +42,7 @@ func (c *Command) WithProxy(proxy string) *Command {
 	return c
 }
 
-func (c *Command) WithEvents(events aop.EventEmitter) *Command {
+func (c *Command) WithEvents(events aop.EventPublisher) *Command {
 	c.Events = events
 	return c
 }

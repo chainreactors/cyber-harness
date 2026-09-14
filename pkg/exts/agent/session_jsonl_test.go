@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"os"
@@ -116,7 +116,7 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 		t.Fatal(err)
 	}
 	for _, event := range events {
-		bus.Emit(event)
+		bus.Publish(event)
 	}
 	if err := output.Close(t.Context()); err != nil {
 		t.Fatal(err)

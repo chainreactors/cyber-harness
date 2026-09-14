@@ -250,7 +250,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		defer unsubscribe.Cancel()
 	}
 	if cfg.Events != nil {
-		unsubscribe := cfg.Events.Subscribe(func(event *aop.Event) {
+		unsubscribe := cfg.Events.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 			if event == nil {
 				return
 			}
@@ -258,7 +258,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 			// observations emitted during a call therefore precede its terminal
 			// result, while genuinely detached observations remain valid later.
 			send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: proto.Clone(event).(*aop.Event)}})
-		})
+		}))
 		defer unsubscribe.Cancel()
 	}
 	defer func() {

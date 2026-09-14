@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -10,15 +10,7 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-func RuntimeCommandSpecs() []*types.CommandSpec {
-	return []*types.CommandSpec{
-		{Name: "/status", Description: "Show Agent LLM, tool, scanner, and session health"},
-		{Name: "/clear", Description: "Clear the current Agent context"},
-		{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"},
-	}
-}
-
-func (rt *Manager) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
+func (rt *Runtime) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSessionResponse {
 	response := &aop.OpenSessionResponse{}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
 		response.Outcome = &aop.OpenSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
@@ -33,7 +25,7 @@ func (rt *Manager) OpenAOPSession(req *aop.OpenSessionRequest) *aop.OpenSessionR
 	return response
 }
 
-func (rt *Manager) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop.RunTurnResponse {
+func (rt *Runtime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop.RunTurnResponse {
 	response := &aop.RunTurnResponse{}
 	if rt == nil || req == nil || (!req.ContinueSession && req.Input == nil) || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
 		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id, turn_id, and input are required unless continue_session is true")}
@@ -65,7 +57,7 @@ func (rt *Manager) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop
 	return response
 }
 
-func (rt *Manager) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResponse {
+func (rt *Runtime) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResponse {
 	response := &aop.CancelTurnResponse{}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" || strings.TrimSpace(req.TurnId) == "" {
 		response.Outcome = &aop.CancelTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id and turn_id are required")}
@@ -79,7 +71,7 @@ func (rt *Manager) CancelAOPTurn(req *aop.CancelTurnRequest) *aop.CancelTurnResp
 	return response
 }
 
-func (rt *Manager) CloseAOPSession(ctx context.Context, req *aop.CloseSessionRequest) *aop.CloseSessionResponse {
+func (rt *Runtime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionRequest) *aop.CloseSessionResponse {
 	response := &aop.CloseSessionResponse{}
 	if rt == nil || req == nil || strings.TrimSpace(req.SessionId) == "" {
 		response.Outcome = &aop.CloseSessionResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "session_id is required")}
@@ -95,7 +87,7 @@ func (rt *Manager) CloseAOPSession(ctx context.Context, req *aop.CloseSessionReq
 
 // RegisterNamespaces binds the existing session and command handlers to a
 // caller-owned mux. Call once during assembly, before using the communication Host.
-func (rt *Manager) RegisterNamespaces(mux *aop.NamespaceMux) error {
+func (rt *Runtime) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	if rt == nil || mux == nil {
 		return fmt.Errorf("runtime and namespace mux are required")
 	}
@@ -109,7 +101,7 @@ func (rt *Manager) RegisterNamespaces(mux *aop.NamespaceMux) error {
 }
 
 // HandleCoreNamespace implements session control for all existing transports.
-func (rt *Manager) HandleCoreNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+func (rt *Runtime) HandleCoreNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
 	value, ok := message.(*aop.ProtocolMessage)
 	if !ok {
 		return fmt.Errorf("unexpected core namespace message %T", message)
@@ -130,7 +122,7 @@ func (rt *Manager) HandleCoreNamespace(ctx context.Context, envelope *aop.Envelo
 }
 
 // HandleCommandNamespace implements the existing product command namespace.
-func (rt *Manager) HandleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
+func (rt *Runtime) HandleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
 	value, ok := message.(*types.CommandProtocolMessage)
 	if !ok {
 		return fmt.Errorf("unexpected command namespace message %T", message)
@@ -139,6 +131,9 @@ func (rt *Manager) HandleCommandNamespace(ctx context.Context, envelope *aop.Env
 	request := value.GetRequest()
 	if request == nil || strings.TrimSpace(request.Line) == "" {
 		return reply(aop.NewProtocolError("INVALID_ARGUMENT", "command line is required"))
+	}
+	if err := rt.ready(); err != nil {
+		return reply(aop.NewProtocolError("COMMAND_FAILED", err.Error()))
 	}
 	// Close cancels the context before taking mu and waiting for operations.
 	// Admission must use the same gate so Add cannot race with an empty Wait.

@@ -7,7 +7,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	execpb "github.com/chainreactors/aiscan/aop/exec"
 	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/output"
@@ -285,14 +284,12 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 		}
 	}
 	if extension := event.GetExtension(); extension != nil && p.artifacts != nil {
-		artifact := new(toolpb.Artifact)
-		if extension.MessageIs(artifact) && extension.UnmarshalTo(artifact) == nil {
-			operationID := correlationID
-			ref := new(operationpb.Ref)
-			if found, err := aop.FindTypedExtension(event, ref); err == nil && found && ref.GetCallId() != "" {
-				operationID = ref.GetCallId()
+		artifact, operationID, found, err := toolpb.FromEvent(event)
+		if err == nil && found {
+			if operationID == "" {
+				operationID = correlationID
 			}
-			_, _, _ = p.artifacts.NormalizeArtifact(context.Background(), operationID, artifact.GetTool(), artifact.GetData())
+			_, _, _ = p.artifacts.ImportArtifact(context.Background(), operationID, artifact)
 		}
 	}
 	switch event.Payload.(type) {

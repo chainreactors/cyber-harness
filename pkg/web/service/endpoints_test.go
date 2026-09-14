@@ -42,7 +42,7 @@ func shareWebAuthWithIOA(accessKey, ioaToken string, next http.Handler) http.Han
 func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	t.Helper()
 	service := NewService(ServiceConfig{})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	server := httptest.NewServer(newHandler(service, nil, nil, ""))
 	t.Cleanup(func() {
@@ -231,7 +231,7 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	defer service.Close(context.Background())
 

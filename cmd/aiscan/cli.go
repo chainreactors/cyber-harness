@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -63,7 +64,7 @@ type cliOptions struct {
 type agentCommand struct {
 	cfg.LLMOptions     `group:"LLM Options"`
 	cfg.ScannerOptions `group:"Scanner Options"`
-	cfg.AgentOptions   `group:"Agent Options"`
+	cfg.AgentOptions   `no-flag:"true"`
 	cfg.IOAOptions     `group:"Server Options"`
 	cfg.ReconOptions   `group:"Recon Options"`
 }
@@ -448,6 +449,13 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
+	// Install inert declarations before Parse/WriteHelp. Extension Load is not
+	// part of command-line discovery, including defaults and aliases.
+	for _, group := range agentext.FlagGroups(&cli.Agent.AgentOptions) {
+		if _, err := parser.Find("agent").AddGroup(group.Name, group.Description, group.Options); err != nil {
+			panic(fmt.Sprintf("invalid agent flag declaration: %v", err))
+		}
+	}
 	parser.SubcommandsOptional = true
 	parser.Usage = fmt.Sprintf(`[OPTIONS] <command>
 

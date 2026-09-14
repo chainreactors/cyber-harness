@@ -40,7 +40,7 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []*aop.Event
-	sub := stream.Subscribe(func(event *aop.Event) { events = append(events, event) })
+	sub := stream.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
 	defer sub.Cancel()
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

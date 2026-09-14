@@ -145,7 +145,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		t.Fatal(err)
 	}
 
-	app.Emit(&aop.Event{
+	app.Publish(&aop.Event{
 		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "call-1", Name: "gogo"}},
 	})
@@ -170,8 +170,8 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err := aop.SetTypedExtension(artifactEvent, &operationpb.Ref{CallId: "call-1"}); err != nil {
 		t.Fatal(err)
 	}
-	app.Emit(artifactEvent)
-	app.Emit(&aop.Event{
+	app.Publish(artifactEvent)
+	app.Publish(&aop.Event{
 		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
 	})

@@ -10,19 +10,16 @@ import (
 var ErrOverflow = errors.New("eventbus: subscriber capacity exceeded")
 
 // SubscribeOptions bounds pending events, including the executing handler.
-// Filter, Size and Clone run on the producer and must be fast. Clone transfers
-// ownership before Emit returns. Other subscribers must treat events as
-// immutable. OnError and OnDrop run on the worker, never on the producer.
-// Callbacks must not wait on this subscription's Done or Close. Filter, Size
-// and Clone must not reenter the subscription (including Err/Cancel).
+// Filter, Size and Clone are value policies: they run on the producer and must
+// be fast. Clone transfers ownership before Emit returns. Processing state is
+// reported by Subscription.Err and Subscription.Dropped; the queue never calls
+// a second, hidden error callback.
 type SubscribeOptions[T any] struct {
 	Filter   func(T) bool
 	Buffer   int
 	MaxBytes int64
 	Size     func(T) int64
 	Clone    func(T) T
-	OnError  func(error)
-	OnDrop   func(uint64)
 }
 
 type queued[T any] struct {
@@ -194,15 +191,8 @@ func (s *Subscription[T]) run() {
 	defer func() {
 		s.bus.unsubscribe(s)
 		s.mu.Lock()
-		err, dropped := s.err, s.dropped
 		s.queue = nil
 		s.mu.Unlock()
-		if dropped > 0 && s.opts.OnDrop != nil {
-			_ = protect(func() error { s.opts.OnDrop(dropped); return nil })
-		}
-		if err != nil && s.opts.OnError != nil {
-			_ = protect(func() error { s.opts.OnError(err); return nil })
-		}
 	}()
 	for {
 		s.mu.Lock()
@@ -292,3 +282,14 @@ func (s *Subscription[T]) Done() <-chan struct{} { return s.done }
 // Stopped closes as soon as admission stops, even if the handler is blocked.
 func (s *Subscription[T]) Stopped() <-chan struct{} { return s.stopped }
 func (s *Subscription[T]) Err() error               { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+
+// Dropped reports values that were rejected by backpressure or discarded by
+// cancellation. It remains available after the subscription has completed.
+func (s *Subscription[T]) Dropped() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropped
+}

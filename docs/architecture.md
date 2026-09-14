@@ -5,8 +5,9 @@ Profile。当前边界和待验收项见 [Issue 127 约定](issue127-extension-b
 
 ## 组合与关闭
 
-`cmd/aiscan` 与 `cmd/runner` 声明各自固定的 Extension 图并保留所需资源的直接引用；
-`pkg/profile.Assembly` 是唯一创建和驱动 `core/extension.Set` 的装配器。依赖通过构造参数传入，
+`cmd/aiscan` 与 `cmd/runner` 声明各自固定的 Extension 图并创建唯一的
+`core/extension.Set`。可复用 host 收到具体 `pkg/profile.Profile`，它只保留该 Set 与所需
+业务能力，不实现第二套生命周期状态。依赖通过构造参数传入，
 `DependsOn` 只表达资源寿命：依赖先加载、依赖者先关闭。共享包不包含任何具体产品 Profile。
 
 ```mermaid
@@ -17,8 +18,8 @@ flowchart TB
     APP[App state]
     COMMANDS[Command Registry]
     TOOLS[Tool Registry]
-    SESSION[Session Manager / external entry]
-    OUTPUT --> OBSERVE --> RESOURCES --> APP --> COMMANDS --> TOOLS --> SESSION
+    AGENT[Agent Runtime / external entry]
+    OUTPUT --> OBSERVE --> RESOURCES --> APP --> COMMANDS --> TOOLS --> AGENT
 ```
 
 关闭顺序反向执行：入口停止，两个 Registry 拒绝新工作、取消并 drain，资源 Extension
@@ -40,7 +41,8 @@ flowchart TB
 和取消。执行前控制可以拒绝或取消，执行后观察不能修改事实。策略 Extension 直接将准入
 结果发布为 typed `operation.Decision`；Observe 不反向参与准入，也不代替策略发布决策。
 
-`core/events.Stream` 统一补全 AOP Event 的 ID、时间和序号。`pkg/exts/observe` 把选中的
+`core/events.Stream` 统一补全 AOP Event 的 ID、时间和序号。生产者调用 `Publish`，同步
+投影调用 `Observe`，有界持久化调用 `Consume`。`pkg/exts/observe` 把选中的
 Tool、Command、Process、File、HTTP hook 转成 typed AOP Event，`pkg/exts/eventoutput`
 将同一 Stream 异步、可排空地写入 JSONL。Console、Web、Node 和 stdio 只订阅事件流。
 
@@ -54,8 +56,9 @@ CLI 中 `--observe` 只选择观测种类，`-o/--output` 只选择 AOP JSONL �
 
 ## Agent、Session 与入口
 
-`agent/` 只依赖 Provider 和 `tool.Executor`。`pkg/exts/session.Manager` 拥有 Session、Run、
-队列、Inbox、取消和恢复；每个 Session 使用已加载 App 的能力。Hook 控制动作，Inbox
+`agent/` 只依赖 Provider 和 `tool.Executor`。`pkg/exts/agent.Extension` 是唯一 Agent
+生命周期所有者；它发布的 `Runtime` 同时承载受控 Loop、Session、Run、队列、Inbox、
+取消和恢复，且不暴露 Load/Close。每个 Session 使用已加载 App 的能力。Hook 控制动作，Inbox
 增加后续上下文，Cancel 停止工作，Event 记录事实，四者不互相替代。
 
 `pkg/host` 只拥有 inline/stdio 通信；Console、Web 和 Node 是并列入口，不包装或关闭
@@ -73,9 +76,9 @@ App/Profile 的资源。
 | `tools/*` | 原始能力实现 |
 | `agent/` | Agent loop |
 | `pkg/app` | 产品状态与访问面 |
-| `pkg/profile` | Profile 生命周期抽象与原子装配器 |
+| `pkg/profile` | 已装配图的具体 host 访问面；生命周期委托 Set |
 | `cmd/aiscan`、`cmd/runner` | 各可执行产品的唯一具体组合根 |
-| `pkg/exts/session` | Session runtime |
+| `pkg/exts/agent` | Agent Runtime 的唯一生命周期适配与 Session 宿主 |
 
 文件能力只有 `pkg/exts/files` 一个扩展，底层位于 `tools/files`。无 Agent 的
 `cmd/runner` 的文件组合直接暴露 `tool.Executor`，其底层依赖闭包不包含 App、Session、Console、

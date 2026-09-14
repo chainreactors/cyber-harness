@@ -13,7 +13,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/extension"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	rpc "github.com/chainreactors/aiscan/pkg/rpc"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -192,7 +191,7 @@ func (s *sessionProbe) BroadcastAOPEvent(_ string, event *aop.Event) {
 
 func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 	probe := &sessionProbe{sid: "sess-eval", found: true}
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(probe)
 	remote := &remoteAgent{nodeState: newNodeState(), nodeID: "agent-1", name: "worker"}
 
@@ -222,7 +221,7 @@ func TestForwardAgentEventKeepsEvalOnlyInAOP(t *testing.T) {
 
 func TestForwardStandaloneScanAOPDoesNotCreateChatHistory(t *testing.T) {
 	probe := &sessionProbe{}
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(probe)
 	event := &aop.Event{SessionId: "scan-not-chat", Emitter: "worker", Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}}}
 	pool.forwardAOPFrame(&remoteAgent{nodeState: newNodeState()}, "scan-not-chat", event)
@@ -233,7 +232,7 @@ func TestForwardStandaloneScanAOPDoesNotCreateChatHistory(t *testing.T) {
 
 func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 	probe := &sessionProbe{}
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(probe)
 	state := newNodeState()
 	state.openSessions["session-command"] = struct{}{}
@@ -253,41 +252,25 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 	}
 }
 
-type recordingProfile struct {
-	assembly *profile.Assembly
-	app      *apppkg.App
-}
-
-func (p *recordingProfile) Load(ctx context.Context) error  { return p.assembly.Load(ctx) }
-func (p *recordingProfile) Close(ctx context.Context) error { return p.assembly.Close(ctx) }
-func (p *recordingProfile) App() (*apppkg.App, error) {
-	if !p.assembly.Available() {
-		return nil, errors.New("profile is unavailable")
-	}
-	return p.app, nil
-}
-func (*recordingProfile) Runtime() (*sessionext.Manager, error) {
-	return nil, errors.New("test profile has no runtime")
-}
-func (*recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error { return nil }
-
-func newRecordingProfile(t *testing.T) (profile.Application, *apppkg.App, func() bool) {
+func newRecordingProfile(t *testing.T) (*profile.Profile, *apppkg.App, func() bool) {
 	t.Helper()
 	resource := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
-	assembly, err := profile.Assemble(extension.Entry{ID: "application", Extension: resource})
+	value, err := profile.New(profile.Config{
+		Entries: []extension.Entry{{ID: "application", Extension: resource}},
+		App:     resource.App,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &recordingProfile{assembly: assembly, app: resource.App}
-	t.Cleanup(func() { _ = p.Close(context.Background()) })
-	if err := p.Load(context.Background()); err != nil {
+	t.Cleanup(func() { _ = value.Close(context.Background()) })
+	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, err := p.App()
+	app, err := value.App()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return p, app, func() bool {
+	return value, app, func() bool {
 		return app.Closed()
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrCloseIncomplete marks cleanup that must be retried before dependencies
@@ -49,12 +50,13 @@ type item struct {
 // Set serializes the lifecycle of a fixed dependency graph. A failed Load seals
 // the Set; incomplete cleanup can be retried with a fresh Close context.
 type Set struct {
-	gate    chan struct{}
-	items   map[string]*item
-	order   []string
-	closing bool
-	claims  []instanceClaim
-	claimed bool
+	gate      chan struct{}
+	items     map[string]*item
+	order     []string
+	closing   atomic.Bool
+	published atomic.Bool
+	claims    []instanceClaim
+	claimed   bool
 }
 
 type instanceID struct {
@@ -151,7 +153,7 @@ func (s *Set) Load(ctx context.Context) error {
 		return err
 	}
 	defer func() { <-s.gate }()
-	if s.closing {
+	if s.closing.Load() {
 		return fmt.Errorf("extension set is closing or closed")
 	}
 	if err := s.claimInstances(); err != nil {
@@ -167,7 +169,8 @@ func (s *Set) Load(ctx context.Context) error {
 			return fmt.Errorf("extension %s is stopping or closed", id)
 		}
 		if err := ctx.Err(); err != nil {
-			s.closing = true
+			s.closing.Store(true)
+			s.published.Store(false)
 			closeErr := s.closeReverse(ctx, started)
 			s.releaseClaimsIfClosed()
 			return errors.Join(err, closeErr)
@@ -179,22 +182,50 @@ func (s *Set) Load(ctx context.Context) error {
 		}
 		loadErr := invokeLoad(it.extension, it.scope)
 		if err := loadErr; err != nil {
-			s.closing = true
+			s.closing.Store(true)
+			s.published.Store(false)
 			closeErr := s.closeReverse(ctx, started)
 			s.releaseClaimsIfClosed()
 			return errors.Join(fmt.Errorf("load extension %s: %w", id, err), closeErr)
 		}
 		if err := ctx.Err(); err != nil {
-			s.closing = true
+			s.closing.Store(true)
+			s.published.Store(false)
 			closeErr := s.closeReverse(ctx, started)
 			s.releaseClaimsIfClosed()
 			return errors.Join(err, closeErr)
 		}
 		it.state = activeState
+		if s.closing.Load() {
+			s.published.Store(false)
+			closeErr := s.closeReverse(ctx, started)
+			s.releaseClaimsIfClosed()
+			return errors.Join(fmt.Errorf("extension set is closing or closed"), closeErr)
+		}
+	}
+	s.published.Store(true)
+	if s.closing.Load() {
+		s.published.Store(false)
+		closeErr := s.closeReverse(ctx, started)
+		s.releaseClaimsIfClosed()
+		return errors.Join(fmt.Errorf("extension set is closing or closed"), closeErr)
 	}
 	return nil
 }
+
+// Active reports whether the complete graph has loaded and Close has not
+// started. It is the publication gate for capabilities retained by a
+// composition root.
+func (s *Set) Active() bool {
+	return s != nil && s.published.Load() && !s.closing.Load()
+}
+
 func (s *Set) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.closing.Store(true)
+	s.published.Store(false)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -202,7 +233,6 @@ func (s *Set) Close(ctx context.Context) error {
 		return errors.Join(ErrCloseIncomplete, err)
 	}
 	defer func() { <-s.gate }()
-	s.closing = true
 	err := s.closeReverse(ctx, s.order)
 	s.releaseClaimsIfClosed()
 	return err

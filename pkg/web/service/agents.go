@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
+	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -233,12 +233,6 @@ type SessionLookup interface {
 	BroadcastAOPEvent(sessionID string, event *aop.Event)
 }
 
-// SCOStore persists server-normalized nodes and records which AOP operation
-// observed them. Node identity is global; operation membership is many-to-many.
-type SCOStore interface {
-	UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error
-}
-
 // AgentPool manages connected aiscan agent nodes. Every member is a node that
 // registered over the application WebSocket — including the hub's own embedded
 // agent, which connects over loopback like any other node.
@@ -247,7 +241,7 @@ type AgentPool struct {
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
-	artifacts      ArtifactIngestor
+	artifacts      managementapi.ArtifactImporter
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan *ptypb.ProtocolMessage
@@ -257,10 +251,11 @@ type AgentPool struct {
 	upgrader       websocket.Upgrader
 }
 
-func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
+func NewAgentPool(hub *Hub, artifacts managementapi.ArtifactImporter, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
+		artifacts:      artifacts,
 		ptySubs:        make(map[string]chan *ptypb.ProtocolMessage),
 		ptyNodeIDs:     make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
@@ -270,10 +265,6 @@ func NewAgentPool(hub *Hub, allowedOrigins ...string) *AgentPool {
 
 func (p *AgentPool) SetSessionLookup(sl SessionLookup) {
 	p.sessions = sl
-}
-
-func (p *AgentPool) SetArtifactIngestor(ingestor ArtifactIngestor) {
-	p.artifacts = ingestor
 }
 
 func (p *AgentPool) register(a *remoteAgent) {

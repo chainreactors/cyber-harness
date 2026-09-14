@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/aiscan/tools/scan/engine"
 )
 
-func NewScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventEmitter) (commands.Command, error) {
+func NewScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (commands.Command, error) {
 	if engines == nil || engines.Gogo == nil || engines.Spray == nil {
 		return commands.Command{}, fmt.Errorf("scan engines are unavailable")
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 	corehooks "github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/aiscan/core/telemetry"
 	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 	"github.com/chainreactors/utils/pty"
 	"google.golang.org/protobuf/proto"
@@ -35,9 +36,9 @@ const (
 )
 
 type Options struct {
-	Kinds    []Kind
-	File     FileOptions
-	Diagnose func(error)
+	Kinds  []Kind
+	File   FileOptions
+	Logger telemetry.Logger
 }
 
 type Extension struct {
@@ -52,7 +53,7 @@ type Extension struct {
 	loaded    bool
 	closing   bool
 	closed    bool
-	diagnose  func(error)
+	logger    telemetry.Logger
 }
 
 var _ extension.Extension = (*Extension)(nil)
@@ -77,9 +78,13 @@ func New(registry *corehooks.Registry, stream *coreevents.Stream, options Option
 	if fileOptions.MaxEntries == 0 && fileOptions.Ignore == nil && !fileOptions.Enabled {
 		fileOptions = defaultFileOptions()
 	}
+	logger := options.Logger
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
 	return &Extension{
 		hooks: registry, events: stream, kinds: kinds, file: fileOptions,
-		snapshots: make(map[string]Snapshot), diagnose: options.Diagnose,
+		snapshots: make(map[string]Snapshot), logger: logger,
 	}, nil
 }
 
@@ -153,21 +158,13 @@ func eventFor(ctx context.Context, payload proto.Message, correlation *operation
 func (e *Extension) emit(ctx context.Context, payload proto.Message, correlation *operationpb.Ref, sidecars ...proto.Message) {
 	event, err := eventFor(ctx, payload, correlation, sidecars...)
 	if err != nil {
-		if e.diagnose != nil {
-			e.diagnose(fmt.Errorf("observe encode: %w", err))
-		}
+		e.logger.Warnf("observe encode: %v", err)
 		return
 	}
-	// Publication is synchronous at the hook boundary. The shared stream is the
-	// sequence authority and each durable output owns its own bounded queue. This
-	// guarantees an observation is handed to the transport before the matching
-	// terminal result without making observer failures alter execution.
-	e.mu.RLock()
-	active := e.loaded && !e.closing && !e.closed
-	e.mu.RUnlock()
-	if active {
-		e.events.Emit(event)
-	}
+	// Publication is synchronous at the hook boundary. Cancel prevents new
+	// callback admission; callbacks already admitted are drained by Close and
+	// must still publish their observation while that drain is in progress.
+	e.events.Publish(event)
 }
 
 func (e *Extension) toolStarted(ctx context.Context, event toolhooks.CallEvent) (struct{}, error) {

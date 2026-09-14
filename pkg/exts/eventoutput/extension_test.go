@@ -32,12 +32,12 @@ func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 4 {
-		events.Emit(&aop.Event{Id: string(rune('a' + i)), Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
+		events.Publish(&aop.Event{Id: string(rune('a' + i)), Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	events.Emit(&aop.Event{Id: "late", Payload: &aop.Event_Status{Status: &aop.Status{State: "late"}}})
+	events.Publish(&aop.Event{Id: "late", Payload: &aop.Event_Status{Status: &aop.Status{State: "late"}}})
 	recorded, err := output.ReadJSONL(path)
 	if err != nil || len(recorded) != 4 {
 		t.Fatalf("events=%d err=%v", len(recorded), err)
@@ -90,7 +90,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	events.Emit(&aop.Event{Id: "first", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
+	events.Publish(&aop.Event{Id: "first", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
 	if err := writer.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if len(recorded) != 1 || recorded[0].GetId() != "first" {
 		t.Fatalf("flushed output: %v", recorded)
 	}
-	events.Emit(&aop.Event{Id: "second", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
+	events.Publish(&aop.Event{Id: "second", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

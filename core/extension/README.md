@@ -25,7 +25,9 @@ type Entry struct {
 
 Scope 没有 ID/Ref、Root/Runtime/Session 枚举、父子树、Provide/Require、通用事件总线或公开 Close。注册批次的唯一性由固定 Registry 自身保证，不再生成 owner token。业务资源的归属由装配决定。
 
-Set 串行执行生命周期，等待锁可以取消。初始化 context 就是调用方传给 Set.Load 的
+Set 串行执行生命周期，等待锁可以取消。`Set.Active()` 是完整图唯一的发布门：仅在全部
+Entry 加载成功后为 true，Close 请求一开始即变为 false，并发 Close 不会让尚在 Load 的图
+重新发布。初始化 context 就是调用方传给 Set.Load 的
 context，只能在 Load 内使用；若它在加载期间取消，Set 会封存并逆序回滚本次开始初始化的
 实例（包括失败实例）。回滚沿用该 context；未完成清理须使用新的 Close context 重试。
 

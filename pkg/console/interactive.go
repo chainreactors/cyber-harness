@@ -20,9 +20,10 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -49,8 +50,8 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	runtime        *sessionext.Manager
-	session        *sessionext.Session
+	runtime        *agentext.Runtime
+	session        *agentext.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -84,7 +85,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *sessionext.Manager, session *sessionext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}
@@ -155,7 +156,7 @@ func newAgentConsole(ctx context.Context, rt *sessionext.Manager, session *sessi
 		return agentComposerPrompt(output, repl.readlineBridge)
 	}
 	repl.workMu.Lock()
-	repl.subscription = rt.Subscribe(repl.handleEvent)
+	repl.subscription = rt.Observe(coreevents.ObserverFunc(repl.handleEvent))
 	repl.workMu.Unlock()
 	repl.configureCompletionKey()
 	repl.configureInterruptKey()
@@ -516,11 +517,15 @@ func (r *AgentConsole) builtinCommands() []*cobra.Command {
 		{Use: "/followup", Short: "排队到当前任务结束后再发送", DisableFlagParsing: true, Args: cobra.MinimumNArgs(1), RunE: func(_ *cobra.Command, args []string) error { return r.submitPrompt(strings.Join(args, " "), false) }},
 		{Use: "/exit", Aliases: []string{"/quit"}, Short: "退出交互模式", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error { return errAgentConsoleExit }},
 	}
-	for _, name := range []string{"/status", "/clear", "/compact", "/eval", "/loop"} {
-		cmd := &cobra.Command{Use: name, Short: "Runtime " + name[1:], DisableFlagParsing: true}
-		if name == "/eval" {
-			cmd.Aliases = []string{"/goal"}
+	for _, spec := range r.runtime.CommandSpecs(false) {
+		if spec.Name == "/help" {
+			continue
+		} // The console owns its command panel.
+		usage := spec.Usage
+		if usage == "" {
+			usage = spec.Name
 		}
+		cmd := &cobra.Command{Use: usage, Aliases: spec.Aliases, Short: spec.Description, DisableFlagParsing: true}
 		cmd.RunE = func(c *cobra.Command, args []string) error {
 			if err := r.command(c.Name() + " " + strings.Join(args, " ")); err != nil {
 				return err

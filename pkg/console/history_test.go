@@ -16,8 +16,8 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -52,14 +52,14 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) *sessionext.Manager {
+func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentext.Runtime {
 	t.Helper()
 	a := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 
 	aSet := loadConsoleApplication(t, t.Context(), a)
 	a.App.SetProvider(provider, agent.ProviderConfig{Model: "test"})
 	t.Cleanup(func() { _ = aSet.Close(context.Background()) })
-	rt, err := sessionext.New(a.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{Loop: agent.StandardLoop{}})
+	rt, err := agentext.New(agentext.Config{Application: a.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func newConsoleRuntime(t *testing.T, provider agent.Provider) *sessionext.Manage
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
-	return rt.Manager
+	return rt.Runtime()
 }
 
 func sessionTestEvent(id string, event *aop.Event) *aop.Event {
@@ -91,7 +91,7 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 		t.Fatal(err)
 	}
 	for _, event := range events {
-		stream.Emit(event)
+		stream.Publish(event)
 	}
 	if err := recorder.Close(t.Context()); err != nil {
 		t.Fatal(err)
@@ -101,12 +101,12 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 	provider := &consoleProvider{usage: provider.TokenUsage(8192, 0, 8200, 0, 0)}
 	rt := newConsoleRuntime(t, provider)
-	session, err := rt.OpenSession(context.Background(), sessionext.SessionOptions{ID: "session-1"})
+	session, err := rt.OpenSession(context.Background(), agentext.SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	run, err := session.Run(context.Background(), sessionext.RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	run, err := session.Run(context.Background(), agentext.RunInput{Content: []*aop.Content{aop.Text("hello")}})
 	if err != nil {
 		t.Fatal(err)
 	}

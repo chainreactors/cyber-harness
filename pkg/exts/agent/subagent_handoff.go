@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -11,15 +11,18 @@ import (
 	"github.com/chainreactors/aiscan/agent"
 	aop "github.com/chainreactors/aiscan/aop"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/ioa/protocols"
 )
 
-type eventSubscriber func(func(*aop.Event)) *eventbus.Subscription[*aop.Event]
+type eventSource interface {
+	Observe(coreevents.Observer) *eventbus.Subscription[*aop.Event]
+}
 
-func subscribeIOAHandoffContext(ctx context.Context, subscribe eventSubscriber, client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
-	if subscribe == nil || isNilIOADependency(client) || spaceName == "" {
+func subscribeIOAHandoffContext(ctx context.Context, source eventSource, client protocols.ClientAPI, spaceName string, logger telemetry.Logger) func() {
+	if source == nil || isNilIOADependency(client) || spaceName == "" {
 		return func() {}
 	}
 	if ctx == nil {
@@ -37,14 +40,8 @@ func subscribeIOAHandoffContext(ctx context.Context, subscribe eventSubscriber, 
 		pending:   make(map[string]*handoffState),
 		bySession: make(map[string]string),
 	}
-	unsub := subscribe(func(event *aop.Event) {
-		select {
-		case r.events <- event:
-		case <-ctx.Done():
-		default:
-			r.logger.Warnf("ioa handoff queue full, dropping %s", aop.Kind(event))
-		}
-	})
+	r.ctx = ctx
+	unsub := source.Observe(r)
 	if unsub == nil {
 		cancel()
 		return func() {}
@@ -69,6 +66,7 @@ type handoffState struct {
 }
 
 type ioaHandoffPublisher struct {
+	ctx       context.Context
 	client    protocols.ClientAPI
 	spaceName string
 	logger    telemetry.Logger
@@ -78,6 +76,15 @@ type ioaHandoffPublisher struct {
 	spaceID   string
 	pending   map[string]*handoffState // parent tool call id -> state
 	bySession map[string]string        // child session id -> parent tool call id
+}
+
+func (r *ioaHandoffPublisher) ObserveEvent(event *aop.Event) {
+	select {
+	case r.events <- event:
+	case <-r.ctx.Done():
+	default:
+		r.logger.Warnf("ioa handoff queue full, dropping %s", aop.Kind(event))
+	}
 }
 
 func (r *ioaHandoffPublisher) run(ctx context.Context) {

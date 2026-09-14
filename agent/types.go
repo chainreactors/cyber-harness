@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	corehooks "github.com/chainreactors/aiscan/core/hooks"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
@@ -114,7 +114,7 @@ type Config struct {
 	TokenBudget      int
 	Logger           telemetry.Logger
 	TransformContext TransformContextFunc
-	Bus              aop.EventEmitter
+	Bus              aop.EventPublisher
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
 	Hooks            *corehooks.Registry
@@ -153,7 +153,7 @@ func (c Config) WithMessages(msgs []*aop.Message) Config { c.Messages = msgs; re
 func (c Config) WithStream(s bool) Config                { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config         { c.Inbox = ib; return c }
 func (c Config) WithLogger(l telemetry.Logger) Config    { c.Logger = l; return c }
-func (c Config) WithBus(b aop.EventEmitter) Config       { c.Bus = b; return c }
+func (c Config) WithBus(b aop.EventPublisher) Config     { c.Bus = b; return c }
 func (c Config) WithMaxTokens(n int) Config              { c.MaxTokens = n; return c }
 func (c Config) WithContextWindow(n int) Config          { c.ContextWindow = n; return c }
 func (c Config) WithTemperature(t float64) Config        { c.Temperature = &t; return c }
@@ -212,7 +212,7 @@ func (c Config) init() Config {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
 	if c.Bus == nil {
-		c.Bus = eventbus.New[*aop.Event]()
+		c.Bus = coreevents.New()
 	}
 	if c.emitter == nil {
 		c.emitter = newAOPEmitter(c.Bus, c.AgentName, c.SessionID, c.ParentSessionID, c.ParentToolCallID, c.Delegation, c.MessageCounter)

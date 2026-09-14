@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -20,10 +20,13 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Manager exposes session operations. Resource alone owns activation and drain.
+// Runtime exposes session operations. Extension alone owns activation and drain.
 // ---------------------------------------------------------------------------
 
-type Manager struct {
+type Runtime struct {
+	commands           []Command
+	commandIndex       map[string]Command
+	loop               *loopRuntime
 	option             *cfg.Option
 	logger             telemetry.Logger
 	runtimeConfig      Config
@@ -55,25 +58,22 @@ type Manager struct {
 	ioa                *ioatools.Runtime
 }
 
-// Resource owns Manager activation and shutdown. Profiles retain Resource and
-// publish Manager, whose API manages sessions but not its own lifetime.
-type Resource struct {
-	Manager *Manager
-}
-
-var _ extension.Extension = (*Resource)(nil)
-
 type Config struct {
+	Commands         []Command
+	Application      *apppkg.App
+	IOA              *ioatools.Runtime
+	Option           *cfg.Option
+	Logger           telemetry.Logger
 	PrimarySessionID string
 	PromptConfig     *PromptConfig
 	MaxPending       int
-	// Loop is supplied by the profile, which owns its optional lifecycle extension.
+	// Loop supplies the algorithm; this extension owns admission and drain.
 	Loop agent.Loop
 }
 
 // IOA returns the optional collaboration runtime. Its type has no lifecycle;
 // the profile retains the owning resource.
-func (rt *Manager) IOA() *ioatools.Runtime {
+func (rt *Runtime) IOA() *ioatools.Runtime {
 	if rt == nil {
 		return nil
 	}
@@ -82,33 +82,9 @@ func (rt *Manager) IOA() *ioatools.Runtime {
 
 const baseAgentSkillName = "aiscan"
 
-// New constructs an inert Agent runtime over an application owned by the
-// caller. Session subscriptions, history IO and command publication begin in
-// Load.
-func New(application *apppkg.App, ioa *ioatools.Runtime, option *cfg.Option, logger telemetry.Logger, rc Config) (*Resource, error) {
-	if option == nil {
-		return nil, fmt.Errorf("agent runtime option is required")
-	}
-	if application == nil {
-		return nil, fmt.Errorf("agent runtime application is required")
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	manager := &Manager{
-		app: application, ioa: ioa, option: option, logger: logger, runtimeConfig: rc,
-		sessions: make(map[string]*sessionState), runs: make(map[string]*Run), closeDone: make(chan struct{}),
-	}
-	return &Resource{Manager: manager}, nil
-}
-
 // Load activates session work under scope.Lifetime. Init bounds initialization
 // only; caller contexts cannot extend the owning extension's lifetime.
-func (r *Resource) Load(scope *extension.Scope) error {
-	if r == nil || r.Manager == nil || scope == nil {
-		return fmt.Errorf("agent runtime is required")
-	}
-	rt := r.Manager
+func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 	ctx := scope.Init()
 	if ctx == nil {
 		ctx = context.Background()
@@ -214,7 +190,7 @@ func (r *Resource) Load(scope *extension.Scope) error {
 	if rt.ioa != nil {
 		ioaClient, ioaStream = rt.ioa.Client(), rt.ioa.Stream()
 	}
-	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, rt.app.SubscribeEvents, ioaClient, ioaSpace, logger)
+	rt.unsubscribeHandoff = subscribeIOAHandoffContext(rt.ctx, rt, ioaClient, ioaSpace, logger)
 	if !isNilIOADependency(ioaStream) && option.Space != "" {
 		nodeID := ""
 		if ioaClient != nil {
@@ -240,10 +216,10 @@ func (r *Resource) Load(scope *extension.Scope) error {
 }
 
 // ready rejects business admission until the owning profile has completed
-// Load. Lifecycle wiring such as RegisterNamespaces and Subscribe may happen
+// Load. Lifecycle wiring such as RegisterNamespaces and Observe may happen
 // earlier, but their handlers cannot create sessions or runs through this
 // gate.
-func (rt *Manager) ready() error {
+func (rt *Runtime) ready() error {
 	if rt == nil {
 		return fmt.Errorf("agent runtime is not configured")
 	}
@@ -264,14 +240,7 @@ func promptHasLoadedSkill(pc *PromptConfig, name string) bool {
 	return false
 }
 
-func (r *Resource) Close(ctx context.Context) error {
-	if r == nil || r.Manager == nil {
-		return nil
-	}
-	return r.Manager.close(ctx)
-}
-
-func (rt *Manager) close(ctx context.Context) error {
+func (rt *Runtime) close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -296,7 +265,7 @@ func (rt *Manager) close(ctx context.Context) error {
 				sessions = append(sessions, session)
 			}
 			rt.mu.RUnlock()
-			// OpenSession may borrow an external context. Cancel every session
+			// OpenSession may derive from an external context. Cancel every session
 			// before waiting for any one of them to acknowledge shutdown.
 			for _, session := range sessions {
 				session.cancel()
@@ -327,7 +296,7 @@ func (rt *Manager) close(ctx context.Context) error {
 	}
 }
 
-func (rt *Manager) SetLogger(logger telemetry.Logger) {
+func (rt *Runtime) SetLogger(logger telemetry.Logger) {
 	if rt == nil {
 		return
 	}
@@ -348,7 +317,7 @@ func (rt *Manager) SetLogger(logger telemetry.Logger) {
 
 // ReloadProvider rebuilds application configuration and updates this Runtime's
 // template and existing sessions. In-flight runs retain their snapshot.
-func (rt *Manager) ReloadProvider(option *cfg.Option) (agent.Provider, string, error) {
+func (rt *Runtime) ReloadProvider(option *cfg.Option) (agent.Provider, string, error) {
 	if option == nil {
 		return nil, "", fmt.Errorf("provider option is required")
 	}
@@ -356,7 +325,7 @@ func (rt *Manager) ReloadProvider(option *cfg.Option) (agent.Provider, string, e
 	return provider, resolved.Model, err
 }
 
-func (rt *Manager) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
+func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
 	if rt == nil || rt.app == nil {
 		return nil, agent.ProviderConfig{}, fmt.Errorf("agent runtime is not configured")
 	}
@@ -372,7 +341,7 @@ func (rt *Manager) reloadProvider(config agent.ProviderConfig) (agent.Provider, 
 
 // SetProvider atomically updates the runtime template and every existing
 // conversation session. Runs already in flight keep their provider snapshot.
-func (rt *Manager) SetProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
+func (rt *Runtime) SetProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
 	if rt == nil {
 		return
 	}
@@ -384,7 +353,7 @@ func (rt *Manager) SetProvider(provider agent.Provider, providerConfig agent.Pro
 	rt.applyProvider(provider, providerConfig)
 }
 
-func (rt *Manager) applyProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
+func (rt *Runtime) applyProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
 	rt.mu.Lock()
 	rt.config.Provider = provider
 	if providerConfig.Model != "" {
@@ -399,7 +368,7 @@ func (rt *Manager) applyProvider(provider agent.Provider, providerConfig agent.P
 }
 
 // App returns the concrete application used by this runtime.
-func (rt *Manager) App() *apppkg.App { return rt.app }
+func (rt *Runtime) App() *apppkg.App { return rt.app }
 
 // Context ends when the runtime shuts down. It is nil before Load.
-func (rt *Manager) Context() context.Context { return rt.ctx }
+func (rt *Runtime) Context() context.Context { return rt.ctx }

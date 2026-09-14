@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/katana"
@@ -104,7 +103,7 @@ func TestFullScannerPublicIntegration(t *testing.T) {
 		t.Skip("set AISCAN_INTEGRATION=1 to run public network regression tests")
 	}
 
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	recorder := newFunctionalRecorder(bus)
 	registry := registerTestScanners(t, &engine.Set{}, t.TempDir(), bus, telemetry.NopLogger(), katana.NewCommand(telemetry.NopLogger(), "", bus))
 

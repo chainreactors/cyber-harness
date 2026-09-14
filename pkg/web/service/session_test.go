@@ -74,7 +74,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	}
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
@@ -129,7 +129,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
@@ -185,7 +185,7 @@ func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
 	defer service.Close(context.Background())
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: newNodeState(),
@@ -227,7 +227,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
 	defer service.Close(context.Background())
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
@@ -312,7 +312,7 @@ func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	pool.agents["agent-1"] = &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
@@ -358,7 +358,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	}
 	defer store.Close()
 
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
 	remote := &remoteAgent{
 		nodeState: newNodeState(),
@@ -465,7 +465,7 @@ func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
 	defer store.Close()
 	service := NewService(ServiceConfig{Store: store})
 	defer service.Close(context.Background())
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
@@ -511,7 +511,7 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	remote := newFakeAgent(session.GetSession().GetNodeId(), 1)
 	pool.register(remote)
 	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})

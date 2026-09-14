@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"io"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ type stdioHost struct {
 	ctx    context.Context
 	stream *host.Stdio
 	host   *host.Host
-	rt     *Manager
+	rt     *Runtime
 }
 
 func newStdioHost(ctx context.Context, _ any, _ telemetry.Logger, output io.Writer) *stdioHost {
@@ -318,9 +319,9 @@ func initRuntimeStdioHost(t *testing.T, h *stdioHost, prov agent.Provider) {
 	t.Cleanup(h.host.Close)
 	h.rt.config.Model = "test"
 	h.rt.config.MaxTurns = 4
-	unsubscribe := h.rt.Subscribe(func(event *aop.Event) {
+	unsubscribe := h.rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		_ = h.emit(aop.MustWrap(aop.EnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
-	})
+	}))
 	t.Cleanup(func() { _ = h.rt.close(context.Background()); unsubscribe.Cancel() })
 }
 

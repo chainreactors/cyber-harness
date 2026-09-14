@@ -17,7 +17,7 @@ func TestSubscribeAgentOutputTracksRotatedRuntimeSession(t *testing.T) {
 	}
 	stdout.Reset()
 	emit := func(id, text string) {
-		c.runtime.App().Emit(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
+		c.runtime.App().Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
 	}
 	emit(oldID, "stale")
 	emit("sibling", "sibling")

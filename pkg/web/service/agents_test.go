@@ -127,19 +127,17 @@ type recordingArtifactProjector struct {
 	artifact    *toolpb.Artifact
 }
 
-func (s *recordingArtifactProjector) NormalizeArtifact(_ context.Context, operationID, tool string, data []byte) (uint64, uint64, error) {
+func (s *recordingArtifactProjector) ImportArtifact(_ context.Context, operationID string, artifact *toolpb.Artifact) (uint64, uint64, error) {
 	s.operationID = operationID
-	s.artifact = &toolpb.Artifact{Tool: tool, Data: append([]byte(nil), data...)}
+	s.artifact = protobuf.Clone(artifact).(*toolpb.Artifact)
 	return 0, 0, nil
 }
 
-func (*recordingArtifactProjector) SupportedArtifacts() []string { return nil }
-func (*recordingArtifactProjector) Close() error                 { return nil }
+func (*recordingArtifactProjector) ArtifactTypes() []string { return nil }
 
 func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
 	projector := &recordingArtifactProjector{}
-	pool := NewAgentPool(NewHub())
-	pool.SetArtifactIngestor(projector)
+	pool := NewAgentPool(NewHub(), projector)
 	raw := []byte(`{"ip":"127.0.0.1","port":"80"}`)
 	event := &aop.Event{SessionId: "session-1"}
 	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: raw, MediaType: aop.JSONMediaType})
@@ -258,7 +256,7 @@ func dialAgentWithIdentity(t *testing.T, srv *httptest.Server, name string, comm
 func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	t.Helper()
 	svc := NewService(ServiceConfig{})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
@@ -392,7 +390,7 @@ func TestWSDispatchAndComplete(t *testing.T) {
 
 func TestDispatchToolCallPublishesSessionCallOnce(t *testing.T) {
 	probe := &sessionProbe{sid: "session-1", found: true}
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(probe)
 	remote := &remoteAgent{
 		nodeState: newNodeState(), nodeID: "agent-1",
@@ -526,7 +524,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	defer store.Close()
 
 	svc := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 
 	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
@@ -935,7 +933,7 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	svc := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	t.Cleanup(func() {
 		if err := svc.Close(context.Background()); err != nil {
@@ -1219,7 +1217,7 @@ func runE2ETerminalResize(t *testing.T) { //nolint:unused // referenced by agent
 }
 
 func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	resultCh := make(chan taskResult, 1)
 	remote := &remoteAgent{
 		nodeState: &nodeState{
@@ -1317,7 +1315,7 @@ func assertTaskOpen(t *testing.T, remote *remoteAgent, ch chan taskResult) {
 }
 
 func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
@@ -1334,7 +1332,7 @@ func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 }
 
 func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
@@ -1356,7 +1354,7 @@ func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 }
 
 func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
@@ -1374,7 +1372,7 @@ func TestChatTaskCanceledTurnEndHasNoErr(t *testing.T) {
 }
 
 func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
@@ -1387,7 +1385,7 @@ func TestChildSessionEndDoesNotConvergeTask(t *testing.T) {
 }
 
 func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
-	pool := NewAgentPool(NewHub())
+	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
 
@@ -1413,7 +1411,7 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 	defer store.Close()
 	createStoredSession(t, store, "session-1")
 	service := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(service.Hub())
+	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	remote := &remoteAgent{
 		nodeState: newNodeState(),
@@ -1463,7 +1461,7 @@ func newFakeAgent(nodeID string, buffer int) *remoteAgent {
 }
 
 func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	agent := newFakeAgent("agent", 1)
 	pool.register(agent)
 	config := &types.DistributeConfig{Llm: &types.LLMConfig{ActiveProfile: "primary"}}
@@ -1483,7 +1481,7 @@ func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
 }
 
 func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	agent := newFakeAgent("busy", 1)
 	cancel := aop.MustWrap("cancel", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "task-1"}}})
 	agent.sendCh <- cancel
@@ -1509,7 +1507,7 @@ func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 }
 
 func TestHandleAgentStatusUpdate(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	agent := newFakeAgent("n1", 1)
 	agent.runtime = &aop.AgentRuntimeInfo{Pid: 4242, Hostname: "local-1"}
 	agent.status = &aop.AgentStatus{Provider: "anthropic", Model: "old-model"}
@@ -1529,7 +1527,7 @@ func TestHandleAgentStatusUpdate(t *testing.T) {
 }
 
 func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	agent := newFakeAgent("n1", 1)
 	agent.status = &aop.AgentStatus{Provider: "openai", Model: "old-model"}
 	pool.register(agent)
@@ -1559,7 +1557,7 @@ func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
 	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
@@ -1609,7 +1607,7 @@ func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
 // A4: CancelTask must converge only the targeted task; a sibling dispatch on
 // the same node stays pending.
 func TestCancelTaskIsolatesSiblingDispatch(t *testing.T) {
-	pool := NewAgentPool(nil)
+	pool := NewAgentPool(nil, nil)
 	agent := newFakeAgent("agent-1", 4)
 	pool.register(agent)
 
@@ -1748,7 +1746,7 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	pool := NewAgentPool(svc.Hub())
+	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()

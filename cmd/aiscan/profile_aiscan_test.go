@@ -16,7 +16,6 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 )
 
 type profileLoop func(context.Context, agent.Config) (*agent.Result, error)
@@ -37,7 +36,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	runtimes := make(chan *agentext.Runtime, 2)
 	var unblock sync.Once
-	config := minimalConfig(&sessionext.Config{})
+	config := minimalConfig(&agentext.Config{})
 	config.Runtime.Loop = profileLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		managed, ok := config.Loop.(*agentext.Runtime)
 		if !ok {
@@ -74,15 +73,15 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	runtime, _ := p.Runtime()
 	app, _ := p.App()
 	runtime.SetProvider(inertProvider{}, agent.ProviderConfig{})
-	first, err := runtime.EnsureSession(sessionext.SessionOptions{ID: "first"})
+	first, err := runtime.EnsureSession(agentext.SessionOptions{ID: "first"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtime.EnsureSession(sessionext.SessionOptions{ID: "second"})
+	second, err := runtime.EnsureSession(agentext.SessionOptions{ID: "second"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondRun, err := second.Run(t.Context(), sessionext.RunInput{Message: agent.TextInput("local lifecycle probe")})
+	secondRun, err := second.Run(t.Context(), agentext.RunInput{Message: agent.TextInput("local lifecycle probe")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +92,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	if _, ok := config.Runtime.Loop.(profileLoop); !ok {
 		t.Fatal("profile mutated caller-owned loop selection")
 	}
-	run, err := first.Run(t.Context(), sessionext.RunInput{Message: agent.TextInput("local lifecycle test")})
+	run, err := first.Run(t.Context(), agentext.RunInput{Message: agent.TextInput("local lifecycle test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +117,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	if app.Closed() {
 		t.Fatal("profile released App before execution completed")
 	}
-	if _, err := second.Run(t.Context(), sessionext.RunInput{Message: agent.TextInput("too late")}); err == nil {
+	if _, err := second.Run(t.Context(), agentext.RunInput{Message: agent.TextInput("too late")}); err == nil {
 		t.Fatal("manager admitted work after shutdown began")
 	}
 	unblock.Do(func() { close(release) })
@@ -135,7 +134,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 
 func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	config := minimalConfig(nil)
-	config.Runtime = &sessionext.Config{} // Sessions are selected, reasoning is not.
+	config.Runtime = &agentext.Config{} // Sessions are selected, reasoning is not.
 	p, err := newAIScanProfile(config)
 	if err != nil {
 		t.Fatal(err)
@@ -146,11 +145,11 @@ func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	}
 	runtime, _ := p.Runtime()
 	runtime.SetProvider(inertProvider{}, agent.ProviderConfig{})
-	session, err := runtime.EnsureSession(sessionext.SessionOptions{ID: "history-only"})
+	session, err := runtime.EnsureSession(agentext.SessionOptions{ID: "history-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(t.Context(), sessionext.RunInput{Message: agent.TextInput("no reasoning selected")})
+	run, err := session.Run(t.Context(), agentext.RunInput{Message: agent.TextInput("no reasoning selected")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	}
 }
 
-func minimalConfig(runtime *sessionext.Config) aiscanProfileConfig {
+func minimalConfig(runtime *agentext.Config) aiscanProfileConfig {
 	if runtime != nil {
 		runtime.Loop = agent.StandardLoop{}
 	}
@@ -208,7 +207,7 @@ func TestApplicationOnlyProfile(t *testing.T) {
 }
 
 func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
-	p, err := newAIScanProfile(minimalConfig(&sessionext.Config{}))
+	p, err := newAIScanProfile(minimalConfig(&agentext.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +231,7 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 }
 
 func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
-	p, err := newAIScanProfile(minimalConfig(&sessionext.Config{}))
+	p, err := newAIScanProfile(minimalConfig(&agentext.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}

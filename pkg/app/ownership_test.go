@@ -19,7 +19,7 @@ import (
 
 func TestResourceDoesNotPromoteAppBusinessMethods(t *testing.T) {
 	resource := reflect.TypeFor[*Resource]()
-	for _, method := range []string{"Emit", "SubscribeEvents", "ProviderState", "SetProvider"} {
+	for _, method := range []string{"Publish", "ObserveEvents", "ProviderState", "SetProvider"} {
 		if _, exists := resource.MethodByName(method); exists {
 			t.Errorf("App Resource promotes business method %s", method)
 		}
@@ -47,12 +47,12 @@ func TestNewIsInertUntilLoad(t *testing.T) {
 	}
 }
 
-func TestEmitConcurrentProducersAndReentrantSubscriber(t *testing.T) {
+func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 	stream := coreevents.New()
 	a := &App{events: stream}
 	var mu sync.Mutex
 	seen := make(map[uint64]*aop.Event)
-	a.SubscribeEvents(func(event *aop.Event) {
+	a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		if seen[event.Seq] != nil {
 			t.Errorf("duplicate sequence %d", event.Seq)
@@ -60,23 +60,23 @@ func TestEmitConcurrentProducersAndReentrantSubscriber(t *testing.T) {
 		seen[event.Seq] = event
 		mu.Unlock()
 		if event.Id == "outer" {
-			a.Emit(&aop.Event{SessionId: "shared", Id: "nested"})
+			a.Publish(&aop.Event{SessionId: "shared", Id: "nested"})
 		}
-	})
+	}))
 	stamp := timestamppb.Now()
 	outer := &aop.Event{SessionId: "shared", Id: "outer", EmittedAt: stamp}
-	a.Emit(outer)
+	a.Publish(outer)
 	var producers sync.WaitGroup
 	for range 32 {
 		producers.Add(1)
 		go func() {
 			defer producers.Done()
-			a.Emit(&aop.Event{SessionId: "shared"})
+			a.Publish(&aop.Event{SessionId: "shared"})
 		}()
 	}
 	producers.Wait()
 	if seen[1] != outer || outer.EmittedAt != stamp || outer.Id != "outer" {
-		t.Fatal("Emit replaced the original event or its metadata")
+		t.Fatal("Publish replaced the original event or its metadata")
 	}
 	for seq := uint64(1); seq <= 34; seq++ {
 		if event := seen[seq]; event == nil || event.EmittedAt == nil || event.Id == "" {

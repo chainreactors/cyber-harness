@@ -28,10 +28,11 @@ import (
 	ptypb "github.com/chainreactors/aiscan/aop/pty"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	toolset "github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -317,7 +318,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	sealed := make(map[string]time.Time)
 
 	stats := NewAgentStatsTracker()
-	unsubscribe := cc.Agent.Subscribe(func(event *aop.Event) {
+	unsubscribe := cc.Agent.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if next, changed := stats.Observe(event); changed {
 			send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
 		}
@@ -328,9 +329,9 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		} else if extension := event.GetExtension(); extension != nil {
 			artifact := new(toolpb.Artifact)
 			isArtifact = extension.MessageIs(artifact)
-			ref := new(operationpb.Ref)
-			if found, err := aop.FindTypedExtension(event, ref); err == nil && found {
-				replyTo = ref.GetCallId()
+			correlation := new(operationpb.Ref)
+			if found, err := aop.FindTypedExtension(event, correlation); err == nil && found {
+				replyTo = correlation.GetCallId()
 			}
 		}
 		// A streaming tool (katana) keeps emitting artifacts from background
@@ -345,7 +346,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			return
 		}
 		send(replyTo, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}})
-	})
+	}))
 	if unsubscribe == nil {
 		return fmt.Errorf("agent event subscription is required")
 	}
@@ -555,7 +556,7 @@ func newAgentConnectionNamespaceMux(
 // payload, then calls the same session handler registered for stdio/inline.
 func handleAgentCoreMessage(
 	ctx context.Context,
-	control *sessionext.Manager,
+	control *agentext.Runtime,
 	envelope *aop.Envelope,
 	value *aop.ProtocolMessage,
 	send func(string, protobuf.Message),
@@ -642,7 +643,7 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 		// The endpoint is the single event source for the connection. Its
 		// subscriber forwards the terminal to the wire; do not send a second copy.
 		seal()
-		cc.Agent.EmitEvent(event)
+		cc.Agent.Publish(event)
 	}()
 }
 

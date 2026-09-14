@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 )
 
@@ -215,7 +215,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	_, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
-		newAOPEmitter(eventbus.New[*aop.Event](), "aiscan", "test-session", "", "", nil, 0),
+		newAOPEmitter(coreevents.New(), "aiscan", "test-session", "", "", nil, 0),
 		telemetry.NopLogger(),
 		1,
 		"m-1",

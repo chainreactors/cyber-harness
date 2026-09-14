@@ -57,7 +57,7 @@ func (t *testTool) Execute(ctx context.Context, arguments string) (*tool.Result,
 			if err := aop.SetTypedExtension(event, operation.Correlation(ctx)); err != nil {
 				return nil, err
 			}
-			t.events.Emit(event)
+			t.events.Publish(event)
 		}
 		close(t.started)
 		<-ctx.Done()

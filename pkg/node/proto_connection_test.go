@@ -25,13 +25,14 @@ import (
 	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/internal/applicationtest"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/gorilla/websocket"
@@ -64,12 +65,12 @@ type trackingAgentEndpoint struct {
 	subscribed *bool
 }
 
-func (e *trackingAgentEndpoint) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
+func (e *trackingAgentEndpoint) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
 	*e.subscribed = true
-	return e.bus.Subscribe(fn)
+	return e.bus.Subscribe(observer.ObserveEvent)
 }
 
-func (e *trackingAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) }
+func (e *trackingAgentEndpoint) Publish(event *aop.Event) { e.bus.Emit(event) }
 
 type silentAgentEndpoint struct{ bus *eventbus.Bus[*aop.Event] }
 
@@ -77,16 +78,18 @@ func newSilentAgentEndpoint() *silentAgentEndpoint {
 	return &silentAgentEndpoint{bus: eventbus.New[*aop.Event]()}
 }
 
-func (e *silentAgentEndpoint) Subscribe(fn func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
-	return e.bus.Subscribe(fn)
+func (e *silentAgentEndpoint) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
+	return e.bus.Subscribe(observer.ObserveEvent)
 }
 
-func (e *silentAgentEndpoint) EmitEvent(event *aop.Event) { e.bus.Emit(event) }
+func (e *silentAgentEndpoint) Publish(event *aop.Event) { e.bus.Emit(event) }
 
 type panicAgentEndpoint struct{}
 
-func (panicAgentEndpoint) Subscribe(func(*aop.Event)) *eventbus.Subscription[*aop.Event] { return nil }
-func (panicAgentEndpoint) EmitEvent(*aop.Event)                                          { panic("send event boom") }
+func (panicAgentEndpoint) Observe(coreevents.Observer) *eventbus.Subscription[*aop.Event] {
+	return nil
+}
+func (panicAgentEndpoint) Publish(*aop.Event) { panic("send event boom") }
 
 type handshakeThenEOFStream struct {
 	helloID string
@@ -217,7 +220,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 
 	appSet := loadNodeTestApplication(t, ctx, app)
 	defer appSet.Close(context.Background())
-	rt, err := sessionext.New(app.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{})
+	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +234,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	registry := testToolExecutor(t, singleDeliveryProbeTool{})
 	runtimeEvents := make(chan *aop.Event, 1)
 	var runtimeToolCalls atomic.Int32
-	unsubscribe := rt.Manager.Subscribe(func(event *aop.Event) {
+	unsubscribe := rt.Runtime().Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event == nil {
 			return
 		}
@@ -241,7 +244,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 		if event.GetToolResult() != nil {
 			runtimeEvents <- event
 		}
-	})
+	}))
 	defer unsubscribe.Cancel()
 	directMessages := make(chan protobuf.Message, 2)
 	send := func(_ string, message protobuf.Message) { directMessages <- message }
@@ -259,7 +262,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 		connectionConfig{
 			Executor: registry,
 			Logger:   telemetry.NopLogger(),
-			Agent:    rt.Manager,
+			Agent:    rt.Runtime(),
 		},
 		&aop.Envelope{Id: "single-delivery-op"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
@@ -633,7 +636,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	app := apppkg.New(apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.Dependencies{})
 	appSet := loadNodeTestApplication(t, t.Context(), app)
 	defer appSet.Close(context.Background())
-	rt, err := sessionext.New(app.App, nil, &cfg.Option{}, telemetry.NopLogger(), sessionext.Config{})
+	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +652,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 		}}),
 	}
 	err = serveAgentConnection(context.Background(), connectionConfig{
-		Name: "embedded", NodeID: "embedded", Registry: app.App.Commands, Agent: rt.Manager, Control: rt.Manager,
+		Name: "embedded", NodeID: "embedded", Registry: app.App.Commands, Agent: rt.Runtime(), Control: rt.Runtime(),
 	}, telemetry.NopLogger(), stream)
 	if err != io.EOF {
 		t.Fatalf("connection: %v", err)

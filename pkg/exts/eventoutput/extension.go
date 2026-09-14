@@ -28,7 +28,6 @@ type Options struct {
 	Path     string
 	Queue    int
 	MaxBytes int64
-	Diagnose func(error)
 }
 
 type Extension struct {
@@ -97,7 +96,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.file, e.path = file, path
-	e.sub, err = e.events.SubscribeAsync(eventbus.SubscribeOptions[*aop.Event]{
+	e.sub, err = e.events.Consume(eventbus.SubscribeOptions[*aop.Event]{
 		Buffer: e.options.Queue, MaxBytes: e.options.MaxBytes,
 		Size: func(event *aop.Event) int64 { return int64(proto.Size(event)) },
 		Clone: func(event *aop.Event) *aop.Event {
@@ -106,11 +105,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			}
 			return proto.Clone(event).(*aop.Event)
 		},
-		OnError: e.recordError,
-		OnDrop: func(count uint64) {
-			e.recordError(fmt.Errorf("event output incomplete: %d events dropped", count))
-		},
-	}, e.write)
+	}, e)
 	if err != nil {
 		_ = file.Close()
 		e.file = nil
@@ -121,7 +116,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	return nil
 }
 
-func (e *Extension) write(event *aop.Event) error {
+func (e *Extension) ConsumeEvent(event *aop.Event) error {
 	if event == nil || event.Id == "" || event.Payload == nil {
 		return fmt.Errorf("event output requires id and typed payload")
 	}
@@ -143,20 +138,6 @@ func (e *Extension) write(event *aop.Event) error {
 		e.err = err
 	}
 	return err
-}
-
-func (e *Extension) recordError(err error) {
-	if err == nil {
-		return
-	}
-	e.mu.Lock()
-	if e.err == nil {
-		e.err = err
-	}
-	e.mu.Unlock()
-	if e.options.Diagnose != nil {
-		e.options.Diagnose(err)
-	}
 }
 
 func (e *Extension) Path() string {
@@ -185,6 +166,9 @@ func (e *Extension) Flush(ctx context.Context) error {
 	}
 	if err := sub.Err(); err != nil {
 		return err
+	}
+	if dropped := sub.Dropped(); dropped > 0 {
+		return fmt.Errorf("event output incomplete: %d events dropped", dropped)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -217,6 +201,9 @@ func (e *Extension) Close(ctx context.Context) error {
 	err := e.err
 	if sub != nil {
 		err = errors.Join(err, sub.Err())
+		if dropped := sub.Dropped(); dropped > 0 {
+			err = errors.Join(err, fmt.Errorf("event output incomplete: %d events dropped", dropped))
+		}
 	}
 	if e.file != nil {
 		err = errors.Join(err, e.file.Sync(), e.file.Close())
@@ -224,3 +211,5 @@ func (e *Extension) Close(ctx context.Context) error {
 	e.file, e.path = nil, ""
 	return err
 }
+
+var _ coreevents.Consumer = (*Extension)(nil)

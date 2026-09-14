@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
@@ -69,8 +69,8 @@ func handoffEvent(t *testing.T, sessionID, agentName string, event *aop.Event) *
 
 func TestIOAHandoffFromAOPBus(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[*aop.Event]()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus.Subscribe, client, "test", nil)
+	bus := coreevents.New()
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
 	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
@@ -85,12 +85,12 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bus.Emit(start)
+	bus.Publish(start)
 
-	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{
+	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{
 		Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("inspection complete")},
 	}}}))
-	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
+	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 
 	spaceCalls, bodies := waitHandoffBodies(t, client, 2)
 	if spaceCalls != 1 {
@@ -133,8 +133,8 @@ func TestIOAHandoffFromAOPBus(t *testing.T) {
 
 func TestIOAHandoffFailedRun(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[*aop.Event]()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus.Subscribe, client, "test", nil)
+	bus := coreevents.New()
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
 	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
@@ -147,8 +147,8 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bus.Emit(start)
-	bus.Emit(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
+	bus.Publish(start)
+	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
 		StopReason: "error", Error: &aop.ProtocolError{Message: "boom"},
 	}}}))
 
@@ -164,12 +164,12 @@ func TestIOAHandoffFailedRun(t *testing.T) {
 
 func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
 	client := &handoffClient{}
-	bus := eventbus.New[*aop.Event]()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus.Subscribe, client, "test", nil)
+	bus := coreevents.New()
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
-	bus.Emit(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}}))
-	bus.Emit(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
+	bus.Publish(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}}))
+	bus.Publish(handoffEvent(t, "root-session", "aiscan", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
 
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -188,8 +188,8 @@ func TestIOAHandoffTypedNilClientIsDisabled(t *testing.T) {
 		t.Fatal("typed-nil IOA client was treated as configured")
 	}
 
-	bus := eventbus.New[*aop.Event]()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus.Subscribe, client, "test", nil)
+	bus := coreevents.New()
+	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
 	defer cancel()
 
 	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
@@ -198,5 +198,5 @@ func TestIOAHandoffTypedNilClientIsDisabled(t *testing.T) {
 	if err := types.SetDelegation(start, &types.DelegationDetail{Task: "inspect target", AgentName: "worker"}); err != nil {
 		t.Fatal(err)
 	}
-	bus.Emit(start)
+	bus.Publish(start)
 }

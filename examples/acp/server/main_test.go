@@ -38,7 +38,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	ingestor, err := webservice.NewArtifactIngestor(store)
+	ingestor, err := webservice.NewArtifactImporter(store)
 	if err != nil {
 		t.Fatalf("open artifact ingestor: %v", err)
 	}

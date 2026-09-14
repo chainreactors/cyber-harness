@@ -4,29 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	toolpb "github.com/chainreactors/aiscan/aop/tool"
 )
 
-type artifactTestStore struct {
+type artifactNativeTestStore struct {
 	operationID string
 	nodes       []json.RawMessage
 }
 
-func (s *artifactTestStore) UpsertSCONodes(_ context.Context, operationID string, nodes []json.RawMessage) error {
+func (s *artifactNativeTestStore) UpsertSCONodes(_ context.Context, operationID string, nodes []json.RawMessage) error {
 	s.operationID = operationID
 	s.nodes = append([]json.RawMessage(nil), nodes...)
 	return nil
 }
 
-func TestCSTXArtifactIngestorNormalizesOnServer(t *testing.T) {
-	store := &artifactTestStore{}
-	ingestor, err := NewArtifactIngestor(store)
+func TestArtifactImporterNormalizesOnServer(t *testing.T) {
+	store := &artifactNativeTestStore{}
+	ingestor, err := NewArtifactImporter(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 
-	_, _, err = ingestor.NormalizeArtifact(context.Background(), "scan-1", "gogo",
-		[]byte(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`))
+	_, _, err = ingestor.ImportArtifact(context.Background(), "scan-1", &toolpb.Artifact{Tool: "gogo",
+		Data: []byte(`{"ip":"192.0.2.1","port":"80","protocol":"tcp","status":"200","uri":"http://192.0.2.1/","title":"Test"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,16 +50,16 @@ func TestCSTXArtifactIngestorNormalizesOnServer(t *testing.T) {
 	}
 }
 
-func TestCSTXArtifactIngestorNormalizesAIScanWebSummary(t *testing.T) {
-	store := &artifactTestStore{}
-	ingestor, err := NewArtifactIngestor(store)
+func TestArtifactImporterNormalizesAIScanWebSummary(t *testing.T) {
+	store := &artifactNativeTestStore{}
+	ingestor, err := NewArtifactImporter(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ingestor.Close() })
 
-	_, _, err = ingestor.NormalizeArtifact(context.Background(), "curl-1", "aiscan",
-		[]byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`))
+	_, _, err = ingestor.ImportArtifact(context.Background(), "curl-1", &toolpb.Artifact{Tool: "aiscan",
+		Data: []byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -23,7 +23,7 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/internal/extensiontest"
@@ -49,7 +49,7 @@ import (
 func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 	t.Helper()
 	logger := telemetry.NopLogger()
-	events := eventbus.New[*aop.Event]()
+	events := coreevents.New()
 	fetch := searchtools.NewFetchCommand()
 	var index *association.Index
 	if engineSet != nil {
@@ -70,14 +70,14 @@ func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 	)
 }
 
-func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventEmitter, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
+func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
 	t.Helper()
 	values := scannerCommandValues(engineSet, workDir, events, logger)
 	values = append(values, extra...)
 	return extensiontest.Commands(t, "scanner", values...)
 }
 
-func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventEmitter, logger telemetry.Logger) []commands.Command {
+func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {
 	values := []commands.Command{
 		curl.NewCommand(logger, "", events),
 		proton.NewCommand(workDir, engineSet.Resources, logger, "", events),
@@ -323,9 +323,9 @@ type functionalEvent struct {
 	Data                       any
 }
 
-func newFunctionalRecorder(bus *eventbus.Bus[*aop.Event]) *functionalRecorder {
+func newFunctionalRecorder(bus *coreevents.Stream) *functionalRecorder {
 	recorder := &functionalRecorder{}
-	bus.Subscribe(func(event *aop.Event) {
+	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event == nil || event.GetExtension() == nil {
 			return
 		}
@@ -341,7 +341,7 @@ func newFunctionalRecorder(bus *eventbus.Bus[*aop.Event]) *functionalRecorder {
 			Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target, CallID: ref.GetCallId(), Data: decoded,
 		})
 		recorder.mu.Unlock()
-	})
+	}))
 	return recorder
 }
 
@@ -494,7 +494,7 @@ func TestScannerFunctionalRegression(t *testing.T) {
 	defer engineSet.Close()
 
 	workDir := t.TempDir()
-	bus := eventbus.New[*aop.Event]()
+	bus := coreevents.New()
 	recorder := newFunctionalRecorder(bus)
 	registry := registerTestScanners(t, engineSet, workDir, bus, telemetry.NopLogger())
 

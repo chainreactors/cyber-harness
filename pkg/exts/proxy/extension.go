@@ -4,7 +4,6 @@ package proxy
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
@@ -32,12 +31,6 @@ func (e *Extension) Hub() *proxytool.ProxyHub {
 		return nil
 	}
 	return e.resource.ProxyHub
-}
-
-// RegisterNamespaces publishes the resource protocols owned by this extension.
-// Callers never receive a lifecycle-capable proxy resource.
-func (e *Extension) RegisterNamespaces(mux *aop.NamespaceMux) error {
-	return proxytool.RegisterTrafficNamespace(mux, e.Hub())
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
