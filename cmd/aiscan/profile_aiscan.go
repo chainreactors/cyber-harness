@@ -17,7 +17,7 @@ import (
 	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
 	"github.com/chainreactors/aiscan/pkg/edition"
 	loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
 	ioaconsole "github.com/chainreactors/aiscan/pkg/exts/ioa/client/console"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
@@ -186,7 +186,7 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	entries = append(entries, extension.Entry{ID: "aiscan.signals", Extension: signals})
 	var sourceDependencies []string
 	if strings.TrimSpace(config.Output) != "" {
-		output, outputErr := eventoutput.New(events, eventoutput.Options{Path: config.Output})
+		output, outputErr := telemetryext.New(events, telemetryext.Options{Path: config.Output})
 		if outputErr != nil {
 			return nil, outputErr
 		}

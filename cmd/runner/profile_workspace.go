@@ -8,7 +8,7 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/tool"
-	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
+	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
 	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
@@ -70,7 +70,7 @@ func newWorkspaceProfile(config workspaceProfileConfig) (*workspaceProfile, erro
 	dependencies := []string{}
 	fileConfig := config.Files
 	if config.Output != "" {
-		output, outputErr := eventoutput.New(events, eventoutput.Options{Path: config.Output})
+		output, outputErr := telemetryext.New(events, telemetryext.Options{Path: config.Output})
 		if outputErr != nil {
 			return nil, outputErr
 		}
