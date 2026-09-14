@@ -17,7 +17,7 @@ import (
 )
 
 func normalizeProductConfig(config *types.DistributeConfig) error {
-	return client.NormalizeWire(config)
+	return client.NormalizeConfig(config)
 }
 func validateProductConfig(config *types.DistributeConfig) error {
 	return client.ValidateWire(config, productSections(false))

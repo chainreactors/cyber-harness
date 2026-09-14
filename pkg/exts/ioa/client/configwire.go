@@ -10,8 +10,8 @@ import (
 	"reflect"
 )
 
-// NormalizeWire consumes the legacy wire field at the product boundary.
-func NormalizeWire(config *types.DistributeConfig) error {
+// NormalizeConfig moves the IOA configuration into the extension namespace.
+func NormalizeConfig(config *types.DistributeConfig) error {
 	if config == nil || config.Ioa == nil {
 		return nil
 	}
@@ -38,7 +38,7 @@ func NormalizeWire(config *types.DistributeConfig) error {
 	config.Ioa = nil
 	return err
 }
-func LegacyConfig(config *types.DistributeConfig) *types.IOAConfig {
+func ConfigFromExtension(config *types.DistributeConfig) *types.IOAConfig {
 	if config == nil {
 		return nil
 	}
@@ -52,7 +52,7 @@ func LegacyConfig(config *types.DistributeConfig) *types.IOAConfig {
 	return value
 }
 func ProjectView(config *types.DistributeConfig, view *types.ConfigView) {
-	value := LegacyConfig(config)
+	value := ConfigFromExtension(config)
 	if value == nil {
 		return
 	}

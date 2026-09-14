@@ -90,7 +90,7 @@ func TestProductConfigMasksAndRestoresURLCredentials(t *testing.T) {
 	}
 }
 
-func TestServingLegacyConfigDoesNotRequireClientFields(t *testing.T) {
+func TestServingConfigDoesNotRequireClientFields(t *testing.T) {
 	r := productSections(true)
 	values, err := r.Normalize(map[string]any{"ioa": map[string]any{"url": "http://localhost:9000", "space": "default", "node_name": "legacy", "token": "secret"}})
 	if err != nil {
