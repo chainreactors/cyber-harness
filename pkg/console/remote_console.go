@@ -5,14 +5,14 @@ import (
 	"context"
 	aop "github.com/chainreactors/aiscan/aop"
 	cfg "github.com/chainreactors/aiscan/core/config"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"io"
 	"strings"
 	"sync"
 )
 
-func runRemoteConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl) error {
+func runRemoteConsole(ctx context.Context, rt *sessionext.Runtime, session *sessionext.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
 	}

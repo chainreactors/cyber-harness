@@ -6,10 +6,9 @@
 ## 单一生命周期图
 
 每个命令入口声明并拥有一张固定的 `core/extension.Set` 图。需要被 Web、Node 或 Runner
-复用的 AIScan 图由命令入口的具体 Profile 持有业务能力，通过 `pkg/profile.Application`
-供 host 使用。`profile.Assembly` 只委托同一个 Set，不保存产品能力，也不增加
-active/closing 状态；具体 `aiscanProfile` 位于 `cmd/aiscan`，发布状态统一读取
-`Assembly.Available()`（其来源是 `Set.Active()`）。构造函数注入真实依赖，
+复用的 AIScan 图由具体 `pkg/profile.Profile` 持有。Profile 内部只有该 Set 和少量已构造
+能力，发布状态统一读取 `Set.Active()`；不再存在 `Application` 接口、`Assembly`、
+`IsNil` 或命令目录中的 `aiscanProfile` 包装。构造函数注入真实依赖，
 `Entry.DependsOn` 只决定 Load 与逆序 Close；`extension.Scope` 只提供初始化 context、
 寿命 context 和同步撤销跟踪，不是服务容器，也不生成 owner ID 或资源 Ref。
 
@@ -84,18 +83,18 @@ FlowStore 完成提交和 body finalization 后发 HTTP hook。Traffic 协议只
 | `tools/*` | 原始实现和领域声明 |
 | `agent` | Agent 状态与 loop，只依赖 `tool.Executor` |
 | `pkg/app` | 内置产品状态与业务访问面；不选择插件、不生成 Entries |
-| `pkg/profile` | host 接口、Factory 输入和无产品状态的 Set 组装器 |
-| `cmd/aiscan`、`cmd/runner` | 实现具体 Profile、构造实例并声明唯一固定产品图 |
+| `pkg/profile` | 持有唯一 Set 并发布 App、Session Runtime 等少量能力的具体 Profile |
+| `cmd/aiscan`、`cmd/runner` | 构造实例并声明唯一固定产品图 |
 
-AIScan 的主要加载顺序是 EventOutput、Observe、Proxy/IOA、App 与能力贡献者、Command
-Registry、Tool Registry、可选 Agent 扩展；关闭严格逆序。Output 可独立记录 Agent 事件，
-Observe 只在明确选择观察种类时安装。
+AIScan 的主要加载顺序是 EventOutput、Observe、Proxy/IOA、可选 Agent Loop、App 与能力
+贡献者、Command Registry、Tool Registry、可选 Session；关闭严格逆序。Output 可独立记录
+Agent 事件，Observe 只在明确选择观察种类时安装。
 
-`pkg/exts/agent.Extension` 是 Agent 执行的唯一生命周期所有者，通过 `Runtime()` 发布不含
-Load/Close 的业务能力。该 Runtime 同时实现受控 `agent.Loop` 并拥有 Session、Run、Inbox、
-准入、取消和 drain；不再存在第二个 `pkg/exts/session` 插件或 Agent/Session 双扩展链。
-会话级 Loop 覆盖入口已移除。仅用于扫描命令的原始 Loop 由 Scanner Extension 的 Registry
-准入和寿命保护，不伪造一个没有 Session 的 Agent 宿主。
+`pkg/exts/agent.Extension` 只拥有选定 `agent.Loop` 的准入、寿命取消和 drain，通过
+`Runtime()` 发布不含 Load/Close 的受控 Loop。`pkg/exts/session.Extension` 独立拥有
+Session、Run、Inbox、队列、历史与协议，通过构造参数接收受控 Loop 和 App。Session 在
+Set 中依赖完整 App 发布点，App 图又依赖 Agent，因此逆序关闭会先排空 Session，再释放 App
+和 Agent。两种扩展不相互导入，不查找或关闭对方；关系只由业务能力注入与固定图表达。
 
 `agent.Agent` 是单次会话中的领域状态，subagent 是受父调用 context 约束的临时执行，
 二者都不拥有 Extension、Registry 或 Profile 生命周期。这是执行模型本身，而不是第二套
@@ -109,6 +108,7 @@ Files、Proxy、IOA 在原始实现中拆分为生命周期 `Resource` 与业务
 ## 禁止回归
 
 - 不恢复 `commands.Catalog`、`toolset.Catalog`、Registrar/Registration 或第二套 Registry。
+- 不恢复 `profile.Application`、`profile.Assembly`、`IsNil`、`aiscanProfile` 或 Profile 自有状态机。
 - 不恢复 `filetools`、`workspacefiles`、`toolgroup`、第二套日志扩展或独立 FileAccess 事件管线。
 - App 不生成 Entries；App 和 Extension 不创建子 Set，不维护通用 cleanup bag 或服务定位器。
 - App 不暴露可写 EventBus；AOP 事件只经 `Publish` 进入唯一 Stream，观察与持久化分别使用 `Observe` 和 `Consume`。
@@ -116,5 +116,6 @@ Files、Proxy、IOA 在原始实现中拆分为生命周期 `Resource` 与业务
 - 活跃 Registry 不热替换、不 shadow registration、不保留兼容 fallback。
 - `tools/*` 和 `agent/*` 不直接实现或导入 Extension 宿主生命周期。
 - 原始实现不关闭由 Profile 拥有的 Registry；业务能力对象不提供资源关闭入口。
+- Agent 扩展不吸收 Session 管理；Session 扩展不重做 Loop 准入，也不导入 Agent 扩展。
 
 架构测试固定以上边界；默认/full 编译和 lifecycle/race 测试是交付门禁。

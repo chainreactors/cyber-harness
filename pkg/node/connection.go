@@ -11,7 +11,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
@@ -42,7 +42,7 @@ type connectionConfig struct {
 	Bash     *commands.BashTool
 	// Agent owns connection-side events. Control uses the product runtime;
 	// nil denotes a tool-only node. No optional interface selects routing.
-	Control       *agentext.Runtime
+	Control       *sessionext.Runtime
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
 	Logger        telemetry.Logger

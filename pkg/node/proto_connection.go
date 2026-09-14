@@ -32,7 +32,7 @@ import (
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	toolset "github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -556,7 +556,7 @@ func newAgentConnectionNamespaceMux(
 // payload, then calls the same session handler registered for stdio/inline.
 func handleAgentCoreMessage(
 	ctx context.Context,
-	control *agentext.Runtime,
+	control *sessionext.Runtime,
 	envelope *aop.Envelope,
 	value *aop.ProtocolMessage,
 	send func(string, protobuf.Message),

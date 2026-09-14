@@ -101,10 +101,12 @@ func TestConsoleHasNoLegacyTUIBoundary(t *testing.T) {
 	}
 }
 
-func TestAgentRuntimeDoesNotImportPresentation(t *testing.T) {
+func TestAgentAndSessionRuntimesDoNotImportPresentation(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
-		assertNoImportPrefix(t, filepath.Join(root, "pkg", "exts", "agent"), modulePath+"/"+forbidden)
+	for _, capability := range []string{"agent", "session"} {
+		for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
+			assertNoImportPrefix(t, filepath.Join(root, "pkg", "exts", capability), modulePath+"/"+forbidden)
+		}
 	}
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "runner"), modulePath+"/pkg/tui")
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "console"), modulePath+"/pkg/runner")
@@ -112,19 +114,21 @@ func TestAgentRuntimeDoesNotImportPresentation(t *testing.T) {
 	assertNoImportPrefix(t, filepath.Join(root, "pkg", "web"), modulePath+"/pkg/tui")
 }
 
-func TestAgentRuntimeDependencyClosureIsHeadless(t *testing.T) {
+func TestAgentAndSessionRuntimeDependencyClosuresAreHeadless(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.Command("go", "list", "-deps", "./pkg/exts/agent")
-	cmd.Dir = root
-	data, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("runtime dependencies: %v\n%s", err, data)
-	}
-	for _, dep := range strings.Fields(string(data)) {
-		for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
-			prefix := modulePath + "/" + forbidden
-			if dep == prefix || strings.HasPrefix(dep, prefix+"/") {
-				t.Errorf("runtime transitively depends on %s", dep)
+	for _, capability := range []string{"agent", "session"} {
+		cmd := exec.Command("go", "list", "-deps", "./pkg/exts/"+capability)
+		cmd.Dir = root
+		data, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s runtime dependencies: %v\n%s", capability, err, data)
+		}
+		for _, dep := range strings.Fields(string(data)) {
+			for _, forbidden := range []string{"pkg/runner", "pkg/console", "pkg/tui", "pkg/host", "pkg/node", "pkg/web", "cmd"} {
+				prefix := modulePath + "/" + forbidden
+				if dep == prefix || strings.HasPrefix(dep, prefix+"/") {
+					t.Errorf("%s runtime transitively depends on %s", capability, dep)
+				}
 			}
 		}
 	}
@@ -193,11 +197,12 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 		}
 	}
 	resources := map[string][]string{
-		filepath.Join("tools", "files", "fs.go"):              {"type Resource struct {\n\tFiles *Files", "func (r *Resource) Open", "func (r *Resource) Close"},
-		filepath.Join("tools", "ioa", "service.go"):           {"type Resource struct {\n\tRuntime *Runtime", "func (r *Resource) Start", "func (r *Resource) Close"},
-		filepath.Join("tools", "proxy", "hub.go"):             {"type Resource struct {\n\tProxyHub *ProxyHub", "func (r *Resource) Start", "func (r *Resource) Close"},
-		filepath.Join("pkg", "app", "app.go"):                 {"type Resource struct {\n\tApp *App", "func (r *Resource) Load", "func (r *Resource) Close"},
-		filepath.Join("pkg", "exts", "agent", "extension.go"): {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Load", "func (e *Extension) Close"},
+		filepath.Join("tools", "files", "fs.go"):                {"type Resource struct {\n\tFiles *Files", "func (r *Resource) Open", "func (r *Resource) Close"},
+		filepath.Join("tools", "ioa", "service.go"):             {"type Resource struct {\n\tRuntime *Runtime", "func (r *Resource) Start", "func (r *Resource) Close"},
+		filepath.Join("tools", "proxy", "hub.go"):               {"type Resource struct {\n\tProxyHub *ProxyHub", "func (r *Resource) Start", "func (r *Resource) Close"},
+		filepath.Join("pkg", "app", "app.go"):                   {"type Resource struct {\n\tApp *App", "func (r *Resource) Load", "func (r *Resource) Close"},
+		filepath.Join("pkg", "exts", "agent", "extension.go"):   {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Load", "func (e *Extension) Close"},
+		filepath.Join("pkg", "exts", "session", "extension.go"): {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Load", "func (e *Extension) Close"},
 	}
 	for rel, required := range resources {
 		source := readRepositoryFile(t, root, rel)
@@ -208,11 +213,12 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 		}
 	}
 	for rel, forbidden := range map[string][]string{
-		filepath.Join("tools", "files", "fs.go"):            {"func (f *Files) Open", "func (f *Files) Close"},
-		filepath.Join("tools", "ioa", "service.go"):         {"func (m *Runtime) Start", "func (m *Runtime) Close"},
-		filepath.Join("tools", "proxy", "hub.go"):           {"func (h *ProxyHub) Start", "func (h *ProxyHub) Close"},
-		filepath.Join("pkg", "app", "app.go"):               {"func (a *App) Load(", "func (a *App) Close("},
-		filepath.Join("pkg", "exts", "agent", "runtime.go"): {"func (rt *Runtime) Load(", "func (rt *Runtime) Close("},
+		filepath.Join("tools", "files", "fs.go"):              {"func (f *Files) Open", "func (f *Files) Close"},
+		filepath.Join("tools", "ioa", "service.go"):           {"func (m *Runtime) Start", "func (m *Runtime) Close"},
+		filepath.Join("tools", "proxy", "hub.go"):             {"func (h *ProxyHub) Start", "func (h *ProxyHub) Close"},
+		filepath.Join("pkg", "app", "app.go"):                 {"func (a *App) Load(", "func (a *App) Close("},
+		filepath.Join("pkg", "exts", "agent", "extension.go"): {"func (r *Runtime) Load(", "func (r *Runtime) Close("},
+		filepath.Join("pkg", "exts", "session", "runtime.go"): {"func (rt *Runtime) Load(", "func (rt *Runtime) Close("},
 	} {
 		source := readRepositoryFile(t, root, rel)
 		for _, value := range forbidden {
@@ -222,10 +228,12 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 		}
 	}
 	agentExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "agent", "extension.go"))
-	agentRuntime := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "agent", "runtime.go"))
+	sessionExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "session", "extension.go"))
+	sessionRuntime := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "session", "runtime.go"))
 	for source, required := range map[string][]string{
-		agentExtension: {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Runtime() *Runtime", "func (rt *Runtime) Run"},
-		agentRuntime:   {"type Runtime struct"},
+		agentExtension:   {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Runtime() *Runtime", "func (r *Runtime) Run"},
+		sessionExtension: {"type Extension struct{ runtime *Runtime }", "func (e *Extension) Runtime() *Runtime"},
+		sessionRuntime:   {"type Runtime struct"},
 	} {
 		for _, value := range required {
 			if strings.Contains(source, value) {
@@ -245,9 +253,11 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 			t.Errorf("agent lifecycle owner publishes business method %q", method)
 		}
 	}
-	legacySources, err := filepath.Glob(filepath.Join(root, "pkg", "exts", "session", "*.go"))
-	if err != nil || len(legacySources) != 0 {
-		t.Fatal("session remains a second extension boundary instead of the agent runtime capability")
+	if strings.Contains(sessionExtension, "func (e *Extension) Run(") {
+		t.Fatal("session lifecycle extension duplicates agent loop execution")
+	}
+	if strings.Contains(sessionRuntime, "loopRuntime") {
+		t.Fatal("session runtime reimplements agent loop admission")
 	}
 	skillsExtension := readRepositoryFile(t, root, filepath.Join("pkg", "exts", "skills", "extension.go"))
 	for _, required := range []string{"type Catalog struct", "func (m *Extension) Catalog() *Catalog", "func (c *Catalog) Locations"} {
@@ -262,7 +272,15 @@ func TestExtensionOwnershipBoundariesAreStructural(t *testing.T) {
 	if strings.Count(profileSource, "agentext.New(") != 1 {
 		t.Fatal("AIScan profile must construct one Agent lifecycle extension")
 	}
-	if strings.Contains(profileSource, "*proxyext.Extension") || !strings.Contains(profileSource, "proxytool.RegisterTrafficNamespace(mux, p.proxy)") {
+	if strings.Count(profileSource, "sessionext.New(") != 1 {
+		t.Fatal("AIScan profile must construct one Session lifecycle extension")
+	}
+	for _, required := range []string{"applicationDependencies = append(applicationDependencies, agentID)", "ID: sessionID", "DependsOn: []string{applicationReadyID}"} {
+		if !strings.Contains(profileSource, required) {
+			t.Errorf("AIScan Agent/Session dependency is missing %q", required)
+		}
+	}
+	if strings.Contains(profileSource, "*proxyext.Extension") || !strings.Contains(profileSource, "proxytool.RegisterTrafficNamespace(mux, proxyHub)") {
 		t.Fatal("AIScan profile must publish the proxy capability without retaining its lifecycle extension")
 	}
 	workspaceProfile := readRepositoryFile(t, root, filepath.Join("cmd", "runner", "profile_workspace.go"))
@@ -354,14 +372,14 @@ func TestAIScanProfileIsOnlyApplicationCompositionRoot(t *testing.T) {
 		}
 	}
 	abstraction := readRepositoryFile(t, root, filepath.Join("pkg", "profile", "profile.go"))
-	for _, forbidden := range []string{"proxyext", "observeext", "eventoutput", "newAIScanProfile"} {
+	for _, forbidden := range []string{"proxyext", "observeext", "eventoutput", "newProductProfile"} {
 		if strings.Contains(abstraction, forbidden) {
 			t.Errorf("generic profile assembler contains product implementation %q", forbidden)
 		}
 	}
 }
 
-func TestProfileDelegatesLifecycleToExtensionSet(t *testing.T) {
+func TestProfileAddsNoLifecycleStateMachine(t *testing.T) {
 	root := repositoryRoot(t)
 	profileRoot := filepath.Join(root, "pkg", "profile")
 	err := filepath.WalkDir(profileRoot, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -381,14 +399,14 @@ func TestProfileDelegatesLifecycleToExtensionSet(t *testing.T) {
 	}
 
 	abstraction := readRepositoryFile(t, root, filepath.Join("pkg", "profile", "profile.go"))
-	for _, obsolete := range []string{"type Profile struct", "type Config struct", "RegisterResourceNamespaces func", "sync.Mutex", "sync.RWMutex"} {
+	for _, obsolete := range []string{"type Application interface", "type Assembly struct", "func Assemble(", "IsNil(", "func (p *Profile) Runtime(", "sync.Mutex", "sync.RWMutex", "reflect."} {
 		if strings.Contains(abstraction, obsolete) {
-			t.Errorf("profile duplicates lifecycle or adds a parallel host abstraction: %q", obsolete)
+			t.Errorf("profile duplicates lifecycle or interface nil handling: %q", obsolete)
 		}
 	}
-	for _, required := range []string{"type Application interface", "type Assembly struct", "type Factory func", "*extension.Set", ".Active()", "a.extensions.Load(ctx)", "a.extensions.Close(ctx)"} {
+	for _, required := range []string{"type Profile struct", "type Config struct", "type Factory func", "*extension.Set", ".Active()", "func (p *Profile) Sessions()", "p.extensions.Load(ctx)", "p.extensions.Close(ctx)"} {
 		if !strings.Contains(abstraction, required) {
-			t.Errorf("generic profile assembler is missing %q", required)
+			t.Errorf("concrete host profile is missing %q", required)
 		}
 	}
 	extensionSource := readRepositoryFile(t, root, filepath.Join("core", "extension", "extension.go"))
@@ -603,7 +621,7 @@ func TestObservationProtocolsDoNotOwnLiveSubscriptionLifecycles(t *testing.T) {
 
 func TestRunnerIsSingleTagFreeImplementation(t *testing.T) {
 	root := repositoryRoot(t)
-	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("pkg", "exts", "agent"), filepath.Join("pkg", "console"), filepath.Join("cmd", "runner")} {
+	for _, rel := range []string{filepath.Join("pkg", "runner"), filepath.Join("pkg", "exts", "agent"), filepath.Join("pkg", "exts", "session"), filepath.Join("pkg", "console"), filepath.Join("cmd", "runner")} {
 		dir := filepath.Join(root, rel)
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -775,35 +793,35 @@ func TestGoTestFilesFollowSourceFiles(t *testing.T) {
 	// one-to-one production source file. They exercise a package boundary or a
 	// resource lifetime assembled from several files.
 	standalone := map[string]bool{
-		"architecture_test.go":                     true,
-		"session_architecture_test.go":             true,
-		"aop/mux_lifecycle_test.go":                true,
-		"cmd/aiscan/imports_default_test.go":       true,
-		"cmd/aiscan/imports_full_test.go":          true,
-		"cmd/aiscan/imports_record_full_test.go":   true,
-		"core/extension/resource_test.go":          true,
-		"core/extension/subscription_test.go":      true,
-		"core/eventbus/lifecycle_test.go":          true,
-		"agent/hooks/hooks_test.go":                true,
-		"agent/tool_registry_test.go":              true,
-		"pkg/commands/command_lifecycle_test.go":   true,
-		"pkg/app/ownership_test.go":                true,
-		"pkg/console/recorder_extension_test.go":   true,
-		"pkg/exts/agent/command_ownership_test.go": true,
-		"pkg/exts/agent/output_extension_test.go":  true,
-		"pkg/exts/agent/ownership_test.go":         true,
-		"pkg/host/example_test.go":                 true,
-		"pkg/host/lifecycle_test.go":               true,
-		"pkg/host/process_test.go":                 true,
-		"cmd/runner/wire_test.go":                  true,
-		"pkg/imageutil/encoding_test.go":           true,
-		"pkg/web/service/config_lifecycle_test.go": true,
-		"pkg/exts/agent/stdio_test.go":             true,
-		"tools/files/lifecycle_test.go":            true,
-		"tools/proxy/capture_lifecycle_test.go":    true,
-		"tools/proxy/flow_store_lifecycle_test.go": true,
-		"tools/proxy/hub_lifecycle_test.go":        true,
-		"tools/record/register_test.go":            true,
+		"architecture_test.go":                       true,
+		"session_architecture_test.go":               true,
+		"aop/mux_lifecycle_test.go":                  true,
+		"cmd/aiscan/imports_default_test.go":         true,
+		"cmd/aiscan/imports_full_test.go":            true,
+		"cmd/aiscan/imports_record_full_test.go":     true,
+		"core/extension/resource_test.go":            true,
+		"core/extension/subscription_test.go":        true,
+		"core/eventbus/lifecycle_test.go":            true,
+		"agent/hooks/hooks_test.go":                  true,
+		"agent/tool_registry_test.go":                true,
+		"pkg/commands/command_lifecycle_test.go":     true,
+		"pkg/app/ownership_test.go":                  true,
+		"pkg/console/recorder_extension_test.go":     true,
+		"pkg/exts/session/command_ownership_test.go": true,
+		"pkg/exts/session/output_extension_test.go":  true,
+		"pkg/exts/session/ownership_test.go":         true,
+		"pkg/host/example_test.go":                   true,
+		"pkg/host/lifecycle_test.go":                 true,
+		"pkg/host/process_test.go":                   true,
+		"cmd/runner/wire_test.go":                    true,
+		"pkg/imageutil/encoding_test.go":             true,
+		"pkg/web/service/config_lifecycle_test.go":   true,
+		"pkg/exts/session/stdio_test.go":             true,
+		"tools/files/lifecycle_test.go":              true,
+		"tools/proxy/capture_lifecycle_test.go":      true,
+		"tools/proxy/flow_store_lifecycle_test.go":   true,
+		"tools/proxy/hub_lifecycle_test.go":          true,
+		"tools/record/register_test.go":              true,
 	}
 	allowedSuffixes := map[string]bool{
 		"default": true, "e2e": true, "full": true, "integration": true,

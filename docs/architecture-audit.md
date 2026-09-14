@@ -4,8 +4,8 @@
 
 ## 结果
 
-- 每个组合根只有一个 `extension.Set`；`pkg/profile` 只提供接口与 `Assembly`，具体
-  `aiscanProfile` 位于 `cmd/aiscan`，且不复制 Set 的发布或关闭状态。App 不生成 Entry，也不拥有子图。
+- 每个组合根只有一个 `extension.Set`；具体 `profile.Profile` 直接持有该 Set 和少量已构造
+  能力，不存在 `Application`、`Assembly`、`aiscanProfile` 或第二套发布/关闭状态。App 不生成 Entry，也不拥有子图。
 - `pkg/toolset.Registry` 与 `pkg/commands.Registry` 共享 `core/registry.Store[T]`，互不依赖。
 - 同名批次原子失败；激活后不可变；Close 拒绝、取消、drain，超时可重试。
 - `core/hooks.Registry` 覆盖 Tool、Command、Process、File、HTTP 的真实执行边界。
@@ -17,9 +17,9 @@
 - ToolNode 没有通用连接 Extension 工厂；只有实际支持的 core/tool 协议。
 - Agent 只依赖 `tool.Executor`；无 Agent 的文件 Profile 保持 headless 依赖闭包。
 - `extension.Scope` 不含 owner ID、资源 Ref 或服务定位；只表达初始化、寿命和注册撤销。
-- Files、Proxy、IOA 与 App 均分离生命周期所有者和业务访问面；Agent Extension 发布一个
-  同时覆盖受控 Loop 与 Session 的 Runtime，不再保留独立 Session Extension。不存在
-  Borrow/Handle/seal 适配层，业务对象不提供 Load/Open/Start/Close。
+- Files、Proxy、IOA 与 App 均分离生命周期所有者和业务访问面；Agent Extension 只发布
+  受控 Loop，Session Extension 独立发布会话 Runtime。两者由能力注入和 Set 依赖关联，
+  不互相导入或关闭。不存在 Borrow/Handle/seal 适配层，业务对象不提供 Load/Open/Start/Close。
 
 ## 防回归
 
@@ -33,7 +33,7 @@ panic 稳定错误、Observe operation 关联、EventOutput 排空和 Profile �
 
 ```powershell
 go test -count=1 ./...
-go test -race -count=1 ./core/extension ./core/registry ./core/hooks ./core/events ./core/eventbus ./core/tool/hooks ./pkg/commands ./pkg/toolset ./pkg/exts/observe ./pkg/exts/eventoutput ./pkg/exts/proxy ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/toolnode ./tools/proxy ./cmd/aiscan ./cmd/runner
+go test -race -count=1 ./core/extension ./core/registry ./core/hooks ./core/events ./core/eventbus ./core/tool/hooks ./pkg/commands ./pkg/toolset ./pkg/exts/observe ./pkg/exts/eventoutput ./pkg/exts/proxy ./pkg/exts/agent ./pkg/exts/session ./pkg/profile ./pkg/node ./pkg/toolnode ./tools/proxy ./cmd/aiscan ./cmd/runner
 go test -tags full -run '^$' ./...
 go build -mod=readonly ./...
 ```
@@ -49,6 +49,6 @@ go build -mod=readonly ./...
 - `harness` 的三个 `TestUser*` 真实进程场景：配置与崩溃恢复、并发配置切换、启动恢复与确认退出。
   场景使用隔离目录、loopback 服务及无模型配置，不调用真实 LLM。
 
-没有执行依赖真实模型的 `TestLiveLLM*` 或需启动浏览器的 `pkg/headless` 测试，
-因此这不是全仓 `go test ./...` 全通过的声明。TUI/Web 独立扩展化仍是后续工作，
-当前验证的是已有 Console/Web 入口与统一 Agent Runtime 的兼容性。
+没有执行依赖真实模型的 `TestLiveLLM*`；本机浏览器复用 E2E 仍按环境测试单独报告，
+因此不将环境失败描述成默认全仓测试通过。Console/Web/Node 是 Session Runtime 的并列
+入口，不拥有独立资源或注册，无需为了形式一致再包装成 Extension。

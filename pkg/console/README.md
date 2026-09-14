@@ -1,7 +1,7 @@
 # Console：终端任务与展示所有权
 
-Console 直接接收 `*agent.Runtime` 和 `*agent.Session`，使用外部终端库 `github.com/chainreactors/tui`。
-Agent Runtime 不保存输出接口、PTY Manager 或终端模式。
+Console 直接接收 `*session.Runtime` 和 `*session.Session`，使用外部终端库 `github.com/chainreactors/tui`。
+Session Runtime 不保存输出接口、PTY Manager 或终端模式。
 
 - `AttachLocalREPL(ctx, rt, option)`：直接使用进程终端，避免把 readline 控制序列写入可重放 PTY 缓冲。
 - `StartPersistent(rt, option)`：在 App 的 Bash Manager 中创建一个持久 REPL。传输断开只解除监视，重连复用同一终端。
@@ -21,4 +21,4 @@ Session 是唯一执行入口，Runtime 的有界队列决定准入和顺序。C
 中其他入口的工作。Console 关闭时停止准入、取消并等待自己的工作，再注销展示订阅。
 
 入口负责在创建 Runtime 前指定 `PrimarySessionID: MainREPLName` 与录制选项。
-释放顺序为 `REPL.Close()` → Profile 关闭其 Agent Extension、App 与资源图。
+释放顺序为 `REPL.Close()` → Profile 关闭 Session Extension、App、Agent Extension 与资源图。

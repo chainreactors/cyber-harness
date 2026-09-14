@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -37,7 +37,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: application.App, Option: option, Logger: telemetry.NopLogger(),
+	rt, err := sessionext.New(sessionext.Config{Application: application.App, Option: option, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -167,7 +167,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		info, ok := mgr.Get(initial.ID)
 		return !ok || info.State != pty.StateRunning
 	})
-	session, err := rt.Runtime().OpenSession(ctx, agentext.SessionOptions{ID: "after-console"})
+	session, err := rt.Runtime().OpenSession(ctx, sessionext.SessionOptions{ID: "after-console"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: application.App, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
+	rt, err := sessionext.New(sessionext.Config{Application: application.App, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})

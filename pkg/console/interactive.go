@@ -23,7 +23,7 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	outputpkg "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/tui/console"
@@ -50,8 +50,8 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	runtime        *agentext.Runtime
-	session        *agentext.Session
+	runtime        *sessionext.Runtime
+	session        *sessionext.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -85,7 +85,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *sessionext.Runtime, session *sessionext.Session, option *cfg.Option, t *rlterm.Terminal) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}

@@ -1,4 +1,4 @@
-package agent
+package session
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	cfg "github.com/chainreactors/aiscan/core/config"
+	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -52,6 +53,7 @@ func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 }
 
 func TestCommandDeclarationsRejectAmbiguousNames(t *testing.T) {
+	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
 	handler := func(context.Context, *Session, []string) (*types.CommandResult, error) { return nil, nil }
 	for _, commands := range [][]Command{
 		{{Spec: &types.CommandSpec{Name: "/status"}, Handler: handler}},
@@ -59,7 +61,7 @@ func TestCommandDeclarationsRejectAmbiguousNames(t *testing.T) {
 		{{Spec: &types.CommandSpec{Name: "missing-slash"}, Handler: handler}},
 		{{Spec: &types.CommandSpec{Name: "/custom"}}},
 	} {
-		if _, err := New(Config{Commands: commands}); err == nil {
+		if _, err := New(Config{Application: application.App, Option: &cfg.Option{}, Commands: commands}); err == nil {
 			t.Fatalf("accepted invalid declarations: %v", commands)
 		}
 	}
@@ -91,7 +93,8 @@ func TestCommandFailureDoesNotStrandSessionQueue(t *testing.T) {
 }
 
 func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
-	owner, err := New(Config{})
+	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	owner, err := New(Config{Application: application.App, Option: &cfg.Option{}})
 	if err != nil {
 		t.Fatal(err)
 	}

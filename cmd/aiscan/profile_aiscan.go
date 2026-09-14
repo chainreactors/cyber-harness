@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	ioaext "github.com/chainreactors/aiscan/pkg/exts/ioa"
 	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
 	proxyext "github.com/chainreactors/aiscan/pkg/exts/proxy"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profilepkg "github.com/chainreactors/aiscan/pkg/profile"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
 	ioatools "github.com/chainreactors/aiscan/tools/ioa"
@@ -34,25 +34,26 @@ const (
 	applicationID = "aiscan.application"
 	ioaID         = "aiscan.ioa"
 	agentID       = "aiscan.agent"
+	sessionID     = "aiscan.session"
 )
 
-type aiscanProfileConfig struct {
+type productProfileConfig struct {
 	Option      *cfg.Option
 	Application apppkg.Config
 	IOA         *ioatools.Config
-	// Runtime nil creates the application-only profile used by the Web service.
-	Runtime   *agentext.Config
+	// Session nil creates the application-only profile used by the Web service.
+	Session   *sessionext.Config
 	Logger    telemetry.Logger
 	Observe   []observeext.Kind
 	Output    string
 	Artifacts managementapi.ArtifactImporter
 }
 
-func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, runtimeConfig *agentext.Config, logger telemetry.Logger) aiscanProfileConfig {
+func profileConfigFromOption(option *cfg.Option, features apppkg.RuntimeFeatures, sessionConfig *sessionext.Config, logger telemetry.Logger) productProfileConfig {
 	application := apppkg.AppConfig(option, features, logger)
-	return aiscanProfileConfig{
+	return productProfileConfig{
 		Option: option, Application: application,
-		IOA: ioatools.ConfigFromOption(option), Runtime: cloneConfig(runtimeConfig), Logger: logger,
+		IOA: ioatools.ConfigFromOption(option), Session: cloneSessionConfig(sessionConfig), Logger: logger,
 		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
 	}
 }
@@ -74,20 +75,11 @@ func parseObserve(value string) []observeext.Kind {
 	return result
 }
 
-type aiscanProfile struct {
-	assembly *profilepkg.Assembly
-	app      *apppkg.App
-	runtime  *agentext.Runtime
-	proxy    *proxytool.ProxyHub
+var productProfileFactory profilepkg.Factory = func(request profilepkg.Request) (*profilepkg.Profile, error) {
+	return newProductProfile(profileConfigFromOption(request.Option, request.Features, request.Session, request.Logger))
 }
 
-var _ profilepkg.Application = (*aiscanProfile)(nil)
-
-var aiscanProfileFactory profilepkg.Factory = func(request profilepkg.Request) (profilepkg.Application, error) {
-	return newAIScanProfile(profileConfigFromOption(request.Option, request.Features, request.Runtime, request.Logger))
-}
-
-func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
+func newProductProfile(config productProfileConfig) (*profilepkg.Profile, error) {
 	if config.Option == nil {
 		return nil, fmt.Errorf("aiscan profile option is required")
 	}
@@ -97,7 +89,7 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	if config.Application.Capabilities.Empty() {
 		config.Application.Capabilities = edition.Catalog()
 	}
-	config.Runtime = cloneConfig(config.Runtime)
+	config.Session = cloneSessionConfig(config.Session)
 	workDir, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve AIScan working directory: %w", err)
@@ -110,15 +102,23 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	}
 	proxyHub := proxyExtension.Hub()
 	events := coreevents.New()
-	var runtimeLoop agent.Loop
-	if config.Runtime != nil {
-		runtimeLoop = config.Runtime.Loop
+	var selectedLoop agent.Loop
+	if config.Session != nil {
+		selectedLoop = config.Session.Loop
 	}
-	scannerLoop := runtimeLoop
-	if scannerLoop == nil && config.Application.Scanner.AIEnabled {
-		scannerLoop = agent.StandardLoop{}
+	if selectedLoop == nil && config.Application.Scanner.AIEnabled {
+		selectedLoop = agent.StandardLoop{}
 	}
-	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, scannerLoop, workDir)
+	var agentExtension *agentext.Extension
+	var admittedLoop agent.Loop
+	if selectedLoop != nil {
+		agentExtension, err = agentext.New(selectedLoop)
+		if err != nil {
+			return nil, fmt.Errorf("construct Agent extension: %w", err)
+		}
+		admittedLoop = agentExtension.Runtime()
+	}
+	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, events, proxyHub, admittedLoop, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("construct AIScan application: %w", err)
 	}
@@ -154,6 +154,10 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	}
 	entries = append(entries, extension.Entry{ID: proxyID, DependsOn: append([]string(nil), sourceDependencies...), Extension: proxyExtension})
 	applicationDependencies := append([]string{proxyID}, sourceDependencies...)
+	if agentExtension != nil {
+		entries = append(entries, extension.Entry{ID: agentID, Extension: agentExtension})
+		applicationDependencies = append(applicationDependencies, agentID)
+	}
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
 		ioa, err = ioaext.New(*config.IOA, application.Commands, config.Logger)
@@ -167,79 +171,44 @@ func newAIScanProfile(config aiscanProfileConfig) (*aiscanProfile, error) {
 	// Registries activate after every declaration and drain before resources.
 	applicationEntries, applicationReadyID := applicationGraph.entriesFor(applicationID, applicationDependencies...)
 	entries = append(entries, applicationEntries...)
-	var run *agentext.Runtime
+	var run *sessionext.Runtime
 	var ioaRuntime *ioatools.Runtime
 	if ioa != nil {
 		ioaRuntime = ioa.Runtime()
 	}
-	if config.Runtime != nil {
-		agentConfig := *config.Runtime
-		agentConfig.Application, agentConfig.IOA = application, ioaRuntime
-		agentConfig.Option, agentConfig.Logger = config.Option, config.Logger
-		agentConfig.Loop = runtimeLoop
-		agentExtension, err := agentext.New(agentConfig)
+	if config.Session != nil {
+		sessionConfig := *config.Session
+		sessionConfig.Application, sessionConfig.IOA = application, ioaRuntime
+		sessionConfig.Option, sessionConfig.Logger = config.Option, config.Logger
+		sessionConfig.Loop = admittedLoop
+		sessionExtension, err := sessionext.New(sessionConfig)
 		if err != nil {
-			return nil, fmt.Errorf("construct AIScan runtime: %w", err)
+			return nil, fmt.Errorf("construct Session extension: %w", err)
 		}
-		run = agentExtension.Runtime()
+		run = sessionExtension.Runtime()
 		entries = append(entries, extension.Entry{
-			ID: agentID, DependsOn: []string{applicationReadyID},
-			Extension: agentExtension,
+			ID: sessionID, DependsOn: []string{applicationReadyID},
+			Extension: sessionExtension,
 		})
 	}
-	assembly, err := profilepkg.Assemble(entries...)
-	if err != nil {
-		return nil, err
-	}
-	return &aiscanProfile{assembly: assembly, app: application, runtime: run, proxy: proxyHub}, nil
+	return profilepkg.New(profilepkg.Config{
+		Entries:  entries,
+		App:      application,
+		Sessions: run,
+		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
+			return proxytool.RegisterTrafficNamespace(mux, proxyHub)
+		},
+	})
 }
 
-func (p *aiscanProfile) Load(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
-		return fmt.Errorf("AIScan profile is required")
-	}
-	return p.assembly.Load(ctx)
-}
-
-func (p *aiscanProfile) App() (*apppkg.App, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() || p.app == nil {
-		return nil, fmt.Errorf("AIScan profile is not active")
-	}
-	return p.app, nil
-}
-
-func (p *aiscanProfile) Runtime() (*agentext.Runtime, error) {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
-		return nil, fmt.Errorf("AIScan profile is not active")
-	}
-	if p.runtime == nil {
-		return nil, fmt.Errorf("AIScan profile has no Agent runtime")
-	}
-	return p.runtime, nil
-}
-
-func (p *aiscanProfile) RegisterResourceNamespaces(mux *aop.NamespaceMux) error {
-	if p == nil || p.assembly == nil || !p.assembly.Available() {
-		return fmt.Errorf("AIScan profile is not active")
-	}
-	return proxytool.RegisterTrafficNamespace(mux, p.proxy)
-}
-
-func (p *aiscanProfile) Close(ctx context.Context) error {
-	if p == nil || p.assembly == nil {
-		return nil
-	}
-	return p.assembly.Close(ctx)
-}
-
-func cloneConfig(config *agentext.Config) *agentext.Config {
+func cloneSessionConfig(config *sessionext.Config) *sessionext.Config {
 	if config == nil {
 		return nil
 	}
 	cloned := *config
 	if config.PromptConfig != nil {
 		prompt := *config.PromptConfig
-		prompt.LoadedSkills = append([]agentext.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
+		prompt.LoadedSkills = append([]sessionext.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
 		cloned.PromptConfig = &prompt
 	}
 	return &cloned

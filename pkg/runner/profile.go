@@ -6,18 +6,18 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 )
 
-func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (profile.Application, *agentext.Runtime, error) {
+func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, sessionConfig *sessionext.Config) (*profile.Profile, *sessionext.Runtime, error) {
 	product, err := factory.Build(profile.Request{
 		Option: option,
 		Features: apppkg.RuntimeFeatures{
 			ProviderEnabled: true,
 			ToolsEnabled:    true, AIEnabled: true,
 		},
-		Runtime: runtimeConfig,
+		Session: sessionConfig,
 		Logger:  logger,
 	})
 	if err != nil {
@@ -27,7 +27,7 @@ func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.
 		_ = product.Close(context.Background())
 		return nil, nil, err
 	}
-	run, err := product.Runtime()
+	run, err := product.Sessions()
 	if err != nil {
 		_ = product.Close(context.Background())
 		return nil, nil, err

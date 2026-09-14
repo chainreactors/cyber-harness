@@ -20,11 +20,11 @@ import (
 
 type ServiceConfig struct {
 	Store       *SQLiteStore
-	Profile     profile.Application
+	Profile     *profile.Profile
 	ConfigStore ConfigStore
 	// BuildProfile returns a fresh candidate, including partial results on error.
 	// Service owns every returned candidate and its cleanup.
-	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Application, error)
+	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (*profile.Profile, error)
 	AgentPool     *AgentPool
 	Artifacts     managementapi.ArtifactImporter
 	MaxConcurrent int
@@ -37,14 +37,14 @@ type Service struct {
 	// candidate and published profiles throughout the transaction.
 	configGate   chan struct{}
 	configStore  ConfigStore
-	buildProfile func(context.Context, *PreparedConfig) (profile.Application, error)
-	pending      profile.Application
+	buildProfile func(context.Context, *PreparedConfig) (*profile.Profile, error)
+	pending      *profile.Profile
 	store        *SQLiteStore
 	appMu        sync.Mutex
-	profile      profile.Application
+	profile      *profile.Profile
 	// profiles owns the current and retired profiles and counts active request leases.
-	// Entries survive cleanup timeouts; the profile itself owns lifecycle state.
-	profiles map[profile.Application]int
+	// Entries survive cleanup timeouts; each Profile delegates lifecycle state to its Set.
+	profiles map[*profile.Profile]int
 	// profileClose serializes release and error collection as one transaction.
 	profileClose chan struct{}
 	appChanged   chan struct{}
@@ -83,7 +83,7 @@ func NewService(cfg ServiceConfig) *Service {
 		configStore:  cfg.ConfigStore,
 		buildProfile: cfg.BuildProfile,
 		store:        cfg.Store,
-		profiles:     make(map[profile.Application]int),
+		profiles:     make(map[*profile.Profile]int),
 		profileClose: make(chan struct{}, 1),
 		appChanged:   make(chan struct{}),
 		agents:       cfg.AgentPool,
@@ -99,7 +99,7 @@ func NewService(cfg ServiceConfig) *Service {
 		sessionSeq:   make(map[string]uint64),
 		endedTurns:   make(map[string]bool),
 	}
-	if !profile.IsNil(cfg.Profile) {
+	if cfg.Profile != nil {
 		svc.profile = cfg.Profile
 		svc.profiles[cfg.Profile] = 0
 	}
@@ -176,7 +176,7 @@ func (s *Service) Close(ctx context.Context) (resultErr error) {
 		s.appMu.Lock()
 		remaining := len(s.profiles)
 		changed := s.appChanged
-		var ready []profile.Application
+		var ready []*profile.Profile
 		for p, refs := range s.profiles {
 			if refs == 0 {
 				ready = append(ready, p)

@@ -1,4 +1,4 @@
-package agent
+package session
 
 import cfg "github.com/chainreactors/aiscan/core/config"
 

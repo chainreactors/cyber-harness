@@ -11,10 +11,11 @@ Scanner 拥有引擎并只向 App 提供只读状态，Proxy 和 IOA 的业务�
 EventOutput 拥有输出文件。`Resource.Close` 只关闭 App 自身状态。
 
 ```text
-EventOutput → Observe → Proxy / IOA → App + capability contributors
-            → Command Registry → Tool Registry → Agent Runtime
+EventOutput → Observe → Proxy / IOA ─┐
+Agent Loop ─────────────────────────┼→ App + capability contributors
+                                   └→ Command Registry → Tool Registry → Session Runtime
 ```
 
 关闭逆序执行。App.Publish 始终委托同一 `core/events.Stream` 补全 Event ID、时间和 session
-内序号；Agent Runtime 只使用该流和已加载能力。Provider 更新按 Run 快照隔离，迟到的
+内序号；Session Runtime 只使用该流和已加载能力。Provider 更新按 Run 快照隔离，迟到的
 健康探测不会覆盖更新后的 Provider。

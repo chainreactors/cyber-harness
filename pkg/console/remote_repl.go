@@ -8,7 +8,7 @@ import (
 	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -22,7 +22,7 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
+func StartPersistent(rt *sessionext.Runtime, option *cfg.Option) (*REPL, error) {
 	if rt == nil || rt.App() == nil {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
@@ -32,7 +32,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
 	}
 	ctx, cancel := context.WithCancel(rt.Context())
 	r := &REPL{cancel: cancel, done: make(chan struct{})}
-	session, err := rt.OpenSession(ctx, agentext.SessionOptions{ID: MainREPLName})
+	session, err := rt.OpenSession(ctx, sessionext.SessionOptions{ID: MainREPLName})
 	if err != nil {
 		cancel()
 		return nil, err
@@ -45,7 +45,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
 		Timeout: 0, StripANSI: false, Resize: control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		defer close(r.done)
-		defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
+		defer rt.CloseSession(context.Background(), MainREPLName, sessionext.SessionCloseCompleted)
 		for {
 			err := runRemoteConsole(replCtx, rt, session, option, input, output, control)
 			if replCtx.Err() != nil {
@@ -58,7 +58,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option) (*REPL, error) {
 	})
 	if err != nil {
 		cancel()
-		_ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseError)
+		_ = rt.CloseSession(context.Background(), MainREPLName, sessionext.SessionCloseError)
 		return nil, err
 	}
 	manager.SetKind(info.ID, "repl")

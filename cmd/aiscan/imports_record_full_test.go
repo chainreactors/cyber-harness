@@ -21,7 +21,7 @@ func TestRecordFullCapabilitySet(t *testing.T) {
 }
 
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	product, err := newAIScanProfile(aiscanProfileConfig{
+	product, err := newProductProfile(productProfileConfig{
 		Option: &cfg.Option{},
 		Application: apppkg.Config{
 			Tools: apppkg.ToolConfig{BashTimeout: 1}, Logger: telemetry.NopLogger(), SkipEngines: true,

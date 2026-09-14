@@ -18,7 +18,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/runner"
 	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -180,7 +180,7 @@ func aiscan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := transportpkg.Run(ctx, aiscanProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := transportpkg.Run(ctx, productProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
@@ -205,7 +205,7 @@ func aiscan() {
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, aiscanProfileFactory, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runner.RunDirectScannerMode(ctx, productProfileFactory, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}
@@ -451,7 +451,7 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	// Install inert declarations before Parse/WriteHelp. Extension Load is not
 	// part of command-line discovery, including defaults and aliases.
-	for _, group := range agentext.FlagGroups(&cli.Agent.AgentOptions) {
+	for _, group := range sessionext.FlagGroups(&cli.Agent.AgentOptions) {
 		if _, err := parser.Find("agent").AddGroup(group.Name, group.Description, group.Options); err != nil {
 			panic(fmt.Sprintf("invalid agent flag declaration: %v", err))
 		}

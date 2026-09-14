@@ -7,7 +7,7 @@
 ## 使用
 
 应用在开始接收请求前，注册实际业务处理函数。现有产品提供
-`session.Manager.RegisterNamespaces(mux)`；嵌入者也可直接调用 `mux.Register`。
+`session.Runtime.RegisterNamespaces(mux)`；嵌入者也可直接调用 `mux.Register`。
 
 ```go
 mux := aop.NewNamespaceMux(ctx)
@@ -73,5 +73,6 @@ Web/Node 的握手、错误码及 EOF 策略保持各自原有行为。
 关闭隔离、并发发送与错误保留、Node 具体运行时接线回归，以及协议依赖边界检查。
 `queuedEnvelopeStream`、嵌套 Host、可选控制接口和 Stdio 重复状态均不保留。
 
-Agent Runtime 位于 `pkg/exts/agent`，Console 位于 `pkg/console`；Host 不持有二者。
+Agent Loop 位于 `pkg/exts/agent`，Session Runtime 位于 `pkg/exts/session`，Console 位于
+`pkg/console`；Host 不持有三者。
 协议辅助函数使用 `aop.EnvelopeID`、`aop.Reply` 和 `aop.NewProtocolError`，不再由 Host 提供。

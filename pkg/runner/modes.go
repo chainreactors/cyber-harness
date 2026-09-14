@@ -17,7 +17,7 @@ import (
 	cmdpkg "github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/console"
 	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	"github.com/chainreactors/aiscan/skills"
@@ -52,7 +52,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	return console.RunTask(ctx, rt, option, "task", "task", task, agentext.RunInput{
+	return console.RunTask(ctx, rt, option, "task", "task", task, sessionext.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 }
@@ -74,7 +74,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -192,15 +192,15 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 			DurationMs: uint64(time.Since(startedAt).Milliseconds()),
 		}
 		stopReason := string(agent.StopReasonCompleted)
-		closeReason := agentext.SessionCloseCompleted
+		closeReason := sessionext.SessionCloseCompleted
 		if runErr != nil {
 			result.Output = []*aop.Content{aop.Text(runErr.Error())}
 			stopReason = string(agent.StopReasonError)
-			closeReason = agentext.SessionCloseError
+			closeReason = sessionext.SessionCloseError
 		}
 		if isCanceled {
 			stopReason = string(agent.StopReasonCanceled)
-			closeReason = agentext.SessionCloseCanceled
+			closeReason = sessionext.SessionCloseCanceled
 		}
 		application.Publish(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,

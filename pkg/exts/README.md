@@ -7,10 +7,11 @@ lifecycle. An adapter in this package turns that behavior into an
 shutdown contract.
 
 Only independently owned resources or registrations need an Extension.
-`pkg/exts/agent` owns admission, cancellation and draining for a selected
-`agent.Loop` and its sessions as one installation. Its Runtime is the single
-business surface for loop and session operations. Profiles can omit Agent
-execution while keeping the remaining tools and commands.
+`pkg/exts/agent` owns admission, cancellation and drain for one selected
+`agent.Loop`; `pkg/exts/session` independently owns conversations, runs,
+inboxes and session protocols. The composition root injects the admitted Loop
+into Session and expresses their lifetime order in the Set graph. Neither
+extension imports or closes the other.
 
 Adapters must not create registries, leases, service locators, or a second
 filesystem implementation. Resource ownership and dependency order belong to
@@ -24,8 +25,8 @@ handlers are stateless bindings registered directly on a connection-owned
 An adapter never publishes its lifecycle owner. Files, Proxy, IOA, and App
 construction separates a `Resource` from its named business object; only
 Resource has Start/Open/Load/Close, while consumers receive Files, ProxyHub,
-Runtime, or App directly. Agent follows the same boundary with one Extension
-and its published Runtime; there is no separate Session extension.
+Runtime, or App directly. Agent publishes a lifecycle-free admitted Loop;
+Session publishes a lifecycle-free session Runtime.
 There is no Borrow/Handle/sealed-interface layer. Extensions depend on business
 capabilities rather than importing one another. Event producers, observers and
 consumers share the profile's concrete `core/events.Stream`; it alone stamps

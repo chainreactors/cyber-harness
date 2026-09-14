@@ -10,7 +10,7 @@ import (
 	cfg "github.com/chainreactors/aiscan/core/config"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
 	"github.com/chainreactors/aiscan/pkg/host"
 	"github.com/chainreactors/aiscan/pkg/profile"
 )
@@ -19,7 +19,7 @@ import (
 func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &sessionext.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}

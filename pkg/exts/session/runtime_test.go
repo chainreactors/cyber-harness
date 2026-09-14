@@ -1,4 +1,4 @@
-package agent
+package session
 
 import (
 	"context"
@@ -24,6 +24,7 @@ import (
 	coreoutput "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
 	eventoutput "github.com/chainreactors/aiscan/pkg/exts/eventoutput"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	"github.com/chainreactors/aiscan/pkg/toolset"
@@ -73,28 +74,35 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	}
 }
 
-func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
+func TestSessionAndAgentExtensionsDrainInDependencyOrder(t *testing.T) {
 	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
 	application.App.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
 	var once sync.Once
-	owner, err := New(Config{Application: application.App, Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	agentOwner := newLoopExtension(lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- struct{}{}
 		<-ctx.Done()
 		canceled <- struct{}{}
 		<-release
 		return nil, ctx.Err()
-	})})
+	}))
+	sessionOwner, err := New(Config{
+		Application: application.App, Option: &cfg.Option{}, Loop: agentOwner.Runtime(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	entries := applicationtest.Entries(t, application)
 	var dependencyClosed atomic.Bool
-	entries = append(entries, extension.Entry{ID: "dependency", Extension: extension.Func{CloseFunc: func(context.Context) error {
-		dependencyClosed.Store(true)
-		return nil
-	}}}, extension.Entry{ID: "agent", DependsOn: []string{"application.tool-registry", "dependency"}, Extension: owner})
+	entries = append(entries,
+		extension.Entry{ID: "dependency", Extension: extension.Func{CloseFunc: func(context.Context) error {
+			dependencyClosed.Store(true)
+			return nil
+		}}},
+		extension.Entry{ID: "agent", DependsOn: []string{"dependency"}, Extension: agentOwner},
+		extension.Entry{ID: "session", DependsOn: []string{"application.tool-registry", "agent"}, Extension: sessionOwner},
+	)
 	set := extensiontest.Set(t, entries...)
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	init, cancelInit := context.WithCancel(t.Context())
@@ -102,7 +110,7 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelInit()
-	runtime := owner.Runtime()
+	runtime := sessionOwner.Runtime()
 	runtime.config.Provider = &runtimeSemanticProvider{}
 	session, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "owned"})
 	if err != nil {
@@ -113,7 +121,10 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := make(chan error, 1)
-	go func() { _, err := runtime.Run(t.Context(), agent.Config{SessionID: "direct"}); direct <- err }()
+	go func() {
+		_, err := agentOwner.Runtime().Run(t.Context(), agent.Config{SessionID: "direct"})
+		direct <- err
+	}()
 	for range 2 {
 		select {
 		case <-started:
@@ -126,12 +137,10 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	if err := set.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close: %v", err)
 	}
-	for range 2 {
-		select {
-		case <-canceled:
-		case <-time.After(time.Second):
-			t.Fatal("execution was not canceled")
-		}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("session execution was not canceled")
 	}
 	if dependencyClosed.Load() {
 		t.Fatal("dependency released before drain")
@@ -139,18 +148,15 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	if _, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "late"}); err == nil {
 		t.Fatal("session admitted during close")
 	}
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("loop admitted during close: %v", err)
-	}
 	once.Do(func() { close(release) })
 	if _, err := run.Wait(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("session result: %v", err)
 	}
-	if err := <-direct; !errors.Is(err, context.Canceled) {
-		t.Fatalf("direct result: %v", err)
-	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if err := <-direct; !errors.Is(err, context.Canceled) {
+		t.Fatalf("direct result: %v", err)
 	}
 	if !dependencyClosed.Load() {
 		t.Fatal("dependency not released after drain")
@@ -407,6 +413,19 @@ func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
 	}
 	if err := a.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSessionExtensionRequiresApplicationAndOptions(t *testing.T) {
+	application := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.Dependencies{})
+	for _, config := range []Config{
+		{},
+		{Application: application.App},
+		{Option: &cfg.Option{}},
+	} {
+		if _, err := New(config); err == nil {
+			t.Fatalf("accepted incomplete session configuration: %+v", config)
+		}
 	}
 }
 
@@ -1092,8 +1111,8 @@ func TestProviderSwapKeepsInFlightSnapshotAndUpdatesExistingSession(t *testing.T
 	}
 }
 
-func newLoopExtension(loop agent.Loop) *Extension {
-	value, err := New(Config{Loop: loop})
+func newLoopExtension(loop agent.Loop) *agentext.Extension {
+	value, err := agentext.New(loop)
 	if err != nil {
 		panic(err)
 	}

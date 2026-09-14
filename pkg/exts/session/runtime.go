@@ -1,4 +1,4 @@
-package agent
+package session
 
 import (
 	"context"
@@ -26,7 +26,6 @@ import (
 type Runtime struct {
 	commands           []Command
 	commandIndex       map[string]Command
-	loop               *loopRuntime
 	option             *cfg.Option
 	logger             telemetry.Logger
 	runtimeConfig      Config
@@ -67,7 +66,8 @@ type Config struct {
 	PrimarySessionID string
 	PromptConfig     *PromptConfig
 	MaxPending       int
-	// Loop supplies the algorithm; this extension owns admission and drain.
+	// Loop is the admitted capability published by pkg/exts/agent. It is
+	// optional for session-only control and history use cases.
 	Loop agent.Loop
 }
 
@@ -84,7 +84,7 @@ const baseAgentSkillName = "aiscan"
 
 // Load activates session work under scope.Lifetime. Init bounds initialization
 // only; caller contexts cannot extend the owning extension's lifetime.
-func (rt *Runtime) loadSessions(scope *extension.Scope) error {
+func (rt *Runtime) load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	if ctx == nil {
 		ctx = context.Background()
@@ -95,7 +95,7 @@ func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 		return nil
 	}
 	if rt.closing {
-		return fmt.Errorf("agent runtime is closed")
+		return fmt.Errorf("session runtime is closed")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -221,12 +221,12 @@ func (rt *Runtime) loadSessions(scope *extension.Scope) error {
 // gate.
 func (rt *Runtime) ready() error {
 	if rt == nil {
-		return fmt.Errorf("agent runtime is not configured")
+		return fmt.Errorf("session runtime is not configured")
 	}
 	rt.lifecycle.Lock()
 	defer rt.lifecycle.Unlock()
 	if !rt.loaded || rt.closing {
-		return fmt.Errorf("agent runtime is not active")
+		return fmt.Errorf("session runtime is not active")
 	}
 	return nil
 }
@@ -327,7 +327,7 @@ func (rt *Runtime) ReloadProvider(option *cfg.Option) (agent.Provider, string, e
 
 func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
 	if rt == nil || rt.app == nil {
-		return nil, agent.ProviderConfig{}, fmt.Errorf("agent runtime is not configured")
+		return nil, agent.ProviderConfig{}, fmt.Errorf("session runtime is not configured")
 	}
 	rt.providerMu.Lock()
 	defer rt.providerMu.Unlock()
