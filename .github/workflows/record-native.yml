@@ -34,10 +34,10 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: false
@@ -78,10 +78,10 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Download SDK archives
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: recorder-native-*
           path: dist/native
