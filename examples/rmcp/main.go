@@ -12,7 +12,8 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolnode"
+	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
@@ -36,7 +37,9 @@ func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.
 }
 
 func main() {
- if code,handled := commands.RunShellCommandProxy(); handled { os.Exit(code) }
+	if code, handled := commands.RunShellCommandProxy(); handled {
+		os.Exit(code)
+	}
 	var (
 		serverURL string
 		token     string

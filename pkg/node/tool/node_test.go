@@ -13,13 +13,13 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/operation"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
-	"github.com/chainreactors/aiscan/pkg/toolnode"
+	"github.com/chainreactors/aiscan/pkg/node/tool"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -110,7 +110,7 @@ func TestWireCallCancellationAndStableReconnectIdentity(t *testing.T) {
 			started := make(chan struct{})
 			events := coreevents.New()
 			progress := eventbus.New[*toolpb.Progress]()
-			r := extensiontest.Tools(t, &testTool{started: started, events: events})
+			r := harness.Tools(t, &testTool{started: started, events: events})
 			instanceIDs := make(chan string, 2)
 			result := make(chan *aop.ToolResult, 1)
 			extras := make(chan string, 2)

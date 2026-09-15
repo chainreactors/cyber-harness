@@ -1,5 +1,5 @@
-// Package toolnode connects an Agent-free tool.Executor to an AOP WebSocket
-// hub. The external framework owns reasoning, history, retries, and scheduling.
+// Package toolnode is the outbound AOP tool node: it connects an Agent-free
+// tool.Executor to a hub and serves tool calls until the context ends.
 package toolnode
 
 import (
@@ -28,6 +28,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// DefaultWSPath is the hub route the tool node dials; the agent node in pkg/node
+// dials the same route.
 const DefaultWSPath = "/api/aop/node/ws"
 
 type Config struct {
@@ -48,8 +50,10 @@ type Config struct {
 	Dialer             *websocket.Dialer
 }
 
-// Run serves until ctx ends. One stable process instance ID is reused across
-// reconnects; accepted calls are canceled and drained before reconnecting.
+// Run connects an Agent-free tool.Executor to the hub and serves until ctx
+// ends. The external framework owns reasoning, history, retries and scheduling.
+// One stable process instance ID is reused across reconnects; accepted calls are
+// canceled and drained before reconnecting.
 func Run(ctx context.Context, cfg Config) error {
 	if ctx == nil {
 		return fmt.Errorf("tool node context is required")

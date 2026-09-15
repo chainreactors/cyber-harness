@@ -11,7 +11,8 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	toolnode "github.com/chainreactors/aiscan/pkg/toolnode"
+	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
