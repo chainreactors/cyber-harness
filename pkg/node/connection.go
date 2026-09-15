@@ -16,8 +16,6 @@ import (
 	types "github.com/chainreactors/aiscan/pkg/types"
 )
 
-const DefaultWSPath = "/api/aop/node/ws"
-
 // agentEndpoint is the sole event ingress/egress point for a node connection.
 // Keeping publication and subscription on one object prevents a terminal event
 // from being sent both through the runtime bus and as a direct protocol reply.

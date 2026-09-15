@@ -3,8 +3,8 @@ package console
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +45,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

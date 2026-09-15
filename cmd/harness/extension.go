@@ -1,6 +1,4 @@
-// Package extensiontest constructs owned hosts for tests. Production packages
-// must construct their explicit profiles instead.
-package extensiontest
+package harness
 
 import (
 	"context"

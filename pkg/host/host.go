@@ -127,7 +127,9 @@ func (h *Host) Close() {
 	h.mu.Unlock()
 	_ = h.mux.Close(context.Background())
 	h.active.Wait()
-	h.sendMu.Lock()
+	// Acquiring the send lock after dispatch drains waits for a write that
+	// started before Close; the empty critical section is the barrier.
+	h.sendMu.Lock() //nolint:staticcheck // SA2001: the empty critical section is intentional
 	h.sendMu.Unlock()
 }
 

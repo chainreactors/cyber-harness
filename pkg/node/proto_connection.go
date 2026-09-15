@@ -32,6 +32,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
 	"github.com/chainreactors/aiscan/pkg/terminal"
 	toolset "github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -141,7 +142,7 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 	}
 	path := cc.WSPath
 	if path == "" {
-		path = DefaultWSPath
+		path = toolnode.DefaultWSPath
 	}
 	var headers http.Header
 	if accessKey != "" {

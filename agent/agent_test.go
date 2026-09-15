@@ -20,7 +20,6 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
 )
@@ -350,7 +349,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	stub := &stubPseudoCommand{name: "scan", output: scanOutput}
 	bash := commands.NewBashTool(dir, 5, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := extensiontest.Commands(t, "core",
+	commandRegistry := testCommands(t, "core",
 		commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
 		tmuxCmd,
 	)
@@ -451,7 +450,7 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, "core", tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -605,7 +604,7 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, "core", tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -709,7 +708,7 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, "core", tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -840,7 +839,7 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 60, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := extensiontest.Commands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, "core", tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)

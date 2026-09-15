@@ -252,7 +252,8 @@ CGO_MODE=0
 case "$PROFILE" in
     mini) ;;
     full)
-        EXTRA_TAGS="full,re2_cgo,re2_static${EXTRA_TAGS:+,$EXTRA_TAGS}"
+        # full 隐含 cstx，cstx 只在 cgo 下编译，所以 full 必须 CGO_ENABLED=1。
+        EXTRA_TAGS="full,re2_cgo,re2_static,cstx${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
         AISCAN_BIN="aiscan-full"
         CGO_MODE=1
@@ -261,12 +262,17 @@ esac
 
 # ─── Build tags ──────────────────────────────────────────────────
 
+# 基准 tag 与 Makefile 的 STANDARD_TAGS 同源，改动需两边同步。
 TAGS="forceposix osusergo netgo"
 if [ "$BUILD_IOA" = true ]; then
     TAGS="$TAGS sqlite"
 fi
+
+# --embed 只切换"是否内嵌扫描资源"这一对 tag，绝不改动 standard/full 契约：
+# 不传 --embed 时 tag 集合与 Makefile 的 STANDARD_TAGS 完全一致。
+RESOURCE_TAGS="emptytemplates noembed"
 if [ "$EMBED_RESOURCES" != true ]; then
-    TAGS="$TAGS emptytemplates noembed"
+    TAGS="$TAGS $RESOURCE_TAGS"
 fi
 if [ -n "$EXTRA_TAGS" ]; then
     TAGS="$TAGS $(echo "$EXTRA_TAGS" | tr ',' ' ')"

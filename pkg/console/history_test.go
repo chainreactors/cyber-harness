@@ -2,9 +2,8 @@ package console
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/applicationtest"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +16,7 @@ import (
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	"github.com/chainreactors/aiscan/pkg/types"
 )
 
@@ -42,7 +41,7 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 type consoleProvider struct{ usage *aop.TokenUsage }
 
 func loadConsoleApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
-	return applicationtest.Load(t, ctx, application)
+	return harness.AppLoad(t, ctx, application)
 }
 
 func (*consoleProvider) Name() string { return "console-test" }
@@ -64,7 +63,7 @@ func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentext.Runtime 
 		t.Fatal(err)
 	}
 
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +82,7 @@ func sessionTestEvent(id string, event *aop.Event) *aop.Event {
 func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	t.Helper()
 	stream := coreevents.New()
-	recorder, err := telemetry.New(stream, telemetry.Options{Path: path})
+	recorder, err := telemetryext.New(stream, telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,4 +117,3 @@ func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 		t.Fatalf("context tokens = %d, want 8200", result.ContextTokens)
 	}
 }
-

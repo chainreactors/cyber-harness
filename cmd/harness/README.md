@@ -1,16 +1,20 @@
 # Repository harness
 
-`harness/` 只放用户场景：从当前工作区源码构建 `cmd/aiscan` 的 `full` 版本，
-启动真实产品子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
-进程重启与资源释放。测试不导入业务实现包，不注入 fake store、Provider 或 Host。
+`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/aiscan` 的 `full`
+版本，启动真实产品子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
+进程重启与资源释放。场景测试不导入业务实现包，不注入 fake store、Provider 或 Host。
 
-静态守卫位于仓库根目录 `architecture_test.go`，运行 `make check-architecture`。
+同目录的导出构造器（`Set`、`Commands`、`Tools`、`AppEntries`、`AppLoad`）供包测试构建
+自己拥有的 extension host；生产代码必须构造显式 Profile，不能使用这些构造器。
+harness 依赖 `pkg`，因此被它依赖的包（`agent`、`pkg/app`、`tools/proton`）不能反向导入
+harness，这些包改为在自己的测试文件里构建 host。
+
 协议回显测试位于 `pkg/host/process_test.go`，不计入用户场景验收。
 
 运行：
 
 ```sh
-go test -count=1 -v -timeout 5m ./harness/...
+go test -count=1 -v -timeout 5m ./cmd/harness/...
 # 或
 make harness
 ```
@@ -134,7 +138,7 @@ make harness-llm-subagent
 
 普通单元覆盖率任务排除 harness 包，由独立 job 验收产品进程，避免重复运行。
 两条路径均保存 JSON 测试结果和运行产物 14 天。race 检查当前覆盖测试驱动，
-产品子进程仍由普通 `go build -tags full` 构建。
+产品子进程仍由普通 `go build -tags full cstx` 构建。
 
 在 GitHub 仓库设置中配置：
 
@@ -148,7 +152,7 @@ make harness-llm-subagent
 本地使用同名环境变量后执行 `make harness-llm`，或：
 
 ```sh
-go test -tags live_llm -run '^TestLiveLLM' -count=1 -v -timeout 8m ./harness/...
+go test -tags live_llm -run '^TestLiveLLM' -count=1 -v -timeout 8m ./cmd/harness/...
 # 只运行多 AI IOA 场景
 make harness-llm-ioa
 ```

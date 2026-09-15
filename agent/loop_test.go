@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/aiscan/core/tool"
 	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
 	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -30,7 +29,7 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 		}
 		return toolhooks.Admission{}, nil
 	})
-	tools := extensiontest.ToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
+	tools := testToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
 	var logs bytes.Buffer
 	cfg := Config{
 		Tools:  tools,
@@ -397,7 +396,7 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	beforeCalled := false
 	afterCalled := false
 	registry := hooks.New()
-	tools = extensiontest.ToolsWithHooks(t, registry, echo)
+	tools = testToolsWithHooks(t, registry, echo)
 	toolhooks.Before.On(registry, "test", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
 		beforeCalled = true
 		return toolhooks.Admission{}, nil
@@ -595,7 +594,7 @@ func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	}
 	rewritten := "rewritten result"
 	registry := hooks.New()
-	tools = extensiontest.ToolsWithHooks(t, registry, echo)
+	tools = testToolsWithHooks(t, registry, echo)
 	toolhooks.After.On(registry, "test", func(_ context.Context, event toolhooks.ResultEvent) (struct{}, error) {
 		event.Result.Output = []*aop.Content{aop.Text(rewritten)}
 		event.Result.IsError = false

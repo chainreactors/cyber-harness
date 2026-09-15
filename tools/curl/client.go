@@ -856,7 +856,8 @@ func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, 
 		ContentType: headerValue(exchange.Response.Headers, "Content-Type"),
 		BodyLength:  size,
 	}
-	// Compact HTTP observations use CSTX's generic AIScan artifact schema.
+	// The compact observation follows CSTX's web schema, which the server reads
+	// as its "spray" artifact; aiscan names the producer.
 	c.EmitArtifactCtx(ctx, "aiscan", toolpb.ArtifactKindWeb, summary.URL, summary)
 }
 

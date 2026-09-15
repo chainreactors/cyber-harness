@@ -227,12 +227,3 @@ func fallbackStr(in, stored string) string {
 	}
 	return stored
 }
-
-func firstCSV(s string) string {
-	for _, part := range strings.Split(s, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			return p
-		}
-	}
-	return ""
-}

@@ -26,7 +26,7 @@ err = h.Serve(stream)
 ```
 
 可编译的最小 inline 示例见 [example_test.go](example_test.go)，真实子进程往返
-验证见 [process_test.go](process_test.go)。这两个示例均不调用模型或工具；产品进程的用户验收见 [harness](../../harness/README.md)。
+验证见 [process_test.go](process_test.go)。这两个示例均不调用模型或工具；产品进程的用户验收见 [harness](../../cmd/harness/README.md)。
 
 ## 唯一职责与状态所有权
 

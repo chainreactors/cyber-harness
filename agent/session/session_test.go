@@ -18,9 +18,9 @@ import (
 	"github.com/chainreactors/aiscan/agent/inbox"
 	"github.com/chainreactors/aiscan/agent/provider"
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	terminaltools "github.com/chainreactors/aiscan/pkg/exts/terminal"
@@ -645,7 +645,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 		extension.Entry{ID: "command-registry", DependsOn: commandDependencies, Extension: reg},
 		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
 	)
-	terminalSet := extensiontest.Set(t, entries...)
+	terminalSet := harness.Set(t, entries...)
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

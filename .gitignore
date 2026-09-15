@@ -57,6 +57,7 @@ web/static.*
 web/static-stale/
 
 # operator artifacts kept on disk but out of git (2026-07-06 post-reset cleanup)
+/tools/katana/katana_response/
 /monitor/
 /scripts/
 /scan_report.md

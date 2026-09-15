@@ -1,4 +1,4 @@
-//go:build full
+//go:build full && cstx
 
 package main
 
@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
 	webext "github.com/chainreactors/aiscan/pkg/exts/web"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	"github.com/chainreactors/aiscan/pkg/web"
 	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
@@ -64,12 +66,26 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	ingestor, err := webservice.NewArtifactImporter(store)
+	artifactExt, err := cstxext.New(store)
 	if err != nil {
 		logger.Errorf("init artifact normalization: %v", err)
 		os.Exit(1)
 	}
-	defer ingestor.Close()
+	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	if err != nil {
+		logger.Errorf("init artifact scope: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := artifactSet.Close(context.Background()); err != nil {
+			logger.Errorf("close artifact scope: %v", err)
+		}
+	}()
+	if err := artifactSet.Load(ctx); err != nil {
+		logger.Errorf("load artifact scope: %v", err)
+		os.Exit(1)
+	}
+	ingestor := artifactExt.Importer()
 
 	service, _, handler, err := newHeadlessHandler(store, ingestor, token)
 	if err != nil {
