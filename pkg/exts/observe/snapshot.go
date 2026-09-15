@@ -70,7 +70,9 @@ func TakeSnapshot(root string, options FileOptions) (Snapshot, error) {
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return nil
+			// Unreadable entries are intentionally omitted from a best-effort
+			// snapshot; callers still receive the remaining tree.
+			return nil //nolint:nilerr
 		}
 		if len(result) >= maxEntries {
 			return errSnapshotTooLarge

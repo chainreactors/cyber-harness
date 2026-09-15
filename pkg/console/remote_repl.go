@@ -46,7 +46,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 		Timeout: 0, StripANSI: false, Resize: control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		defer close(r.done)
-		defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
+		defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted) }()
 		for {
 			err := runRemoteConsole(replCtx, rt, session, option, input, output, control, bindings)
 			if replCtx.Err() != nil {

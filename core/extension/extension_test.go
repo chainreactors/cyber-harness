@@ -225,7 +225,7 @@ func TestCloseContextErrorIsAutomaticallyIncomplete(t *testing.T) {
 	resource := &testExtension{name: "resource", events: &events}
 	consumer := &testExtension{name: "consumer", events: &events, closeErr: context.DeadlineExceeded}
 	set := newSet(t, entry(consumer, "resource"), entry(resource))
-	if err := set.Load(nil); err != nil {
+	if err := set.Load(context.TODO()); err != nil {
 		t.Fatal(err)
 	}
 	if err := set.Close(t.Context()); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.DeadlineExceeded) {
@@ -233,7 +233,7 @@ func TestCloseContextErrorIsAutomaticallyIncomplete(t *testing.T) {
 	}
 	assertEvents(t, events, []string{"load:resource", "load:consumer", "close:consumer"})
 	consumer.closeErr = nil
-	if err := set.Close(nil); err != nil {
+	if err := set.Close(context.TODO()); err != nil {
 		t.Fatal(err)
 	}
 	assertEvents(t, events, []string{"load:resource", "load:consumer", "close:consumer", "close:consumer", "close:resource"})

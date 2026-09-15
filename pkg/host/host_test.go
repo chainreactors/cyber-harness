@@ -164,12 +164,12 @@ func TestCancellationPreventsDispatch(t *testing.T) {
 	cancel()
 	mux := aop.NewNamespaceMux(ctx)
 	if err := mux.Register("test", &aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
-		t.Fatal("cancelled request dispatched")
+		t.Fatal("canceled request dispatched")
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	request := aop.MustWrap("cancelled", "", &aop.ProtocolMessage{})
+	request := aop.MustWrap("canceled", "", &aop.ProtocolMessage{})
 	if err := testHost(t, mux).Handle(request, func(*aop.Envelope) error { t.Fatal("unexpected send"); return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}

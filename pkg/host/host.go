@@ -129,8 +129,8 @@ func (h *Host) Close() {
 	h.active.Wait()
 	// Acquiring the send lock after dispatch drains waits for a write that
 	// started before Close; the empty critical section is the barrier.
-	h.sendMu.Lock() //nolint:staticcheck // SA2001: the empty critical section is intentional
-	h.sendMu.Unlock()
+	h.sendMu.Lock()   //nolint:staticcheck // SA2001: the empty critical section is intentional
+	h.sendMu.Unlock() //nolint:staticcheck // SA2001: the empty critical section is intentional
 }
 
 // Err retains the first write error, including asynchronous sends after EOF.

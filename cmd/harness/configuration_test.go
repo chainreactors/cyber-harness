@@ -206,12 +206,7 @@ func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer confirmation.Stop()
 	defer ticker.Stop()
-	confirmed := false
-	for !confirmed {
-		if bytes.Contains(readFile(t, p.logPath), []byte("Press Ctrl+C again to exit")) {
-			confirmed = true
-			break
-		}
+	for !bytes.Contains(readFile(t, p.logPath), []byte("Press Ctrl+C again to exit")) {
 		select {
 		case <-p.done:
 			t.Fatalf("product exited before confirmation: %v", p.waitErr)

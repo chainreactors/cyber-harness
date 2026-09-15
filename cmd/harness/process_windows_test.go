@@ -11,7 +11,7 @@ import (
 )
 
 func configureProductProcess(cmd *exec.Cmd) {
-	// A private hidden console permits a real Ctrl+Break without signalling the
+	// A private hidden console permits a real Ctrl+Break without signaling the
 	// developer's terminal or unrelated processes. Product stdout stays in logs.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: windows.CREATE_NEW_CONSOLE | windows.CREATE_NEW_PROCESS_GROUP,

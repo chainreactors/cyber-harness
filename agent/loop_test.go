@@ -392,11 +392,10 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 
 func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools := newTestTools(t, echo)
 	beforeCalled := false
 	afterCalled := false
 	registry := hooks.New()
-	tools = testToolsWithHooks(t, registry, echo)
+	tools := testToolsWithHooks(t, registry, echo)
 	toolhooks.Before.On(registry, "test", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
 		beforeCalled = true
 		return toolhooks.Admission{}, nil
@@ -576,7 +575,6 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 
 func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	echo := &recordingTool{name: "echo", output: "raw"}
-	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -594,7 +592,7 @@ func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	}
 	rewritten := "rewritten result"
 	registry := hooks.New()
-	tools = testToolsWithHooks(t, registry, echo)
+	tools := testToolsWithHooks(t, registry, echo)
 	toolhooks.After.On(registry, "test", func(_ context.Context, event toolhooks.ResultEvent) (struct{}, error) {
 		event.Result.Output = []*aop.Content{aop.Text(rewritten)}
 		event.Result.IsError = false

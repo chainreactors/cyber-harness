@@ -132,7 +132,7 @@ func withEgressEnvironment(overrides map[string]string, proxyURL, caPath string)
 
 func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *Execution, event toolhooks.ProcessEvent, startedAt time.Time) {
 	defer t.processWG.Done()
-	waitErr := execution.Wait(context.Background())
+	waitErr := execution.Wait(context.WithoutCancel(ctx))
 	cause := context.Cause(ctx)
 	completionErr := waitErr
 	if cause != nil && !errors.Is(completionErr, cause) {

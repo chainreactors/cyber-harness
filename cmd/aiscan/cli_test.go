@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
@@ -27,21 +26,6 @@ func containsAny(value string, candidates ...string) bool {
 		}
 	}
 	return false
-}
-
-type fakeConsoleProvider struct {
-	requests int
-}
-
-func (p *fakeConsoleProvider) Name() string { return "fake" }
-
-func (p *fakeConsoleProvider) ChatCompletion(_ context.Context, req *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
-	p.requests++
-	return &provider.ChatCompletionResponse{
-		Choices: []provider.Choice{{
-			Message: provider.TextMessage("assistant", "ok"),
-		}},
-	}, nil
 }
 
 func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {

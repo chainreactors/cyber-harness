@@ -38,7 +38,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			feed := make(chan protocols.Message)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "POST" && r.URL.Path == failurePath && failed.CompareAndSwap(false, true) {
-					http.Error(w, "temporary failure", 503)
+					http.Error(w, "temporary failure", http.StatusServiceUnavailable)
 					return
 				}
 				if strings.HasSuffix(r.URL.Path, "/sse") {
@@ -217,4 +217,3 @@ func setDelegation(t *testing.T, event *aop.Event) {
 		t.Fatal(err)
 	}
 }
-

@@ -152,17 +152,18 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		}
 	}
 
-	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(options, &scanResultWriter{onResult: handleResult}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Use instance-owned output and logging: this process hosts other tools, so
+	// construction must not reconfigure the global logger.
+	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(
+		options,
+		&scanResultWriter{onResult: handleResult},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
 	if err != nil {
-
 		emitError(emit, source, "katana init %s: %v", wt.URL, err)
 		return
 	}
-	// Output ownership is transferred during construction.
-	defer func() {
-		crawlerOptions.Close()
-
-	}()
+	defer crawlerOptions.Close()
 
 	var crawler engine.Engine
 	if jsMode {

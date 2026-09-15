@@ -31,7 +31,7 @@ func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Opti
 	if err != nil {
 		return err
 	}
-	defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
+	defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted) }()
 	if option == nil {
 		option = &cfg.Option{}
 	}

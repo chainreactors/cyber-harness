@@ -16,7 +16,7 @@ import (
 	"net/url"
 )
 
-func normalizeProductConfig(config *types.DistributeConfig) error {
+func normalizeProductConfig(config *types.DistributeConfig) error { //nolint:unused // used by the full-tag web build
 	return client.NormalizeConfig(config)
 }
 func validateProductConfig(config *types.DistributeConfig) error {

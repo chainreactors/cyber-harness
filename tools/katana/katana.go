@@ -183,17 +183,12 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	}
 
 	// Use instance-owned output and logging for embedded crawling.
-
 	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(options, collector, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-
 		return nil, fmt.Errorf("katana: init: %w", err)
 	}
 	// Output ownership is transferred during construction.
-	defer func() {
-		crawlerOptions.Close()
-
-	}()
+	defer crawlerOptions.Close()
 
 	var crawler engine.Engine
 	switch {
