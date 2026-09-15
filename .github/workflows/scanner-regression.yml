@@ -32,7 +32,7 @@ jobs:
 
       - name: Run bounded public scanner regressions
         run: |
-          go test -tags "full integration re2_cgo re2_static" -count=1 -timeout 8m -v \
+          go test -tags "full sqlite cstx integration re2_cgo re2_static" -count=1 -timeout 8m -v \
             -run 'Test(ScannerPublicIntegration|FullScannerPublicIntegration)$' \
             ./tools
 

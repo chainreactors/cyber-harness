@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	protoncmd "github.com/chainreactors/aiscan/tools/proton"
 )
@@ -27,7 +27,7 @@ func e2eBash(t *testing.T) (*commands.BashTool, string) {
 	dir := t.TempDir()
 
 	rs := &resources.Set{}
-	registry := extensiontest.Commands(t, "scanner", protoncmd.NewCommand(dir, rs, nil, "", nil))
+	registry := harness.Commands(t, "scanner", protoncmd.NewCommand(dir, rs, nil, "", nil))
 
 	bash := commands.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)

@@ -3,9 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/applicationtest"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ import (
 	coreoutput "github.com/chainreactors/aiscan/core/output"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	types "github.com/chainreactors/aiscan/pkg/types"
@@ -38,7 +37,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	owner := newLoopExtension(lifecycleLoop(func(context.Context, agent.Config) (*agent.Result, error) {
 		panic("test loop failure")
 	}))
-	set := extensiontest.Set(t, extension.Entry{ID: "agent", Extension: owner})
+	set := harness.Set(t, extension.Entry{ID: "agent", Extension: owner})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -89,13 +88,13 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := applicationtest.Entries(t, application)
+	entries := harness.AppEntries(t, application)
 	var dependencyClosed atomic.Bool
 	entries = append(entries, extension.Entry{ID: "dependency", Extension: extension.Func{CloseFunc: func(context.Context) error {
 		dependencyClosed.Store(true)
 		return nil
 	}}}, extension.Entry{ID: "agent", DependsOn: []string{"application.tool-registry", "dependency"}, Extension: owner})
-	set := extensiontest.Set(t, entries...)
+	set := harness.Set(t, entries...)
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	init, cancelInit := context.WithCancel(t.Context())
 	if err := set.Load(init); err != nil {
@@ -171,7 +170,7 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := extensiontest.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +328,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := extensiontest.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +386,7 @@ type lifecycleOutput struct {
 }
 
 func loadTestApplication(t *testing.T, application *apppkg.Resource) *extension.Set {
-	return applicationtest.Load(t, t.Context(), application)
+	return harness.AppLoad(t, t.Context(), application)
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
@@ -454,9 +453,9 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.Bash = terminal.Bash()
-	entries := applicationtest.Entries(t, appResource)
+	entries := harness.AppEntries(t, appResource)
 	entries[1].Extension = terminal
-	appSet := extensiontest.Set(t, entries...)
+	appSet := harness.Set(t, entries...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +467,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -861,30 +860,30 @@ func assertRotationEvents(t *testing.T, events []*aop.Event, oldID, newID, reaso
 	}
 }
 
-func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *telemetry.Extension) {
+func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *telemetryext.Extension) {
 	return newPersistenceRuntimeWithMode(t, option, llm, false)
 }
 
-func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetry.Extension) {
+func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
 	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{Events: stream})
 	app := appResource.App
 	var dependencies []string
 	var entries []extension.Entry
-	var output *telemetry.Extension
+	var output *telemetryext.Extension
 	if option.OutputFile != "" {
 		var outputErr error
-		output, outputErr = telemetry.New(stream, telemetry.Options{Path: option.OutputFile})
+		output, outputErr = telemetryext.New(stream, telemetryext.Options{Path: option.OutputFile})
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
 		entries = append(entries, extension.Entry{ID: "output", Extension: output})
 		dependencies = append(dependencies, "output")
 	}
-	applicationEntries := applicationtest.Entries(t, appResource, dependencies...)
+	applicationEntries := harness.AppEntries(t, appResource, dependencies...)
 	entries = append(entries, applicationEntries...)
-	appSet := extensiontest.Set(t, entries...)
+	appSet := harness.Set(t, entries...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -899,7 +898,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 		t.Fatal(err)
 	}
 
-	runtimeSet := extensiontest.Set(t, extension.Entry{ID: "runtime", Extension: runtimeResource})
+	runtimeSet := harness.Set(t, extension.Entry{ID: "runtime", Extension: runtimeResource})
 	if err := runtimeSet.Load(t.Context()); err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -911,7 +910,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	return app, runtimeResource.Runtime(), output
 }
 
-func flushPersistenceOutput(t *testing.T, output *telemetry.Extension) {
+func flushPersistenceOutput(t *testing.T, output *telemetryext.Extension) {
 	t.Helper()
 	if output != nil {
 		if err := output.Flush(t.Context()); err != nil {
@@ -953,7 +952,7 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	}
 	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := coreevents.New()
-	writer, err := telemetry.New(bus, telemetry.Options{Path: path})
+	writer, err := telemetryext.New(bus, telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,13 +985,13 @@ func persistenceMessagesText(messages []*aop.Message) string {
 func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.jsonl")
 	bus := coreevents.New()
-	output, err := telemetry.New(bus, telemetry.Options{Path: path})
+	output, err := telemetryext.New(bus, telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{Events: bus})
-	applicationEntries := applicationtest.Entries(t, a, "output")
-	aSet := extensiontest.Set(t, append([]extension.Entry{{ID: "output", Extension: output}}, applicationEntries...)...)
+	applicationEntries := harness.AppEntries(t, a, "output")
+	aSet := harness.Set(t, append([]extension.Entry{{ID: "output", Extension: output}}, applicationEntries...)...)
 	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1012,7 +1011,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+		rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 		if err := rtSet.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -1099,4 +1098,3 @@ func newLoopExtension(loop agent.Loop) *Extension {
 	}
 	return value
 }
-

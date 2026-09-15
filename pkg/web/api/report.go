@@ -5,19 +5,46 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/chainreactors/libcstx/go"
 )
 
 const DefaultReportLang = "zh"
 
+// scoDocument is one stored SCO node. The graph is libcstx-owned, but a
+// document read back from the SCO store is schema-named JSON, so rendering a
+// report needs only the fields it prints, not the typed libcstx node model.
+type scoDocument struct {
+	CstxType string `json:"cstx_type"`
+	CstxID   string `json:"cstx_id"`
+
+	Ip       string `json:"ip"`
+	Port     string `json:"port"`
+	Protocol string `json:"protocol"`
+
+	Scheme string `json:"scheme"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
+
+	AppId      string `json:"app_id"`
+	Url        string `json:"url"`
+	Title      string `json:"title"`
+	StatusCode int64  `json:"status_code"`
+
+	Name    string `json:"name"`
+	Product string `json:"product"`
+	Version string `json:"version"`
+
+	Value    string `json:"value"`
+	VulnId   string `json:"vuln_id"`
+	Severity string `json:"severity"`
+}
+
 type scoReportFacts struct {
-	ips        []*cstx.IpNode
-	ports      []*cstx.PortNode
-	apps       []*cstx.AppNode
-	urls       []*cstx.UrlNode
-	frameworks []*cstx.FrameworkNode
-	vulns      []*cstx.VulnNode
+	ips        []scoDocument
+	ports      []scoDocument
+	apps       []scoDocument
+	urls       []scoDocument
+	frameworks []scoDocument
+	vulns      []scoDocument
 	other      map[string]int
 }
 
@@ -32,34 +59,38 @@ func BuildMarkdownReport(target, mode string, rawNodes []json.RawMessage, lang s
 func collectSCOReportFacts(rawNodes []json.RawMessage) scoReportFacts {
 	facts := scoReportFacts{other: make(map[string]int)}
 	for _, raw := range rawNodes {
-		node, err := cstx.ParseSCONode(raw)
-		if err != nil || node == nil {
+		var document scoDocument
+		if err := json.Unmarshal(raw, &document); err != nil {
 			continue
 		}
-		switch value := node.(type) {
-		case *cstx.IpNode:
-			facts.ips = append(facts.ips, value)
-		case *cstx.PortNode:
-			facts.ports = append(facts.ports, value)
-		case *cstx.AppNode:
-			facts.apps = append(facts.apps, value)
-		case *cstx.UrlNode:
-			facts.urls = append(facts.urls, value)
-		case *cstx.FrameworkNode:
-			facts.frameworks = append(facts.frameworks, value)
-		case *cstx.VulnNode:
-			facts.vulns = append(facts.vulns, value)
+		switch document.CstxType {
+		case "ip":
+			facts.ips = append(facts.ips, document)
+		case "port":
+			facts.ports = append(facts.ports, document)
+		case "app":
+			facts.apps = append(facts.apps, document)
+		case "url":
+			facts.urls = append(facts.urls, document)
+		case "framework":
+			facts.frameworks = append(facts.frameworks, document)
+		case "vuln":
+			facts.vulns = append(facts.vulns, document)
 		default:
-			facts.other[node.CstxType()]++
+			facts.other[document.CstxType]++
 		}
 	}
-	sort.Slice(facts.ips, func(i, j int) bool { return facts.ips[i].CstxID() < facts.ips[j].CstxID() })
-	sort.Slice(facts.ports, func(i, j int) bool { return facts.ports[i].CstxID() < facts.ports[j].CstxID() })
-	sort.Slice(facts.apps, func(i, j int) bool { return facts.apps[i].CstxID() < facts.apps[j].CstxID() })
-	sort.Slice(facts.urls, func(i, j int) bool { return facts.urls[i].CstxID() < facts.urls[j].CstxID() })
-	sort.Slice(facts.frameworks, func(i, j int) bool { return facts.frameworks[i].CstxID() < facts.frameworks[j].CstxID() })
-	sort.Slice(facts.vulns, func(i, j int) bool { return facts.vulns[i].CstxID() < facts.vulns[j].CstxID() })
+	sortSCODocuments(facts.ips)
+	sortSCODocuments(facts.ports)
+	sortSCODocuments(facts.apps)
+	sortSCODocuments(facts.urls)
+	sortSCODocuments(facts.frameworks)
+	sortSCODocuments(facts.vulns)
 	return facts
+}
+
+func sortSCODocuments(nodes []scoDocument) {
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].CstxID < nodes[j].CstxID })
 }
 
 func renderSCOReportZH(target, mode string, facts scoReportFacts) string {
@@ -127,7 +158,7 @@ func writeSCOSections(out *strings.Builder, facts scoReportFacts, english bool) 
 	if len(facts.apps) > 0 {
 		writeSectionTitle(out, "应用", "Applications", english)
 		for _, value := range facts.apps {
-			label := firstReportValue(value.Title, value.AppId, value.Url, value.CstxID())
+			label := firstReportValue(value.Title, value.AppId, value.Url, value.CstxID)
 			fmt.Fprintf(out, "- **%s**", markdownInline(label))
 			if value.Url != "" {
 				fmt.Fprintf(out, " — `%s`", markdownInline(value.Url))
@@ -161,7 +192,7 @@ func writeSCOSections(out *strings.Builder, facts scoReportFacts, english bool) 
 	if len(facts.frameworks) > 0 {
 		writeSectionTitle(out, "框架", "Frameworks", english)
 		for _, value := range facts.frameworks {
-			name := firstReportValue(value.Name, value.Product, value.CstxID())
+			name := firstReportValue(value.Name, value.Product, value.CstxID)
 			if value.Version != "" {
 				name += " " + value.Version
 			}
@@ -172,7 +203,7 @@ func writeSCOSections(out *strings.Builder, facts scoReportFacts, english bool) 
 	if len(facts.vulns) > 0 {
 		writeSectionTitle(out, "漏洞", "Vulnerabilities", english)
 		for _, value := range facts.vulns {
-			name := firstReportValue(value.Name, value.VulnId, value.Value, value.CstxID())
+			name := firstReportValue(value.Name, value.VulnId, value.Value, value.CstxID)
 			fmt.Fprintf(out, "- **%s**", markdownInline(name))
 			if value.Severity != "" {
 				fmt.Fprintf(out, " — `%s`", markdownInline(value.Severity))

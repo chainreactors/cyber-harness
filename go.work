@@ -1,9 +1,0 @@
-// Local integration of the companion IOA handler API. Once that API is
-// published, pin the new IOA version in go.mod and remove this workspace file.
-go 1.26
-
-use (
- .
- ./aop
- ../internet-of-agent
-)

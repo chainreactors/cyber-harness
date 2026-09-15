@@ -16,8 +16,8 @@ require (
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
 	github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744
-	github.com/chainreactors/ioa v0.1.2-0.20260802104212-d0e2604a2186
-	github.com/chainreactors/libcstx/go v0.4.2-0.20260909071444-6f9e2a708301
+	github.com/chainreactors/ioa v0.1.2-0.20260914080230-0fff59a906db
+	github.com/chainreactors/libcstx/go v0.4.2-0.20260915062605-a4bd085cbb12
 	github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc
 	github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6
 	github.com/chainreactors/proton v0.3.3-0.20260707162538-471f99ea6131
@@ -82,36 +82,25 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
 	github.com/aws/smithy-go v1.25.1 // indirect
-	github.com/brianvoe/gofakeit/v7 v7.2.1 // indirect
 	github.com/cloudflare/ahocorasick v0.0.0-20240916140611-054963ec9396 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/flier/gohs v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/go-github/v57 v57.0.0 // indirect
-	github.com/gosimple/slug v1.15.0 // indirect
-	github.com/gosimple/unidecode v1.0.1 // indirect
-	github.com/hdm/jarm-go v0.0.7 // indirect
-	github.com/iangcarroll/cookiemonster v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.7.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/kataras/jwt v0.1.8 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/praetorian-inc/titus v1.2.0 // indirect
-	github.com/projectdiscovery/dsl v0.8.20 // indirect
-	github.com/projectdiscovery/gostruct v0.0.2 // indirect
-	github.com/projectdiscovery/govaluate v0.0.0-20260504230327-80320480bb6e // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
-	github.com/sashabaranov/go-openai v1.37.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/vulncheck-oss/go-exploit v1.51.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 )
 
@@ -361,5 +350,7 @@ require (
 )
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
+
+replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.7.0-aiscan.1
 
 replace github.com/chainreactors/aiscan/aop => ./aop

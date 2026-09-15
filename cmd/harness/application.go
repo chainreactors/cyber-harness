@@ -1,19 +1,18 @@
-// Package applicationtest supplies a minimal App host graph for package tests.
-// Production code must construct a concrete Profile instead.
-package applicationtest
+package harness
 
 import (
 	"context"
 	"testing"
 
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	app "github.com/chainreactors/aiscan/pkg/app"
 	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
 
-func Entries(t testing.TB, resource *app.Resource, dependencies ...string) []extension.Entry {
+// AppEntries supplies a minimal App host graph for tests. Production code must
+// construct a concrete Profile instead.
+func AppEntries(t testing.TB, resource *app.Resource, dependencies ...string) []extension.Entry {
 	t.Helper()
 	if resource == nil || resource.App == nil {
 		t.Fatal("test application resource is required")
@@ -45,9 +44,9 @@ func Entries(t testing.TB, resource *app.Resource, dependencies ...string) []ext
 	}
 }
 
-func Load(t testing.TB, ctx context.Context, application *app.Resource, dependencies ...string) *extension.Set {
+func AppLoad(t testing.TB, ctx context.Context, application *app.Resource, dependencies ...string) *extension.Set {
 	t.Helper()
-	set := extensiontest.Set(t, Entries(t, application, dependencies...)...)
+	set := Set(t, AppEntries(t, application, dependencies...)...)
 	if err := set.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

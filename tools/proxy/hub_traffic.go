@@ -15,8 +15,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func (h *ProxyHub) ingest(flow Flow) { h.ingestFiles(flow, [2]*os.File{}) }
-
 func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 	if h.store == nil {
 		return
@@ -87,20 +85,9 @@ func flowSequence(id string) int {
 
 // flowToProto renders a stored flow as a wire Flow: the exchange semantics go
 // through the canonical Exchange, attribution (tool id, timestamp) is stamped
-// on top.
-func flowToProto(flow *Flow) *traffic.Flow {
-	return renderFlowToProto(nil, flow)
-}
-
-// flowToProto hydrates through the store's body read lock when rendering a
-// query response. The lock keeps ring eviction from deleting a
-// file between the copy and the read. The package-level helper above remains
-// for callers/tests that do not have a store handle.
+// on top. Hydration goes through the store's body read lock, which keeps ring
+// eviction from deleting a file between the copy and the read.
 func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
-	return renderFlowToProto(s, flow)
-}
-
-func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 	if flow == nil {
 		return nil
 	}
@@ -108,12 +95,11 @@ func renderFlowToProto(store *FlowStore, flow *Flow) *traffic.Flow {
 	// load bytes only at this boundary, never into a subscriber queue.
 	copy := *flow
 	copy.Exchange = flow.Clone()
-	if store != nil {
-		if err := store.hydrate(&copy); err != nil {
+	if s != nil {
+		if err := s.hydrate(&copy); err != nil {
 			copy.Complete = false
 			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
 		}
-
 	}
 	message := copy.Proto()
 	if !flow.Timestamp.IsZero() {

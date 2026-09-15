@@ -23,10 +23,10 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	operationpb "github.com/chainreactors/aiscan/aop/operation"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/tools/curl"
 	"github.com/chainreactors/aiscan/tools/gogo"
@@ -61,9 +61,9 @@ func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 		}
 	}
 	cyberhub := searchtools.NewCyberhubSearch(index)
-	return extensiontest.CommandGroups(t,
-		extensiontest.CommandGroup{Name: "scanner", Values: scannerCommandValues(engineSet, t.TempDir(), events, logger)},
-		extensiontest.CommandGroup{Name: "search", Values: []commands.Command{
+	return harness.CommandGroups(t,
+		harness.CommandGroup{Name: "scanner", Values: scannerCommandValues(engineSet, t.TempDir(), events, logger)},
+		harness.CommandGroup{Name: "search", Values: []commands.Command{
 			{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
 			{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
 		}},
@@ -74,7 +74,7 @@ func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, e
 	t.Helper()
 	values := scannerCommandValues(engineSet, workDir, events, logger)
 	values = append(values, extra...)
-	return extensiontest.Commands(t, "scanner", values...)
+	return harness.Commands(t, "scanner", values...)
 }
 
 func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {

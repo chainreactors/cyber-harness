@@ -107,7 +107,9 @@ func buildProduct(t *testing.T) string {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full", "-o", productBinary, "./cmd/aiscan")
+		// The full edition implies cstx, which only compiles with cgo. The
+		// harness runner's default CGO_ENABLED=1 covers that.
+		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full cstx", "-o", productBinary, "./cmd/aiscan")
 		cmd.Dir = root
 		data, err := cmd.CombinedOutput()
 		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {

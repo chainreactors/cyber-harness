@@ -14,7 +14,6 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/resources"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
 	_ "github.com/chainreactors/aiscan/tools/gogo"
 	_ "github.com/chainreactors/aiscan/tools/neutron"
 	"github.com/chainreactors/aiscan/tools/scan/engine"

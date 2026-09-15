@@ -48,6 +48,33 @@ Limitations:
 
 Record-enabled builds statically link a feature-minimal FFmpeg and x264, so users do not install either runtime separately. This is single-file distribution, not literally zero runtime dependencies: Windows still uses system DLLs; Linux requires glibc, X11/XCB libraries, and an accessible `DISPLAY`. The SDK only enables the platform capture input, its raw/BMP decoder, libx264, the MP4 muxer, file output, and pixel conversion. It is not a general-purpose FFmpeg build.
 
+## Build tags and CGO
+
+Editions are defined by tags, not by which files happen to be imported. Three
+editions exist, and each one pins its CGO setting:
+
+| Edition | Tags | CGO_ENABLED |
+| --- | --- | --- |
+| standard | `forceposix emptytemplates noembed osusergo netgo` | `0` |
+| full | standard + `full sqlite cstx re2_cgo re2_static` | `1` |
+| record | full + `record_ffmpeg` | `1` |
+
+- **`cstx`** gates the native SCO importer in `pkg/exts/cstx`, which is the only
+  package that imports `libcstx`. Every file there requires both `cstx` and
+  `cgo`, so the dependency cannot leak into a pure-Go build. It is registered as
+  an extension on the web layer's own `extension.Set`.
+- **`full`** implies `cstx`, therefore `full` requires `CGO_ENABLED=1`. A full
+  build that succeeds with `CGO_ENABLED=0` means the cstx files stopped being
+  gated and the edition silently lost the native importer.
+- **`re2_cgo`/`re2_static`** select the cgo RE2 backend. Without them the RE2
+  binding stays on its pure-Go engine, which is slower but still builds with
+  `CGO_ENABLED=0`.
+- `sqlite` is a dependency-supplied tag; the sqlite driver itself is pure Go.
+
+CI enforces both halves: `go list -deps` over the whole module must not reach
+`libcstx` under the standard tags, and the full edition must build with
+`CGO_ENABLED=1` and fail with `CGO_ENABLED=0`.
+
 ## Two-stage native build
 
 Build the record-enabled edition with the dedicated target:

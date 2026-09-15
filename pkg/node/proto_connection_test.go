@@ -23,16 +23,16 @@ import (
 	filepb "github.com/chainreactors/aiscan/aop/file"
 	toolpb "github.com/chainreactors/aiscan/aop/tool"
 	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/eventbus"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/internal/applicationtest"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
 	types "github.com/chainreactors/aiscan/pkg/types"
 	proxytool "github.com/chainreactors/aiscan/tools/proxy"
 	"github.com/gorilla/websocket"
@@ -45,7 +45,7 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 
 func testToolExecutor(t *testing.T, tools ...coretool.Tool) coretool.Executor {
 	t.Helper()
-	return extensiontest.Tools(t, tools...)
+	return harness.Tools(t, tools...)
 }
 
 func (singleDeliveryProbeTool) Name() string { return "single_delivery_probe" }
@@ -225,7 +225,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 		recorded <- wrapped
 		return wrapped, nil
 	}
-	wsConn, response, err := dialer.DialContext(context.Background(), HTTPToWS(server.URL)+DefaultWSPath, nil)
+	wsConn, response, err := dialer.DialContext(context.Background(), HTTPToWS(server.URL)+toolnode.DefaultWSPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 }
 
 func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
-	return applicationtest.Load(t, ctx, application)
+	return harness.AppLoad(t, ctx, application)
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
@@ -640,7 +640,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

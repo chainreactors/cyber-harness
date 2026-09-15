@@ -6,8 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 )
 
@@ -17,7 +17,7 @@ func TestModuleOwnsBrowserRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := extensiontest.Set(t,
+	set := harness.Set(t,
 		extension.Entry{ID: "browser", Extension: instance},
 		extension.Entry{ID: "commands", DependsOn: []string{"browser"}, Extension: registry},
 	)

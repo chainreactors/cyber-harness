@@ -16,7 +16,8 @@ import (
 
 	cfg "github.com/chainreactors/aiscan/core/config"
 	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/toolnode"
+	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+
 	"github.com/chainreactors/aiscan/tools/files"
 )
 

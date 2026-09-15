@@ -13,7 +13,6 @@ import (
 	aop "github.com/chainreactors/aiscan/aop"
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -35,7 +34,7 @@ func TestNewIsInertUntilLoad(t *testing.T) {
 	if len(a.Skills.Skills) != 0 || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("New exposed initialized application resources before Load")
 	}
-	set := extensiontest.Set(t, extension.Entry{ID: "app", Extension: resource})
+	set := testSet(t, extension.Entry{ID: "app", Extension: resource})
 	if len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
 		t.Fatal("construction published registries before Set.Load")
 	}
