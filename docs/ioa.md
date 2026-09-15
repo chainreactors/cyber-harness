@@ -121,9 +121,8 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 
 ## 开发验证
 
-本次同时修改相邻 `internet-of-agent` 仓库，增加 `server.NewHTTPHandler`。
-根目录 `go.work` 使用相对路径联调 AIScan、AOP 和该仓库，不修改模块缓存。
-上游发布该接口后，将 `go.mod` 中 IOA 依赖固定到对应版本并移除这个联调 workspace。
+上游 `internet-of-agent` 发布 `server.NewHTTPHandler` 后，`go.mod` 已把 IOA 依赖固定到对应版本，
+根目录 `go.work` 联调 workspace 随之移除，构建不再依赖相邻仓库的本地路径。
 
 ```text
 go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service

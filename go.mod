@@ -362,4 +362,6 @@ require (
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
 
+replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.7.0-aiscan.1
+
 replace github.com/chainreactors/aiscan/aop => ./aop
