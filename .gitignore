@@ -44,6 +44,7 @@ community.yaml
 /.codex/
 /.playwright-cli/
 /.cache/
+/.buildcheck/
 # operator scan outputs dumped at repo root (screenshots, IP lists, app dumps, findings/reports)
 /*.png
 /*_ips.txt
