@@ -1,6 +1,6 @@
 # Scan 模式详解
 
-`scan` 是 aiscan 最常用的入口命令。它将多个扫描引擎编排为一条事件驱动的流水线，自动完成从端口发现到漏洞检测的全流程，无需 LLM 即可运行。本文档详细说明其内部流程、参数、AI 增强能力和输出格式。
+`scan` 是 cyber 最常用的入口命令。它将多个扫描引擎编排为一条事件驱动的流水线，自动完成从端口发现到漏洞检测的全流程，无需 LLM 即可运行。本文档详细说明其内部流程、参数、AI 增强能力和输出格式。
 
 ---
 
@@ -161,7 +161,7 @@ scan 提供三种 AI 增强能力，均需要配置 LLM Provider（参考 [参�
 
 **auto 行为说明：**
 
-当命令行未显式传入 `--verify` 时，aiscan 使用编译时固化的 `auto` 策略。`auto` 等效于 `high` 级别验证，但如果 LLM Provider 未配置或不可用，验证阶段会被静默跳过，不影响扫描主体流程的正常运行。这意味着即使没有 LLM，scan 依然可以完整运行。
+当命令行未显式传入 `--verify` 时，cyber 使用编译时固化的 `auto` 策略。`auto` 等效于 `high` 级别验证，但如果 LLM Provider 未配置或不可用，验证阶段会被静默跳过，不影响扫描主体流程的正常运行。这意味着即使没有 LLM，scan 依然可以完整运行。
 
 ### --sniper：漏洞情报搜索
 
@@ -209,10 +209,10 @@ scan 提供三种 AI 增强能力，均需要配置 LLM Provider（参考 [参�
 使用 `-o` 保存的 JSONL 扫描记录可以通过 `-F` 回放：
 
 ```bash
-aiscan scan -i 192.168.1.0/24 -o scan_result.jsonl          # 保存事件
-aiscan -F scan_result.jsonl                                # 终端回放
-aiscan -F scan_result.jsonl --view-format markdown          # 转 Markdown 到 stdout
-aiscan -F scan_result.jsonl --view-format markdown -f report.md
+cyber scan -i 192.168.1.0/24 -o scan_result.jsonl          # 保存事件
+cyber -F scan_result.jsonl                                # 终端回放
+cyber -F scan_result.jsonl --view-format markdown          # 转 Markdown 到 stdout
+cyber -F scan_result.jsonl --view-format markdown -f report.md
 ```
 
 ---
@@ -223,40 +223,40 @@ aiscan -F scan_result.jsonl --view-format markdown -f report.md
 
 ```bash
 # 自定义端口范围
-aiscan scan -i 10.0.0.0/24 --ports top3
-aiscan scan -i 10.0.0.0/24 --ports 80,443,8080,8443,9090
-aiscan scan -i 10.0.0.10 --ports -
+cyber scan -i 10.0.0.0/24 --ports top3
+cyber scan -i 10.0.0.0/24 --ports 80,443,8080,8443,9090
+cyber scan -i 10.0.0.10 --ports -
 
 # 自定义字典和规则
-aiscan scan -i http://target.example --dict /path/to/wordlist.txt
-aiscan scan -i http://target.example --dict paths.txt --dict backup.txt --rule rules.txt
-aiscan scan -i http://target.example --default-dict
+cyber scan -i http://target.example --dict /path/to/wordlist.txt
+cyber scan -i http://target.example --dict paths.txt --dict backup.txt --rule rules.txt
+cyber scan -i http://target.example --default-dict
 
 # 自定义弱口令
-aiscan scan -i 10.0.0.0/24 --user admin --user root --pwd password --pwd admin123
-aiscan scan -i 10.0.0.0/24 --zombie-top 10
+cyber scan -i 10.0.0.0/24 --user admin --user root --pwd password --pwd admin123
+cyber scan -i 10.0.0.0/24 --zombie-top 10
 
 # 无指纹时也运行 POC / 增加 POC 上限
-aiscan scan -i http://target.example --broad-poc
-aiscan scan -i http://target.example --max-neutron-per-finger 50
+cyber scan -i http://target.example --broad-poc
+cyber scan -i http://target.example --max-neutron-per-finger 50
 
 # 输出与回放
-aiscan scan -i 10.0.0.0/24 -j
-aiscan scan -i 10.0.0.0/24 -o result.jsonl
-aiscan -F result.jsonl
-aiscan -F result.jsonl --view-format markdown -f report.md
+cyber scan -i 10.0.0.0/24 -j
+cyber scan -i 10.0.0.0/24 -o result.jsonl
+cyber -F result.jsonl
+cyber -F result.jsonl --view-format markdown -f report.md
 
 # 并发与超时
-aiscan scan -i 10.0.0.0/16 --thread 200
-aiscan scan -i 10.0.0.0/24 --timeout 10
+cyber scan -i 10.0.0.0/16 --thread 200
+cyber scan -i 10.0.0.0/24 --timeout 10
 
 # 调试
-aiscan scan -i 192.168.1.1 --trace
-aiscan scan -i 192.168.1.1 --debug
-aiscan scan -i 192.168.1.0/24 --no-color > scan.log
+cyber scan -i 192.168.1.1 --trace
+cyber scan -i 192.168.1.1 --debug
+cyber scan -i 192.168.1.0/24 --no-color > scan.log
 
 # AI 增强组合
-aiscan scan -i http://target.example --mode full --verify=high --sniper --deep --report
-aiscan scan -i http://target.example --verify=critical
-aiscan scan -i http://target.example --verify=off
+cyber scan -i http://target.example --mode full --verify=high --sniper --deep --report
+cyber scan -i http://target.example --verify=critical
+cyber scan -i http://target.example --verify=off
 ```

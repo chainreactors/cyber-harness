@@ -1,16 +1,16 @@
 # Recorder native SDK
 
-AIScan keeps the native recorder SDK separate from normal product builds.
+Cyber keeps the native recorder SDK separate from normal product builds.
 
 1. Maintainers run the `recorder-native-sdk` workflow after changing `versions.env` or the native build configuration. It builds the pinned sources, creates relocatable static SDK archives, writes SHA-256 sidecars, and publishes the assets to the versioned GitHub release.
-2. SDK and record-tool developers run `make record` when they need the optional backend. It downloads the matching platform archive once, verifies it, installs it below `.cache/record-native`, and builds `aiscan-record`. Default `make full` and product release jobs do not fetch or link this SDK.
+2. SDK and record-tool developers run `make record` when they need the optional backend. It downloads the matching platform archive once, verifies it, installs it below `.cache/record-native`, and builds `cyber-record`. Default `make full` and product release jobs do not fetch or link this SDK.
 
 Supported bundles are `linux-amd64`, `linux-arm64`, and `windows-amd64`. FFmpeg and x264 are static, so the distributed executable does not require separate FFmpeg/x264 installation. Operating-system libraries remain external dependencies: Linux uses glibc and X11/XCB; Windows uses system DLLs. The source builder uses an explicit component allowlist (capture input, H.264 encoder, MP4 muxer, and file output only), and packaging rejects static-library sets larger than 16 MiB by default.
 
 The Makefile is the public build interface:
 
 ```bash
-make record                            # fetch SDK and build aiscan-record
+make record                            # fetch SDK and build cyber-record
 make record-native                     # fetch and verify SDK only
 make record-native-source              # build SDK from pinned sources
 make record-native-source record-native-package
@@ -28,10 +28,10 @@ bash .github/native/sdk.sh env linux amd64
 
 Environment overrides:
 
-- `AISCAN_RECORD_PREFIX`: SDK install/cache directory.
-- `AISCAN_RECORD_NATIVE_URL`: release or mirror base URL containing the archive and `.sha256` sidecar.
-- `AISCAN_RECORD_OFFLINE=1`: forbid downloads and require an already cached matching SDK.
-- `AISCAN_RECORD_BUILD_FROM_SOURCE=1`: make `make record` or `make record-native` use the pinned source builder instead of downloading an SDK.
+- `CYBER_RECORD_PREFIX`: SDK install/cache directory.
+- `CYBER_RECORD_NATIVE_URL`: release or mirror base URL containing the archive and `.sha256` sidecar.
+- `CYBER_RECORD_OFFLINE=1`: forbid downloads and require an already cached matching SDK.
+- `CYBER_RECORD_BUILD_FROM_SOURCE=1`: make `make record` or `make record-native` use the pinned source builder instead of downloading an SDK.
 - `RECORD_ARCH`: target architecture for Makefile SDK targets (defaults to `go env GOARCH`).
 - `RECORD_NATIVE_OUTPUT`: package output directory (defaults to `dist/native`).
 

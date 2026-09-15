@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

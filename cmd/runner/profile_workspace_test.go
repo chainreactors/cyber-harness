@@ -13,13 +13,13 @@ import (
 	"testing/synctest"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/files"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/files"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

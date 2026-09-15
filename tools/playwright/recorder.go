@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/pkg/headless"
+	"github.com/chainreactors/cyber/pkg/headless"
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,7 +94,7 @@ func (r *recorder) generateTemplate(id, name string) *headless.Template {
 		ID: id,
 		Info: headless.TemplateInfo{
 			Name:     name,
-			Author:   "aiscan-recorder",
+			Author:   "cyber-recorder",
 			Severity: "info",
 		},
 		RequestsHeadless: []*headless.Request{{

@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// AgentServiceName is the fully-qualified name of the AgentService service.
-	AgentServiceName = "aiscan.rpc.agent.AgentService"
+	AgentServiceName = "cyber.rpc.agent.AgentService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,15 +34,15 @@ const (
 // period.
 const (
 	// AgentServiceListAgentsProcedure is the fully-qualified name of the AgentService's ListAgents RPC.
-	AgentServiceListAgentsProcedure = "/aiscan.rpc.agent.AgentService/ListAgents"
+	AgentServiceListAgentsProcedure = "/cyber.rpc.agent.AgentService/ListAgents"
 )
 
-// AgentServiceClient is a client for the aiscan.rpc.agent.AgentService service.
+// AgentServiceClient is a client for the cyber.rpc.agent.AgentService service.
 type AgentServiceClient interface {
 	ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error)
 }
 
-// NewAgentServiceClient constructs a client for the aiscan.rpc.agent.AgentService service. By
+// NewAgentServiceClient constructs a client for the cyber.rpc.agent.AgentService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -67,12 +67,12 @@ type agentServiceClient struct {
 	listAgents *connect.Client[types.ListAgentsRequest, types.ListAgentsResponse]
 }
 
-// ListAgents calls aiscan.rpc.agent.AgentService.ListAgents.
+// ListAgents calls cyber.rpc.agent.AgentService.ListAgents.
 func (c *agentServiceClient) ListAgents(ctx context.Context, req *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error) {
 	return c.listAgents.CallUnary(ctx, req)
 }
 
-// AgentServiceHandler is an implementation of the aiscan.rpc.agent.AgentService service.
+// AgentServiceHandler is an implementation of the cyber.rpc.agent.AgentService service.
 type AgentServiceHandler interface {
 	ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error)
 }
@@ -90,7 +90,7 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("ListAgents")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.agent.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.agent.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceListAgentsProcedure:
 			agentServiceListAgentsHandler.ServeHTTP(w, r)
@@ -104,5 +104,5 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 type UnimplementedAgentServiceHandler struct{}
 
 func (UnimplementedAgentServiceHandler) ListAgents(context.Context, *connect.Request[types.ListAgentsRequest]) (*connect.Response[types.ListAgentsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.agent.AgentService.ListAgents is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.agent.AgentService.ListAgents is not implemented"))
 }

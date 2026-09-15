@@ -23,7 +23,7 @@ import zhIOA from './locales/zh/ioa'
 import enTools from './locales/en/tools'
 import zhTools from './locales/zh/tools'
 
-export const STORAGE_KEY = 'aiscan-locale'
+export const STORAGE_KEY = 'cyber-locale'
 export const SUPPORTED_LOCALES = ['en', 'zh'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 export const defaultNS = 'app'

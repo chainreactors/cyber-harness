@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
 )
@@ -29,7 +29,7 @@ func NewArsenalCommand(base string) (*ArsenalCommand, error) {
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    filepath.Join(base, "bin"),
-		ConfigPath: filepath.Join(base, "aiscan.yaml"),
+		ConfigPath: filepath.Join(base, "cyber.yaml"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init arsenal: %w", err)

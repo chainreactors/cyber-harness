@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,43 +25,43 @@ var File_rpc_sco_proto protoreflect.FileDescriptor
 
 const file_rpc_sco_proto_rawDesc = "" +
 	"\n" +
-	"\rrpc/sco.proto\x12\x0eaiscan.rpc.sco\x1a\x0ftypes/sco.proto2\xd7\x03\n" +
+	"\rrpc/sco.proto\x12\rcyber.rpc.sco\x1a\x0ftypes/sco.proto2\xcb\x03\n" +
 	"\n" +
-	"SCOService\x12H\n" +
-	"\tListNodes\x12\x1c.aiscan.sco.ListNodesRequest\x1a\x1d.aiscan.sco.ListNodesResponse\x12B\n" +
-	"\aGetNode\x12\x1a.aiscan.sco.GetNodeRequest\x1a\x1b.aiscan.sco.GetNodeResponse\x12E\n" +
-	"\bGetStats\x12\x1b.aiscan.sco.GetStatsRequest\x1a\x1c.aiscan.sco.GetStatsResponse\x12N\n" +
-	"\vDeleteNodes\x12\x1e.aiscan.sco.DeleteNodesRequest\x1a\x1f.aiscan.sco.DeleteNodesResponse\x12N\n" +
-	"\vImportNodes\x12\x1e.aiscan.sco.ImportNodesRequest\x1a\x1f.aiscan.sco.ImportNodesResponse\x12T\n" +
-	"\rListArtifacts\x12 .aiscan.sco.ListArtifactsRequest\x1a!.aiscan.sco.ListArtifactsResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"SCOService\x12F\n" +
+	"\tListNodes\x12\x1b.cyber.sco.ListNodesRequest\x1a\x1c.cyber.sco.ListNodesResponse\x12@\n" +
+	"\aGetNode\x12\x19.cyber.sco.GetNodeRequest\x1a\x1a.cyber.sco.GetNodeResponse\x12C\n" +
+	"\bGetStats\x12\x1a.cyber.sco.GetStatsRequest\x1a\x1b.cyber.sco.GetStatsResponse\x12L\n" +
+	"\vDeleteNodes\x12\x1d.cyber.sco.DeleteNodesRequest\x1a\x1e.cyber.sco.DeleteNodesResponse\x12L\n" +
+	"\vImportNodes\x12\x1d.cyber.sco.ImportNodesRequest\x1a\x1e.cyber.sco.ImportNodesResponse\x12R\n" +
+	"\rListArtifacts\x12\x1f.cyber.sco.ListArtifactsRequest\x1a .cyber.sco.ListArtifactsResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_sco_proto_goTypes = []any{
-	(*types.ListNodesRequest)(nil),      // 0: aiscan.sco.ListNodesRequest
-	(*types.GetNodeRequest)(nil),        // 1: aiscan.sco.GetNodeRequest
-	(*types.GetStatsRequest)(nil),       // 2: aiscan.sco.GetStatsRequest
-	(*types.DeleteNodesRequest)(nil),    // 3: aiscan.sco.DeleteNodesRequest
-	(*types.ImportNodesRequest)(nil),    // 4: aiscan.sco.ImportNodesRequest
-	(*types.ListArtifactsRequest)(nil),  // 5: aiscan.sco.ListArtifactsRequest
-	(*types.ListNodesResponse)(nil),     // 6: aiscan.sco.ListNodesResponse
-	(*types.GetNodeResponse)(nil),       // 7: aiscan.sco.GetNodeResponse
-	(*types.GetStatsResponse)(nil),      // 8: aiscan.sco.GetStatsResponse
-	(*types.DeleteNodesResponse)(nil),   // 9: aiscan.sco.DeleteNodesResponse
-	(*types.ImportNodesResponse)(nil),   // 10: aiscan.sco.ImportNodesResponse
-	(*types.ListArtifactsResponse)(nil), // 11: aiscan.sco.ListArtifactsResponse
+	(*types.ListNodesRequest)(nil),      // 0: cyber.sco.ListNodesRequest
+	(*types.GetNodeRequest)(nil),        // 1: cyber.sco.GetNodeRequest
+	(*types.GetStatsRequest)(nil),       // 2: cyber.sco.GetStatsRequest
+	(*types.DeleteNodesRequest)(nil),    // 3: cyber.sco.DeleteNodesRequest
+	(*types.ImportNodesRequest)(nil),    // 4: cyber.sco.ImportNodesRequest
+	(*types.ListArtifactsRequest)(nil),  // 5: cyber.sco.ListArtifactsRequest
+	(*types.ListNodesResponse)(nil),     // 6: cyber.sco.ListNodesResponse
+	(*types.GetNodeResponse)(nil),       // 7: cyber.sco.GetNodeResponse
+	(*types.GetStatsResponse)(nil),      // 8: cyber.sco.GetStatsResponse
+	(*types.DeleteNodesResponse)(nil),   // 9: cyber.sco.DeleteNodesResponse
+	(*types.ImportNodesResponse)(nil),   // 10: cyber.sco.ImportNodesResponse
+	(*types.ListArtifactsResponse)(nil), // 11: cyber.sco.ListArtifactsResponse
 }
 var file_rpc_sco_proto_depIdxs = []int32{
-	0,  // 0: aiscan.rpc.sco.SCOService.ListNodes:input_type -> aiscan.sco.ListNodesRequest
-	1,  // 1: aiscan.rpc.sco.SCOService.GetNode:input_type -> aiscan.sco.GetNodeRequest
-	2,  // 2: aiscan.rpc.sco.SCOService.GetStats:input_type -> aiscan.sco.GetStatsRequest
-	3,  // 3: aiscan.rpc.sco.SCOService.DeleteNodes:input_type -> aiscan.sco.DeleteNodesRequest
-	4,  // 4: aiscan.rpc.sco.SCOService.ImportNodes:input_type -> aiscan.sco.ImportNodesRequest
-	5,  // 5: aiscan.rpc.sco.SCOService.ListArtifacts:input_type -> aiscan.sco.ListArtifactsRequest
-	6,  // 6: aiscan.rpc.sco.SCOService.ListNodes:output_type -> aiscan.sco.ListNodesResponse
-	7,  // 7: aiscan.rpc.sco.SCOService.GetNode:output_type -> aiscan.sco.GetNodeResponse
-	8,  // 8: aiscan.rpc.sco.SCOService.GetStats:output_type -> aiscan.sco.GetStatsResponse
-	9,  // 9: aiscan.rpc.sco.SCOService.DeleteNodes:output_type -> aiscan.sco.DeleteNodesResponse
-	10, // 10: aiscan.rpc.sco.SCOService.ImportNodes:output_type -> aiscan.sco.ImportNodesResponse
-	11, // 11: aiscan.rpc.sco.SCOService.ListArtifacts:output_type -> aiscan.sco.ListArtifactsResponse
+	0,  // 0: cyber.rpc.sco.SCOService.ListNodes:input_type -> cyber.sco.ListNodesRequest
+	1,  // 1: cyber.rpc.sco.SCOService.GetNode:input_type -> cyber.sco.GetNodeRequest
+	2,  // 2: cyber.rpc.sco.SCOService.GetStats:input_type -> cyber.sco.GetStatsRequest
+	3,  // 3: cyber.rpc.sco.SCOService.DeleteNodes:input_type -> cyber.sco.DeleteNodesRequest
+	4,  // 4: cyber.rpc.sco.SCOService.ImportNodes:input_type -> cyber.sco.ImportNodesRequest
+	5,  // 5: cyber.rpc.sco.SCOService.ListArtifacts:input_type -> cyber.sco.ListArtifactsRequest
+	6,  // 6: cyber.rpc.sco.SCOService.ListNodes:output_type -> cyber.sco.ListNodesResponse
+	7,  // 7: cyber.rpc.sco.SCOService.GetNode:output_type -> cyber.sco.GetNodeResponse
+	8,  // 8: cyber.rpc.sco.SCOService.GetStats:output_type -> cyber.sco.GetStatsResponse
+	9,  // 9: cyber.rpc.sco.SCOService.DeleteNodes:output_type -> cyber.sco.DeleteNodesResponse
+	10, // 10: cyber.rpc.sco.SCOService.ImportNodes:output_type -> cyber.sco.ImportNodesResponse
+	11, // 11: cyber.rpc.sco.SCOService.ListArtifacts:output_type -> cyber.sco.ListArtifactsResponse
 	6,  // [6:12] is the sub-list for method output_type
 	0,  // [0:6] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name

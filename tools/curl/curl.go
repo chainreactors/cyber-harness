@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/toolargs"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/toolargs"
 )
 
 // Command is a pure-Go, observation-native reimplementation of curl. It exposes a
@@ -24,7 +24,7 @@ type Command struct {
 // compatibilityVersion is intentionally explicit instead of inheriting the
 // host's curl version. Agents can therefore use --version to discover that
 // they are talking to the deterministic in-process implementation.
-const compatibilityVersion = "curl 8.14.1 (aiscan pure-Go)"
+const compatibilityVersion = "curl 8.14.1 (cyber pure-Go)"
 
 func New() *Command {
 	c := &Command{}

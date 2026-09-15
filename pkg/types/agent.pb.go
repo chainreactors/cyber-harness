@@ -7,7 +7,7 @@
 package types
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -884,17 +884,17 @@ var File_types_agent_proto protoreflect.FileDescriptor
 
 const file_types_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x11types/agent.proto\x12\faiscan.agent\x1a\x12aop/protocol.proto\x1a\x13types/command.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x95\x02\n" +
+	"\x11types/agent.proto\x12\vcyber.agent\x1a\x12aop/protocol.proto\x1a\x13types/command.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x94\x02\n" +
 	"\tAgentView\x12%\n" +
 	"\x05hello\x18\x01 \x01(\v2\x0f.aop.AgentHelloR\x05hello\x12(\n" +
 	"\x06status\x18\x02 \x01(\v2\x10.aop.AgentStatusR\x06status\x12%\n" +
 	"\x05stats\x18\x03 \x01(\v2\x0f.aop.AgentStatsR\x05stats\x12=\n" +
-	"\fconnected_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vconnectedAt\x127\n" +
-	"\bcommands\x18\x06 \x03(\v2\x1b.aiscan.command.CommandSpecR\bcommands\x12\x12\n" +
+	"\fconnected_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vconnectedAt\x126\n" +
+	"\bcommands\x18\x06 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommands\x12\x12\n" +
 	"\x04busy\x18\a \x01(\bR\x04busyJ\x04\b\x04\x10\x05\"\x13\n" +
-	"\x11ListAgentsRequest\"E\n" +
-	"\x12ListAgentsResponse\x12/\n" +
-	"\x06agents\x18\x01 \x03(\v2\x17.aiscan.agent.AgentViewR\x06agents\"^\n" +
+	"\x11ListAgentsRequest\"D\n" +
+	"\x12ListAgentsResponse\x12.\n" +
+	"\x06agents\x18\x01 \x03(\v2\x16.cyber.agent.AgentViewR\x06agents\"^\n" +
 	"\x0fAgentRunOptions\x12#\n" +
 	"\reval_criteria\x18\x01 \x01(\tR\fevalCriteria\x12&\n" +
 	"\x0feval_max_rounds\x18\x02 \x01(\rR\revalMaxRounds\"G\n" +
@@ -941,15 +941,15 @@ const file_types_agent_proto_rawDesc = "" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04busy\x18\x03 \x01(\bR\x04busy\x12\x1a\n" +
 	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x14\n" +
-	"\x05model\x18\x05 \x01(\tR\x05model\"I\n" +
-	"\x11AgentListMetadata\x124\n" +
-	"\x06agents\x18\x01 \x03(\v2\x1c.aiscan.agent.AgentListEntryR\x06agents\"\xb2\x01\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\"H\n" +
+	"\x11AgentListMetadata\x123\n" +
+	"\x06agents\x18\x01 \x03(\v2\x1b.cyber.agent.AgentListEntryR\x06agents\"\xb1\x01\n" +
 	"\x12WebMessageMetadata\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12/\n" +
-	"\x06params\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06params\x12>\n" +
+	"\x06params\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06params\x12=\n" +
 	"\n" +
-	"agent_list\x18\x04 \x01(\v2\x1f.aiscan.agent.AgentListMetadataR\tagentListB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	"agent_list\x18\x04 \x01(\v2\x1e.cyber.agent.AgentListMetadataR\tagentListB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_agent_proto_rawDescOnce sync.Once
@@ -965,37 +965,37 @@ func file_types_agent_proto_rawDescGZIP() []byte {
 
 var file_types_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_types_agent_proto_goTypes = []any{
-	(*AgentView)(nil),             // 0: aiscan.agent.AgentView
-	(*ListAgentsRequest)(nil),     // 1: aiscan.agent.ListAgentsRequest
-	(*ListAgentsResponse)(nil),    // 2: aiscan.agent.ListAgentsResponse
-	(*AgentRunOptions)(nil),       // 3: aiscan.agent.AgentRunOptions
-	(*CommandDetail)(nil),         // 4: aiscan.agent.CommandDetail
-	(*CompactDetail)(nil),         // 5: aiscan.agent.CompactDetail
-	(*DelegationDetail)(nil),      // 6: aiscan.agent.DelegationDetail
-	(*EvalControl)(nil),           // 7: aiscan.agent.EvalControl
-	(*EvalDetail)(nil),            // 8: aiscan.agent.EvalDetail
-	(*BudgetWarning)(nil),         // 9: aiscan.agent.BudgetWarning
-	(*LLMRequestDetail)(nil),      // 10: aiscan.agent.LLMRequestDetail
-	(*AgentListEntry)(nil),        // 11: aiscan.agent.AgentListEntry
-	(*AgentListMetadata)(nil),     // 12: aiscan.agent.AgentListMetadata
-	(*WebMessageMetadata)(nil),    // 13: aiscan.agent.WebMessageMetadata
+	(*AgentView)(nil),             // 0: cyber.agent.AgentView
+	(*ListAgentsRequest)(nil),     // 1: cyber.agent.ListAgentsRequest
+	(*ListAgentsResponse)(nil),    // 2: cyber.agent.ListAgentsResponse
+	(*AgentRunOptions)(nil),       // 3: cyber.agent.AgentRunOptions
+	(*CommandDetail)(nil),         // 4: cyber.agent.CommandDetail
+	(*CompactDetail)(nil),         // 5: cyber.agent.CompactDetail
+	(*DelegationDetail)(nil),      // 6: cyber.agent.DelegationDetail
+	(*EvalControl)(nil),           // 7: cyber.agent.EvalControl
+	(*EvalDetail)(nil),            // 8: cyber.agent.EvalDetail
+	(*BudgetWarning)(nil),         // 9: cyber.agent.BudgetWarning
+	(*LLMRequestDetail)(nil),      // 10: cyber.agent.LLMRequestDetail
+	(*AgentListEntry)(nil),        // 11: cyber.agent.AgentListEntry
+	(*AgentListMetadata)(nil),     // 12: cyber.agent.AgentListMetadata
+	(*WebMessageMetadata)(nil),    // 13: cyber.agent.WebMessageMetadata
 	(*aop.AgentHello)(nil),        // 14: aop.AgentHello
 	(*aop.AgentStatus)(nil),       // 15: aop.AgentStatus
 	(*aop.AgentStats)(nil),        // 16: aop.AgentStats
 	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
-	(*CommandSpec)(nil),           // 18: aiscan.command.CommandSpec
+	(*CommandSpec)(nil),           // 18: cyber.command.CommandSpec
 	(*structpb.Struct)(nil),       // 19: google.protobuf.Struct
 }
 var file_types_agent_proto_depIdxs = []int32{
-	14, // 0: aiscan.agent.AgentView.hello:type_name -> aop.AgentHello
-	15, // 1: aiscan.agent.AgentView.status:type_name -> aop.AgentStatus
-	16, // 2: aiscan.agent.AgentView.stats:type_name -> aop.AgentStats
-	17, // 3: aiscan.agent.AgentView.connected_at:type_name -> google.protobuf.Timestamp
-	18, // 4: aiscan.agent.AgentView.commands:type_name -> aiscan.command.CommandSpec
-	0,  // 5: aiscan.agent.ListAgentsResponse.agents:type_name -> aiscan.agent.AgentView
-	11, // 6: aiscan.agent.AgentListMetadata.agents:type_name -> aiscan.agent.AgentListEntry
-	19, // 7: aiscan.agent.WebMessageMetadata.params:type_name -> google.protobuf.Struct
-	12, // 8: aiscan.agent.WebMessageMetadata.agent_list:type_name -> aiscan.agent.AgentListMetadata
+	14, // 0: cyber.agent.AgentView.hello:type_name -> aop.AgentHello
+	15, // 1: cyber.agent.AgentView.status:type_name -> aop.AgentStatus
+	16, // 2: cyber.agent.AgentView.stats:type_name -> aop.AgentStats
+	17, // 3: cyber.agent.AgentView.connected_at:type_name -> google.protobuf.Timestamp
+	18, // 4: cyber.agent.AgentView.commands:type_name -> cyber.command.CommandSpec
+	0,  // 5: cyber.agent.ListAgentsResponse.agents:type_name -> cyber.agent.AgentView
+	11, // 6: cyber.agent.AgentListMetadata.agents:type_name -> cyber.agent.AgentListEntry
+	19, // 7: cyber.agent.WebMessageMetadata.params:type_name -> google.protobuf.Struct
+	12, // 8: cyber.agent.WebMessageMetadata.agent_list:type_name -> cyber.agent.AgentListMetadata
 	9,  // [9:9] is the sub-list for method output_type
 	9,  // [9:9] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name

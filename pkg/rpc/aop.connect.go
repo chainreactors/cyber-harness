@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// AOPServiceName is the fully-qualified name of the AOPService service.
-	AOPServiceName = "aiscan.rpc.aop.AOPService"
+	AOPServiceName = "cyber.rpc.aop.AOPService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,15 +34,15 @@ const (
 // period.
 const (
 	// AOPServiceConnectProcedure is the fully-qualified name of the AOPService's Connect RPC.
-	AOPServiceConnectProcedure = "/aiscan.rpc.aop.AOPService/Connect"
+	AOPServiceConnectProcedure = "/cyber.rpc.aop.AOPService/Connect"
 )
 
-// AOPServiceClient is a client for the aiscan.rpc.aop.AOPService service.
+// AOPServiceClient is a client for the cyber.rpc.aop.AOPService service.
 type AOPServiceClient interface {
 	Connect(context.Context) *connect.BidiStreamForClient[aop.Envelope, aop.Envelope]
 }
 
-// NewAOPServiceClient constructs a client for the aiscan.rpc.aop.AOPService service. By default, it
+// NewAOPServiceClient constructs a client for the cyber.rpc.aop.AOPService service. By default, it
 // uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
 // uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
 // connect.WithGRPCWeb() options.
@@ -67,12 +67,12 @@ type aOPServiceClient struct {
 	connect *connect.Client[aop.Envelope, aop.Envelope]
 }
 
-// Connect calls aiscan.rpc.aop.AOPService.Connect.
+// Connect calls cyber.rpc.aop.AOPService.Connect.
 func (c *aOPServiceClient) Connect(ctx context.Context) *connect.BidiStreamForClient[aop.Envelope, aop.Envelope] {
 	return c.connect.CallBidiStream(ctx)
 }
 
-// AOPServiceHandler is an implementation of the aiscan.rpc.aop.AOPService service.
+// AOPServiceHandler is an implementation of the cyber.rpc.aop.AOPService service.
 type AOPServiceHandler interface {
 	Connect(context.Context, *connect.BidiStream[aop.Envelope, aop.Envelope]) error
 }
@@ -90,7 +90,7 @@ func NewAOPServiceHandler(svc AOPServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(aOPServiceMethods.ByName("Connect")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.aop.AOPService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.aop.AOPService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AOPServiceConnectProcedure:
 			aOPServiceConnectHandler.ServeHTTP(w, r)
@@ -104,5 +104,5 @@ func NewAOPServiceHandler(svc AOPServiceHandler, opts ...connect.HandlerOption) 
 type UnimplementedAOPServiceHandler struct{}
 
 func (UnimplementedAOPServiceHandler) Connect(context.Context, *connect.BidiStream[aop.Envelope, aop.Envelope]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.aop.AOPService.Connect is not implemented"))
+	return connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.aop.AOPService.Connect is not implemented"))
 }

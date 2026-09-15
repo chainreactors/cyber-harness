@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/skills"
 )
 
 func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
@@ -412,7 +412,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		},
 	}
 	systemPrompt := buildTestSystemPrompt(registry, nil, store.Skills)
-	task := skills.ExpandCommand("/skill:aiscan scan 127.0.0.1", store)
+	task := skills.ExpandCommand("/skill:cyber scan 127.0.0.1", store)
 
 	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
@@ -435,7 +435,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 		t.Fatalf("system prompt missing skills")
 	}
 	user := requests[0].Messages[1]
-	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="aiscan"`) {
+	if user.Role != "user" || !strings.Contains(provider.MessageText(user), `<skill name="cyber"`) {
 		t.Fatalf("user prompt missing expanded skill")
 	}
 }

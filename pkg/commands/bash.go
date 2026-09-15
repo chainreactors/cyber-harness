@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/output"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/tmux"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/output"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/cyber/pkg/types"
 )
 
 const (

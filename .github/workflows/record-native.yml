@@ -98,6 +98,6 @@ jobs:
             gh release upload "${RECORD_NATIVE_RELEASE}" dist/native/* --clobber
           else
             gh release create "${RECORD_NATIVE_RELEASE}" dist/native/* \
-              --title "AIScan recorder native SDK ${RECORD_NATIVE_VERSION}" \
-              --notes "Prebuilt static FFmpeg ${FFMPEG_TAG} and x264 ${X264_COMMIT} SDKs for optional AIScan record tool builds."
+              --title "Cyber recorder native SDK ${RECORD_NATIVE_VERSION}" \
+              --notes "Prebuilt static FFmpeg ${FFMPEG_TAG} and x264 ${X264_COMMIT} SDKs for optional Cyber record tool builds."
           fi

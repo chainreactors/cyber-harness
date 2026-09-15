@@ -7,7 +7,7 @@
 package types
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -76,7 +76,7 @@ func (SessionHistory_Mode) EnumDescriptor() ([]byte, []int) {
 // inheritance explicit without changing the shared AOP protocol schema.
 type SessionHistory struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Mode          SessionHistory_Mode    `protobuf:"varint,1,opt,name=mode,proto3,enum=aiscan.chat.SessionHistory_Mode" json:"mode,omitempty"`
+	Mode          SessionHistory_Mode    `protobuf:"varint,1,opt,name=mode,proto3,enum=cyber.chat.SessionHistory_Mode" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -838,9 +838,10 @@ var File_types_chat_proto protoreflect.FileDescriptor
 
 const file_types_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x10types/chat.proto\x12\vaiscan.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x89\x01\n" +
-	"\x0eSessionHistory\x124\n" +
-	"\x04mode\x18\x01 \x01(\x0e2 .aiscan.chat.SessionHistory.ModeR\x04mode\"A\n" +
+	"\x10types/chat.proto\x12\n" +
+	"cyber.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x88\x01\n" +
+	"\x0eSessionHistory\x123\n" +
+	"\x04mode\x18\x01 \x01(\x0e2\x1f.cyber.chat.SessionHistory.ModeR\x04mode\"A\n" +
 	"\x04Mode\x12\x14\n" +
 	"\x10MODE_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fMODE_INHERIT\x10\x01\x12\x11\n" +
@@ -857,30 +858,30 @@ const file_types_chat_proto_rawDesc = "" +
 	"\x13ListSessionsRequest\x12!\n" +
 	"\fafter_cursor\x18\x01 \x01(\tR\vafterCursor\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12%\n" +
-	"\x0einclude_closed\x18\x03 \x01(\bR\rincludeClosed\"o\n" +
-	"\x14ListSessionsResponse\x126\n" +
-	"\bsessions\x18\x01 \x03(\v2\x1a.aiscan.chat.SessionRecordR\bsessions\x12\x1f\n" +
+	"\x0einclude_closed\x18\x03 \x01(\bR\rincludeClosed\"n\n" +
+	"\x14ListSessionsResponse\x125\n" +
+	"\bsessions\x18\x01 \x03(\v2\x19.cyber.chat.SessionRecordR\bsessions\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\"2\n" +
 	"\x11GetSessionRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"J\n" +
-	"\x12GetSessionResponse\x124\n" +
-	"\asession\x18\x01 \x01(\v2\x1a.aiscan.chat.SessionRecordR\asession\"\x8f\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"I\n" +
+	"\x12GetSessionResponse\x123\n" +
+	"\asession\x18\x01 \x01(\v2\x19.cyber.chat.SessionRecordR\asession\"\x8f\x01\n" +
 	"\x13ResetSessionRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12$\n" +
 	"\x0enew_session_id\x18\x03 \x01(\tR\fnewSessionId\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title\"u\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"t\n" +
 	"\x13ResetSessionReceipt\x12(\n" +
-	"\bprevious\x18\x01 \x01(\v2\f.aop.SessionR\bprevious\x124\n" +
-	"\acurrent\x18\x02 \x01(\v2\x1a.aiscan.chat.SessionRecordR\acurrent\"\xae\x01\n" +
+	"\bprevious\x18\x01 \x01(\v2\f.aop.SessionR\bprevious\x123\n" +
+	"\acurrent\x18\x02 \x01(\v2\x19.cyber.chat.SessionRecordR\acurrent\"\xad\x01\n" +
 	"\x14ResetSessionResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12>\n" +
-	"\baccepted\x18\x02 \x01(\v2 .aiscan.chat.ResetSessionReceiptH\x00R\baccepted\x12,\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12=\n" +
+	"\baccepted\x18\x02 \x01(\v2\x1f.cyber.chat.ResetSessionReceiptH\x00R\baccepted\x12,\n" +
 	"\brejected\x18\x03 \x01(\v2\x0e.aop.RejectionH\x00R\brejectedB\t\n" +
 	"\aoutcome\"T\n" +
 	"\x14DeleteSessionRequest\x12\x1d\n" +
@@ -896,9 +897,9 @@ const file_types_chat_proto_rawDesc = "" +
 	"\aoutcome\"4\n" +
 	"\x13ListCommandsRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"O\n" +
-	"\x14ListCommandsResponse\x127\n" +
-	"\bcommands\x18\x01 \x03(\v2\x1b.aiscan.command.CommandSpecR\bcommandsB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	"session_id\x18\x01 \x01(\tR\tsessionId\"N\n" +
+	"\x14ListCommandsResponse\x126\n" +
+	"\bcommands\x18\x01 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommandsB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_chat_proto_rawDescOnce sync.Once
@@ -915,39 +916,39 @@ func file_types_chat_proto_rawDescGZIP() []byte {
 var file_types_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_types_chat_proto_goTypes = []any{
-	(SessionHistory_Mode)(0),      // 0: aiscan.chat.SessionHistory.Mode
-	(*SessionHistory)(nil),        // 1: aiscan.chat.SessionHistory
-	(*SessionRecord)(nil),         // 2: aiscan.chat.SessionRecord
-	(*ListSessionsRequest)(nil),   // 3: aiscan.chat.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 4: aiscan.chat.ListSessionsResponse
-	(*GetSessionRequest)(nil),     // 5: aiscan.chat.GetSessionRequest
-	(*GetSessionResponse)(nil),    // 6: aiscan.chat.GetSessionResponse
-	(*ResetSessionRequest)(nil),   // 7: aiscan.chat.ResetSessionRequest
-	(*ResetSessionReceipt)(nil),   // 8: aiscan.chat.ResetSessionReceipt
-	(*ResetSessionResponse)(nil),  // 9: aiscan.chat.ResetSessionResponse
-	(*DeleteSessionRequest)(nil),  // 10: aiscan.chat.DeleteSessionRequest
-	(*DeleteSessionResponse)(nil), // 11: aiscan.chat.DeleteSessionResponse
-	(*ListCommandsRequest)(nil),   // 12: aiscan.chat.ListCommandsRequest
-	(*ListCommandsResponse)(nil),  // 13: aiscan.chat.ListCommandsResponse
+	(SessionHistory_Mode)(0),      // 0: cyber.chat.SessionHistory.Mode
+	(*SessionHistory)(nil),        // 1: cyber.chat.SessionHistory
+	(*SessionRecord)(nil),         // 2: cyber.chat.SessionRecord
+	(*ListSessionsRequest)(nil),   // 3: cyber.chat.ListSessionsRequest
+	(*ListSessionsResponse)(nil),  // 4: cyber.chat.ListSessionsResponse
+	(*GetSessionRequest)(nil),     // 5: cyber.chat.GetSessionRequest
+	(*GetSessionResponse)(nil),    // 6: cyber.chat.GetSessionResponse
+	(*ResetSessionRequest)(nil),   // 7: cyber.chat.ResetSessionRequest
+	(*ResetSessionReceipt)(nil),   // 8: cyber.chat.ResetSessionReceipt
+	(*ResetSessionResponse)(nil),  // 9: cyber.chat.ResetSessionResponse
+	(*DeleteSessionRequest)(nil),  // 10: cyber.chat.DeleteSessionRequest
+	(*DeleteSessionResponse)(nil), // 11: cyber.chat.DeleteSessionResponse
+	(*ListCommandsRequest)(nil),   // 12: cyber.chat.ListCommandsRequest
+	(*ListCommandsResponse)(nil),  // 13: cyber.chat.ListCommandsResponse
 	(*aop.Session)(nil),           // 14: aop.Session
 	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
 	(*aop.Rejection)(nil),         // 16: aop.Rejection
-	(*CommandSpec)(nil),           // 17: aiscan.command.CommandSpec
+	(*CommandSpec)(nil),           // 17: cyber.command.CommandSpec
 }
 var file_types_chat_proto_depIdxs = []int32{
-	0,  // 0: aiscan.chat.SessionHistory.mode:type_name -> aiscan.chat.SessionHistory.Mode
-	14, // 1: aiscan.chat.SessionRecord.session:type_name -> aop.Session
-	15, // 2: aiscan.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
-	15, // 3: aiscan.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
-	2,  // 4: aiscan.chat.ListSessionsResponse.sessions:type_name -> aiscan.chat.SessionRecord
-	2,  // 5: aiscan.chat.GetSessionResponse.session:type_name -> aiscan.chat.SessionRecord
-	14, // 6: aiscan.chat.ResetSessionReceipt.previous:type_name -> aop.Session
-	2,  // 7: aiscan.chat.ResetSessionReceipt.current:type_name -> aiscan.chat.SessionRecord
-	8,  // 8: aiscan.chat.ResetSessionResponse.accepted:type_name -> aiscan.chat.ResetSessionReceipt
-	16, // 9: aiscan.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
-	14, // 10: aiscan.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
-	16, // 11: aiscan.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
-	17, // 12: aiscan.chat.ListCommandsResponse.commands:type_name -> aiscan.command.CommandSpec
+	0,  // 0: cyber.chat.SessionHistory.mode:type_name -> cyber.chat.SessionHistory.Mode
+	14, // 1: cyber.chat.SessionRecord.session:type_name -> aop.Session
+	15, // 2: cyber.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
+	15, // 3: cyber.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: cyber.chat.ListSessionsResponse.sessions:type_name -> cyber.chat.SessionRecord
+	2,  // 5: cyber.chat.GetSessionResponse.session:type_name -> cyber.chat.SessionRecord
+	14, // 6: cyber.chat.ResetSessionReceipt.previous:type_name -> aop.Session
+	2,  // 7: cyber.chat.ResetSessionReceipt.current:type_name -> cyber.chat.SessionRecord
+	8,  // 8: cyber.chat.ResetSessionResponse.accepted:type_name -> cyber.chat.ResetSessionReceipt
+	16, // 9: cyber.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
+	14, // 10: cyber.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
+	16, // 11: cyber.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
+	17, // 12: cyber.chat.ListCommandsResponse.commands:type_name -> cyber.command.CommandSpec
 	13, // [13:13] is the sub-list for method output_type
 	13, // [13:13] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name

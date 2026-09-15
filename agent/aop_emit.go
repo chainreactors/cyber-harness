@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 

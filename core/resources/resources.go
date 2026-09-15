@@ -23,7 +23,7 @@ const (
 	ModeOverride = "override"
 )
 
-// Options controls aiscan-owned scanner resource loading.
+// Options controls cyber-owned scanner resource loading.
 type Options struct {
 	CacheDir    string
 	CyberhubURL string
@@ -32,7 +32,7 @@ type Options struct {
 	Proxy       string
 }
 
-// Set owns the scanner resource bytes and compiled SDK engines used by aiscan.
+// Set owns the scanner resource bytes and compiled SDK engines used by cyber.
 type Set struct {
 	Mode             string
 	RemoteEnabled    bool
@@ -47,7 +47,7 @@ type Set struct {
 	configs          map[string]map[string][]byte
 }
 
-// Init loads scanner resources once for aiscan and prepares SDK configs.
+// Init loads scanner resources once for cyber and prepares SDK configs.
 func Init(ctx context.Context, opts Options) (*Set, error) {
 	mode, err := NormalizeMode(opts.Mode)
 	if err != nil {

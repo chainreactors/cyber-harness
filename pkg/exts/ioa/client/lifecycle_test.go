@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/types"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/types"
+	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
 )

@@ -23,7 +23,7 @@
 
 ## 运行模式
 
-`aiscan agent` 根据输入自动选择三种运行模式之一：
+`cyber agent` 根据输入自动选择三种运行模式之一：
 
 | 条件 | 模式 | 行为 |
 | --- | --- | --- |
@@ -59,34 +59,34 @@ One-shot 模式接收一次性任务，agent 执行完成后自动退出。
 新文件。`--resume` 只读历史，不会修改历史文件或隐式开启输出。
 
 ```bash
-aiscan agent -p "检查目标" -i http://target.example --output-format json
-aiscan agent -p "检查目标" -i http://target.example --observe=files,http -o run.jsonl
-aiscan agent -p "继续分析" --resume run.jsonl -o continuation.jsonl
+cyber agent -p "检查目标" -i http://target.example --output-format json
+cyber agent -p "检查目标" -i http://target.example --observe=files,http -o run.jsonl
+cyber agent -p "继续分析" --resume run.jsonl -o continuation.jsonl
 ```
 
 ### 示例
 
 ```bash
 # 基本用法
-aiscan agent -p "发现 Web 服务并检查高风险漏洞，给出可复现证据" -i 192.168.1.0/24
+cyber agent -p "发现 Web 服务并检查高风险漏洞，给出可复现证据" -i 192.168.1.0/24
 
 # 多个目标
-aiscan agent -p "枚举服务并输出风险摘要" -i 10.0.0.10 -i http://10.0.0.20
+cyber agent -p "枚举服务并输出风险摘要" -i 10.0.0.10 -i http://10.0.0.20
 
 # 从文件读取任务
-aiscan agent --task-file task.md -i 192.168.1.0/24
+cyber agent --task-file task.md -i 192.168.1.0/24
 
 # -p 也会自动读取已存在的 prompt 文件
-aiscan agent -p task.md -i 192.168.1.0/24
+cyber agent -p task.md -i 192.168.1.0/24
 
 # 仅提供目标（自动生成扫描任务）
-aiscan agent -i http://target.example
+cyber agent -i http://target.example
 
 # 指定 skill
-aiscan agent -s scan -s neutron -p "先做快速扫描，再分析高危 POC 命中" -i http://target.example
+cyber agent -s scan -s neutron -p "先做快速扫描，再分析高危 POC 命中" -i http://target.example
 
 # 从 stdin 读取任务
-echo "检查这个网段的暴露面" | aiscan agent -i 192.168.1.0/24
+echo "检查这个网段的暴露面" | cyber agent -i 192.168.1.0/24
 ```
 
 ---
@@ -101,11 +101,11 @@ Goal Evaluation 让一个独立的评估 LLM 在 agent 完成任务后判定是�
 
 ```bash
 # One-shot 模式
-aiscan agent -p "检查目标 Web 漏洞" -i http://target.example -e "必须给出至少一个可复现的漏洞证据，包含请求和响应"
+cyber agent -p "检查目标 Web 漏洞" -i http://target.example -e "必须给出至少一个可复现的漏洞证据，包含请求和响应"
 
 # 交互式 REPL
-aiscan> /eval 必须包含完整的端口列表和风险等级
-aiscan> 扫描 192.168.1.0/24
+cyber> /eval 必须包含完整的端口列表和风险等级
+cyber> 扫描 192.168.1.0/24
 ```
 
 | 参数 | 说明 |
@@ -154,17 +154,17 @@ agent 收到此反馈后继续执行，不会因为评估器问题而停止。
 
 ```bash
 # 要求输出格式和内容的评估
-aiscan agent -p "扫描目标所有端口并识别服务" -i 10.0.0.0/24 \
+cyber agent -p "扫描目标所有端口并识别服务" -i 10.0.0.0/24 \
   -e "输出必须包含每个开放端口的服务名称和版本号，使用表格格式"
 
 # 要求漏洞验证深度的评估
-aiscan agent -p "检查 Web 应用漏洞" -i http://target.example \
+cyber agent -p "检查 Web 应用漏洞" -i http://target.example \
   -e "每个发现的漏洞必须附带可复现的 curl 命令"
 
 # REPL 中动态启用/关闭
-aiscan> /eval 扫描结果必须覆盖 `gogo -P port` 列出的当前运行时端口预设
-aiscan> 扫描 192.168.1.1
-aiscan> /eval off
+cyber> /eval 扫描结果必须覆盖 `gogo -P port` 列出的当前运行时端口预设
+cyber> 扫描 192.168.1.1
+cyber> /eval off
 ```
 
 ---
@@ -174,7 +174,7 @@ aiscan> /eval off
 无任何输入时进入交互式 REPL。支持命令历史、补全，会话上下文在 `/reset` 前保留。
 
 ```bash
-aiscan agent --model gpt-4o
+cyber agent --model gpt-4o
 ```
 
 ### 命令列表
@@ -214,9 +214,9 @@ aiscan agent --model gpt-4o
 每个已注册的非 internal skill 自动成为 REPL 命令：
 
 ```text
-aiscan> /scan 检查这个网段的高危漏洞
-aiscan> /neutron 用 critical 级别 POC 检查 http://target.example
-aiscan> /report 根据上次扫描结果生成报告
+cyber> /scan 检查这个网段的高危漏洞
+cyber> /neutron 用 critical 级别 POC 检查 http://target.example
+cyber> /report 根据上次扫描结果生成报告
 ```
 
 #### `!` 直接执行 ★
@@ -224,10 +224,10 @@ aiscan> /report 根据上次扫描结果生成报告
 `!` 前缀直接执行命令，绕过 LLM。所有注册的 scanner 伪命令和 shell 命令均可使用，支持 Ctrl+C / Escape 取消。
 
 ```text
-aiscan> !gogo -i 192.168.1.0/24 -p top2
-aiscan> !scan -i http://target.example
-aiscan> !cyberhub list poc --severity critical
-aiscan> !neutron -u http://target.example -s high
+cyber> !gogo -i 192.168.1.0/24 -p top2
+cyber> !scan -i http://target.example
+cyber> !cyberhub list poc --severity critical
+cyber> !neutron -u http://target.example -s high
 ```
 
 输入普通文本（非 `/` 或 `!` 开头）直接作为 prompt 发送给 agent。
@@ -418,7 +418,7 @@ subagent 工具创建独立子 agent 处理子任务。
 `--ai` 模式将 scanner 执行和 LLM 分析结合：先运行 scanner，再由 agent 分析输出。
 
 ```bash
-aiscan --ai -p "<分析意图>" <scanner> [scanner 参数...]
+cyber --ai -p "<分析意图>" <scanner> [scanner 参数...]
 ```
 
 ### 工作方式
@@ -432,16 +432,16 @@ aiscan --ai -p "<分析意图>" <scanner> [scanner 参数...]
 
 ```bash
 # gogo 结果由 agent 分析
-aiscan --ai -p "只提取高风险暴露面，并给出证据" gogo -i 192.168.1.0/24 -p top2
+cyber --ai -p "只提取高风险暴露面，并给出证据" gogo -i 192.168.1.0/24 -p top2
 
 # spray 结果分析
-aiscan --ai -p "判断这些 Web 指纹是否值得进一步验证" spray -u http://target.example --finger
+cyber --ai -p "判断这些 Web 指纹是否值得进一步验证" spray -u http://target.example --finger
 
 # neutron 结果分析
-aiscan --ai -p "解释命中的 POC 影响和复现条件" neutron -u http://target.example -s critical,high
+cyber --ai -p "解释命中的 POC 影响和复现条件" neutron -u http://target.example -s critical,high
 
 # 额外指定 skill
-aiscan --ai --skill scan gogo -i 192.168.1.0/24 -p all
+cyber --ai --skill scan gogo -i 192.168.1.0/24 -p all
 ```
 
 > `--ai` 适合对 scanner 输出做总结、解释和筛选。如果需要自动化证据验证，使用 `scan --verify`。
@@ -456,7 +456,7 @@ Skills 是 agent 按需加载的知识文件，提供工具使用指南、最佳
 
 | Skill | 说明 | 可用性 |
 | --- | --- | --- |
-| `aiscan` | 核心机制、能力、scanner 伪命令、工具调用规则 | 默认 |
+| `cyber` | 核心机制、能力、scanner 伪命令、工具调用规则 | 默认 |
 | `scan` | 多阶段扫描流水线知识 | 默认 |
 | `search` | Cyberhub 指纹和 POC 模板查询 | 默认 |
 | `report` | 安全扫描报告生成 | 默认 |
@@ -476,16 +476,16 @@ Skills 是 agent 按需加载的知识文件，提供工具使用指南、最佳
 
 ```bash
 # 加载多个 skill
-aiscan agent -s aiscan -s scan -p "全面扫描这个网段" -i 10.0.0.0/24
+cyber agent -s cyber -s scan -p "全面扫描这个网段" -i 10.0.0.0/24
 
 # 报告生成
-aiscan agent -s report -p "根据扫描结果生成报告" -i http://target.example
+cyber agent -s report -p "根据扫描结果生成报告" -i http://target.example
 ```
 
 ### 加载优先级
 
 ```
-内置 embedded skill < .aiscan/skills/ < .agent/skills/ < -s 指定路径
+内置 embedded skill < .cyber/skills/ < .agent/skills/ < -s 指定路径
 ```
 
 后加载的同名 skill 覆盖先加载的。`-s` 除了接受 skill 名称，也可以指定自定义 skill 文件路径。
@@ -567,7 +567,7 @@ llm:
 REPL 中使用 `/provider` 命令查看当前和其他可用配置：
 
 ```text
-aiscan> /provider
+cyber> /provider
 Provider profiles:
   1. openai / gpt-4o          # active
   2. openai / deepseek-chat   # deepseek profile

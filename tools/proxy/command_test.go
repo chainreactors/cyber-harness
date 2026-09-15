@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func runProxy(cmd *Command, args ...string) (string, error) {

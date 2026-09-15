@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"

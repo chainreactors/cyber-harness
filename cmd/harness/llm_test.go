@@ -13,12 +13,12 @@ import (
 
 func liveLLMRequest(t *testing.T) map[string]any {
 	t.Helper()
-	key := strings.TrimSpace(os.Getenv("AISCAN_HARNESS_LLM_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("AISCAN_HARNESS_LLM_MODEL"))
-	provider := strings.TrimSpace(os.Getenv("AISCAN_HARNESS_LLM_PROVIDER"))
-	baseURL := strings.TrimSpace(os.Getenv("AISCAN_HARNESS_LLM_BASE_URL"))
+	key := strings.TrimSpace(os.Getenv("CYBER_HARNESS_LLM_API_KEY"))
+	model := strings.TrimSpace(os.Getenv("CYBER_HARNESS_LLM_MODEL"))
+	provider := strings.TrimSpace(os.Getenv("CYBER_HARNESS_LLM_PROVIDER"))
+	baseURL := strings.TrimSpace(os.Getenv("CYBER_HARNESS_LLM_BASE_URL"))
 	if key == "" || model == "" || baseURL == "" {
-		t.Fatal("live_llm requires AISCAN_HARNESS_LLM_API_KEY, AISCAN_HARNESS_LLM_MODEL and AISCAN_HARNESS_LLM_BASE_URL")
+		t.Fatal("live_llm requires CYBER_HARNESS_LLM_API_KEY, CYBER_HARNESS_LLM_MODEL and CYBER_HARNESS_LLM_BASE_URL")
 	}
 	endpoint, err := url.Parse(baseURL)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") || endpoint.User != nil || endpoint.RawQuery != "" {
@@ -46,7 +46,7 @@ func TestLiveLLMRecoveryAcrossRestart(t *testing.T) {
 	p := w.startMode(t, true)
 	user := p.user(t, "llm-user")
 	assertLiveReply(t, user.call(t, http.MethodPost, configRPC+"TestLLM", request, http.StatusOK))
-	status := user.call(t, http.MethodPost, "/aiscan.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
+	status := user.call(t, http.MethodPost, "/cyber.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
 	if available, _ := field(status, "status", "llmAvailable").(bool); !available {
 		t.Fatalf("product status did not report the configured provider: %v", status)
 	}
@@ -90,7 +90,7 @@ func TestLiveLLMConcurrentClients(t *testing.T) {
 	t.Cleanup(pending.Wait)
 	for i := 0; i < 3; i++ {
 		observer.config(t)
-		status := observer.call(t, http.MethodPost, "/aiscan.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
+		status := observer.call(t, http.MethodPost, "/cyber.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
 		assertField(t, status, true, "status", "llmAvailable")
 	}
 	pending.Wait()

@@ -42,7 +42,7 @@ export default {
   // 手机端会话抽屉（顶栏汉堡打开）
   openSessions: '对话历史',
   authChecking: '正在验证登录状态…',
-  loginTitle: '访问 AIScan',
+  loginTitle: '访问 Cyber',
   loginDescription: '请输入服务启动时生成或通过命令行配置的访问 Token。',
   loginTokenLabel: '访问 Token',
   loginTokenPlaceholder: '输入 Token',

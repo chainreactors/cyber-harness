@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	filepb "github.com/chainreactors/aiscan/aop/file"
+	filepb "github.com/chainreactors/cyber/aop/file"
 )
 
 const DefaultMaxEntries = 20000

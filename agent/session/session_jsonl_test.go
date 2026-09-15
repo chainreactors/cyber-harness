@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -100,7 +100,7 @@ func sessionTestEvent(sessionID string, event *aop.Event) *aop.Event {
 	}
 	event.SessionId = sessionID
 	event.TurnId = "turn-1"
-	event.Emitter = "aiscan"
+	event.Emitter = "cyber"
 	event.EmittedAt = timestamppb.New(time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	return event
 }

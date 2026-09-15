@@ -2,7 +2,7 @@ package skills
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 	"os"
 	"path/filepath"
 	"testing"

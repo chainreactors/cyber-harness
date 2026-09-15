@@ -94,8 +94,8 @@ jobs:
       - name: Ensure the full edition requires cgo
         run: |
           FULL="forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
-          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/aiscan
-          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/aiscan 2>/dev/null; then
+          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/cyber
+          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/cyber 2>/dev/null; then
             echo "::error::the full edition built with CGO_ENABLED=0; full must imply cgo"
             exit 1
           fi
@@ -153,7 +153,7 @@ jobs:
             test_args=(-timeout 10m -p 4)
           fi
           package_list="$(go list ./...)"
-          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/aiscan/cmd/harness\(/\|$\)')
+          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/cyber/cmd/harness\(/\|$\)')
           go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
@@ -215,8 +215,8 @@ jobs:
       run:
         shell: bash
     env:
-      AISCAN_HARNESS_SEED: ${{ matrix.seed }}
-      AISCAN_HARNESS_STEPS: "48"
+      CYBER_HARNESS_SEED: ${{ matrix.seed }}
+      CYBER_HARNESS_STEPS: "48"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -230,12 +230,12 @@ jobs:
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
       - name: Run real product scenarios without model credentials
         env:
-          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness
+          CYBER_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness
         run: |
-          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
+          mkdir -p "$CYBER_HARNESS_ARTIFACTS"
           set -o pipefail
           go test -race -count=1 -shuffle=on -json -timeout 8m ./cmd/harness/... \
-            | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
+            | tee "$CYBER_HARNESS_ARTIFACTS/results.jsonl"
       - name: Upload harness evidence
         if: ${{ always() && env.ACT != 'true' }}
         uses: actions/upload-artifact@v7
@@ -262,22 +262,22 @@ jobs:
           cache: ${{ env.ACT != 'true' }}
       - name: Run live model requests, recovery, IOA and subagent delegation tasks
         env:
-          AISCAN_HARNESS_LLM_API_KEY: ${{ secrets.AISCAN_HARNESS_LLM_API_KEY }}
-          AISCAN_HARNESS_LLM_BASE_URL: ${{ vars.AISCAN_HARNESS_LLM_BASE_URL }}
-          AISCAN_HARNESS_LLM_MODEL: ${{ vars.AISCAN_HARNESS_LLM_MODEL }}
-          AISCAN_HARNESS_LLM_PROVIDER: ${{ vars.AISCAN_HARNESS_LLM_PROVIDER }}
-          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness-live
+          CYBER_HARNESS_LLM_API_KEY: ${{ secrets.CYBER_HARNESS_LLM_API_KEY }}
+          CYBER_HARNESS_LLM_BASE_URL: ${{ vars.CYBER_HARNESS_LLM_BASE_URL }}
+          CYBER_HARNESS_LLM_MODEL: ${{ vars.CYBER_HARNESS_LLM_MODEL }}
+          CYBER_HARNESS_LLM_PROVIDER: ${{ vars.CYBER_HARNESS_LLM_PROVIDER }}
+          CYBER_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness-live
         run: |
-          for name in AISCAN_HARNESS_LLM_API_KEY AISCAN_HARNESS_LLM_BASE_URL AISCAN_HARNESS_LLM_MODEL; do
+          for name in CYBER_HARNESS_LLM_API_KEY CYBER_HARNESS_LLM_BASE_URL CYBER_HARNESS_LLM_MODEL; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing required live harness setting: $name"
               exit 1
             fi
           done
-          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
+          mkdir -p "$CYBER_HARNESS_ARTIFACTS"
           set -o pipefail
           go test -race -tags live_llm -run '^TestLiveLLM' -count=1 -shuffle=on \
-            -json -timeout 8m ./cmd/harness/... | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
+            -json -timeout 8m ./cmd/harness/... | tee "$CYBER_HARNESS_ARTIFACTS/results.jsonl"
       - name: Upload live harness evidence
         if: ${{ always() && env.ACT != 'true' }}
         uses: actions/upload-artifact@v7
@@ -331,7 +331,7 @@ jobs:
           CGO_ENABLED: "1"
 
       - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/aiscan
+        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/cyber
         env:
           CGO_ENABLED: "1"
 
@@ -359,7 +359,7 @@ jobs:
       - name: Run remaining full-tag unit variants
         run: |
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
-            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
+            ./cmd/cyber ./skills ./tools/passive ./tools/scan/engine
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan
@@ -377,7 +377,7 @@ jobs:
       - name: Run full server CSTX integration
         run: |
           CGO_ENABLED=1 go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
-            ./cmd/aiscan ./pkg/web/api ./pkg/web/service
+            ./cmd/cyber ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
     runs-on: ubuntu-22.04
@@ -406,7 +406,7 @@ jobs:
       - name: Run headless action E2E
         run: |
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
-            -run '^(TestExecAIScanExtendedActions|TestExecAIScanHistoryActions)$' \
+            -run '^(TestExecCyberExtendedActions|TestExecCyberHistoryActions)$' \
             ./pkg/headless
 
       - name: Run authenticated record and replay E2E

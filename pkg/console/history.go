@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 func listSavedSessions(dir string) ([]SavedSession, error) {

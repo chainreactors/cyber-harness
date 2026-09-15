@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/core/util"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/cyber/core/util"
 )
 
 const (

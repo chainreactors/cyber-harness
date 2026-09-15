@@ -7,7 +7,7 @@
 package types
 
 import (
-	sco "github.com/chainreactors/aiscan/aop/sco"
+	sco "github.com/chainreactors/cyber/aop/sco"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -586,8 +586,7 @@ var File_types_sco_proto protoreflect.FileDescriptor
 
 const file_types_sco_proto_rawDesc = "" +
 	"\n" +
-	"\x0ftypes/sco.proto\x12\n" +
-	"aiscan.sco\x1a\x16aop/sco/protocol.proto\"_\n" +
+	"\x0ftypes/sco.proto\x12\tcyber.sco\x1a\x16aop/sco/protocol.proto\"_\n" +
 	"\x10ListNodesRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x14\n" +
@@ -600,9 +599,9 @@ const file_types_sco_proto_rawDesc = "" +
 	"\x04node\x18\x01 \x01(\fR\x04node\x12\x1d\n" +
 	"\n" +
 	"media_type\x18\x02 \x01(\tR\tmediaType\"\x11\n" +
-	"\x0fGetStatsRequest\"\x8f\x01\n" +
-	"\x10GetStatsResponse\x12@\n" +
-	"\x06values\x18\x01 \x03(\v2(.aiscan.sco.GetStatsResponse.ValuesEntryR\x06values\x1a9\n" +
+	"\x0fGetStatsRequest\"\x8e\x01\n" +
+	"\x10GetStatsResponse\x12?\n" +
+	"\x06values\x18\x01 \x03(\v2'.cyber.sco.GetStatsResponse.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"7\n" +
@@ -621,7 +620,7 @@ const file_types_sco_proto_rawDesc = "" +
 	"\bartifact\x18\x03 \x01(\tR\bartifact\"\x16\n" +
 	"\x14ListArtifactsRequest\"5\n" +
 	"\x15ListArtifactsResponse\x12\x1c\n" +
-	"\tartifacts\x18\x01 \x03(\tR\tartifactsB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	"\tartifacts\x18\x01 \x03(\tR\tartifactsB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_sco_proto_rawDescOnce sync.Once
@@ -637,24 +636,24 @@ func file_types_sco_proto_rawDescGZIP() []byte {
 
 var file_types_sco_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_types_sco_proto_goTypes = []any{
-	(*ListNodesRequest)(nil),      // 0: aiscan.sco.ListNodesRequest
-	(*ListNodesResponse)(nil),     // 1: aiscan.sco.ListNodesResponse
-	(*GetNodeRequest)(nil),        // 2: aiscan.sco.GetNodeRequest
-	(*GetNodeResponse)(nil),       // 3: aiscan.sco.GetNodeResponse
-	(*GetStatsRequest)(nil),       // 4: aiscan.sco.GetStatsRequest
-	(*GetStatsResponse)(nil),      // 5: aiscan.sco.GetStatsResponse
-	(*DeleteNodesRequest)(nil),    // 6: aiscan.sco.DeleteNodesRequest
-	(*DeleteNodesResponse)(nil),   // 7: aiscan.sco.DeleteNodesResponse
-	(*ImportNodesRequest)(nil),    // 8: aiscan.sco.ImportNodesRequest
-	(*ImportNodesResponse)(nil),   // 9: aiscan.sco.ImportNodesResponse
-	(*ListArtifactsRequest)(nil),  // 10: aiscan.sco.ListArtifactsRequest
-	(*ListArtifactsResponse)(nil), // 11: aiscan.sco.ListArtifactsResponse
-	nil,                           // 12: aiscan.sco.GetStatsResponse.ValuesEntry
+	(*ListNodesRequest)(nil),      // 0: cyber.sco.ListNodesRequest
+	(*ListNodesResponse)(nil),     // 1: cyber.sco.ListNodesResponse
+	(*GetNodeRequest)(nil),        // 2: cyber.sco.GetNodeRequest
+	(*GetNodeResponse)(nil),       // 3: cyber.sco.GetNodeResponse
+	(*GetStatsRequest)(nil),       // 4: cyber.sco.GetStatsRequest
+	(*GetStatsResponse)(nil),      // 5: cyber.sco.GetStatsResponse
+	(*DeleteNodesRequest)(nil),    // 6: cyber.sco.DeleteNodesRequest
+	(*DeleteNodesResponse)(nil),   // 7: cyber.sco.DeleteNodesResponse
+	(*ImportNodesRequest)(nil),    // 8: cyber.sco.ImportNodesRequest
+	(*ImportNodesResponse)(nil),   // 9: cyber.sco.ImportNodesResponse
+	(*ListArtifactsRequest)(nil),  // 10: cyber.sco.ListArtifactsRequest
+	(*ListArtifactsResponse)(nil), // 11: cyber.sco.ListArtifactsResponse
+	nil,                           // 12: cyber.sco.GetStatsResponse.ValuesEntry
 	(*sco.Nodes)(nil),             // 13: aop.sco.Nodes
 }
 var file_types_sco_proto_depIdxs = []int32{
-	13, // 0: aiscan.sco.ListNodesResponse.nodes:type_name -> aop.sco.Nodes
-	12, // 1: aiscan.sco.GetStatsResponse.values:type_name -> aiscan.sco.GetStatsResponse.ValuesEntry
+	13, // 0: cyber.sco.ListNodesResponse.nodes:type_name -> aop.sco.Nodes
+	12, // 1: cyber.sco.GetStatsResponse.values:type_name -> cyber.sco.GetStatsResponse.ValuesEntry
 	2,  // [2:2] is the sub-list for method output_type
 	2,  // [2:2] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name

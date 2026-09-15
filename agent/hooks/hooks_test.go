@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	aop "github.com/chainreactors/cyber/aop"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
 func ptr[T any](v T) *T { return &v }

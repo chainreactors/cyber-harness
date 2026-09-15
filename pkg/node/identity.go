@@ -5,9 +5,9 @@ import (
 	"net/url"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/tool"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 // BuildHello builds the AOP core agent registration message.

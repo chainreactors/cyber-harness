@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const CookieName = "aiscan_session"
+const CookieName = "cyber_session"
 
 // Auth owns the access-key policy shared by HTTP, ConnectRPC and WebSocket.
 type Auth struct {
@@ -147,7 +147,7 @@ func AccessKeyMatches(key, candidate string) bool {
 }
 
 func SessionValue(key string) string {
-	sum := sha256.Sum256([]byte("aiscan-web-session\x00" + key))
+	sum := sha256.Sum256([]byte("cyber-web-session\x00" + key))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 

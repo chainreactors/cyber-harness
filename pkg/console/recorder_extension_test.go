@@ -2,8 +2,8 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/core/extension"
+	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	"testing"
 )
 

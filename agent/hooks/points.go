@@ -1,8 +1,8 @@
 package hooks
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
+	aop "github.com/chainreactors/cyber/aop"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
 )
 
 // Aliases keep event definitions readable without pulling agent in (that

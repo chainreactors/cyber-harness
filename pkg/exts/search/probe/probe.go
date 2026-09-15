@@ -3,8 +3,8 @@ package probe
 import (
 	"context"
 	"fmt"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/tools/search"
+	types "github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/tools/search"
 	"strings"
 	"time"
 )

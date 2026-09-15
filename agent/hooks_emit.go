@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/agent/hooks"
-	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/agent/hooks"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 // The kernel reaches the typed hook registry only through these helpers. Each

@@ -45,7 +45,7 @@ validate_target() {
 
 native_prefix() {
   local platform="$1" arch="$2"
-  echo "${AISCAN_RECORD_PREFIX:-${ROOT}/.cache/record-native/${platform}-${arch}}"
+  echo "${CYBER_RECORD_PREFIX:-${ROOT}/.cache/record-native/${platform}-${arch}}"
 }
 
 configure_link_env() {
@@ -132,8 +132,8 @@ verify_ffmpeg() {
 fetch_sdk() {
   local platform="$1" arch="$2" prefix archive base_url expected stamp
   prefix="$(native_prefix "${platform}" "${arch}")"
-  archive="aiscan-record-native-${RECORD_NATIVE_VERSION}-${platform}-${arch}.tar.gz"
-  base_url="${AISCAN_RECORD_NATIVE_URL:-https://github.com/${RECORD_NATIVE_REPOSITORY}/releases/download/${RECORD_NATIVE_RELEASE}}"
+  archive="cyber-record-native-${RECORD_NATIVE_VERSION}-${platform}-${arch}.tar.gz"
+  base_url="${CYBER_RECORD_NATIVE_URL:-https://github.com/${RECORD_NATIVE_REPOSITORY}/releases/download/${RECORD_NATIVE_RELEASE}}"
   expected="bundle=${RECORD_NATIVE_VERSION} platform=${platform} arch=${arch} ffmpeg=${FFMPEG_COMMIT} x264=${X264_COMMIT}"
   stamp="${prefix}/.versions"
 
@@ -141,7 +141,7 @@ fetch_sdk() {
     echo "record native SDK already available at ${prefix}"
     return
   fi
-  if [[ "${AISCAN_RECORD_OFFLINE:-0}" == 1 ]]; then
+  if [[ "${CYBER_RECORD_OFFLINE:-0}" == 1 ]]; then
     echo "record native SDK is not cached at ${prefix} and offline mode is enabled" >&2
     exit 1
   fi
@@ -208,7 +208,7 @@ install_licenses() {
 build_sdk() {
   local platform="$1" arch="$2" prefix source_root stamp expected
   prefix="$(native_prefix "${platform}" "${arch}")"
-  source_root="${AISCAN_RECORD_SOURCE:-${ROOT}/.cache/record-native/src}"
+  source_root="${CYBER_RECORD_SOURCE:-${ROOT}/.cache/record-native/src}"
   stamp="${prefix}/.versions"
   expected="source_bundle=${RECORD_NATIVE_VERSION} ffmpeg=${FFMPEG_COMMIT} x264=${X264_COMMIT}"
   if [[ -f "${stamp}" ]] && [[ "$(cat "${stamp}")" == "${expected}" ]]; then
@@ -276,8 +276,8 @@ package_sdk() {
   prefix="$(native_prefix "${platform}" "${arch}")"
   source_stamp="source_bundle=${RECORD_NATIVE_VERSION} ffmpeg=${FFMPEG_COMMIT} x264=${X264_COMMIT}"
   bundle_stamp="bundle=${RECORD_NATIVE_VERSION} platform=${platform} arch=${arch} ffmpeg=${FFMPEG_COMMIT} x264=${X264_COMMIT}"
-  archive="aiscan-record-native-${RECORD_NATIVE_VERSION}-${platform}-${arch}.tar.gz"
-  max_bytes="${AISCAN_RECORD_MAX_LIB_BYTES:-16777216}"
+  archive="cyber-record-native-${RECORD_NATIVE_VERSION}-${platform}-${arch}.tar.gz"
+  max_bytes="${CYBER_RECORD_MAX_LIB_BYTES:-16777216}"
   if [[ ! -f "${prefix}/.versions" ]] || [[ "$(cat "${prefix}/.versions")" != "${source_stamp}" ]]; then
     echo "native dependencies at ${prefix} do not match versions.env" >&2
     exit 1
@@ -314,13 +314,13 @@ package_sdk() {
 
   printf '%s' "${bundle_stamp}" > "${stage}/.versions"
   cat > "${stage}/README.txt" <<EOF
-AIScan recorder native SDK ${RECORD_NATIVE_VERSION}
+Cyber recorder native SDK ${RECORD_NATIVE_VERSION}
 Target: ${platform}/${arch}
 FFmpeg: ${FFMPEG_TAG} (${FFMPEG_COMMIT})
 x264: ${X264_COMMIT}
 
 This bundle contains size-bounded, feature-minimal static FFmpeg and x264
-development libraries for AIScan recording. OS system libraries remain
+development libraries for Cyber recording. OS system libraries remain
 external platform dependencies.
 Static library bytes: ${static_bytes}
 EOF

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 func TestStorageConfigValidation(t *testing.T) {

@@ -17,15 +17,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 const (
-	shellCommandAdapterMarkerEnv     = "AISCAN_SHELL_COMMAND"
-	shellCommandAdapterEndpointEnv   = "AISCAN_SHELL_COMMAND_ENDPOINT"
-	shellCommandAdapterCommandEnv    = "AISCAN_SHELL_COMMAND_COMMAND"
-	shellCommandAdapterExecutableEnv = "AISCAN_SHELL_COMMAND_EXECUTABLE"
-	shellCommandAdapterContextEnv    = "AISCAN_SHELL_COMMAND_CONTEXT"
+	shellCommandAdapterMarkerEnv     = "CYBER_SHELL_COMMAND"
+	shellCommandAdapterEndpointEnv   = "CYBER_SHELL_COMMAND_ENDPOINT"
+	shellCommandAdapterCommandEnv    = "CYBER_SHELL_COMMAND_COMMAND"
+	shellCommandAdapterExecutableEnv = "CYBER_SHELL_COMMAND_EXECUTABLE"
+	shellCommandAdapterContextEnv    = "CYBER_SHELL_COMMAND_CONTEXT"
 
 	shellCommandAdapterProtocolVersion = 1
 	shellCommandAdapterChunkSize       = 32 << 10
@@ -108,7 +108,7 @@ func newShellCommandAdapter(registry Executor) (*shellCommandAdapter, error) {
 }
 
 func shellCommandAdapterRuntimeRoot() string {
-	return filepath.Join(os.TempDir(), "aiscan-shell-commands")
+	return filepath.Join(os.TempDir(), "cyber-shell-commands")
 }
 
 func cleanupStaleShellCommandAdapterRuntime() error {
@@ -455,7 +455,7 @@ func (b *shellCommandAdapter) close() {
 
 // RunShellCommandProxy dispatches the process-local PATH shim. The
 // marker and command variables are only injected into shim children, so normal
-// AIScan and embedding-host startup is unchanged.
+// Cyber and embedding-host startup is unchanged.
 func RunShellCommandProxy() (code int, ok bool) {
 	command := strings.TrimSpace(os.Getenv(shellCommandAdapterCommandEnv))
 	if os.Getenv(shellCommandAdapterMarkerEnv) != "1" || command == "" {
@@ -471,14 +471,14 @@ func RunShellCommandProxy() (code int, ok bool) {
 func runShellCommandAdapterProxy(command string, args []string) int {
 	endpoint := os.Getenv(shellCommandAdapterEndpointEnv)
 	if endpoint == "" {
-		fmt.Fprintln(os.Stderr, "AIScan shell command environment is incomplete")
+		fmt.Fprintln(os.Stderr, "Cyber shell command environment is incomplete")
 		return 126
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shellCommandAdapterDialTimeout)
 	conn, err := dialShellCommandAdapter(ctx, endpoint)
 	cancel()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "connect AIScan shell command adapter: %s\n", err)
+		fmt.Fprintf(os.Stderr, "connect Cyber shell command adapter: %s\n", err)
 		return 125
 	}
 	defer conn.Close()
@@ -490,7 +490,7 @@ func runShellCommandAdapterProxy(command string, args []string) int {
 	}
 	writer := &shellCommandAdapterFrameWriter{writer: conn}
 	if err := writer.write(header); err != nil {
-		fmt.Fprintf(os.Stderr, "start AIScan shell command request: %s\n", err)
+		fmt.Fprintf(os.Stderr, "start Cyber shell command request: %s\n", err)
 		return 125
 	}
 	go streamShellCommandAdapterStdin(writer)
@@ -499,7 +499,7 @@ func runShellCommandAdapterProxy(command string, args []string) int {
 	for {
 		frame, err := readShellCommandAdapterFrame(reader)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "read AIScan shell command response: %s\n", err)
+			fmt.Fprintf(os.Stderr, "read Cyber shell command response: %s\n", err)
 			return 125
 		}
 		switch frame.Type {
@@ -511,7 +511,7 @@ func runShellCommandAdapterProxy(command string, args []string) int {
 			flushShellCommandAdapterProxyOutput()
 			return frame.ExitCode
 		default:
-			fmt.Fprintf(os.Stderr, "unexpected AIScan shell command response %q\n", frame.Type)
+			fmt.Fprintf(os.Stderr, "unexpected Cyber shell command response %q\n", frame.Type)
 			return 125
 		}
 	}

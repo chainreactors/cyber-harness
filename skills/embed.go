@@ -14,10 +14,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/cyber/core/capability"
 )
 
-const uriPrefix = "aiscan://skills/"
+const uriPrefix = "cyber://skills/"
 
 //go:embed all:*
 var embeddedFS embed.FS
@@ -26,7 +26,7 @@ type SkillSource string
 
 const (
 	SourceEmbedded SkillSource = "embedded"
-	SourceProject  SkillSource = "project" // .aiscan/skills/
+	SourceProject  SkillSource = "project" // .cyber/skills/
 	SourceAgent    SkillSource = "agent"   // .agent/skills/
 	SourceCLI      SkillSource = "cli"     // -s path
 	SourceBundle   SkillSource = "bundle"  // explicitly selected extension
@@ -78,7 +78,7 @@ type Store struct {
 }
 
 // LoadAll loads skills from all sources with override support.
-// Priority (later overrides earlier): embedded < .aiscan/skills/ < .agent/skills/ < CLI paths.
+// Priority (later overrides earlier): embedded < .cyber/skills/ < .agent/skills/ < CLI paths.
 func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
 	directory, _ := os.Getwd()
 	return LoadFrom(directory, cliPaths, catalog, bundles...)
@@ -101,7 +101,7 @@ func LoadFrom(directory string, cliPaths []string, catalog capability.Catalog, b
 		dir    string
 		source SkillSource
 	}{
-		{".aiscan/skills", SourceProject},
+		{".cyber/skills", SourceProject},
 		{".agent/skills", SourceAgent},
 	} {
 		dir := filepath.Join(directory, rel.dir)

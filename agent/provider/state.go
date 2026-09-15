@@ -3,8 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"strings"
 	"sync"
 	"time"

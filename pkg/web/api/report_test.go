@@ -23,7 +23,7 @@ func TestBuildMarkdownReportUsesLibcstxFacts(t *testing.T) {
 	}
 	for _, old := range []string{"Asset", "Service", "WebProbe", "Loot"} {
 		if strings.Contains(zh, old) {
-			t.Fatalf("report leaked removed AIScan taxonomy %q:\n%s", old, zh)
+			t.Fatalf("report leaked removed Cyber taxonomy %q:\n%s", old, zh)
 		}
 	}
 

@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/core/truncate"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/core/truncate"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func requireProvider(cfg Config) error {
@@ -27,7 +27,7 @@ func requireProvider(cfg Config) error {
 	return nil
 }
 
-// StandardLoop is AIScan's built-in provider/tool reasoning loop. It has no
+// StandardLoop is Cyber's built-in provider/tool reasoning loop. It has no
 // mutable lifecycle and can be selected explicitly by any profile or session.
 type StandardLoop struct{}
 

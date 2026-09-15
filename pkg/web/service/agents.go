@@ -9,13 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/pkg/terminal"
+	types "github.com/chainreactors/cyber/pkg/types"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -233,7 +233,7 @@ type SessionLookup interface {
 	BroadcastAOPEvent(sessionID string, event *aop.Event)
 }
 
-// AgentPool manages connected aiscan agent nodes. Every member is a node that
+// AgentPool manages connected cyber agent nodes. Every member is a node that
 // registered over the application WebSocket — including the hub's own embedded
 // agent, which connects over loopback like any other node.
 type AgentPool struct {

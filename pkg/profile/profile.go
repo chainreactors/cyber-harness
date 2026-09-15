@@ -1,4 +1,4 @@
-// Package profile defines the lifecycle boundary shared by AIScan hosts.
+// Package profile defines the lifecycle boundary shared by Cyber hosts.
 // Product-specific composition and capabilities belong to the executable that
 // implements Application and owns its extension.Set; this package validates
 // product factories without adding another lifecycle wrapper.
@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	"github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 // Application is the complete capability surface published by a product

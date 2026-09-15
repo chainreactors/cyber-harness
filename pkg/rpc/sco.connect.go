@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// SCOServiceName is the fully-qualified name of the SCOService service.
-	SCOServiceName = "aiscan.rpc.sco.SCOService"
+	SCOServiceName = "cyber.rpc.sco.SCOService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,21 +34,21 @@ const (
 // period.
 const (
 	// SCOServiceListNodesProcedure is the fully-qualified name of the SCOService's ListNodes RPC.
-	SCOServiceListNodesProcedure = "/aiscan.rpc.sco.SCOService/ListNodes"
+	SCOServiceListNodesProcedure = "/cyber.rpc.sco.SCOService/ListNodes"
 	// SCOServiceGetNodeProcedure is the fully-qualified name of the SCOService's GetNode RPC.
-	SCOServiceGetNodeProcedure = "/aiscan.rpc.sco.SCOService/GetNode"
+	SCOServiceGetNodeProcedure = "/cyber.rpc.sco.SCOService/GetNode"
 	// SCOServiceGetStatsProcedure is the fully-qualified name of the SCOService's GetStats RPC.
-	SCOServiceGetStatsProcedure = "/aiscan.rpc.sco.SCOService/GetStats"
+	SCOServiceGetStatsProcedure = "/cyber.rpc.sco.SCOService/GetStats"
 	// SCOServiceDeleteNodesProcedure is the fully-qualified name of the SCOService's DeleteNodes RPC.
-	SCOServiceDeleteNodesProcedure = "/aiscan.rpc.sco.SCOService/DeleteNodes"
+	SCOServiceDeleteNodesProcedure = "/cyber.rpc.sco.SCOService/DeleteNodes"
 	// SCOServiceImportNodesProcedure is the fully-qualified name of the SCOService's ImportNodes RPC.
-	SCOServiceImportNodesProcedure = "/aiscan.rpc.sco.SCOService/ImportNodes"
+	SCOServiceImportNodesProcedure = "/cyber.rpc.sco.SCOService/ImportNodes"
 	// SCOServiceListArtifactsProcedure is the fully-qualified name of the SCOService's ListArtifacts
 	// RPC.
-	SCOServiceListArtifactsProcedure = "/aiscan.rpc.sco.SCOService/ListArtifacts"
+	SCOServiceListArtifactsProcedure = "/cyber.rpc.sco.SCOService/ListArtifacts"
 )
 
-// SCOServiceClient is a client for the aiscan.rpc.sco.SCOService service.
+// SCOServiceClient is a client for the cyber.rpc.sco.SCOService service.
 type SCOServiceClient interface {
 	ListNodes(context.Context, *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error)
 	GetNode(context.Context, *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error)
@@ -58,7 +58,7 @@ type SCOServiceClient interface {
 	ListArtifacts(context.Context, *connect.Request[types.ListArtifactsRequest]) (*connect.Response[types.ListArtifactsResponse], error)
 }
 
-// NewSCOServiceClient constructs a client for the aiscan.rpc.sco.SCOService service. By default, it
+// NewSCOServiceClient constructs a client for the cyber.rpc.sco.SCOService service. By default, it
 // uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
 // uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
 // connect.WithGRPCWeb() options.
@@ -118,37 +118,37 @@ type sCOServiceClient struct {
 	listArtifacts *connect.Client[types.ListArtifactsRequest, types.ListArtifactsResponse]
 }
 
-// ListNodes calls aiscan.rpc.sco.SCOService.ListNodes.
+// ListNodes calls cyber.rpc.sco.SCOService.ListNodes.
 func (c *sCOServiceClient) ListNodes(ctx context.Context, req *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error) {
 	return c.listNodes.CallUnary(ctx, req)
 }
 
-// GetNode calls aiscan.rpc.sco.SCOService.GetNode.
+// GetNode calls cyber.rpc.sco.SCOService.GetNode.
 func (c *sCOServiceClient) GetNode(ctx context.Context, req *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error) {
 	return c.getNode.CallUnary(ctx, req)
 }
 
-// GetStats calls aiscan.rpc.sco.SCOService.GetStats.
+// GetStats calls cyber.rpc.sco.SCOService.GetStats.
 func (c *sCOServiceClient) GetStats(ctx context.Context, req *connect.Request[types.GetStatsRequest]) (*connect.Response[types.GetStatsResponse], error) {
 	return c.getStats.CallUnary(ctx, req)
 }
 
-// DeleteNodes calls aiscan.rpc.sco.SCOService.DeleteNodes.
+// DeleteNodes calls cyber.rpc.sco.SCOService.DeleteNodes.
 func (c *sCOServiceClient) DeleteNodes(ctx context.Context, req *connect.Request[types.DeleteNodesRequest]) (*connect.Response[types.DeleteNodesResponse], error) {
 	return c.deleteNodes.CallUnary(ctx, req)
 }
 
-// ImportNodes calls aiscan.rpc.sco.SCOService.ImportNodes.
+// ImportNodes calls cyber.rpc.sco.SCOService.ImportNodes.
 func (c *sCOServiceClient) ImportNodes(ctx context.Context, req *connect.Request[types.ImportNodesRequest]) (*connect.Response[types.ImportNodesResponse], error) {
 	return c.importNodes.CallUnary(ctx, req)
 }
 
-// ListArtifacts calls aiscan.rpc.sco.SCOService.ListArtifacts.
+// ListArtifacts calls cyber.rpc.sco.SCOService.ListArtifacts.
 func (c *sCOServiceClient) ListArtifacts(ctx context.Context, req *connect.Request[types.ListArtifactsRequest]) (*connect.Response[types.ListArtifactsResponse], error) {
 	return c.listArtifacts.CallUnary(ctx, req)
 }
 
-// SCOServiceHandler is an implementation of the aiscan.rpc.sco.SCOService service.
+// SCOServiceHandler is an implementation of the cyber.rpc.sco.SCOService service.
 type SCOServiceHandler interface {
 	ListNodes(context.Context, *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error)
 	GetNode(context.Context, *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error)
@@ -201,7 +201,7 @@ func NewSCOServiceHandler(svc SCOServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(sCOServiceMethods.ByName("ListArtifacts")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.sco.SCOService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.sco.SCOService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SCOServiceListNodesProcedure:
 			sCOServiceListNodesHandler.ServeHTTP(w, r)
@@ -225,25 +225,25 @@ func NewSCOServiceHandler(svc SCOServiceHandler, opts ...connect.HandlerOption) 
 type UnimplementedSCOServiceHandler struct{}
 
 func (UnimplementedSCOServiceHandler) ListNodes(context.Context, *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.ListNodes is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.ListNodes is not implemented"))
 }
 
 func (UnimplementedSCOServiceHandler) GetNode(context.Context, *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.GetNode is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.GetNode is not implemented"))
 }
 
 func (UnimplementedSCOServiceHandler) GetStats(context.Context, *connect.Request[types.GetStatsRequest]) (*connect.Response[types.GetStatsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.GetStats is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.GetStats is not implemented"))
 }
 
 func (UnimplementedSCOServiceHandler) DeleteNodes(context.Context, *connect.Request[types.DeleteNodesRequest]) (*connect.Response[types.DeleteNodesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.DeleteNodes is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.DeleteNodes is not implemented"))
 }
 
 func (UnimplementedSCOServiceHandler) ImportNodes(context.Context, *connect.Request[types.ImportNodesRequest]) (*connect.Response[types.ImportNodesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.ImportNodes is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.ImportNodes is not implemented"))
 }
 
 func (UnimplementedSCOServiceHandler) ListArtifacts(context.Context, *connect.Request[types.ListArtifactsRequest]) (*connect.Response[types.ListArtifactsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.sco.SCOService.ListArtifacts is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.sco.SCOService.ListArtifacts is not implemented"))
 }

@@ -5,15 +5,15 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 
-	"github.com/chainreactors/aiscan/agent/hooks"
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 // The agent loop operates on AOP protos directly. Vendored JSON shapes live
@@ -130,7 +130,7 @@ type Config struct {
 	ParentSessionID  string
 	ParentToolCallID string
 	Delegation       *types.DelegationDetail
-	// AgentName tags emitted AOP events; defaults to "aiscan".
+	// AgentName tags emitted AOP events; defaults to "cyber".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
 	// restored; Result.MessageCounter carries the final value for saving.
@@ -203,7 +203,7 @@ func (c Config) init() Config {
 		c.SessionID = randomID()
 	}
 	if c.AgentName == "" {
-		c.AgentName = "aiscan"
+		c.AgentName = "cyber"
 	}
 	if c.Tools == nil {
 		c.Tools = tool.EmptyExecutor()

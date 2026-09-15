@@ -1,16 +1,16 @@
 syntax = "proto3";
 
-package aiscan.rpc.config;
+package cyber.rpc.config;
 
 import "types/config.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+option go_package = "github.com/chainreactors/cyber/pkg/rpc;rpc";
 
 service ConfigService {
-  rpc GetConfig(aiscan.config.GetConfigRequest) returns (aiscan.config.GetConfigResponse);
-  rpc UpdateConfig(aiscan.config.UpdateConfigRequest) returns (aiscan.config.UpdateConfigResponse);
-  rpc ActivateProfile(aiscan.config.ActivateProfileRequest) returns (aiscan.config.ActivateProfileResponse);
-  rpc TestLLM(aiscan.config.LLMProbeRequest) returns (aiscan.config.LLMProbeResult);
-  rpc ListModels(aiscan.config.LLMProbeRequest) returns (aiscan.config.ListModelsResult);
-  rpc TestConnection(aiscan.config.TestConnectionRequest) returns (aiscan.config.TestConnectionResponse);
+  rpc GetConfig(cyber.config.GetConfigRequest) returns (cyber.config.GetConfigResponse);
+  rpc UpdateConfig(cyber.config.UpdateConfigRequest) returns (cyber.config.UpdateConfigResponse);
+  rpc ActivateProfile(cyber.config.ActivateProfileRequest) returns (cyber.config.ActivateProfileResponse);
+  rpc TestLLM(cyber.config.LLMProbeRequest) returns (cyber.config.LLMProbeResult);
+  rpc ListModels(cyber.config.LLMProbeRequest) returns (cyber.config.ListModelsResult);
+  rpc TestConnection(cyber.config.TestConnectionRequest) returns (cyber.config.TestConnectionResponse);
 }

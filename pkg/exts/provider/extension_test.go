@@ -3,8 +3,8 @@ package provider
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/core/extension"
 	"testing"
 )
 

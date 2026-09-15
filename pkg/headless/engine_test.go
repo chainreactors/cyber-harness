@@ -334,7 +334,7 @@ func TestExecMultipleHeadlessRequests(t *testing.T) {
 	}
 }
 
-func TestExecAIScanExtendedActions(t *testing.T) {
+func TestExecCyberExtendedActions(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/actions", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -354,7 +354,7 @@ email.addEventListener('focus', () => state.dataset.focus = 'yes');
 email.addEventListener('blur', () => state.dataset.blur = 'yes');
 activate.addEventListener('mouseover', () => state.dataset.hover = 'yes');
 activate.addEventListener('dblclick', () => state.dataset.dblclick = 'yes');
-activate.addEventListener('aiscan', event => state.dataset.custom = event.detail.flag);
+activate.addEventListener('cyber', event => state.dataset.custom = event.detail.flag);
 document.getElementById('source').addEventListener('mousedown', () => state.dataset.dragstart = 'yes');
 document.getElementById('drop').addEventListener('mouseup', () => state.dataset.dragend = 'yes');
 </script></body></html>`)
@@ -388,7 +388,7 @@ document.getElementById('drop').addEventListener('mouseup', () => state.dataset.
 		action(ActionSelectInput, mergeMapsForTest(ParseSelector(`role=combobox[name="Plan"]`), map[string]string{"value": "pro"})),
 		action(ActionHover, ParseSelector(`role=button[name="Activate"]`)),
 		action(ActionDblClick, ParseSelector(`role=button[name="Activate"]`)),
-		action(ActionDispatchEvent, mergeMapsForTest(ParseSelector("#activate"), map[string]string{"event": "aiscan", "detail": `{"flag":"ok"}`})),
+		action(ActionDispatchEvent, mergeMapsForTest(ParseSelector("#activate"), map[string]string{"event": "cyber", "detail": `{"flag":"ok"}`})),
 		action(ActionDrag, mergeMapsForTest(ParseSelector("testid=source"), map[string]string{"target": "testid=drop"})),
 		action(ActionScroll, map[string]string{"y": "250", "steps": "2"}),
 		action(ActionStorage, map[string]string{"storage": "local", "operation": "set", "key": "token", "value": "abc123"}),
@@ -422,7 +422,7 @@ document.getElementById('drop').addEventListener('mouseup', () => state.dataset.
 	}
 }
 
-func TestExecAIScanHistoryActions(t *testing.T) {
+func TestExecCyberHistoryActions(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/one", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `<html><head><title>Page One</title></head><body>one</body></html>`)

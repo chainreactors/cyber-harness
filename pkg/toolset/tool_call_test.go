@@ -8,13 +8,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 type aopTestExecutor struct{}

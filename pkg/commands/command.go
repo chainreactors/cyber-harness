@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	coreregistry "github.com/chainreactors/aiscan/core/registry"
- "github.com/chainreactors/aiscan/core/commandline"
+	coreregistry "github.com/chainreactors/cyber/core/registry"
+ "github.com/chainreactors/cyber/core/commandline"
 )
 
 var (

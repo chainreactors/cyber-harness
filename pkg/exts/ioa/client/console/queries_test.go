@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	clientext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
 func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {

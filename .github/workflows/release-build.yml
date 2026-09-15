@@ -67,11 +67,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: aiscan
+          - id: cyber
             profile: standard
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan
+            main: ./cmd/cyber
+            binary: cyber
             tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
@@ -83,36 +83,36 @@ jobs:
             tags: ""
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
-          - id: aiscan-full-linux-amd64
+          - id: cyber-full-linux-amd64
             profile: full
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan-full
+            main: ./cmd/cyber
+            binary: cyber-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/amd64"
             cgo: "1"
-          - id: aiscan-full-linux-arm64
+          - id: cyber-full-linux-arm64
             profile: full
             runner: ubuntu-24.04-arm
-            main: ./cmd/aiscan
-            binary: aiscan-full
+            main: ./cmd/cyber
+            binary: cyber-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/arm64"
             cgo: "1"
-          - id: aiscan-full-darwin
+          - id: cyber-full-darwin
             profile: full
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan-full
+            main: ./cmd/cyber
+            binary: cyber-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "darwin/amd64 darwin/arm64"
             cgo: "1"
             cross: darwin
-          - id: aiscan-full-windows-amd64
+          - id: cyber-full-windows-amd64
             profile: full
             runner: windows-2022
-            main: ./cmd/aiscan
-            binary: aiscan-full
+            main: ./cmd/cyber
+            binary: cyber-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "windows/amd64"
             cgo: "1"
@@ -213,7 +213,7 @@ jobs:
             out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
 
-            link_flags="-s -w -X github.com/chainreactors/aiscan/core/config.Version=${VERSION}"
+            link_flags="-s -w -X github.com/chainreactors/cyber/core/config.Version=${VERSION}"
             if [[ "$goos" == "darwin" && "${{ matrix.cgo }}" == "1" ]]; then
               test -n "${MACOS_SDKROOT:-}"
               case "$goarch" in
@@ -254,7 +254,7 @@ jobs:
             if [[ "${{ matrix.profile }}" == "runner" ]]; then
               test "$version_output" = "runner v${VERSION}"
             else
-              test "$version_output" = "aiscan v${VERSION}"
+              test "$version_output" = "cyber v${VERSION}"
             fi
           fi
 
@@ -344,8 +344,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist/release
-          sha256sum *.zip > aiscan_checksums.txt
-          cat aiscan_checksums.txt
+          sha256sum *.zip > cyber_checksums.txt
+          cat cyber_checksums.txt
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v7
@@ -378,14 +378,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          (cd dist/release && sha256sum -c aiscan_checksums.txt)
+          (cd dist/release && sha256sum -c cyber_checksums.txt)
           test "$(find dist/release -name '*.zip' | wc -l)" -eq 11
-          for binary in aiscan aiscan-full; do
+          for binary in cyber cyber-full; do
             destination="${RUNNER_TEMP}/${binary}"
             unzip -q "dist/release/${binary}_linux_${ARCH}.zip" -d "$destination"
             test -x "${destination}/${binary}"
-            test "$("${destination}/${binary}" --version)" = "aiscan ${TAG}"
-            if [[ "$binary" == "aiscan-full" ]]; then
+            test "$("${destination}/${binary}" --version)" = "cyber ${TAG}"
+            if [[ "$binary" == "cyber-full" ]]; then
               "${destination}/${binary}" web --help >/dev/null
             fi
           done
@@ -408,10 +408,10 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $expectedVersion = "aiscan $env:TAG"
+          $expectedVersion = "cyber $env:TAG"
           $cases = @(
-            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
+            @{ Archive = 'cyber_windows_amd64.zip'; Binary = 'cyber.exe'; Full = $false },
+            @{ Archive = 'cyber-full_windows_amd64.zip'; Binary = 'cyber-full.exe'; Full = $true }
           )
 
           foreach ($case in $cases) {

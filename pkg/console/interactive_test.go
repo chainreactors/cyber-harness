@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -44,7 +44,7 @@ func TestAgentComposerPromptPlacesStatusAboveInput(t *testing.T) {
 	bridge := &readlineConsoleBridge{}
 	bridge.UpdateStatus("thinking")
 
-	if got, want := agentComposerPrompt(nil, bridge), "thinking\naiscan> "; got != want {
+	if got, want := agentComposerPrompt(nil, bridge), "thinking\ncyber> "; got != want {
 		t.Fatalf("composer prompt = %q, want %q", got, want)
 	}
 }
@@ -245,7 +245,7 @@ func TestAgentConsoleCtrlCWarnsAndClearsInput(t *testing.T) {
 	if !strings.Contains(out, "Press Ctrl+C again to exit") {
 		t.Fatalf("missing Ctrl+C hint:\n%s", out)
 	}
-	if strings.Contains(stripANSI(out), "aiscan> exit") {
+	if strings.Contains(stripANSI(out), "cyber> exit") {
 		t.Fatalf("Ctrl+C leaked input as output:\n%s", out)
 	}
 }
@@ -410,7 +410,7 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, messages ...*aop.Message) {
 	t.Helper()
 	events := []*aop.Event{{
-		Id: "e-1", SessionId: "console-session", Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+		Id: "e-1", SessionId: "console-session", Emitter: "cyber", EmittedAt: timestamppb.New(updatedAt),
 		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: model}},
 	}}
 	if err := types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT}); err != nil {
@@ -420,7 +420,7 @@ func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, 
 		message.Id = fmt.Sprintf("m-%d", i+1)
 		events = append(events, &aop.Event{
 			Id: fmt.Sprintf("e-%d", i+2), SessionId: "console-session", TurnId: "turn-1",
-			Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+			Emitter: "cyber", EmittedAt: timestamppb.New(updatedAt),
 			Payload: &aop.Event_Message{Message: message},
 		})
 	}

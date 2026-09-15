@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
 	"github.com/chainreactors/proxyclient"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )

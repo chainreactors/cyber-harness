@@ -8,7 +8,7 @@ export default {
   running: '{{count}} running',
   noScansYet: 'No scans yet.',
   noAgentsConnected: 'No agents connected',
-  startAgentToBegin: 'Start an aiscan agent to begin',
+  startAgentToBegin: 'Start an cyber agent to begin',
   busy: 'busy',
   idle: 'idle',
   terminal: 'Terminal',

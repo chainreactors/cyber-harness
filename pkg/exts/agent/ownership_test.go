@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	"github.com/chainreactors/cyber/core/extension"
+	agentext "github.com/chainreactors/cyber/pkg/exts/agent"
 )
 
 func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {

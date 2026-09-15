@@ -45,7 +45,7 @@ import {
   type ScanOptions,
   type SessionRecord,
   type SystemStatus as ServerStatus,
-} from './aiscan-proto'
+} from './cyber-proto'
 
 export type { SCONode };
 export type { AOPEvent };
@@ -61,9 +61,9 @@ const connectTransport = createConnectTransport({
   useBinaryFormat: false,
 })
 
-// One AIScan facade is initialized for the application. The generated service
+// One Cyber facade is initialized for the application. The generated service
 // clients are lightweight API groups and all share this single transport.
-const aiscanRPC = {
+const cyberRPC = {
   sessions: createClient(SessionService, connectTransport),
   scans: createClient(ScanService, connectTransport),
   config: createClient(ConfigService, connectTransport),
@@ -76,7 +76,7 @@ const aopClient = new AOPClient()
   .register(ScanProtocolMessageSchema)
   .register(ReloadProtocolMessageSchema)
 
-export const AUTH_REQUIRED_EVENT = 'aiscan:auth-required'
+export const AUTH_REQUIRED_EVENT = 'cyber:auth-required'
 
 export class APIError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -167,7 +167,7 @@ export interface IOAOverview {
 
 export async function getStatus(): Promise<ServerStatus> {
   try {
-    const response = await aiscanRPC.system.getStatus({})
+    const response = await cyberRPC.system.getStatus({})
     if (!response.status) throw new Error('Status is unavailable')
     return response.status
   } catch (error) {
@@ -177,7 +177,7 @@ export async function getStatus(): Promise<ServerStatus> {
 
 export async function listAgents(): Promise<AgentView[]> {
   try {
-    const response = await aiscanRPC.agents.listAgents({})
+    const response = await cyberRPC.agents.listAgents({})
     return response.agents
   } catch (error) {
     throw connectFailure(error, 'Failed to list agents')
@@ -186,7 +186,7 @@ export async function listAgents(): Promise<AgentView[]> {
 
 export async function getConfigStatus(): Promise<ConfigView> {
   try {
-    const response = await aiscanRPC.config.getConfig({})
+    const response = await cyberRPC.config.getConfig({})
     if (!response.config) throw new Error('Config is unavailable')
     return response.config
   } catch (error) {
@@ -196,7 +196,7 @@ export async function getConfigStatus(): Promise<ConfigView> {
 
 export async function saveConfig(config: DistributeConfig): Promise<ConfigView> {
   try {
-    const response = await aiscanRPC.config.updateConfig({ config })
+    const response = await cyberRPC.config.updateConfig({ config })
     if (!response.config) throw new Error('Config update returned no view')
     return response.config
   } catch (error) {
@@ -206,7 +206,7 @@ export async function saveConfig(config: DistributeConfig): Promise<ConfigView> 
 
 export async function activateLLMProfile(id: string): Promise<ConfigView> {
   try {
-    const response = await aiscanRPC.config.activateProfile({ profileId: id })
+    const response = await cyberRPC.config.activateProfile({ profileId: id })
     if (!response.config) throw new Error('Profile activation returned no view')
     return response.config
   } catch (error) {
@@ -216,18 +216,18 @@ export async function activateLLMProfile(id: string): Promise<ConfigView> {
 
 // Blank api_key asks the server to reuse the stored secret.
 export async function testLLM(req: MessageInitShape<typeof LLMProbeRequestSchema>): Promise<LLMProbeResult> {
-  return aiscanRPC.config.testLLM(req)
+  return cyberRPC.config.testLLM(req)
 }
 
 export async function listLLMModels(req: MessageInitShape<typeof LLMProbeRequestSchema>): Promise<ListModelsResult> {
-  return aiscanRPC.config.listModels(req)
+  return cyberRPC.config.listModels(req)
 }
 
 // testConn probes the external dependencies of a settings section
 // (cyberhub | recon | search | ioa). The current (possibly unsaved) form is
 // sent so edits are tested; blank secrets fall back to stored values server-side.
 export async function testConn(section: string, config: DistributeConfig): Promise<TestConnectionResponse> {
-  return aiscanRPC.config.testConnection({ section, config })
+  return cyberRPC.config.testConnection({ section, config })
 }
 
 // --- IOA overview ---
@@ -244,7 +244,7 @@ export async function getIOAOverview(): Promise<IOAOverview> {
 
 export async function submitScan(target: string, mode: string, options: ScanOptions): Promise<Scan> {
 	try {
-		const response = await aiscanRPC.scans.submitScan({ requestId: newRPCID(), target, mode, options })
+		const response = await cyberRPC.scans.submitScan({ requestId: newRPCID(), target, mode, options })
 		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to submit scan')
 		return response.outcome.value
 	} catch (error) {
@@ -254,7 +254,7 @@ export async function submitScan(target: string, mode: string, options: ScanOpti
 
 export async function getScan(id: string): Promise<Scan> {
 	try {
-		const response = await aiscanRPC.scans.getScan({ scanId: id })
+		const response = await cyberRPC.scans.getScan({ scanId: id })
 		if (!response.scan) throw new Error('Scan not found')
 		return response.scan
 	} catch (error) {
@@ -264,7 +264,7 @@ export async function getScan(id: string): Promise<Scan> {
 
 export async function listScans(): Promise<Scan[]> {
 	try {
-		const response = await aiscanRPC.scans.listScans({})
+		const response = await cyberRPC.scans.listScans({})
 		return response.scans
 	} catch (error) {
 		throw connectFailure(error, 'Failed to list scans')
@@ -273,7 +273,7 @@ export async function listScans(): Promise<Scan[]> {
 
 export async function deleteScan(id: string): Promise<void> {
 	try {
-		const response = await aiscanRPC.scans.cancelScan({ requestId: newRPCID(), scanId: id })
+		const response = await cyberRPC.scans.cancelScan({ requestId: newRPCID(), scanId: id })
 		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to cancel scan')
 	} catch (error) {
 		throw connectFailure(error, 'Failed to cancel scan')
@@ -297,7 +297,7 @@ export async function createChatSession(nodeID: string, title?: string, scanID?:
 
 export async function listChatSessions(): Promise<SessionRecord[]> {
   try {
-    const response = await aiscanRPC.sessions.listSessions({ limit: 100, includeClosed: true })
+    const response = await cyberRPC.sessions.listSessions({ limit: 100, includeClosed: true })
     return response.sessions
   } catch (error) {
     throw connectFailure(error, 'Failed to list sessions')
@@ -306,7 +306,7 @@ export async function listChatSessions(): Promise<SessionRecord[]> {
 
 export async function getChatSession(id: string): Promise<SessionRecord> {
   try {
-    const response = await aiscanRPC.sessions.getSession({ sessionId: id })
+    const response = await cyberRPC.sessions.getSession({ sessionId: id })
     if (!response.session) throw new Error('Session not found')
     return response.session
   } catch (error) {
@@ -316,7 +316,7 @@ export async function getChatSession(id: string): Promise<SessionRecord> {
 
 export async function deleteChatSession(id: string): Promise<void> {
   try {
-    const response = await aiscanRPC.sessions.deleteSession({ requestId: newRPCID(), sessionId: id })
+    const response = await cyberRPC.sessions.deleteSession({ requestId: newRPCID(), sessionId: id })
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to delete session')
   } catch (error) {
     throw connectFailure(error, 'Failed to delete session')
@@ -325,7 +325,7 @@ export async function deleteChatSession(id: string): Promise<void> {
 
 export async function resetChatSession(id: string): Promise<SessionRecord> {
   try {
-    const response = await aiscanRPC.sessions.resetSession({ requestId: newRPCID(), sessionId: id })
+    const response = await cyberRPC.sessions.resetSession({ requestId: newRPCID(), sessionId: id })
     if (response.outcome.case !== 'accepted' || !response.outcome.value.current) {
       throw rejectionError(response.outcome.case === 'rejected' ? response.outcome.value : undefined, 'Failed to reset session')
     }
@@ -335,13 +335,13 @@ export async function resetChatSession(id: string): Promise<SessionRecord> {
   }
 }
 
-// The web "/" menu is built from the aiscan.chat.CommandSpec list returned by
+// The web "/" menu is built from the cyber.chat.CommandSpec list returned by
 // SessionService/ListCommands (hub-scope commands merged with the bound
 // agent's reported commands), so it always reflects the real command set
 // instead of a hardcoded list.
 export async function fetchSessionCommands(sessionID: string): Promise<CommandSpec[]> {
   try {
-    const response = await aiscanRPC.sessions.listCommands({ sessionId: sessionID })
+    const response = await cyberRPC.sessions.listCommands({ sessionId: sessionID })
     return response.commands
   } catch (error) {
     throw connectFailure(error, 'Failed to load commands')
@@ -438,7 +438,7 @@ export async function uploadChatFile(sessionID: string, file: File): Promise<Fil
 // into their own render models (see useChatSession.deliveryToChatMessage).
 export async function listChatMessages(sessionID: string): Promise<EventDelivery[]> {
   try {
-	const response = await aiscanRPC.sessions.listEvents({ sessionId: sessionID, limit: 500 })
+	const response = await cyberRPC.sessions.listEvents({ sessionId: sessionID, limit: 500 })
     return response.events
   } catch (error) {
     throw connectFailure(error, 'Failed to list messages')
@@ -450,7 +450,7 @@ export async function listChatMessages(sessionID: string): Promise<EventDelivery
 // just show a placeholder.
 export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
 	try {
-		const response = await aiscanRPC.scans.getScanReport({ scanId: scanID, language: lang })
+		const response = await cyberRPC.scans.getScanReport({ scanId: scanID, language: lang })
 		return response.markdown
 	} catch {
 		return ''
@@ -514,21 +514,21 @@ export { aopClient }
 // ── SCO Nodes ──
 
 export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
-  const response = await aiscanRPC.sco.listNodes({ type: opts?.type || '', operationId: opts?.scanId || '', limit: opts?.limit || 0 })
+  const response = await cyberRPC.sco.listNodes({ type: opts?.type || '', operationId: opts?.scanId || '', limit: opts?.limit || 0 })
   return (response.nodes?.nodes || []).map(decodeSCONode)
 }
 
 export async function getSCONode(id: string): Promise<SCONode> {
-  return decodeSCONode((await aiscanRPC.sco.getNode({ id })).node)
+  return decodeSCONode((await cyberRPC.sco.getNode({ id })).node)
 }
 
 export async function getSCOStats(): Promise<Record<string, number>> {
-  const values = (await aiscanRPC.sco.getStats({})).values
+  const values = (await cyberRPC.sco.getStats({})).values
   return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number(value)]))
 }
 
 export async function getSupportedArtifacts(): Promise<string[]> {
-  return (await aiscanRPC.sco.listArtifacts({})).artifacts
+  return (await cyberRPC.sco.listArtifacts({})).artifacts
 }
 
 export async function importSCOData(
@@ -536,7 +536,7 @@ export async function importSCOData(
   artifact: string,
   scanId = 'import',
 ): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
-  const response = await aiscanRPC.sco.importNodes({ data: new Uint8Array(await file.arrayBuffer()), artifact, operationId: scanId })
+  const response = await cyberRPC.sco.importNodes({ data: new Uint8Array(await file.arrayBuffer()), artifact, operationId: scanId })
   return { status: 'ok', nodes: Number(response.nodes), artifact: response.artifact, duplicates: Number(response.duplicates) }
 }
 

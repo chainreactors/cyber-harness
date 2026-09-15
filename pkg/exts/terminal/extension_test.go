@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
 	runtimepty "github.com/chainreactors/utils/pty"
 )
 

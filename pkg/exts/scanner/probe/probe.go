@@ -1,4 +1,4 @@
-// Package probe verifies connectivity to aiscan's external dependencies
+// Package probe verifies connectivity to cyber's external dependencies
 // (cyberhub, recon providers, search, and the LLM) using a supplied config.
 // Probe failures are reported inside the result structs rather than as returned
 // errors; a returned error only signals an unknown/untestable section.
@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 )
 

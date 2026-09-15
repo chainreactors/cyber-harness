@@ -6,22 +6,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/truncate"
-	app "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	toolimpl "github.com/chainreactors/aiscan/tools"
-	curltools "github.com/chainreactors/aiscan/tools/curl"
-	gotools "github.com/chainreactors/aiscan/tools/gogo"
-	neutrontools "github.com/chainreactors/aiscan/tools/neutron"
-	protontools "github.com/chainreactors/aiscan/tools/proton"
-	"github.com/chainreactors/aiscan/tools/scan"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
-	spraytools "github.com/chainreactors/aiscan/tools/spray"
-	zombietools "github.com/chainreactors/aiscan/tools/zombie"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/core/resources"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/truncate"
+	app "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	toolimpl "github.com/chainreactors/cyber/tools"
+	curltools "github.com/chainreactors/cyber/tools/curl"
+	gotools "github.com/chainreactors/cyber/tools/gogo"
+	neutrontools "github.com/chainreactors/cyber/tools/neutron"
+	protontools "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/cyber/tools/scan/engine"
+	spraytools "github.com/chainreactors/cyber/tools/spray"
+	zombietools "github.com/chainreactors/cyber/tools/zombie"
 )
 
 func buildScannerCommands(application *app.App, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
@@ -54,7 +54,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 		)
 		if application.Skills != nil {
 			options = append(options, scan.WithSkillReader(func(name string) string {
-				content, ok, err := application.Skills.ReadVirtual("aiscan://skills/scan/" + name + ".md")
+				content, ok, err := application.Skills.ReadVirtual("cyber://skills/scan/" + name + ".md")
 				if !ok || err != nil {
 					return ""
 				}

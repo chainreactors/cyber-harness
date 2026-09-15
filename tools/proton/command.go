@@ -15,11 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/toolargs"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/neutron/operators"
 	"github.com/chainreactors/neutron/protocols"
 	"github.com/chainreactors/proton/proton/file"
@@ -208,7 +208,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 		return nil, fmt.Errorf("proton: %w", err)
 	}
 	if len(inputs) == 0 && execution.Stdin != nil {
-		stdinFile, stdinErr := os.CreateTemp("", "aiscan-proton-stdin-*")
+		stdinFile, stdinErr := os.CreateTemp("", "cyber-proton-stdin-*")
 		if stdinErr != nil {
 			return nil, fmt.Errorf("proton: create stdin file: %w", stdinErr)
 		}

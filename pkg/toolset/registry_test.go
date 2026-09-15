@@ -8,12 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 type registryTool struct {

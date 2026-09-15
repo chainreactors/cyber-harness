@@ -4,11 +4,11 @@ import (
 	"context"
 	"io"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	node "github.com/chainreactors/aiscan/pkg/node"
-	"github.com/chainreactors/aiscan/pkg/profile"
-	"github.com/chainreactors/aiscan/pkg/runner"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	node "github.com/chainreactors/cyber/pkg/node"
+	"github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/pkg/runner"
 )
 
 // Run selects exactly one Agent transport. Session, provider and PTY state stay

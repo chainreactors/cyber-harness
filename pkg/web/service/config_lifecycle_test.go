@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
+	"github.com/chainreactors/cyber/core/extension"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
 func TestConfigShutdownRetainsCandidateWhileCommitIsInProgress(t *testing.T) {

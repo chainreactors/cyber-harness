@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
@@ -302,7 +302,7 @@ func TestZombieWithContextNilReceiver(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. aiscan wrapper: GogoScanStream rejects nil engine
+// 7. cyber wrapper: GogoScanStream rejects nil engine
 // ---------------------------------------------------------------------------
 
 func TestGogoScanStreamRejectsNilEngine(t *testing.T) {
@@ -343,7 +343,7 @@ func TestZombieWeakpassStreamRejectsNilEngine(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. aiscan wrapper: context.Background() is properly passed to SDK engine
+// 8. cyber wrapper: context.Background() is properly passed to SDK engine
 //    (verifies the NewContext().WithContext(ctx) chain does not produce nil)
 // ---------------------------------------------------------------------------
 
@@ -492,7 +492,7 @@ func TestZombieStatsHandlerSafeAfterCancel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 10. aiscan wrapper context chain: verify the full
+// 10. cyber wrapper context chain: verify the full
 //     NewContext().WithContext(ctx) chain used in each wrapper
 // ---------------------------------------------------------------------------
 
@@ -596,10 +596,10 @@ func testNeutronTemplate(id string) *templates.Template {
 	}
 }
 
-// Regression: aiscan drives gogo through the SDK, whose applyInjectedNeutron
+// Regression: cyber drives gogo through the SDK, whose applyInjectedNeutron
 // populates gogo's pkg.TemplateMap but must also populate pkg.ChainExec.
 // engine.NeutronScan calls pkg.ChainExec.Execute on every open host when
-// Exploit != "none" (aiscan's default is "auto"); a nil ChainExec turns that
+// Exploit != "none" (cyber's default is "auto"); a nil ChainExec turns that
 // into a nil-receiver panic caught only by the ants pool ("worker exits from
 // panic"), silently dropping the host's result.
 func TestGogoEngineInjectsChainExecutor(t *testing.T) {

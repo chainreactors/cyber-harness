@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func TestProfileLifecycleAndActualFiles(t *testing.T) {

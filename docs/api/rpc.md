@@ -4,145 +4,145 @@
 ## Table of Contents
 
 - [rpc/agent.proto](#rpc_agent-proto)
-    - [AgentService](#aiscan-rpc-agent-AgentService)
+    - [AgentService](#cyber-rpc-agent-AgentService)
 
 - [rpc/aop.proto](#rpc_aop-proto)
-    - [AOPService](#aiscan-rpc-aop-AOPService)
+    - [AOPService](#cyber-rpc-aop-AOPService)
 
 - [rpc/chat.proto](#rpc_chat-proto)
-    - [SessionService](#aiscan-rpc-chat-SessionService)
+    - [SessionService](#cyber-rpc-chat-SessionService)
 
 - [rpc/config.proto](#rpc_config-proto)
-    - [ConfigService](#aiscan-rpc-config-ConfigService)
+    - [ConfigService](#cyber-rpc-config-ConfigService)
 
 - [rpc/scan.proto](#rpc_scan-proto)
-    - [ScanService](#aiscan-rpc-scan-ScanService)
+    - [ScanService](#cyber-rpc-scan-ScanService)
 
 - [rpc/sco.proto](#rpc_sco-proto)
-    - [SCOService](#aiscan-rpc-sco-SCOService)
+    - [SCOService](#cyber-rpc-sco-SCOService)
 
 - [rpc/system.proto](#rpc_system-proto)
-    - [SystemService](#aiscan-rpc-system-SystemService)
+    - [SystemService](#cyber-rpc-system-SystemService)
 
 - [types/agent.proto](#types_agent-proto)
-    - [AgentListEntry](#aiscan-agent-AgentListEntry)
-    - [AgentListMetadata](#aiscan-agent-AgentListMetadata)
-    - [AgentRunOptions](#aiscan-agent-AgentRunOptions)
-    - [AgentView](#aiscan-agent-AgentView)
-    - [BudgetWarning](#aiscan-agent-BudgetWarning)
-    - [CommandDetail](#aiscan-agent-CommandDetail)
-    - [CompactDetail](#aiscan-agent-CompactDetail)
-    - [DelegationDetail](#aiscan-agent-DelegationDetail)
-    - [EvalControl](#aiscan-agent-EvalControl)
-    - [EvalDetail](#aiscan-agent-EvalDetail)
-    - [LLMRequestDetail](#aiscan-agent-LLMRequestDetail)
-    - [ListAgentsRequest](#aiscan-agent-ListAgentsRequest)
-    - [ListAgentsResponse](#aiscan-agent-ListAgentsResponse)
-    - [WebMessageMetadata](#aiscan-agent-WebMessageMetadata)
+    - [AgentListEntry](#cyber-agent-AgentListEntry)
+    - [AgentListMetadata](#cyber-agent-AgentListMetadata)
+    - [AgentRunOptions](#cyber-agent-AgentRunOptions)
+    - [AgentView](#cyber-agent-AgentView)
+    - [BudgetWarning](#cyber-agent-BudgetWarning)
+    - [CommandDetail](#cyber-agent-CommandDetail)
+    - [CompactDetail](#cyber-agent-CompactDetail)
+    - [DelegationDetail](#cyber-agent-DelegationDetail)
+    - [EvalControl](#cyber-agent-EvalControl)
+    - [EvalDetail](#cyber-agent-EvalDetail)
+    - [LLMRequestDetail](#cyber-agent-LLMRequestDetail)
+    - [ListAgentsRequest](#cyber-agent-ListAgentsRequest)
+    - [ListAgentsResponse](#cyber-agent-ListAgentsResponse)
+    - [WebMessageMetadata](#cyber-agent-WebMessageMetadata)
 
 - [types/chat.proto](#types_chat-proto)
-    - [DeleteSessionRequest](#aiscan-chat-DeleteSessionRequest)
-    - [DeleteSessionResponse](#aiscan-chat-DeleteSessionResponse)
-    - [GetSessionRequest](#aiscan-chat-GetSessionRequest)
-    - [GetSessionResponse](#aiscan-chat-GetSessionResponse)
-    - [ListCommandsRequest](#aiscan-chat-ListCommandsRequest)
-    - [ListCommandsResponse](#aiscan-chat-ListCommandsResponse)
-    - [ListSessionsRequest](#aiscan-chat-ListSessionsRequest)
-    - [ListSessionsResponse](#aiscan-chat-ListSessionsResponse)
-    - [ResetSessionReceipt](#aiscan-chat-ResetSessionReceipt)
-    - [ResetSessionRequest](#aiscan-chat-ResetSessionRequest)
-    - [ResetSessionResponse](#aiscan-chat-ResetSessionResponse)
-    - [SessionHistory](#aiscan-chat-SessionHistory)
-    - [SessionRecord](#aiscan-chat-SessionRecord)
+    - [DeleteSessionRequest](#cyber-chat-DeleteSessionRequest)
+    - [DeleteSessionResponse](#cyber-chat-DeleteSessionResponse)
+    - [GetSessionRequest](#cyber-chat-GetSessionRequest)
+    - [GetSessionResponse](#cyber-chat-GetSessionResponse)
+    - [ListCommandsRequest](#cyber-chat-ListCommandsRequest)
+    - [ListCommandsResponse](#cyber-chat-ListCommandsResponse)
+    - [ListSessionsRequest](#cyber-chat-ListSessionsRequest)
+    - [ListSessionsResponse](#cyber-chat-ListSessionsResponse)
+    - [ResetSessionReceipt](#cyber-chat-ResetSessionReceipt)
+    - [ResetSessionRequest](#cyber-chat-ResetSessionRequest)
+    - [ResetSessionResponse](#cyber-chat-ResetSessionResponse)
+    - [SessionHistory](#cyber-chat-SessionHistory)
+    - [SessionRecord](#cyber-chat-SessionRecord)
 
-    - [SessionHistory.Mode](#aiscan-chat-SessionHistory-Mode)
+    - [SessionHistory.Mode](#cyber-chat-SessionHistory-Mode)
 
 - [types/command.proto](#types_command-proto)
-    - [CommandCatalog](#aiscan-command-CommandCatalog)
-    - [CommandProtocolMessage](#aiscan-command-CommandProtocolMessage)
-    - [CommandReceipt](#aiscan-command-CommandReceipt)
-    - [CommandRequest](#aiscan-command-CommandRequest)
-    - [CommandResult](#aiscan-command-CommandResult)
-    - [CommandSpec](#aiscan-command-CommandSpec)
+    - [CommandCatalog](#cyber-command-CommandCatalog)
+    - [CommandProtocolMessage](#cyber-command-CommandProtocolMessage)
+    - [CommandReceipt](#cyber-command-CommandReceipt)
+    - [CommandRequest](#cyber-command-CommandRequest)
+    - [CommandResult](#cyber-command-CommandResult)
+    - [CommandSpec](#cyber-command-CommandSpec)
 
 - [types/config.proto](#types_config-proto)
-    - [ActivateProfileRequest](#aiscan-config-ActivateProfileRequest)
-    - [ActivateProfileResponse](#aiscan-config-ActivateProfileResponse)
-    - [AgentConfig](#aiscan-config-AgentConfig)
-    - [ConfigView](#aiscan-config-ConfigView)
-    - [ConnectionCheck](#aiscan-config-ConnectionCheck)
-    - [CyberhubConfig](#aiscan-config-CyberhubConfig)
-    - [CyberhubView](#aiscan-config-CyberhubView)
-    - [DistributeConfig](#aiscan-config-DistributeConfig)
-    - [GetConfigRequest](#aiscan-config-GetConfigRequest)
-    - [GetConfigResponse](#aiscan-config-GetConfigResponse)
-    - [IOAConfig](#aiscan-config-IOAConfig)
-    - [IOAView](#aiscan-config-IOAView)
-    - [LLMConfig](#aiscan-config-LLMConfig)
-    - [LLMProbeRequest](#aiscan-config-LLMProbeRequest)
-    - [LLMProbeResult](#aiscan-config-LLMProbeResult)
-    - [LLMProviderConfig](#aiscan-config-LLMProviderConfig)
-    - [LLMProviderView](#aiscan-config-LLMProviderView)
-    - [LLMView](#aiscan-config-LLMView)
-    - [ListModelsResult](#aiscan-config-ListModelsResult)
-    - [ReconConfig](#aiscan-config-ReconConfig)
-    - [ReconView](#aiscan-config-ReconView)
-    - [ScanConfig](#aiscan-config-ScanConfig)
-    - [SearchConfig](#aiscan-config-SearchConfig)
-    - [SearchView](#aiscan-config-SearchView)
-    - [TestConnectionRequest](#aiscan-config-TestConnectionRequest)
-    - [TestConnectionResponse](#aiscan-config-TestConnectionResponse)
-    - [UpdateConfigRequest](#aiscan-config-UpdateConfigRequest)
-    - [UpdateConfigResponse](#aiscan-config-UpdateConfigResponse)
+    - [ActivateProfileRequest](#cyber-config-ActivateProfileRequest)
+    - [ActivateProfileResponse](#cyber-config-ActivateProfileResponse)
+    - [AgentConfig](#cyber-config-AgentConfig)
+    - [ConfigView](#cyber-config-ConfigView)
+    - [ConnectionCheck](#cyber-config-ConnectionCheck)
+    - [CyberhubConfig](#cyber-config-CyberhubConfig)
+    - [CyberhubView](#cyber-config-CyberhubView)
+    - [DistributeConfig](#cyber-config-DistributeConfig)
+    - [GetConfigRequest](#cyber-config-GetConfigRequest)
+    - [GetConfigResponse](#cyber-config-GetConfigResponse)
+    - [IOAConfig](#cyber-config-IOAConfig)
+    - [IOAView](#cyber-config-IOAView)
+    - [LLMConfig](#cyber-config-LLMConfig)
+    - [LLMProbeRequest](#cyber-config-LLMProbeRequest)
+    - [LLMProbeResult](#cyber-config-LLMProbeResult)
+    - [LLMProviderConfig](#cyber-config-LLMProviderConfig)
+    - [LLMProviderView](#cyber-config-LLMProviderView)
+    - [LLMView](#cyber-config-LLMView)
+    - [ListModelsResult](#cyber-config-ListModelsResult)
+    - [ReconConfig](#cyber-config-ReconConfig)
+    - [ReconView](#cyber-config-ReconView)
+    - [ScanConfig](#cyber-config-ScanConfig)
+    - [SearchConfig](#cyber-config-SearchConfig)
+    - [SearchView](#cyber-config-SearchView)
+    - [TestConnectionRequest](#cyber-config-TestConnectionRequest)
+    - [TestConnectionResponse](#cyber-config-TestConnectionResponse)
+    - [UpdateConfigRequest](#cyber-config-UpdateConfigRequest)
+    - [UpdateConfigResponse](#cyber-config-UpdateConfigResponse)
 
 - [types/reload.proto](#types_reload-proto)
-    - [ReloadProtocolMessage](#aiscan-reload-ReloadProtocolMessage)
-    - [ReloadRequest](#aiscan-reload-ReloadRequest)
-    - [ReloadResult](#aiscan-reload-ReloadResult)
+    - [ReloadProtocolMessage](#cyber-reload-ReloadProtocolMessage)
+    - [ReloadRequest](#cyber-reload-ReloadRequest)
+    - [ReloadResult](#cyber-reload-ReloadResult)
 
 - [types/scan.proto](#types_scan-proto)
-    - [CancelScanRequest](#aiscan-scan-CancelScanRequest)
-    - [CancelScanResponse](#aiscan-scan-CancelScanResponse)
-    - [GetScanReportRequest](#aiscan-scan-GetScanReportRequest)
-    - [GetScanReportResponse](#aiscan-scan-GetScanReportResponse)
-    - [GetScanRequest](#aiscan-scan-GetScanRequest)
-    - [GetScanResponse](#aiscan-scan-GetScanResponse)
-    - [ListScansRequest](#aiscan-scan-ListScansRequest)
-    - [ListScansResponse](#aiscan-scan-ListScansResponse)
-    - [Scan](#aiscan-scan-Scan)
-    - [ScanCompleted](#aiscan-scan-ScanCompleted)
-    - [ScanEvent](#aiscan-scan-ScanEvent)
-    - [ScanFailed](#aiscan-scan-ScanFailed)
-    - [ScanOptions](#aiscan-scan-ScanOptions)
-    - [ScanProgress](#aiscan-scan-ScanProgress)
-    - [ScanProtocolMessage](#aiscan-scan-ScanProtocolMessage)
-    - [SessionBinding](#aiscan-scan-SessionBinding)
-    - [SessionScanEvent](#aiscan-scan-SessionScanEvent)
-    - [SubmitScanRequest](#aiscan-scan-SubmitScanRequest)
-    - [SubmitScanResponse](#aiscan-scan-SubmitScanResponse)
-    - [WatchScanEventsRequest](#aiscan-scan-WatchScanEventsRequest)
+    - [CancelScanRequest](#cyber-scan-CancelScanRequest)
+    - [CancelScanResponse](#cyber-scan-CancelScanResponse)
+    - [GetScanReportRequest](#cyber-scan-GetScanReportRequest)
+    - [GetScanReportResponse](#cyber-scan-GetScanReportResponse)
+    - [GetScanRequest](#cyber-scan-GetScanRequest)
+    - [GetScanResponse](#cyber-scan-GetScanResponse)
+    - [ListScansRequest](#cyber-scan-ListScansRequest)
+    - [ListScansResponse](#cyber-scan-ListScansResponse)
+    - [Scan](#cyber-scan-Scan)
+    - [ScanCompleted](#cyber-scan-ScanCompleted)
+    - [ScanEvent](#cyber-scan-ScanEvent)
+    - [ScanFailed](#cyber-scan-ScanFailed)
+    - [ScanOptions](#cyber-scan-ScanOptions)
+    - [ScanProgress](#cyber-scan-ScanProgress)
+    - [ScanProtocolMessage](#cyber-scan-ScanProtocolMessage)
+    - [SessionBinding](#cyber-scan-SessionBinding)
+    - [SessionScanEvent](#cyber-scan-SessionScanEvent)
+    - [SubmitScanRequest](#cyber-scan-SubmitScanRequest)
+    - [SubmitScanResponse](#cyber-scan-SubmitScanResponse)
+    - [WatchScanEventsRequest](#cyber-scan-WatchScanEventsRequest)
 
-    - [ScanStatus](#aiscan-scan-ScanStatus)
+    - [ScanStatus](#cyber-scan-ScanStatus)
 
 - [types/sco.proto](#types_sco-proto)
-    - [DeleteNodesRequest](#aiscan-sco-DeleteNodesRequest)
-    - [DeleteNodesResponse](#aiscan-sco-DeleteNodesResponse)
-    - [GetNodeRequest](#aiscan-sco-GetNodeRequest)
-    - [GetNodeResponse](#aiscan-sco-GetNodeResponse)
-    - [GetStatsRequest](#aiscan-sco-GetStatsRequest)
-    - [GetStatsResponse](#aiscan-sco-GetStatsResponse)
-    - [GetStatsResponse.ValuesEntry](#aiscan-sco-GetStatsResponse-ValuesEntry)
-    - [ImportNodesRequest](#aiscan-sco-ImportNodesRequest)
-    - [ImportNodesResponse](#aiscan-sco-ImportNodesResponse)
-    - [ListArtifactsRequest](#aiscan-sco-ListArtifactsRequest)
-    - [ListArtifactsResponse](#aiscan-sco-ListArtifactsResponse)
-    - [ListNodesRequest](#aiscan-sco-ListNodesRequest)
-    - [ListNodesResponse](#aiscan-sco-ListNodesResponse)
+    - [DeleteNodesRequest](#cyber-sco-DeleteNodesRequest)
+    - [DeleteNodesResponse](#cyber-sco-DeleteNodesResponse)
+    - [GetNodeRequest](#cyber-sco-GetNodeRequest)
+    - [GetNodeResponse](#cyber-sco-GetNodeResponse)
+    - [GetStatsRequest](#cyber-sco-GetStatsRequest)
+    - [GetStatsResponse](#cyber-sco-GetStatsResponse)
+    - [GetStatsResponse.ValuesEntry](#cyber-sco-GetStatsResponse-ValuesEntry)
+    - [ImportNodesRequest](#cyber-sco-ImportNodesRequest)
+    - [ImportNodesResponse](#cyber-sco-ImportNodesResponse)
+    - [ListArtifactsRequest](#cyber-sco-ListArtifactsRequest)
+    - [ListArtifactsResponse](#cyber-sco-ListArtifactsResponse)
+    - [ListNodesRequest](#cyber-sco-ListNodesRequest)
+    - [ListNodesResponse](#cyber-sco-ListNodesResponse)
 
 - [types/system.proto](#types_system-proto)
-    - [GetStatusRequest](#aiscan-system-GetStatusRequest)
-    - [GetStatusResponse](#aiscan-system-GetStatusResponse)
-    - [SystemStatus](#aiscan-system-SystemStatus)
+    - [GetStatusRequest](#cyber-system-GetStatusRequest)
+    - [GetStatusResponse](#cyber-system-GetStatusResponse)
+    - [SystemStatus](#cyber-system-SystemStatus)
 
 - [Scalar Value Types](#scalar-value-types)
 
@@ -161,14 +161,14 @@
 
 
 
-<a name="aiscan-rpc-agent-AgentService"></a>
+<a name="cyber-rpc-agent-AgentService"></a>
 
 ### AgentService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| ListAgents | [.aiscan.agent.ListAgentsRequest](#aiscan-agent-ListAgentsRequest) | [.aiscan.agent.ListAgentsResponse](#aiscan-agent-ListAgentsResponse) |  |
+| ListAgents | [.cyber.agent.ListAgentsRequest](#cyber-agent-ListAgentsRequest) | [.cyber.agent.ListAgentsResponse](#cyber-agent-ListAgentsResponse) |  |
 
 
 
@@ -187,7 +187,7 @@
 
 
 
-<a name="aiscan-rpc-aop-AOPService"></a>
+<a name="cyber-rpc-aop-AOPService"></a>
 
 ### AOPService
 AOPService exposes the application protocol as one bidirectional Envelope
@@ -215,18 +215,18 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-rpc-chat-SessionService"></a>
+<a name="cyber-rpc-chat-SessionService"></a>
 
 ### SessionService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| ListSessions | [.aiscan.chat.ListSessionsRequest](#aiscan-chat-ListSessionsRequest) | [.aiscan.chat.ListSessionsResponse](#aiscan-chat-ListSessionsResponse) |  |
-| GetSession | [.aiscan.chat.GetSessionRequest](#aiscan-chat-GetSessionRequest) | [.aiscan.chat.GetSessionResponse](#aiscan-chat-GetSessionResponse) |  |
-| ResetSession | [.aiscan.chat.ResetSessionRequest](#aiscan-chat-ResetSessionRequest) | [.aiscan.chat.ResetSessionResponse](#aiscan-chat-ResetSessionResponse) |  |
-| DeleteSession | [.aiscan.chat.DeleteSessionRequest](#aiscan-chat-DeleteSessionRequest) | [.aiscan.chat.DeleteSessionResponse](#aiscan-chat-DeleteSessionResponse) |  |
-| ListCommands | [.aiscan.chat.ListCommandsRequest](#aiscan-chat-ListCommandsRequest) | [.aiscan.chat.ListCommandsResponse](#aiscan-chat-ListCommandsResponse) |  |
+| ListSessions | [.cyber.chat.ListSessionsRequest](#cyber-chat-ListSessionsRequest) | [.cyber.chat.ListSessionsResponse](#cyber-chat-ListSessionsResponse) |  |
+| GetSession | [.cyber.chat.GetSessionRequest](#cyber-chat-GetSessionRequest) | [.cyber.chat.GetSessionResponse](#cyber-chat-GetSessionResponse) |  |
+| ResetSession | [.cyber.chat.ResetSessionRequest](#cyber-chat-ResetSessionRequest) | [.cyber.chat.ResetSessionResponse](#cyber-chat-ResetSessionResponse) |  |
+| DeleteSession | [.cyber.chat.DeleteSessionRequest](#cyber-chat-DeleteSessionRequest) | [.cyber.chat.DeleteSessionResponse](#cyber-chat-DeleteSessionResponse) |  |
+| ListCommands | [.cyber.chat.ListCommandsRequest](#cyber-chat-ListCommandsRequest) | [.cyber.chat.ListCommandsResponse](#cyber-chat-ListCommandsResponse) |  |
 | ListEvents | [.aop.ListEventsRequest](#aop-ListEventsRequest) | [.aop.ListEventsResponse](#aop-ListEventsResponse) |  |
 
 
@@ -246,19 +246,19 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-rpc-config-ConfigService"></a>
+<a name="cyber-rpc-config-ConfigService"></a>
 
 ### ConfigService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| GetConfig | [.aiscan.config.GetConfigRequest](#aiscan-config-GetConfigRequest) | [.aiscan.config.GetConfigResponse](#aiscan-config-GetConfigResponse) |  |
-| UpdateConfig | [.aiscan.config.UpdateConfigRequest](#aiscan-config-UpdateConfigRequest) | [.aiscan.config.UpdateConfigResponse](#aiscan-config-UpdateConfigResponse) |  |
-| ActivateProfile | [.aiscan.config.ActivateProfileRequest](#aiscan-config-ActivateProfileRequest) | [.aiscan.config.ActivateProfileResponse](#aiscan-config-ActivateProfileResponse) |  |
-| TestLLM | [.aiscan.config.LLMProbeRequest](#aiscan-config-LLMProbeRequest) | [.aiscan.config.LLMProbeResult](#aiscan-config-LLMProbeResult) |  |
-| ListModels | [.aiscan.config.LLMProbeRequest](#aiscan-config-LLMProbeRequest) | [.aiscan.config.ListModelsResult](#aiscan-config-ListModelsResult) |  |
-| TestConnection | [.aiscan.config.TestConnectionRequest](#aiscan-config-TestConnectionRequest) | [.aiscan.config.TestConnectionResponse](#aiscan-config-TestConnectionResponse) |  |
+| GetConfig | [.cyber.config.GetConfigRequest](#cyber-config-GetConfigRequest) | [.cyber.config.GetConfigResponse](#cyber-config-GetConfigResponse) |  |
+| UpdateConfig | [.cyber.config.UpdateConfigRequest](#cyber-config-UpdateConfigRequest) | [.cyber.config.UpdateConfigResponse](#cyber-config-UpdateConfigResponse) |  |
+| ActivateProfile | [.cyber.config.ActivateProfileRequest](#cyber-config-ActivateProfileRequest) | [.cyber.config.ActivateProfileResponse](#cyber-config-ActivateProfileResponse) |  |
+| TestLLM | [.cyber.config.LLMProbeRequest](#cyber-config-LLMProbeRequest) | [.cyber.config.LLMProbeResult](#cyber-config-LLMProbeResult) |  |
+| ListModels | [.cyber.config.LLMProbeRequest](#cyber-config-LLMProbeRequest) | [.cyber.config.ListModelsResult](#cyber-config-ListModelsResult) |  |
+| TestConnection | [.cyber.config.TestConnectionRequest](#cyber-config-TestConnectionRequest) | [.cyber.config.TestConnectionResponse](#cyber-config-TestConnectionResponse) |  |
 
 
 
@@ -277,18 +277,18 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-rpc-scan-ScanService"></a>
+<a name="cyber-rpc-scan-ScanService"></a>
 
 ### ScanService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| SubmitScan | [.aiscan.scan.SubmitScanRequest](#aiscan-scan-SubmitScanRequest) | [.aiscan.scan.SubmitScanResponse](#aiscan-scan-SubmitScanResponse) |  |
-| GetScan | [.aiscan.scan.GetScanRequest](#aiscan-scan-GetScanRequest) | [.aiscan.scan.GetScanResponse](#aiscan-scan-GetScanResponse) |  |
-| ListScans | [.aiscan.scan.ListScansRequest](#aiscan-scan-ListScansRequest) | [.aiscan.scan.ListScansResponse](#aiscan-scan-ListScansResponse) |  |
-| CancelScan | [.aiscan.scan.CancelScanRequest](#aiscan-scan-CancelScanRequest) | [.aiscan.scan.CancelScanResponse](#aiscan-scan-CancelScanResponse) |  |
-| GetScanReport | [.aiscan.scan.GetScanReportRequest](#aiscan-scan-GetScanReportRequest) | [.aiscan.scan.GetScanReportResponse](#aiscan-scan-GetScanReportResponse) |  |
+| SubmitScan | [.cyber.scan.SubmitScanRequest](#cyber-scan-SubmitScanRequest) | [.cyber.scan.SubmitScanResponse](#cyber-scan-SubmitScanResponse) |  |
+| GetScan | [.cyber.scan.GetScanRequest](#cyber-scan-GetScanRequest) | [.cyber.scan.GetScanResponse](#cyber-scan-GetScanResponse) |  |
+| ListScans | [.cyber.scan.ListScansRequest](#cyber-scan-ListScansRequest) | [.cyber.scan.ListScansResponse](#cyber-scan-ListScansResponse) |  |
+| CancelScan | [.cyber.scan.CancelScanRequest](#cyber-scan-CancelScanRequest) | [.cyber.scan.CancelScanResponse](#cyber-scan-CancelScanResponse) |  |
+| GetScanReport | [.cyber.scan.GetScanReportRequest](#cyber-scan-GetScanReportRequest) | [.cyber.scan.GetScanReportResponse](#cyber-scan-GetScanReportResponse) |  |
 
 
 
@@ -307,19 +307,19 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-rpc-sco-SCOService"></a>
+<a name="cyber-rpc-sco-SCOService"></a>
 
 ### SCOService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| ListNodes | [.aiscan.sco.ListNodesRequest](#aiscan-sco-ListNodesRequest) | [.aiscan.sco.ListNodesResponse](#aiscan-sco-ListNodesResponse) |  |
-| GetNode | [.aiscan.sco.GetNodeRequest](#aiscan-sco-GetNodeRequest) | [.aiscan.sco.GetNodeResponse](#aiscan-sco-GetNodeResponse) |  |
-| GetStats | [.aiscan.sco.GetStatsRequest](#aiscan-sco-GetStatsRequest) | [.aiscan.sco.GetStatsResponse](#aiscan-sco-GetStatsResponse) |  |
-| DeleteNodes | [.aiscan.sco.DeleteNodesRequest](#aiscan-sco-DeleteNodesRequest) | [.aiscan.sco.DeleteNodesResponse](#aiscan-sco-DeleteNodesResponse) |  |
-| ImportNodes | [.aiscan.sco.ImportNodesRequest](#aiscan-sco-ImportNodesRequest) | [.aiscan.sco.ImportNodesResponse](#aiscan-sco-ImportNodesResponse) |  |
-| ListArtifacts | [.aiscan.sco.ListArtifactsRequest](#aiscan-sco-ListArtifactsRequest) | [.aiscan.sco.ListArtifactsResponse](#aiscan-sco-ListArtifactsResponse) |  |
+| ListNodes | [.cyber.sco.ListNodesRequest](#cyber-sco-ListNodesRequest) | [.cyber.sco.ListNodesResponse](#cyber-sco-ListNodesResponse) |  |
+| GetNode | [.cyber.sco.GetNodeRequest](#cyber-sco-GetNodeRequest) | [.cyber.sco.GetNodeResponse](#cyber-sco-GetNodeResponse) |  |
+| GetStats | [.cyber.sco.GetStatsRequest](#cyber-sco-GetStatsRequest) | [.cyber.sco.GetStatsResponse](#cyber-sco-GetStatsResponse) |  |
+| DeleteNodes | [.cyber.sco.DeleteNodesRequest](#cyber-sco-DeleteNodesRequest) | [.cyber.sco.DeleteNodesResponse](#cyber-sco-DeleteNodesResponse) |  |
+| ImportNodes | [.cyber.sco.ImportNodesRequest](#cyber-sco-ImportNodesRequest) | [.cyber.sco.ImportNodesResponse](#cyber-sco-ImportNodesResponse) |  |
+| ListArtifacts | [.cyber.sco.ListArtifactsRequest](#cyber-sco-ListArtifactsRequest) | [.cyber.sco.ListArtifactsResponse](#cyber-sco-ListArtifactsResponse) |  |
 
 
 
@@ -338,14 +338,14 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-rpc-system-SystemService"></a>
+<a name="cyber-rpc-system-SystemService"></a>
 
 ### SystemService
 
 
 | Method Name | Request Type | Response Type | Description |
 | ----------- | ------------ | ------------- | ------------|
-| GetStatus | [.aiscan.system.GetStatusRequest](#aiscan-system-GetStatusRequest) | [.aiscan.system.GetStatusResponse](#aiscan-system-GetStatusResponse) |  |
+| GetStatus | [.cyber.system.GetStatusRequest](#cyber-system-GetStatusRequest) | [.cyber.system.GetStatusResponse](#cyber-system-GetStatusResponse) |  |
 
 
 
@@ -358,7 +358,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-AgentListEntry"></a>
+<a name="cyber-agent-AgentListEntry"></a>
 
 ### AgentListEntry
 
@@ -377,7 +377,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-AgentListMetadata"></a>
+<a name="cyber-agent-AgentListMetadata"></a>
 
 ### AgentListMetadata
 
@@ -385,14 +385,14 @@ the WebSocket compatibility transport over the same service core.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| agents | [AgentListEntry](#aiscan-agent-AgentListEntry) | repeated |  |
+| agents | [AgentListEntry](#cyber-agent-AgentListEntry) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-agent-AgentRunOptions"></a>
+<a name="cyber-agent-AgentRunOptions"></a>
 
 ### AgentRunOptions
 
@@ -408,7 +408,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-AgentView"></a>
+<a name="cyber-agent-AgentView"></a>
 
 ### AgentView
 
@@ -420,7 +420,7 @@ the WebSocket compatibility transport over the same service core.
 | status | [aop.AgentStatus](#aop-AgentStatus) |  |  |
 | stats | [aop.AgentStats](#aop-AgentStats) |  |  |
 | connected_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| commands | [aiscan.command.CommandSpec](#aiscan-command-CommandSpec) | repeated |  |
+| commands | [cyber.command.CommandSpec](#cyber-command-CommandSpec) | repeated |  |
 | busy | [bool](#bool) |  |  |
 
 
@@ -428,7 +428,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-BudgetWarning"></a>
+<a name="cyber-agent-BudgetWarning"></a>
 
 ### BudgetWarning
 
@@ -444,7 +444,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-CommandDetail"></a>
+<a name="cyber-agent-CommandDetail"></a>
 
 ### CommandDetail
 
@@ -460,7 +460,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-CompactDetail"></a>
+<a name="cyber-agent-CompactDetail"></a>
 
 ### CompactDetail
 
@@ -478,7 +478,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-DelegationDetail"></a>
+<a name="cyber-agent-DelegationDetail"></a>
 
 ### DelegationDetail
 
@@ -498,7 +498,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-EvalControl"></a>
+<a name="cyber-agent-EvalControl"></a>
 
 ### EvalControl
 
@@ -514,7 +514,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-EvalDetail"></a>
+<a name="cyber-agent-EvalDetail"></a>
 
 ### EvalDetail
 
@@ -533,7 +533,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-LLMRequestDetail"></a>
+<a name="cyber-agent-LLMRequestDetail"></a>
 
 ### LLMRequestDetail
 
@@ -551,7 +551,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-ListAgentsRequest"></a>
+<a name="cyber-agent-ListAgentsRequest"></a>
 
 ### ListAgentsRequest
 
@@ -561,7 +561,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-agent-ListAgentsResponse"></a>
+<a name="cyber-agent-ListAgentsResponse"></a>
 
 ### ListAgentsResponse
 
@@ -569,14 +569,14 @@ the WebSocket compatibility transport over the same service core.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| agents | [AgentView](#aiscan-agent-AgentView) | repeated |  |
+| agents | [AgentView](#cyber-agent-AgentView) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-agent-WebMessageMetadata"></a>
+<a name="cyber-agent-WebMessageMetadata"></a>
 
 ### WebMessageMetadata
 
@@ -587,7 +587,7 @@ the WebSocket compatibility transport over the same service core.
 | node_id | [string](#string) |  |  |
 | code | [string](#string) |  |  |
 | params | [google.protobuf.Struct](#google-protobuf-Struct) |  |  |
-| agent_list | [AgentListMetadata](#aiscan-agent-AgentListMetadata) |  |  |
+| agent_list | [AgentListMetadata](#cyber-agent-AgentListMetadata) |  |  |
 
 
 
@@ -610,7 +610,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-DeleteSessionRequest"></a>
+<a name="cyber-chat-DeleteSessionRequest"></a>
 
 ### DeleteSessionRequest
 
@@ -626,7 +626,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-DeleteSessionResponse"></a>
+<a name="cyber-chat-DeleteSessionResponse"></a>
 
 ### DeleteSessionResponse
 
@@ -643,7 +643,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-GetSessionRequest"></a>
+<a name="cyber-chat-GetSessionRequest"></a>
 
 ### GetSessionRequest
 
@@ -658,7 +658,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-GetSessionResponse"></a>
+<a name="cyber-chat-GetSessionResponse"></a>
 
 ### GetSessionResponse
 
@@ -666,14 +666,14 @@ the WebSocket compatibility transport over the same service core.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| session | [SessionRecord](#aiscan-chat-SessionRecord) |  |  |
+| session | [SessionRecord](#cyber-chat-SessionRecord) |  |  |
 
 
 
 
 
 
-<a name="aiscan-chat-ListCommandsRequest"></a>
+<a name="cyber-chat-ListCommandsRequest"></a>
 
 ### ListCommandsRequest
 
@@ -688,7 +688,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-ListCommandsResponse"></a>
+<a name="cyber-chat-ListCommandsResponse"></a>
 
 ### ListCommandsResponse
 
@@ -696,14 +696,14 @@ the WebSocket compatibility transport over the same service core.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| commands | [aiscan.command.CommandSpec](#aiscan-command-CommandSpec) | repeated |  |
+| commands | [cyber.command.CommandSpec](#cyber-command-CommandSpec) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-chat-ListSessionsRequest"></a>
+<a name="cyber-chat-ListSessionsRequest"></a>
 
 ### ListSessionsRequest
 
@@ -720,7 +720,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-ListSessionsResponse"></a>
+<a name="cyber-chat-ListSessionsResponse"></a>
 
 ### ListSessionsResponse
 
@@ -728,7 +728,7 @@ the WebSocket compatibility transport over the same service core.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| sessions | [SessionRecord](#aiscan-chat-SessionRecord) | repeated |  |
+| sessions | [SessionRecord](#cyber-chat-SessionRecord) | repeated |  |
 | next_cursor | [string](#string) |  |  |
 
 
@@ -736,7 +736,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-ResetSessionReceipt"></a>
+<a name="cyber-chat-ResetSessionReceipt"></a>
 
 ### ResetSessionReceipt
 
@@ -745,14 +745,14 @@ the WebSocket compatibility transport over the same service core.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | previous | [aop.Session](#aop-Session) |  |  |
-| current | [SessionRecord](#aiscan-chat-SessionRecord) |  |  |
+| current | [SessionRecord](#cyber-chat-SessionRecord) |  |  |
 
 
 
 
 
 
-<a name="aiscan-chat-ResetSessionRequest"></a>
+<a name="cyber-chat-ResetSessionRequest"></a>
 
 ### ResetSessionRequest
 
@@ -770,7 +770,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-ResetSessionResponse"></a>
+<a name="cyber-chat-ResetSessionResponse"></a>
 
 ### ResetSessionResponse
 
@@ -779,7 +779,7 @@ the WebSocket compatibility transport over the same service core.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | request_id | [string](#string) |  |  |
-| accepted | [ResetSessionReceipt](#aiscan-chat-ResetSessionReceipt) |  |  |
+| accepted | [ResetSessionReceipt](#cyber-chat-ResetSessionReceipt) |  |  |
 | rejected | [aop.Rejection](#aop-Rejection) |  |  |
 
 
@@ -787,7 +787,7 @@ the WebSocket compatibility transport over the same service core.
 
 
 
-<a name="aiscan-chat-SessionHistory"></a>
+<a name="cyber-chat-SessionHistory"></a>
 
 ### SessionHistory
 SessionHistory is persisted as an AOP event extension. It makes transcript
@@ -796,14 +796,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| mode | [SessionHistory.Mode](#aiscan-chat-SessionHistory-Mode) |  |  |
+| mode | [SessionHistory.Mode](#cyber-chat-SessionHistory-Mode) |  |  |
 
 
 
 
 
 
-<a name="aiscan-chat-SessionRecord"></a>
+<a name="cyber-chat-SessionRecord"></a>
 
 ### SessionRecord
 
@@ -824,7 +824,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-chat-SessionHistory-Mode"></a>
+<a name="cyber-chat-SessionHistory-Mode"></a>
 
 ### SessionHistory.Mode
 
@@ -851,7 +851,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-command-CommandCatalog"></a>
+<a name="cyber-command-CommandCatalog"></a>
 
 ### CommandCatalog
 
@@ -859,14 +859,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| commands | [CommandSpec](#aiscan-command-CommandSpec) | repeated |  |
+| commands | [CommandSpec](#cyber-command-CommandSpec) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-command-CommandProtocolMessage"></a>
+<a name="cyber-command-CommandProtocolMessage"></a>
 
 ### CommandProtocolMessage
 
@@ -874,17 +874,17 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| request | [CommandRequest](#aiscan-command-CommandRequest) |  |  |
-| result | [CommandResult](#aiscan-command-CommandResult) |  |  |
-| catalog | [CommandCatalog](#aiscan-command-CommandCatalog) |  |  |
-| receipt | [CommandReceipt](#aiscan-command-CommandReceipt) |  |  |
+| request | [CommandRequest](#cyber-command-CommandRequest) |  |  |
+| result | [CommandResult](#cyber-command-CommandResult) |  |  |
+| catalog | [CommandCatalog](#cyber-command-CommandCatalog) |  |  |
+| receipt | [CommandReceipt](#cyber-command-CommandReceipt) |  |  |
 
 
 
 
 
 
-<a name="aiscan-command-CommandReceipt"></a>
+<a name="cyber-command-CommandReceipt"></a>
 
 ### CommandReceipt
 
@@ -901,7 +901,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-command-CommandRequest"></a>
+<a name="cyber-command-CommandRequest"></a>
 
 ### CommandRequest
 
@@ -917,7 +917,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-command-CommandResult"></a>
+<a name="cyber-command-CommandResult"></a>
 
 ### CommandResult
 
@@ -934,7 +934,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-command-CommandSpec"></a>
+<a name="cyber-command-CommandSpec"></a>
 
 ### CommandSpec
 
@@ -968,7 +968,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ActivateProfileRequest"></a>
+<a name="cyber-config-ActivateProfileRequest"></a>
 
 ### ActivateProfileRequest
 
@@ -983,7 +983,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ActivateProfileResponse"></a>
+<a name="cyber-config-ActivateProfileResponse"></a>
 
 ### ActivateProfileResponse
 
@@ -991,14 +991,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| config | [ConfigView](#aiscan-config-ConfigView) |  |  |
+| config | [ConfigView](#cyber-config-ConfigView) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-AgentConfig"></a>
+<a name="cyber-config-AgentConfig"></a>
 
 ### AgentConfig
 
@@ -1014,7 +1014,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ConfigView"></a>
+<a name="cyber-config-ConfigView"></a>
 
 ### ConfigView
 
@@ -1024,20 +1024,20 @@ inheritance explicit without changing the shared AOP protocol schema.
 | ----- | ---- | ----- | ----------- |
 | path | [string](#string) |  |  |
 | loaded | [bool](#bool) |  |  |
-| llm | [LLMView](#aiscan-config-LLMView) |  |  |
-| cyberhub | [CyberhubView](#aiscan-config-CyberhubView) |  |  |
-| recon | [ReconView](#aiscan-config-ReconView) |  |  |
-| scan | [ScanConfig](#aiscan-config-ScanConfig) |  |  |
-| search | [SearchView](#aiscan-config-SearchView) |  |  |
-| ioa | [IOAView](#aiscan-config-IOAView) |  |  |
-| agent | [AgentConfig](#aiscan-config-AgentConfig) |  |  |
+| llm | [LLMView](#cyber-config-LLMView) |  |  |
+| cyberhub | [CyberhubView](#cyber-config-CyberhubView) |  |  |
+| recon | [ReconView](#cyber-config-ReconView) |  |  |
+| scan | [ScanConfig](#cyber-config-ScanConfig) |  |  |
+| search | [SearchView](#cyber-config-SearchView) |  |  |
+| ioa | [IOAView](#cyber-config-IOAView) |  |  |
+| agent | [AgentConfig](#cyber-config-AgentConfig) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-ConnectionCheck"></a>
+<a name="cyber-config-ConnectionCheck"></a>
 
 ### ConnectionCheck
 
@@ -1056,7 +1056,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-CyberhubConfig"></a>
+<a name="cyber-config-CyberhubConfig"></a>
 
 ### CyberhubConfig
 
@@ -1074,7 +1074,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-CyberhubView"></a>
+<a name="cyber-config-CyberhubView"></a>
 
 ### CyberhubView
 
@@ -1092,7 +1092,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-DistributeConfig"></a>
+<a name="cyber-config-DistributeConfig"></a>
 
 ### DistributeConfig
 
@@ -1100,20 +1100,20 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| llm | [LLMConfig](#aiscan-config-LLMConfig) |  |  |
-| cyberhub | [CyberhubConfig](#aiscan-config-CyberhubConfig) |  |  |
-| recon | [ReconConfig](#aiscan-config-ReconConfig) |  |  |
-| scan | [ScanConfig](#aiscan-config-ScanConfig) |  |  |
-| search | [SearchConfig](#aiscan-config-SearchConfig) |  |  |
-| ioa | [IOAConfig](#aiscan-config-IOAConfig) |  |  |
-| agent | [AgentConfig](#aiscan-config-AgentConfig) |  |  |
+| llm | [LLMConfig](#cyber-config-LLMConfig) |  |  |
+| cyberhub | [CyberhubConfig](#cyber-config-CyberhubConfig) |  |  |
+| recon | [ReconConfig](#cyber-config-ReconConfig) |  |  |
+| scan | [ScanConfig](#cyber-config-ScanConfig) |  |  |
+| search | [SearchConfig](#cyber-config-SearchConfig) |  |  |
+| ioa | [IOAConfig](#cyber-config-IOAConfig) |  |  |
+| agent | [AgentConfig](#cyber-config-AgentConfig) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-GetConfigRequest"></a>
+<a name="cyber-config-GetConfigRequest"></a>
 
 ### GetConfigRequest
 
@@ -1123,7 +1123,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-GetConfigResponse"></a>
+<a name="cyber-config-GetConfigResponse"></a>
 
 ### GetConfigResponse
 
@@ -1131,14 +1131,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| config | [ConfigView](#aiscan-config-ConfigView) |  |  |
+| config | [ConfigView](#cyber-config-ConfigView) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-IOAConfig"></a>
+<a name="cyber-config-IOAConfig"></a>
 
 ### IOAConfig
 
@@ -1156,7 +1156,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-IOAView"></a>
+<a name="cyber-config-IOAView"></a>
 
 ### IOAView
 
@@ -1174,7 +1174,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-LLMConfig"></a>
+<a name="cyber-config-LLMConfig"></a>
 
 ### LLMConfig
 
@@ -1183,14 +1183,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | active_profile | [string](#string) |  |  |
-| providers | [LLMProviderConfig](#aiscan-config-LLMProviderConfig) | repeated |  |
+| providers | [LLMProviderConfig](#cyber-config-LLMProviderConfig) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-config-LLMProbeRequest"></a>
+<a name="cyber-config-LLMProbeRequest"></a>
 
 ### LLMProbeRequest
 
@@ -1210,7 +1210,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-LLMProbeResult"></a>
+<a name="cyber-config-LLMProbeResult"></a>
 
 ### LLMProbeResult
 
@@ -1230,7 +1230,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-LLMProviderConfig"></a>
+<a name="cyber-config-LLMProviderConfig"></a>
 
 ### LLMProviderConfig
 
@@ -1255,7 +1255,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-LLMProviderView"></a>
+<a name="cyber-config-LLMProviderView"></a>
 
 ### LLMProviderView
 
@@ -1280,7 +1280,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-LLMView"></a>
+<a name="cyber-config-LLMView"></a>
 
 ### LLMView
 
@@ -1289,15 +1289,15 @@ inheritance explicit without changing the shared AOP protocol schema.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | active_profile | [string](#string) |  |  |
-| active | [LLMProviderView](#aiscan-config-LLMProviderView) |  |  |
-| providers | [LLMProviderView](#aiscan-config-LLMProviderView) | repeated |  |
+| active | [LLMProviderView](#cyber-config-LLMProviderView) |  |  |
+| providers | [LLMProviderView](#cyber-config-LLMProviderView) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-config-ListModelsResult"></a>
+<a name="cyber-config-ListModelsResult"></a>
 
 ### ListModelsResult
 
@@ -1315,7 +1315,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ReconConfig"></a>
+<a name="cyber-config-ReconConfig"></a>
 
 ### ReconConfig
 
@@ -1333,7 +1333,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ReconView"></a>
+<a name="cyber-config-ReconView"></a>
 
 ### ReconView
 
@@ -1351,7 +1351,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-ScanConfig"></a>
+<a name="cyber-config-ScanConfig"></a>
 
 ### ScanConfig
 
@@ -1366,7 +1366,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-SearchConfig"></a>
+<a name="cyber-config-SearchConfig"></a>
 
 ### SearchConfig
 
@@ -1381,7 +1381,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-SearchView"></a>
+<a name="cyber-config-SearchView"></a>
 
 ### SearchView
 
@@ -1396,7 +1396,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-config-TestConnectionRequest"></a>
+<a name="cyber-config-TestConnectionRequest"></a>
 
 ### TestConnectionRequest
 
@@ -1405,14 +1405,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | section | [string](#string) |  |  |
-| config | [DistributeConfig](#aiscan-config-DistributeConfig) |  |  |
+| config | [DistributeConfig](#cyber-config-DistributeConfig) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-TestConnectionResponse"></a>
+<a name="cyber-config-TestConnectionResponse"></a>
 
 ### TestConnectionResponse
 
@@ -1420,14 +1420,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| checks | [ConnectionCheck](#aiscan-config-ConnectionCheck) | repeated |  |
+| checks | [ConnectionCheck](#cyber-config-ConnectionCheck) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-config-UpdateConfigRequest"></a>
+<a name="cyber-config-UpdateConfigRequest"></a>
 
 ### UpdateConfigRequest
 
@@ -1435,14 +1435,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| config | [DistributeConfig](#aiscan-config-DistributeConfig) |  |  |
+| config | [DistributeConfig](#cyber-config-DistributeConfig) |  |  |
 
 
 
 
 
 
-<a name="aiscan-config-UpdateConfigResponse"></a>
+<a name="cyber-config-UpdateConfigResponse"></a>
 
 ### UpdateConfigResponse
 
@@ -1450,7 +1450,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| config | [ConfigView](#aiscan-config-ConfigView) |  |  |
+| config | [ConfigView](#cyber-config-ConfigView) |  |  |
 
 
 
@@ -1473,7 +1473,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-reload-ReloadProtocolMessage"></a>
+<a name="cyber-reload-ReloadProtocolMessage"></a>
 
 ### ReloadProtocolMessage
 
@@ -1481,15 +1481,15 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| request | [ReloadRequest](#aiscan-reload-ReloadRequest) |  |  |
-| result | [ReloadResult](#aiscan-reload-ReloadResult) |  |  |
+| request | [ReloadRequest](#cyber-reload-ReloadRequest) |  |  |
+| result | [ReloadResult](#cyber-reload-ReloadResult) |  |  |
 
 
 
 
 
 
-<a name="aiscan-reload-ReloadRequest"></a>
+<a name="cyber-reload-ReloadRequest"></a>
 
 ### ReloadRequest
 
@@ -1497,14 +1497,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| config | [aiscan.config.DistributeConfig](#aiscan-config-DistributeConfig) |  |  |
+| config | [cyber.config.DistributeConfig](#cyber-config-DistributeConfig) |  |  |
 
 
 
 
 
 
-<a name="aiscan-reload-ReloadResult"></a>
+<a name="cyber-reload-ReloadResult"></a>
 
 ### ReloadResult
 
@@ -1538,7 +1538,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-CancelScanRequest"></a>
+<a name="cyber-scan-CancelScanRequest"></a>
 
 ### CancelScanRequest
 
@@ -1554,7 +1554,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-CancelScanResponse"></a>
+<a name="cyber-scan-CancelScanResponse"></a>
 
 ### CancelScanResponse
 
@@ -1563,7 +1563,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | request_id | [string](#string) |  |  |
-| accepted | [Scan](#aiscan-scan-Scan) |  |  |
+| accepted | [Scan](#cyber-scan-Scan) |  |  |
 | rejected | [aop.Rejection](#aop-Rejection) |  |  |
 
 
@@ -1571,7 +1571,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-GetScanReportRequest"></a>
+<a name="cyber-scan-GetScanReportRequest"></a>
 
 ### GetScanReportRequest
 
@@ -1587,7 +1587,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-GetScanReportResponse"></a>
+<a name="cyber-scan-GetScanReportResponse"></a>
 
 ### GetScanReportResponse
 
@@ -1603,7 +1603,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-GetScanRequest"></a>
+<a name="cyber-scan-GetScanRequest"></a>
 
 ### GetScanRequest
 
@@ -1618,7 +1618,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-GetScanResponse"></a>
+<a name="cyber-scan-GetScanResponse"></a>
 
 ### GetScanResponse
 
@@ -1626,14 +1626,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| scan | [Scan](#aiscan-scan-Scan) |  |  |
+| scan | [Scan](#cyber-scan-Scan) |  |  |
 
 
 
 
 
 
-<a name="aiscan-scan-ListScansRequest"></a>
+<a name="cyber-scan-ListScansRequest"></a>
 
 ### ListScansRequest
 
@@ -1643,7 +1643,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ListScansResponse"></a>
+<a name="cyber-scan-ListScansResponse"></a>
 
 ### ListScansResponse
 
@@ -1651,14 +1651,14 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| scans | [Scan](#aiscan-scan-Scan) | repeated |  |
+| scans | [Scan](#cyber-scan-Scan) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-scan-Scan"></a>
+<a name="cyber-scan-Scan"></a>
 
 ### Scan
 
@@ -1669,8 +1669,8 @@ inheritance explicit without changing the shared AOP protocol schema.
 | id | [string](#string) |  |  |
 | target | [string](#string) |  |  |
 | mode | [string](#string) |  |  |
-| options | [ScanOptions](#aiscan-scan-ScanOptions) |  |  |
-| status | [ScanStatus](#aiscan-scan-ScanStatus) |  |  |
+| options | [ScanOptions](#cyber-scan-ScanOptions) |  |  |
+| status | [ScanStatus](#cyber-scan-ScanStatus) |  |  |
 | progress | [string](#string) |  |  |
 | report | [string](#string) |  |  |
 | error | [string](#string) |  |  |
@@ -1682,7 +1682,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ScanCompleted"></a>
+<a name="cyber-scan-ScanCompleted"></a>
 
 ### ScanCompleted
 
@@ -1692,7 +1692,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ScanEvent"></a>
+<a name="cyber-scan-ScanEvent"></a>
 
 ### ScanEvent
 
@@ -1703,18 +1703,18 @@ inheritance explicit without changing the shared AOP protocol schema.
 | scan_id | [string](#string) |  |  |
 | sequence | [uint64](#uint64) |  |  |
 | emitted_at | [google.protobuf.Timestamp](#google-protobuf-Timestamp) |  |  |
-| snapshot | [Scan](#aiscan-scan-Scan) |  |  |
-| status | [ScanStatus](#aiscan-scan-ScanStatus) |  |  |
-| progress | [ScanProgress](#aiscan-scan-ScanProgress) |  |  |
-| completed | [ScanCompleted](#aiscan-scan-ScanCompleted) |  |  |
-| failed | [ScanFailed](#aiscan-scan-ScanFailed) |  |  |
+| snapshot | [Scan](#cyber-scan-Scan) |  |  |
+| status | [ScanStatus](#cyber-scan-ScanStatus) |  |  |
+| progress | [ScanProgress](#cyber-scan-ScanProgress) |  |  |
+| completed | [ScanCompleted](#cyber-scan-ScanCompleted) |  |  |
+| failed | [ScanFailed](#cyber-scan-ScanFailed) |  |  |
 
 
 
 
 
 
-<a name="aiscan-scan-ScanFailed"></a>
+<a name="cyber-scan-ScanFailed"></a>
 
 ### ScanFailed
 
@@ -1730,7 +1730,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ScanOptions"></a>
+<a name="cyber-scan-ScanOptions"></a>
 
 ### ScanOptions
 
@@ -1747,7 +1747,7 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ScanProgress"></a>
+<a name="cyber-scan-ScanProgress"></a>
 
 ### ScanProgress
 
@@ -1762,27 +1762,27 @@ inheritance explicit without changing the shared AOP protocol schema.
 
 
 
-<a name="aiscan-scan-ScanProtocolMessage"></a>
+<a name="cyber-scan-ScanProtocolMessage"></a>
 
 ### ScanProtocolMessage
-ProtocolMessage carries AIScan scan runtime semantics over the shared AOP
+ProtocolMessage carries Cyber scan runtime semantics over the shared AOP
 WebSocket. Scan management remains on ScanService.
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| watch_events_request | [WatchScanEventsRequest](#aiscan-scan-WatchScanEventsRequest) |  |  |
-| event | [ScanEvent](#aiscan-scan-ScanEvent) |  |  |
+| watch_events_request | [WatchScanEventsRequest](#cyber-scan-WatchScanEventsRequest) |  |  |
+| event | [ScanEvent](#cyber-scan-ScanEvent) |  |  |
 
 
 
 
 
 
-<a name="aiscan-scan-SessionBinding"></a>
+<a name="cyber-scan-SessionBinding"></a>
 
 ### SessionBinding
-SessionBinding attaches an AIScan Scan to an AOP Session at open time.
+SessionBinding attaches an Cyber Scan to an AOP Session at open time.
 
 
 | Field | Type | Label | Description |
@@ -1794,7 +1794,7 @@ SessionBinding attaches an AIScan Scan to an AOP Session at open time.
 
 
 
-<a name="aiscan-scan-SessionScanEvent"></a>
+<a name="cyber-scan-SessionScanEvent"></a>
 
 ### SessionScanEvent
 SessionScanEvent links a completed scan into an AOP session timeline without
@@ -1804,14 +1804,14 @@ reintroducing a parallel web-only domain event envelope.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | scan_id | [string](#string) |  |  |
-| status | [ScanStatus](#aiscan-scan-ScanStatus) |  |  |
+| status | [ScanStatus](#cyber-scan-ScanStatus) |  |  |
 
 
 
 
 
 
-<a name="aiscan-scan-SubmitScanRequest"></a>
+<a name="cyber-scan-SubmitScanRequest"></a>
 
 ### SubmitScanRequest
 
@@ -1822,14 +1822,14 @@ reintroducing a parallel web-only domain event envelope.
 | request_id | [string](#string) |  |  |
 | target | [string](#string) |  |  |
 | mode | [string](#string) |  |  |
-| options | [ScanOptions](#aiscan-scan-ScanOptions) |  |  |
+| options | [ScanOptions](#cyber-scan-ScanOptions) |  |  |
 
 
 
 
 
 
-<a name="aiscan-scan-SubmitScanResponse"></a>
+<a name="cyber-scan-SubmitScanResponse"></a>
 
 ### SubmitScanResponse
 
@@ -1838,7 +1838,7 @@ reintroducing a parallel web-only domain event envelope.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | request_id | [string](#string) |  |  |
-| accepted | [Scan](#aiscan-scan-Scan) |  |  |
+| accepted | [Scan](#cyber-scan-Scan) |  |  |
 | rejected | [aop.Rejection](#aop-Rejection) |  |  |
 
 
@@ -1846,7 +1846,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-scan-WatchScanEventsRequest"></a>
+<a name="cyber-scan-WatchScanEventsRequest"></a>
 
 ### WatchScanEventsRequest
 
@@ -1863,7 +1863,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-scan-ScanStatus"></a>
+<a name="cyber-scan-ScanStatus"></a>
 
 ### ScanStatus
 
@@ -1893,7 +1893,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-DeleteNodesRequest"></a>
+<a name="cyber-sco-DeleteNodesRequest"></a>
 
 ### DeleteNodesRequest
 
@@ -1908,7 +1908,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-DeleteNodesResponse"></a>
+<a name="cyber-sco-DeleteNodesResponse"></a>
 
 ### DeleteNodesResponse
 
@@ -1918,7 +1918,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-GetNodeRequest"></a>
+<a name="cyber-sco-GetNodeRequest"></a>
 
 ### GetNodeRequest
 
@@ -1933,7 +1933,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-GetNodeResponse"></a>
+<a name="cyber-sco-GetNodeResponse"></a>
 
 ### GetNodeResponse
 
@@ -1949,7 +1949,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-GetStatsRequest"></a>
+<a name="cyber-sco-GetStatsRequest"></a>
 
 ### GetStatsRequest
 
@@ -1959,7 +1959,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-GetStatsResponse"></a>
+<a name="cyber-sco-GetStatsResponse"></a>
 
 ### GetStatsResponse
 
@@ -1967,14 +1967,14 @@ reintroducing a parallel web-only domain event envelope.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| values | [GetStatsResponse.ValuesEntry](#aiscan-sco-GetStatsResponse-ValuesEntry) | repeated |  |
+| values | [GetStatsResponse.ValuesEntry](#cyber-sco-GetStatsResponse-ValuesEntry) | repeated |  |
 
 
 
 
 
 
-<a name="aiscan-sco-GetStatsResponse-ValuesEntry"></a>
+<a name="cyber-sco-GetStatsResponse-ValuesEntry"></a>
 
 ### GetStatsResponse.ValuesEntry
 
@@ -1990,7 +1990,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ImportNodesRequest"></a>
+<a name="cyber-sco-ImportNodesRequest"></a>
 
 ### ImportNodesRequest
 
@@ -2007,7 +2007,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ImportNodesResponse"></a>
+<a name="cyber-sco-ImportNodesResponse"></a>
 
 ### ImportNodesResponse
 
@@ -2024,7 +2024,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ListArtifactsRequest"></a>
+<a name="cyber-sco-ListArtifactsRequest"></a>
 
 ### ListArtifactsRequest
 
@@ -2034,7 +2034,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ListArtifactsResponse"></a>
+<a name="cyber-sco-ListArtifactsResponse"></a>
 
 ### ListArtifactsResponse
 
@@ -2049,7 +2049,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ListNodesRequest"></a>
+<a name="cyber-sco-ListNodesRequest"></a>
 
 ### ListNodesRequest
 
@@ -2066,7 +2066,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-sco-ListNodesResponse"></a>
+<a name="cyber-sco-ListNodesResponse"></a>
 
 ### ListNodesResponse
 
@@ -2097,7 +2097,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-system-GetStatusRequest"></a>
+<a name="cyber-system-GetStatusRequest"></a>
 
 ### GetStatusRequest
 
@@ -2107,7 +2107,7 @@ reintroducing a parallel web-only domain event envelope.
 
 
 
-<a name="aiscan-system-GetStatusResponse"></a>
+<a name="cyber-system-GetStatusResponse"></a>
 
 ### GetStatusResponse
 
@@ -2115,14 +2115,14 @@ reintroducing a parallel web-only domain event envelope.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| status | [SystemStatus](#aiscan-system-SystemStatus) |  |  |
+| status | [SystemStatus](#cyber-system-SystemStatus) |  |  |
 
 
 
 
 
 
-<a name="aiscan-system-SystemStatus"></a>
+<a name="cyber-system-SystemStatus"></a>
 
 ### SystemStatus
 

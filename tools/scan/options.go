@@ -3,9 +3,9 @@ package scan
 import (
 	"context"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 type invocationProxyKey struct{}

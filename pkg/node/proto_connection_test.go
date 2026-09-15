@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 	"io"
 	"net"
 	"net/http"
@@ -18,23 +18,23 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	execpb "github.com/chainreactors/aiscan/aop/exec"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	proxytool "github.com/chainreactors/aiscan/tools/proxy"
+	aop "github.com/chainreactors/cyber/aop"
+	execpb "github.com/chainreactors/cyber/aop/exec"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	trafficpb "github.com/chainreactors/cyber/aop/traffic"
+	"github.com/chainreactors/cyber/cmd/harness"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
+	proxytool "github.com/chainreactors/cyber/tools/proxy"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -426,9 +426,9 @@ func TestFileReadDoesNotDecodePathEncodedRanges(t *testing.T) {
 }
 
 func TestUploadWritesAbsolutePath(t *testing.T) {
-	const filename = "aiscan_test_upload_probe.txt"
+	const filename = "cyber_test_upload_probe.txt"
 	const body = "codex public proof\nkey=appImage/probe"
-	dest := filepath.Join(os.TempDir(), "aiscan-uploads", filename)
+	dest := filepath.Join(os.TempDir(), "cyber-uploads", filename)
 	t.Cleanup(func() { _ = os.Remove(dest) })
 	result, err := (&chatAgentHandler{}).Upload(&filepb.UploadRequest{SessionId: "sess-1", Filename: filename, Data: []byte(body)})
 	if err != nil {

@@ -2,7 +2,7 @@ package probe
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/pkg/types"
 	"testing"
 )
 

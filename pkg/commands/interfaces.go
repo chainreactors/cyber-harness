@@ -2,7 +2,7 @@ package commands
 
 import (
  "context"
- "github.com/chainreactors/aiscan/pkg/types"
+ "github.com/chainreactors/cyber/pkg/types"
 )
 
 type Registrar interface { Register(string, string, ...Command) error }

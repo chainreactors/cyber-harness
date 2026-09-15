@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/cli"
+	"github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/cli"
 )
 
 // Declaration belongs to a capability extension, but does not require a

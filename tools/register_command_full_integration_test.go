@@ -1,6 +1,6 @@
 //go:build full && integration
 
-//	Run with: AISCAN_INTEGRATION=1 FOFA_KEY=... \
+//	Run with: CYBER_INTEGRATION=1 FOFA_KEY=... \
 //	  go test -tags 'full integration' ./tools/... -run TestIntegration -v
 package tools
 
@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/katana"
-	passivecmd "github.com/chainreactors/aiscan/tools/passive"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/katana"
+	passivecmd "github.com/chainreactors/cyber/tools/passive"
+	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
 func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
@@ -32,8 +32,8 @@ func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Contex
 }
 
 func TestIntegrationPassiveFofa(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") == "" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run")
+	if os.Getenv("CYBER_INTEGRATION") == "" {
+		t.Skip("set CYBER_INTEGRATION=1 to run")
 	}
 	key := os.Getenv("FOFA_KEY")
 	if key == "" {
@@ -63,8 +63,8 @@ func TestIntegrationPassiveFofa(t *testing.T) {
 }
 
 func TestIntegrationPassiveHunter(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") == "" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run")
+	if os.Getenv("CYBER_INTEGRATION") == "" {
+		t.Skip("set CYBER_INTEGRATION=1 to run")
 	}
 	apikey := os.Getenv("HUNTER_API_KEY")
 	if apikey == "" {
@@ -99,8 +99,8 @@ func truncForTest(s string, n int) string {
 }
 
 func TestFullScannerPublicIntegration(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") != "1" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run public network regression tests")
+	if os.Getenv("CYBER_INTEGRATION") != "1" {
+		t.Skip("set CYBER_INTEGRATION=1 to run public network regression tests")
 	}
 
 	bus := coreevents.New()

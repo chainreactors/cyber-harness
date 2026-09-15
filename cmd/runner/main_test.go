@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/tools/files"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func TestParseOptionsRequiresServer(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/pkg/headless"
 	"github.com/projectdiscovery/katana/pkg/engine"
 	"github.com/projectdiscovery/katana/pkg/engine/headless"
 	"github.com/projectdiscovery/katana/pkg/engine/standard"
@@ -20,7 +20,7 @@ import (
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"
 	"github.com/projectdiscovery/katana/pkg/utils/queue"
 
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 )
 
 const (

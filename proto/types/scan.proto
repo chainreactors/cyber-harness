@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package aiscan.scan;
+package cyber.scan;
 
 import "aop/chat.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+option go_package = "github.com/chainreactors/cyber/pkg/types;types";
 
 enum ScanStatus {
   SCAN_STATUS_UNSPECIFIED = 0;
@@ -93,7 +93,7 @@ message ScanFailed {
   bool canceled = 2;
 }
 
-// SessionBinding attaches an AIScan Scan to an AOP Session at open time.
+// SessionBinding attaches an Cyber Scan to an AOP Session at open time.
 message SessionBinding {
   string scan_id = 1;
 }
@@ -119,7 +119,7 @@ message ScanEvent {
   }
 }
 
-// ProtocolMessage carries AIScan scan runtime semantics over the shared AOP
+// ProtocolMessage carries Cyber scan runtime semantics over the shared AOP
 // WebSocket. Scan management remains on ScanService.
 message ScanProtocolMessage {
   oneof message {

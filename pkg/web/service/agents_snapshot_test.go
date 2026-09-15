@@ -2,7 +2,7 @@ package service
 
 import (
 	"bytes"
-	"github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/aop"
 	"testing"
 )
 

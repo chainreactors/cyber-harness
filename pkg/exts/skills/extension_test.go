@@ -2,16 +2,16 @@ package skills
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/extension"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	"github.com/chainreactors/cyber/pkg/toolset"
 	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
 
-	"github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func TestMountDiscoveryReadAndClose(t *testing.T) {

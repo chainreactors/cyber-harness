@@ -42,7 +42,7 @@ const (
 	ActionDialog                             // install a JS dialog handler
 	ActionWaitDialog                         // wait for JS dialog and capture type+message
 
-	// AIScan extensions. Keep these appended so the nuclei-compatible values
+	// Cyber extensions. Keep these appended so the nuclei-compatible values
 	// above remain stable.
 	ActionDblClick      // double-click an element
 	ActionHover         // hover an element

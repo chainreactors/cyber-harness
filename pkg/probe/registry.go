@@ -3,7 +3,7 @@ package probe
 import (
 	"context"
 	"fmt"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"strings"
 )
 

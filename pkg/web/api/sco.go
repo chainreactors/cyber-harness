@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	aopsco "github.com/chainreactors/aiscan/aop/sco"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	aopsco "github.com/chainreactors/cyber/aop/sco"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type SCOStore interface {

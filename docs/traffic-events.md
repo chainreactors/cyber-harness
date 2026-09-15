@@ -5,7 +5,7 @@ MITM `FlowFinished` 是唯一完成边界。FlowStore 在 body finalization 和 
 typed `http.completed` hook，客户端 EOF 不构成事实发布屏障。
 
 `traffic.body_storage=none` 只保留有界 preview；`disk` 将 body 增量保存到
-`.aiscan/mitm/capture/body`，FlowStore 只在查询/发送边界按需 hydrate。单 body 和总保留
+`.cyber/mitm/capture/body`，FlowStore 只在查询/发送边界按需 hydrate。单 body 和总保留
 预算均在启动前校验，失败或截断会明确标记 Flow 不完整。
 
 FlowStore 的内部 eventbus 只驱动磁盘 metadata index，并由 FlowStore 在关闭时 drain；

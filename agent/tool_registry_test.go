@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 func newTestTools(t testing.TB, tools ...coretool.Tool) coretool.Executor {

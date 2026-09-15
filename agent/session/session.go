@@ -11,18 +11,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/evaluator"
-	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	toolpkg "github.com/chainreactors/aiscan/core/tool"
-	providerpkg "github.com/chainreactors/aiscan/agent/provider"
-	commands "github.com/chainreactors/aiscan/core/commandline"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/evaluator"
+	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	toolpkg "github.com/chainreactors/cyber/core/tool"
+	providerpkg "github.com/chainreactors/cyber/agent/provider"
+	commands "github.com/chainreactors/cyber/core/commandline"
+	types "github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/skills"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -509,7 +509,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		agentName = rt.nodeName
 	}
 	if agentName == "" {
-		agentName = "aiscan"
+		agentName = "cyber"
 	}
 
 	rt.mu.Lock()

@@ -9,10 +9,10 @@ import (
 	yamldrv "github.com/gookit/config/v2/yaml"
 )
 
-const DefaultConfigName = "aiscan.yaml"
+const DefaultConfigName = "cyber.yaml"
 
 func newConfigLoader() *gkcfg.Config {
-	c := gkcfg.New("aiscan")
+	c := gkcfg.New("cyber")
 	c.WithOptions(func(opt *gkcfg.Options) {
 		opt.DecoderConfig.TagName = "config"
 		opt.ParseDefault = true

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // run is a small harness: parse args, execute against a real server, capture
@@ -54,7 +54,7 @@ func TestGetWritesBody(t *testing.T) {
 	}
 }
 
-func TestResponseEmitsAIScanArtifact(t *testing.T) {
+func TestResponseEmitsCyberArtifact(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("hello"))
@@ -81,7 +81,7 @@ func TestResponseEmitsAIScanArtifact(t *testing.T) {
 		t.Fatal("response did not emit an artifact")
 	}
 	expectedURL := srv.URL + "/"
-	if artifact.Tool != "aiscan" || artifact.Kind != toolpb.ArtifactKindWeb || artifact.Target != expectedURL {
+	if artifact.Tool != "cyber" || artifact.Kind != toolpb.ArtifactKindWeb || artifact.Target != expectedURL {
 		t.Fatalf("artifact metadata = %+v", artifact)
 	}
 	var summary struct {

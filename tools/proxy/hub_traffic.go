@@ -6,11 +6,11 @@ import (
 	"os"
 	"strconv"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

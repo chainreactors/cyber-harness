@@ -120,7 +120,7 @@ func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
 		t.Fatalf("fingerprinthub fallback data should be empty JSON")
 	}
 	if len(set.GogoConfig("port")) == 0 {
-		t.Fatalf("aiscan port config was not delivered to the gogo scan provider")
+		t.Fatalf("cyber port config was not delivered to the gogo scan provider")
 	}
 }
 
@@ -149,7 +149,7 @@ func TestEmbeddedFingersMatchNginx(t *testing.T) {
 	t.Fatalf("nginx fingerprint not matched: %v", frameworks.GetNames())
 }
 
-// TestPipelineDeliversAiscanBytes ensures that the bytes aiscan stages in
+// TestPipelineDeliversAiscanBytes ensures that the bytes cyber stages in
 // gogoConfigs / sprayConfigs / zombieConfigs really arrive at the downstream
 // SDK's pkg.LoadConfig — the actual call site each engine uses to read its
 // templates / dictionaries / rules.
@@ -157,7 +157,7 @@ func TestEmbeddedFingersMatchNginx(t *testing.T) {
 // This is an end-to-end-of-resource-pipeline check; it does NOT spin up engines
 // or perform scans. It validates the LoadConfig contract:
 //
-//	(aiscan Set.XxxConfig)  ===  (sdk pkg.LoadConfig with our provider installed)
+//	(cyber Set.XxxConfig)  ===  (sdk pkg.LoadConfig with our provider installed)
 //
 // Note on build tags: by default each SDK ships its own embedded fallback
 // (templates.go), so a missing provider entry would silently fall through to
@@ -165,7 +165,7 @@ func TestEmbeddedFingersMatchNginx(t *testing.T) {
 // TestPipelineProviderActuallyDrivesLoadConfig below pins the negative case,
 // and running this suite with -tags emptytemplates (which the SDK templates
 // switch to no-op stubs) is the strongest harness: the suite should still
-// pass because data must come from aiscan.
+// pass because data must come from cyber.
 func TestPipelineDeliversAiscanBytes(t *testing.T) {
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
@@ -233,14 +233,14 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 			for _, key := range tc.required {
 				want := tc.fromAiscan(key)
 				if len(want) == 0 {
-					t.Fatalf("%s: aiscan returned no bytes for key %q", tc.engine, key)
+					t.Fatalf("%s: cyber returned no bytes for key %q", tc.engine, key)
 				}
 				if isFallbackOnly(want) && !tc.fallbackAllowed[key] {
 					t.Fatalf("%s key %q is only fallback ([]/{}) — embedded data missing", tc.engine, key)
 				}
 				got := tc.load(key)
 				if !bytes.Equal(got, want) {
-					t.Fatalf("%s key %q: SDK pkg.LoadConfig(%d bytes) != aiscan provider(%d bytes)",
+					t.Fatalf("%s key %q: SDK pkg.LoadConfig(%d bytes) != cyber provider(%d bytes)",
 						tc.engine, key, len(got), len(want))
 				}
 			}
@@ -248,7 +248,7 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 	}
 }
 
-// TestPipelineParsesIntoSDKStructures double-checks that aiscan-provided bytes
+// TestPipelineParsesIntoSDKStructures double-checks that cyber-provided bytes
 // for the most signal-bearing keys per engine actually parse via the same yaml
 // schema each SDK expects, by re-invoking the SDK's loader functions against
 // our provider. This catches the case where bytes reach LoadConfig but their
@@ -333,8 +333,8 @@ func TestPipelineParsesIntoSDKStructures(t *testing.T) {
 
 // TestPipelineProviderActuallyDrivesLoadConfig pins the negative case for the
 // equality check in TestPipelineDeliversAiscanBytes. By default each SDK
-// embeds its own copy of (some of) the same upstream files aiscan ships, so
-// "aiscan bytes equal LoadConfig bytes" alone can't tell us whether the
+// embeds its own copy of (some of) the same upstream files cyber ships, so
+// "cyber bytes equal LoadConfig bytes" alone can't tell us whether the
 // provider is in the call path or whether we are silently riding on the SDK
 // fallback.
 //
@@ -351,7 +351,7 @@ func TestPipelineProviderActuallyDrivesLoadConfig(t *testing.T) {
 	})
 
 	sentinel := func(typ string) []byte {
-		return []byte("AISCAN_SENTINEL/" + typ)
+		return []byte("CYBER_SENTINEL/" + typ)
 	}
 
 	probes := []struct {

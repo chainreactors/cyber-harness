@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/operation"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 // hubClient builds an HTTP client through an opaque operation-correlation lease.

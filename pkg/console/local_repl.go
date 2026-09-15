@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	cfg "github.com/chainreactors/cyber/core/config"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 

@@ -20,22 +20,22 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/curl"
-	"github.com/chainreactors/aiscan/tools/gogo"
-	"github.com/chainreactors/aiscan/tools/neutron"
-	"github.com/chainreactors/aiscan/tools/proton"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
-	searchtools "github.com/chainreactors/aiscan/tools/search"
-	"github.com/chainreactors/aiscan/tools/spray"
-	"github.com/chainreactors/aiscan/tools/zombie"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/cmd/harness"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/resources"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/curl"
+	"github.com/chainreactors/cyber/tools/gogo"
+	"github.com/chainreactors/cyber/tools/neutron"
+	"github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/scan/engine"
+	searchtools "github.com/chainreactors/cyber/tools/search"
+	"github.com/chainreactors/cyber/tools/spray"
+	"github.com/chainreactors/cyber/tools/zombie"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/proxyclient"
@@ -510,7 +510,7 @@ http:
     matchers:
       - type: word
         words:
-          - 'AISCAN_REGRESSION_MARKER'
+          - 'CYBER_REGRESSION_MARKER'
 `)
 
 	cases := []functionalCase{
@@ -646,11 +646,11 @@ func newScannerHTTPHandler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Server", "nginx/1.25.4")
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, `<html><head><title>AIScan Regression Lab</title></head><body><a href="/admin">admin</a><script src="/app.js"></script></body></html>`)
+		fmt.Fprint(w, `<html><head><title>Cyber Regression Lab</title></head><body><a href="/admin">admin</a><script src="/app.js"></script></body></html>`)
 	})
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Server", "nginx/1.25.4")
-		fmt.Fprint(w, "AISCAN_ADMIN_ENDPOINT")
+		fmt.Fprint(w, "CYBER_ADMIN_ENDPOINT")
 	})
 	mux.HandleFunc("/app.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
@@ -662,7 +662,7 @@ func newScannerHTTPHandler() http.Handler {
 	})
 	mux.HandleFunc("/poc", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Server", "nginx/1.25.4")
-		fmt.Fprint(w, "AISCAN_REGRESSION_MARKER")
+		fmt.Fprint(w, "CYBER_REGRESSION_MARKER")
 	})
 	return mux
 }

@@ -3,8 +3,8 @@ package console
 import (
 	"bytes"
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
 	"testing"
 )
 

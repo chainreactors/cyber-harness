@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 )
 
 type testExtension struct {

@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/operation"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/inbox"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/operation"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestSubAgentSyncReturnsResult(t *testing.T) {
@@ -127,7 +127,7 @@ func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {
 	bus := coreevents.New()
 	events := make(chan *aop.Event, 1)
 	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events <- event }))
-	em := newAOPEmitter(bus, "aiscan", "parent-session", "", "", nil, 0)
+	em := newAOPEmitter(bus, "cyber", "parent-session", "", "", nil, 0)
 
 	em.toolCall(&aop.ToolCall{
 		Id:   "spawn-1",

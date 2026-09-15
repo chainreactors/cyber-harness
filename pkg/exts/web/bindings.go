@@ -1,8 +1,8 @@
-// Package web supplies AIScan's optional Web protocol bindings.
+// Package web supplies Cyber's optional Web protocol bindings.
 // Handler declarations own no resources and need no lifecycle interface.
 package web
 
-import "github.com/chainreactors/aiscan/pkg/web"
+import "github.com/chainreactors/cyber/pkg/web"
 
 func Routes(service web.Service) []web.Route {
 	routes := []web.Route{web.AOPRoute(service)}

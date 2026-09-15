@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
-const E2E_MODEL = process.env.AISCAN_E2E_LLM_MODEL || 'deepseek-chat'
+const E2E_MODEL = process.env.CYBER_E2E_LLM_MODEL || 'deepseek-chat'
 
 function rpcID(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -26,7 +26,7 @@ async function connectRPC(request: APIRequestContext, procedure: string, data: R
 async function waitForNode(request: APIRequestContext) {
   let nodeID = ''
   await expect.poll(async () => {
-    const response = await connectRPC(request, '/aiscan.rpc.agent.AgentService/ListAgents', {})
+    const response = await connectRPC(request, '/cyber.rpc.agent.AgentService/ListAgents', {})
     nodeID = response.agents?.find((agent: { hello?: { nodeId?: string } }) => agent.hello?.nodeId === 'e2e-node')?.hello?.nodeId || ''
     return nodeID
   }, { timeout: 20_000 }).toBe('e2e-node')
@@ -35,7 +35,7 @@ async function waitForNode(request: APIRequestContext) {
 
 async function login(page: Page) {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Access AIScan' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Access Cyber' })).toBeVisible()
   await page.getByLabel('Access token').fill(API_TOKEN)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByRole('button', { name: 'Open settings', exact: true })).toBeVisible()
@@ -47,7 +47,7 @@ async function sendChat(page: Page, text: string) {
   await page.getByRole('button', { name: 'Send message' }).click()
 }
 
-test('operator completes a full AIScan Web journey', async ({ page, request }) => {
+test('operator completes a full Cyber Web journey', async ({ page, request }) => {
   test.setTimeout(120_000)
   await waitForNode(request)
   await login(page)
@@ -72,7 +72,7 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     // Theme is user state, so verify both rendered state and persisted state.
     await page.getByRole('button', { name: 'Switch to dark theme' }).click()
     await expect.poll(() => page.locator('html').getAttribute('class')).toContain('dark')
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('aiscan-theme'))).toBe('dark')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('cyber-theme'))).toBe('dark')
 
     // One durable Chat session, two LLM turns, then a real REPL command through
     // the same node channel.
@@ -151,7 +151,7 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
     // Authentication renewal must restore the complete durable transcript,
     // including accepted operator messages and command input.
     await page.getByRole('button', { name: 'Sign out' }).click()
-    await expect(page.getByRole('heading', { name: 'Access AIScan' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Access Cyber' })).toBeVisible()
     await page.getByLabel('Access token').fill(API_TOKEN)
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByText(firstPrompt, { exact: true }).last()).toBeVisible({ timeout: 20_000 })
@@ -174,7 +174,7 @@ test('operator completes a full AIScan Web journey', async ({ page, request }) =
   } finally {
     // A failed assertion must not leak durable state into later test runs.
     if (sessionID) {
-      await connectRPC(request, '/aiscan.rpc.chat.SessionService/DeleteSession', {
+      await connectRPC(request, '/cyber.rpc.chat.SessionService/DeleteSession', {
         requestId: rpcID('cleanup'),
         sessionId: sessionID,
       }).catch(() => undefined)

@@ -1,14 +1,14 @@
 package session
 import (
  "context"
- "github.com/chainreactors/aiscan/agent"
- inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
- "github.com/chainreactors/aiscan/aop"
- cfg "github.com/chainreactors/aiscan/core/config"
- "github.com/chainreactors/aiscan/core/eventbus"
- coreevents "github.com/chainreactors/aiscan/core/events"
- "github.com/chainreactors/aiscan/core/telemetry"
- "github.com/chainreactors/aiscan/pkg/types"
+ "github.com/chainreactors/cyber/agent"
+ inboxpkg "github.com/chainreactors/cyber/agent/inbox"
+ "github.com/chainreactors/cyber/aop"
+ cfg "github.com/chainreactors/cyber/core/config"
+ "github.com/chainreactors/cyber/core/eventbus"
+ coreevents "github.com/chainreactors/cyber/core/events"
+ "github.com/chainreactors/cyber/core/telemetry"
+ "github.com/chainreactors/cyber/pkg/types"
  protobuf "google.golang.org/protobuf/proto"
 )
 // Operations is the borrowed session surface. Start and Close stay with the

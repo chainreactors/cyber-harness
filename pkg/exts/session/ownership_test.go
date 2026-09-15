@@ -4,10 +4,10 @@ import (
  "context"
  "reflect"
  "testing"
- "github.com/chainreactors/aiscan/agent"
- "github.com/chainreactors/aiscan/core/extension"
- loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
- sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
+ "github.com/chainreactors/cyber/agent"
+ "github.com/chainreactors/cyber/core/extension"
+ loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+ sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 type loopFunc func(context.Context,agent.Config)(*agent.Result,error)
 func (f loopFunc) Run(ctx context.Context,c agent.Config)(*agent.Result,error){return f(ctx,c)}

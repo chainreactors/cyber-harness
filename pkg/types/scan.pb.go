@@ -7,7 +7,7 @@
 package types
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -147,7 +147,7 @@ type Scan struct {
 	Target        string                 `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	Mode          string                 `protobuf:"bytes,3,opt,name=mode,proto3" json:"mode,omitempty"`
 	Options       *ScanOptions           `protobuf:"bytes,4,opt,name=options,proto3" json:"options,omitempty"`
-	Status        ScanStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=aiscan.scan.ScanStatus" json:"status,omitempty"`
+	Status        ScanStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=cyber.scan.ScanStatus" json:"status,omitempty"`
 	Progress      string                 `protobuf:"bytes,6,opt,name=progress,proto3" json:"progress,omitempty"`
 	Report        string                 `protobuf:"bytes,7,opt,name=report,proto3" json:"report,omitempty"`
 	Error         string                 `protobuf:"bytes,9,opt,name=error,proto3" json:"error,omitempty"`
@@ -901,7 +901,7 @@ func (x *ScanFailed) GetCanceled() bool {
 	return false
 }
 
-// SessionBinding attaches an AIScan Scan to an AOP Session at open time.
+// SessionBinding attaches an Cyber Scan to an AOP Session at open time.
 type SessionBinding struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ScanId        string                 `protobuf:"bytes,1,opt,name=scan_id,json=scanId,proto3" json:"scan_id,omitempty"`
@@ -951,7 +951,7 @@ func (x *SessionBinding) GetScanId() string {
 type SessionScanEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ScanId        string                 `protobuf:"bytes,1,opt,name=scan_id,json=scanId,proto3" json:"scan_id,omitempty"`
-	Status        ScanStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=aiscan.scan.ScanStatus" json:"status,omitempty"`
+	Status        ScanStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=cyber.scan.ScanStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1129,7 +1129,7 @@ type ScanEvent_Snapshot struct {
 }
 
 type ScanEvent_Status struct {
-	Status ScanStatus `protobuf:"varint,11,opt,name=status,proto3,enum=aiscan.scan.ScanStatus,oneof"`
+	Status ScanStatus `protobuf:"varint,11,opt,name=status,proto3,enum=cyber.scan.ScanStatus,oneof"`
 }
 
 type ScanEvent_Progress struct {
@@ -1154,7 +1154,7 @@ func (*ScanEvent_Completed) isScanEvent_Payload() {}
 
 func (*ScanEvent_Failed) isScanEvent_Payload() {}
 
-// ProtocolMessage carries AIScan scan runtime semantics over the shared AOP
+// ProtocolMessage carries Cyber scan runtime semantics over the shared AOP
 // WebSocket. Scan management remains on ScanService.
 type ScanProtocolMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1346,17 +1346,18 @@ var File_types_scan_proto protoreflect.FileDescriptor
 
 const file_types_scan_proto_rawDesc = "" +
 	"\n" +
-	"\x10types/scan.proto\x12\vaiscan.scan\x1a\x0eaop/chat.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"Q\n" +
+	"\x10types/scan.proto\x12\n" +
+	"cyber.scan\x1a\x0eaop/chat.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"Q\n" +
 	"\vScanOptions\x12\x16\n" +
 	"\x06verify\x18\x01 \x01(\bR\x06verify\x12\x16\n" +
 	"\x06sniper\x18\x02 \x01(\bR\x06sniper\x12\x12\n" +
-	"\x04deep\x18\x03 \x01(\bR\x04deep\"\xed\x02\n" +
+	"\x04deep\x18\x03 \x01(\bR\x04deep\"\xeb\x02\n" +
 	"\x04Scan\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\tR\x04mode\x122\n" +
-	"\aoptions\x18\x04 \x01(\v2\x18.aiscan.scan.ScanOptionsR\aoptions\x12/\n" +
-	"\x06status\x18\x05 \x01(\x0e2\x17.aiscan.scan.ScanStatusR\x06status\x12\x1a\n" +
+	"\x04mode\x18\x03 \x01(\tR\x04mode\x121\n" +
+	"\aoptions\x18\x04 \x01(\v2\x17.cyber.scan.ScanOptionsR\aoptions\x12.\n" +
+	"\x06status\x18\x05 \x01(\x0e2\x16.cyber.scan.ScanStatusR\x06status\x12\x1a\n" +
 	"\bprogress\x18\x06 \x01(\tR\bprogress\x12\x16\n" +
 	"\x06report\x18\a \x01(\tR\x06report\x12\x14\n" +
 	"\x05error\x18\t \x01(\tR\x05error\x129\n" +
@@ -1364,34 +1365,34 @@ const file_types_scan_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtJ\x04\b\b\x10\t\"\x92\x01\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtJ\x04\b\b\x10\t\"\x91\x01\n" +
 	"\x11SubmitScanRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\tR\x04mode\x122\n" +
-	"\aoptions\x18\x04 \x01(\v2\x18.aiscan.scan.ScanOptionsR\aoptions\"\x9d\x01\n" +
+	"\x04mode\x18\x03 \x01(\tR\x04mode\x121\n" +
+	"\aoptions\x18\x04 \x01(\v2\x17.cyber.scan.ScanOptionsR\aoptions\"\x9c\x01\n" +
 	"\x12SubmitScanResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12/\n" +
-	"\baccepted\x18\x02 \x01(\v2\x11.aiscan.scan.ScanH\x00R\baccepted\x12,\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12.\n" +
+	"\baccepted\x18\x02 \x01(\v2\x10.cyber.scan.ScanH\x00R\baccepted\x12,\n" +
 	"\brejected\x18\x03 \x01(\v2\x0e.aop.RejectionH\x00R\brejectedB\t\n" +
 	"\aoutcome\")\n" +
 	"\x0eGetScanRequest\x12\x17\n" +
-	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"8\n" +
-	"\x0fGetScanResponse\x12%\n" +
-	"\x04scan\x18\x01 \x01(\v2\x11.aiscan.scan.ScanR\x04scan\"\x12\n" +
-	"\x10ListScansRequest\"<\n" +
-	"\x11ListScansResponse\x12'\n" +
-	"\x05scans\x18\x01 \x03(\v2\x11.aiscan.scan.ScanR\x05scans\"K\n" +
+	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"7\n" +
+	"\x0fGetScanResponse\x12$\n" +
+	"\x04scan\x18\x01 \x01(\v2\x10.cyber.scan.ScanR\x04scan\"\x12\n" +
+	"\x10ListScansRequest\";\n" +
+	"\x11ListScansResponse\x12&\n" +
+	"\x05scans\x18\x01 \x03(\v2\x10.cyber.scan.ScanR\x05scans\"K\n" +
 	"\x11CancelScanRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
-	"\ascan_id\x18\x02 \x01(\tR\x06scanId\"\x9d\x01\n" +
+	"\ascan_id\x18\x02 \x01(\tR\x06scanId\"\x9c\x01\n" +
 	"\x12CancelScanResponse\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12/\n" +
-	"\baccepted\x18\x02 \x01(\v2\x11.aiscan.scan.ScanH\x00R\baccepted\x12,\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12.\n" +
+	"\baccepted\x18\x02 \x01(\v2\x10.cyber.scan.ScanH\x00R\baccepted\x12,\n" +
 	"\brejected\x18\x03 \x01(\v2\x0e.aop.RejectionH\x00R\brejectedB\t\n" +
 	"\aoutcome\"1\n" +
 	"\x16WatchScanEventsRequest\x12\x17\n" +
@@ -1404,26 +1405,26 @@ const file_types_scan_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x1a\n" +
 	"\bcanceled\x18\x02 \x01(\bR\bcanceled\")\n" +
 	"\x0eSessionBinding\x12\x17\n" +
-	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"\\\n" +
+	"\ascan_id\x18\x01 \x01(\tR\x06scanId\"[\n" +
 	"\x10SessionScanEvent\x12\x17\n" +
-	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12/\n" +
-	"\x06status\x18\x02 \x01(\x0e2\x17.aiscan.scan.ScanStatusR\x06status\"\x98\x03\n" +
+	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12.\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x16.cyber.scan.ScanStatusR\x06status\"\x93\x03\n" +
 	"\tScanEvent\x12\x17\n" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x129\n" +
 	"\n" +
-	"emitted_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\temittedAt\x12/\n" +
+	"emitted_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\temittedAt\x12.\n" +
 	"\bsnapshot\x18\n" +
-	" \x01(\v2\x11.aiscan.scan.ScanH\x00R\bsnapshot\x121\n" +
-	"\x06status\x18\v \x01(\x0e2\x17.aiscan.scan.ScanStatusH\x00R\x06status\x127\n" +
-	"\bprogress\x18\f \x01(\v2\x19.aiscan.scan.ScanProgressH\x00R\bprogress\x12:\n" +
-	"\tcompleted\x18\x0e \x01(\v2\x1a.aiscan.scan.ScanCompletedH\x00R\tcompleted\x121\n" +
-	"\x06failed\x18\x0f \x01(\v2\x17.aiscan.scan.ScanFailedH\x00R\x06failedB\t\n" +
-	"\apayloadJ\x04\b\r\x10\x0e\"\xa9\x01\n" +
-	"\x13ScanProtocolMessage\x12W\n" +
+	" \x01(\v2\x10.cyber.scan.ScanH\x00R\bsnapshot\x120\n" +
+	"\x06status\x18\v \x01(\x0e2\x16.cyber.scan.ScanStatusH\x00R\x06status\x126\n" +
+	"\bprogress\x18\f \x01(\v2\x18.cyber.scan.ScanProgressH\x00R\bprogress\x129\n" +
+	"\tcompleted\x18\x0e \x01(\v2\x19.cyber.scan.ScanCompletedH\x00R\tcompleted\x120\n" +
+	"\x06failed\x18\x0f \x01(\v2\x16.cyber.scan.ScanFailedH\x00R\x06failedB\t\n" +
+	"\apayloadJ\x04\b\r\x10\x0e\"\xa7\x01\n" +
+	"\x13ScanProtocolMessage\x12V\n" +
 	"\x14watch_events_request\x18\n" +
-	" \x01(\v2#.aiscan.scan.WatchScanEventsRequestH\x00R\x12watchEventsRequest\x12.\n" +
-	"\x05event\x18\v \x01(\v2\x16.aiscan.scan.ScanEventH\x00R\x05eventB\t\n" +
+	" \x01(\v2\".cyber.scan.WatchScanEventsRequestH\x00R\x12watchEventsRequest\x12-\n" +
+	"\x05event\x18\v \x01(\v2\x15.cyber.scan.ScanEventH\x00R\x05eventB\t\n" +
 	"\amessage\"K\n" +
 	"\x14GetScanReportRequest\x12\x17\n" +
 	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12\x1a\n" +
@@ -1439,7 +1440,7 @@ const file_types_scan_proto_rawDesc = "" +
 	"\x13SCAN_STATUS_RUNNING\x10\x02\x12\x19\n" +
 	"\x15SCAN_STATUS_COMPLETED\x10\x03\x12\x16\n" +
 	"\x12SCAN_STATUS_FAILED\x10\x04\x12\x18\n" +
-	"\x14SCAN_STATUS_CANCELED\x10\x05B1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	"\x14SCAN_STATUS_CANCELED\x10\x05B0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_scan_proto_rawDescOnce sync.Once
@@ -1456,51 +1457,51 @@ func file_types_scan_proto_rawDescGZIP() []byte {
 var file_types_scan_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_types_scan_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_types_scan_proto_goTypes = []any{
-	(ScanStatus)(0),                // 0: aiscan.scan.ScanStatus
-	(*ScanOptions)(nil),            // 1: aiscan.scan.ScanOptions
-	(*Scan)(nil),                   // 2: aiscan.scan.Scan
-	(*SubmitScanRequest)(nil),      // 3: aiscan.scan.SubmitScanRequest
-	(*SubmitScanResponse)(nil),     // 4: aiscan.scan.SubmitScanResponse
-	(*GetScanRequest)(nil),         // 5: aiscan.scan.GetScanRequest
-	(*GetScanResponse)(nil),        // 6: aiscan.scan.GetScanResponse
-	(*ListScansRequest)(nil),       // 7: aiscan.scan.ListScansRequest
-	(*ListScansResponse)(nil),      // 8: aiscan.scan.ListScansResponse
-	(*CancelScanRequest)(nil),      // 9: aiscan.scan.CancelScanRequest
-	(*CancelScanResponse)(nil),     // 10: aiscan.scan.CancelScanResponse
-	(*WatchScanEventsRequest)(nil), // 11: aiscan.scan.WatchScanEventsRequest
-	(*ScanProgress)(nil),           // 12: aiscan.scan.ScanProgress
-	(*ScanCompleted)(nil),          // 13: aiscan.scan.ScanCompleted
-	(*ScanFailed)(nil),             // 14: aiscan.scan.ScanFailed
-	(*SessionBinding)(nil),         // 15: aiscan.scan.SessionBinding
-	(*SessionScanEvent)(nil),       // 16: aiscan.scan.SessionScanEvent
-	(*ScanEvent)(nil),              // 17: aiscan.scan.ScanEvent
-	(*ScanProtocolMessage)(nil),    // 18: aiscan.scan.ScanProtocolMessage
-	(*GetScanReportRequest)(nil),   // 19: aiscan.scan.GetScanReportRequest
-	(*GetScanReportResponse)(nil),  // 20: aiscan.scan.GetScanReportResponse
+	(ScanStatus)(0),                // 0: cyber.scan.ScanStatus
+	(*ScanOptions)(nil),            // 1: cyber.scan.ScanOptions
+	(*Scan)(nil),                   // 2: cyber.scan.Scan
+	(*SubmitScanRequest)(nil),      // 3: cyber.scan.SubmitScanRequest
+	(*SubmitScanResponse)(nil),     // 4: cyber.scan.SubmitScanResponse
+	(*GetScanRequest)(nil),         // 5: cyber.scan.GetScanRequest
+	(*GetScanResponse)(nil),        // 6: cyber.scan.GetScanResponse
+	(*ListScansRequest)(nil),       // 7: cyber.scan.ListScansRequest
+	(*ListScansResponse)(nil),      // 8: cyber.scan.ListScansResponse
+	(*CancelScanRequest)(nil),      // 9: cyber.scan.CancelScanRequest
+	(*CancelScanResponse)(nil),     // 10: cyber.scan.CancelScanResponse
+	(*WatchScanEventsRequest)(nil), // 11: cyber.scan.WatchScanEventsRequest
+	(*ScanProgress)(nil),           // 12: cyber.scan.ScanProgress
+	(*ScanCompleted)(nil),          // 13: cyber.scan.ScanCompleted
+	(*ScanFailed)(nil),             // 14: cyber.scan.ScanFailed
+	(*SessionBinding)(nil),         // 15: cyber.scan.SessionBinding
+	(*SessionScanEvent)(nil),       // 16: cyber.scan.SessionScanEvent
+	(*ScanEvent)(nil),              // 17: cyber.scan.ScanEvent
+	(*ScanProtocolMessage)(nil),    // 18: cyber.scan.ScanProtocolMessage
+	(*GetScanReportRequest)(nil),   // 19: cyber.scan.GetScanReportRequest
+	(*GetScanReportResponse)(nil),  // 20: cyber.scan.GetScanReportResponse
 	(*timestamppb.Timestamp)(nil),  // 21: google.protobuf.Timestamp
 	(*aop.Rejection)(nil),          // 22: aop.Rejection
 }
 var file_types_scan_proto_depIdxs = []int32{
-	1,  // 0: aiscan.scan.Scan.options:type_name -> aiscan.scan.ScanOptions
-	0,  // 1: aiscan.scan.Scan.status:type_name -> aiscan.scan.ScanStatus
-	21, // 2: aiscan.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
-	21, // 3: aiscan.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
-	1,  // 4: aiscan.scan.SubmitScanRequest.options:type_name -> aiscan.scan.ScanOptions
-	2,  // 5: aiscan.scan.SubmitScanResponse.accepted:type_name -> aiscan.scan.Scan
-	22, // 6: aiscan.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
-	2,  // 7: aiscan.scan.GetScanResponse.scan:type_name -> aiscan.scan.Scan
-	2,  // 8: aiscan.scan.ListScansResponse.scans:type_name -> aiscan.scan.Scan
-	2,  // 9: aiscan.scan.CancelScanResponse.accepted:type_name -> aiscan.scan.Scan
-	22, // 10: aiscan.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
-	0,  // 11: aiscan.scan.SessionScanEvent.status:type_name -> aiscan.scan.ScanStatus
-	21, // 12: aiscan.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
-	2,  // 13: aiscan.scan.ScanEvent.snapshot:type_name -> aiscan.scan.Scan
-	0,  // 14: aiscan.scan.ScanEvent.status:type_name -> aiscan.scan.ScanStatus
-	12, // 15: aiscan.scan.ScanEvent.progress:type_name -> aiscan.scan.ScanProgress
-	13, // 16: aiscan.scan.ScanEvent.completed:type_name -> aiscan.scan.ScanCompleted
-	14, // 17: aiscan.scan.ScanEvent.failed:type_name -> aiscan.scan.ScanFailed
-	11, // 18: aiscan.scan.ScanProtocolMessage.watch_events_request:type_name -> aiscan.scan.WatchScanEventsRequest
-	17, // 19: aiscan.scan.ScanProtocolMessage.event:type_name -> aiscan.scan.ScanEvent
+	1,  // 0: cyber.scan.Scan.options:type_name -> cyber.scan.ScanOptions
+	0,  // 1: cyber.scan.Scan.status:type_name -> cyber.scan.ScanStatus
+	21, // 2: cyber.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
+	21, // 3: cyber.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
+	1,  // 4: cyber.scan.SubmitScanRequest.options:type_name -> cyber.scan.ScanOptions
+	2,  // 5: cyber.scan.SubmitScanResponse.accepted:type_name -> cyber.scan.Scan
+	22, // 6: cyber.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
+	2,  // 7: cyber.scan.GetScanResponse.scan:type_name -> cyber.scan.Scan
+	2,  // 8: cyber.scan.ListScansResponse.scans:type_name -> cyber.scan.Scan
+	2,  // 9: cyber.scan.CancelScanResponse.accepted:type_name -> cyber.scan.Scan
+	22, // 10: cyber.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
+	0,  // 11: cyber.scan.SessionScanEvent.status:type_name -> cyber.scan.ScanStatus
+	21, // 12: cyber.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
+	2,  // 13: cyber.scan.ScanEvent.snapshot:type_name -> cyber.scan.Scan
+	0,  // 14: cyber.scan.ScanEvent.status:type_name -> cyber.scan.ScanStatus
+	12, // 15: cyber.scan.ScanEvent.progress:type_name -> cyber.scan.ScanProgress
+	13, // 16: cyber.scan.ScanEvent.completed:type_name -> cyber.scan.ScanCompleted
+	14, // 17: cyber.scan.ScanEvent.failed:type_name -> cyber.scan.ScanFailed
+	11, // 18: cyber.scan.ScanProtocolMessage.watch_events_request:type_name -> cyber.scan.WatchScanEventsRequest
+	17, // 19: cyber.scan.ScanProtocolMessage.event:type_name -> cyber.scan.ScanEvent
 	20, // [20:20] is the sub-list for method output_type
 	20, // [20:20] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name

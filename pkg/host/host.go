@@ -9,7 +9,7 @@ import (
 	"io"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 // Host is one communication lifetime. It owns its connection's namespace mux and

@@ -235,11 +235,11 @@ func toVarName(key string) string {
 func main() {
 	flag.StringVar(&templatePath, "t", ".", "templates repo path")
 	flag.StringVar(&resultPath, "o", "template.go", "result filename")
-	need := flag.String("need", "aiscan", "aiscan or comma-separated template keys")
+	need := flag.String("need", "cyber", "cyber or comma-separated template keys")
 	flag.Parse()
 
 	var needs []string
-	if *need == "aiscan" {
+	if *need == "cyber" {
 		needs = []string{
 			"http", "socket", "fingerprinthub_web", "fingerprinthub_service",
 			"port", "extract", "workflow", "neutron",

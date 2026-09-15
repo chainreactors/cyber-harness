@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	web "github.com/chainreactors/aiscan/pkg/web"
+	aop "github.com/chainreactors/cyber/aop"
+	web "github.com/chainreactors/cyber/pkg/web"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )

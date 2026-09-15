@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type exampleSessionService struct {

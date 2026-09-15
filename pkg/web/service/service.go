@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	web "github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	types "github.com/chainreactors/cyber/pkg/types"
+	web "github.com/chainreactors/cyber/pkg/web"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

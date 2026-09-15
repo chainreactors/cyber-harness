@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/extension"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/extension"
 )
 
 type artifactTestStore struct {
@@ -107,11 +107,11 @@ func TestImporterNormalizesOnServer(t *testing.T) {
 	}
 }
 
-func TestImporterNormalizesAIScanWebSummary(t *testing.T) {
+func TestImporterNormalizesCyberWebSummary(t *testing.T) {
 	store := &artifactTestStore{}
 	importer := loadImporter(t, store)
 
-	_, _, err := importer.ImportArtifact(context.Background(), "curl-1", &toolpb.Artifact{Tool: "aiscan",
+	_, _, err := importer.ImportArtifact(context.Background(), "curl-1", &toolpb.Artifact{Tool: "cyber",
 		Data: []byte(`{"url":"https://example.com/","status":200,"content_type":"text/plain","body_length":5}`)})
 	if err != nil {
 		t.Fatal(err)

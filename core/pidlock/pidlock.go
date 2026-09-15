@@ -18,7 +18,7 @@ type nopLogger struct{}
 func (nopLogger) Debugf(string, ...any) {}
 
 func AgentPIDFilePath() string {
-	return filepath.Join(os.TempDir(), "aiscan-agent.pid")
+	return filepath.Join(os.TempDir(), "cyber-agent.pid")
 }
 
 type Lock struct {
@@ -39,9 +39,9 @@ func Acquire(path string, logger Logger) (*Lock, error) {
 	if err := lockFile(f); err != nil {
 		_ = f.Close()
 		if existingPID, readErr := ReadPIDFile(path); readErr == nil && existingPID > 0 {
-			return nil, fmt.Errorf("another aiscan agent is already running (PID %d, pidfile %s); kill it first or remove the pidfile", existingPID, path)
+			return nil, fmt.Errorf("another cyber agent is already running (PID %d, pidfile %s); kill it first or remove the pidfile", existingPID, path)
 		}
-		return nil, fmt.Errorf("another aiscan agent is already running (pidfile %s is locked)", path)
+		return nil, fmt.Errorf("another cyber agent is already running (pidfile %s is locked)", path)
 	}
 	locked := true
 	cleanup := func() {
@@ -55,7 +55,7 @@ func Acquire(path string, logger Logger) (*Lock, error) {
 		if existingPID, readErr := ReadPIDFile(path); readErr == nil && existingPID > 0 && existingPID != pid {
 			if ProcessExists(existingPID) {
 				cleanup()
-				return nil, fmt.Errorf("another aiscan agent is already running (PID %d, pidfile %s); kill it first or remove the pidfile", existingPID, path)
+				return nil, fmt.Errorf("another cyber agent is already running (PID %d, pidfile %s); kill it first or remove the pidfile", existingPID, path)
 			}
 			logger.Debugf("pidfile=%s stale_pid=%d action=reclaim", path, existingPID)
 		} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {

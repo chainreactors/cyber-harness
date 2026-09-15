@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	"github.com/chainreactors/cyber/core/extension"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	types "github.com/chainreactors/cyber/pkg/types"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -113,10 +113,10 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 			s.pending = next
 		}
 		if err != nil {
-			return nil, managementapi.NewError(managementapi.CodeFailedPrecondition, fmt.Errorf("reload aiscan runtime: %w", err))
+			return nil, managementapi.NewError(managementapi.CodeFailedPrecondition, fmt.Errorf("reload cyber runtime: %w", err))
 		}
 		if profile.IsNil(next) {
-			return nil, fmt.Errorf("reload aiscan runtime returned no app")
+			return nil, fmt.Errorf("reload cyber runtime returned no app")
 		}
 		if _, err := next.App(); err != nil {
 			return nil, fmt.Errorf("config candidate is not ready: %w", err)

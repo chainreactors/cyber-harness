@@ -89,7 +89,7 @@ const semanticSelectorJS = `(kind, role, name, value, exact, testIdAttribute) =>
 	return null;
 }`
 
-// ParseSelector converts CSS/XPath and AIScan semantic locator syntax into the
+// ParseSelector converts CSS/XPath and Cyber semantic locator syntax into the
 // argument map used by nuclei headless actions.
 //
 // Supported semantic syntax:
@@ -151,7 +151,7 @@ func FindElement(page *rod.Page, selector string, timeout time.Duration) (*rod.E
 }
 
 // ElementBy resolves a nuclei action selector. In addition to nuclei's
-// CSS/XPath/regex/search forms, AIScan supports role, label, text, and testid.
+// CSS/XPath/regex/search forms, Cyber supports role, label, text, and testid.
 func ElementBy(page *rod.Page, data map[string]string, timeout time.Duration) (*rod.Element, error) {
 	if timeout <= 0 {
 		timeout = defaultActionTimeout

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
-import { ScanStatus, SessionScanEventSchema, WebMessageMetadataSchema } from '../aiscan-proto'
+import { ScanStatus, SessionScanEventSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { usePolling } from './usePolling'
 import {
   cancelChatSession,
@@ -62,7 +62,7 @@ export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 's
 // ChatMessage is the flat render model the chat UI projects from the AOP event
 // log (listChatMessages returns raw EventDelivery records). It is a view model
 // owned by this hook, not an API wire type — the wire truth is aop.Event +
-// EventDelivery + the aiscan.web extension.
+// EventDelivery + the cyber.web extension.
 export interface ChatMessage {
   id: string
   session_id: string
@@ -366,7 +366,7 @@ export function useChatSession() {
       case 'error': {
         const data = event.payload.value
         // Hub-originated failures carry a translatable code plus i18n params
-        // in the aiscan.web extension; agent errors are plain text.
+        // in the cyber.web extension; agent errors are plain text.
         const params = aopExtension(event)?.params as Record<string, unknown> | undefined
         if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
         else setError(String(data.message ?? 'Agent error'))

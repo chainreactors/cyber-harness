@@ -3,8 +3,8 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/extension"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,19 +14,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/agent/tmux"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	coreoutput "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/tmux"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	coreoutput "github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -619,7 +619,7 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	large := strings.Repeat("x", 4<<20)
 	oldID := root.ID()
 	runtime.app.Publish(&aop.Event{
-		SessionId: root.ID(), TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: root.ID(), TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
 	})
 	flushPersistenceOutput(t, output)
@@ -945,10 +945,10 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	t.Helper()
 	timestamp := timestamppb.New(time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	events := []*aop.Event{
-		{Id: "e-1", EmittedAt: timestamp, SessionId: sessionID, Emitter: "aiscan", Seq: 1, Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}},
-		{Id: "e-2", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "aiscan", Seq: 2, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("old user")}}}},
-		{Id: "e-3", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "aiscan", Seq: 3, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("old assistant")}}}},
-		{Id: "e-4", EmittedAt: timestamp, SessionId: sessionID, Emitter: "aiscan", Seq: 4, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}},
+		{Id: "e-1", EmittedAt: timestamp, SessionId: sessionID, Emitter: "cyber", Seq: 1, Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}},
+		{Id: "e-2", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "cyber", Seq: 2, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("old user")}}}},
+		{Id: "e-3", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "cyber", Seq: 3, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("old assistant")}}}},
+		{Id: "e-4", EmittedAt: timestamp, SessionId: sessionID, Emitter: "cyber", Seq: 4, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}},
 	}
 	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := coreevents.New()

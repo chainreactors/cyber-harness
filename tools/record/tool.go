@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/imageutil"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/imageutil"
 )
 
 const (

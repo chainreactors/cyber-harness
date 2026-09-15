@@ -1,7 +1,7 @@
 package client
 
 import (
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 	"os"
 	"path/filepath"
 	"testing"

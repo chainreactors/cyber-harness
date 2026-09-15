@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
-	searchprobe "github.com/chainreactors/aiscan/pkg/exts/search/probe"
-	"github.com/chainreactors/aiscan/pkg/probe"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	scannerprobe "github.com/chainreactors/cyber/pkg/exts/scanner/probe"
+	searchprobe "github.com/chainreactors/cyber/pkg/exts/search/probe"
+	"github.com/chainreactors/cyber/pkg/probe"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 // fakeConfigStore is a minimal in-memory ConfigStore.
@@ -105,7 +105,7 @@ func TestConfigStatusIncludesModelLimits(t *testing.T) {
 			MaxTokens: 32768, ContextWindow: 1000000, Timeout: 45, Images: &images,
 		}},
 	}}
-	view := ConfigView(conf, "aiscan.yaml", true)
+	view := ConfigView(conf, "cyber.yaml", true)
 	if view.GetLlm().GetActive().GetMaxTokens() != 32768 || view.GetLlm().GetActive().GetContextWindow() != 1000000 {
 		t.Fatalf("active limits missing from view: %+v", view.GetLlm())
 	}

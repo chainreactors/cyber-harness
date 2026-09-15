@@ -2,6 +2,6 @@
 
 package edition
 
-import "github.com/chainreactors/aiscan/core/capability"
+import "github.com/chainreactors/cyber/core/capability"
 
 func platformCapabilities() []capability.Descriptor { return nil }

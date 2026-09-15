@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/capability"
+	"github.com/chainreactors/cyber/core/capability"
 )
 
 func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {

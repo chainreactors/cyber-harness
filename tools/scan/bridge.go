@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 )
 
 type pipelineEvent struct {

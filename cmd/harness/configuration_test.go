@@ -40,7 +40,7 @@ func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
 	p := w.start(t)
 	editor, observer := p.user(t, "editor"), p.user(t, "observer")
 	assertField(t, editor.config(t), true, "config", "loaded")
-	status := editor.call(t, http.MethodPost, "/aiscan.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
+	status := editor.call(t, http.MethodPost, "/cyber.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
 	if available, _ := field(status, "status", "llmAvailable").(bool); available {
 		t.Fatal("no-LLM workspace unexpectedly inherited a model provider")
 	}
@@ -84,7 +84,7 @@ func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
 	if !bytes.Contains(readFile(t, w.config), []byte("harness-only-placeholder")) {
 		t.Fatal("blank secret edit lost the stored setting")
 	}
-	temps, err := filepath.Glob(filepath.Join(w.dir, ".aiscan.yaml.tmp-*.yaml"))
+	temps, err := filepath.Glob(filepath.Join(w.dir, ".cyber.yaml.tmp-*.yaml"))
 	if err != nil || len(temps) != 0 {
 		t.Fatalf("config staging files remain after requests: %v, %v", temps, err)
 	}
@@ -111,21 +111,21 @@ func TestUserConcurrentProfileChanges(t *testing.T) {
 	writer := p.user(t, "writer")
 	writer.call(t, http.MethodPost, configRPC+"UpdateConfig", map[string]any{"config": profileConfig("daily")}, http.StatusOK)
 	seed := time.Now().UnixNano()
-	if supplied := os.Getenv("AISCAN_HARNESS_SEED"); supplied != "" {
+	if supplied := os.Getenv("CYBER_HARNESS_SEED"); supplied != "" {
 		parsed, err := strconv.ParseInt(supplied, 10, 64)
 		if err != nil {
-			t.Fatalf("invalid AISCAN_HARNESS_SEED: %v", err)
+			t.Fatalf("invalid CYBER_HARNESS_SEED: %v", err)
 		}
 		seed = parsed
 	}
 	writeFile(t, filepath.Join(w.dir, "seed.txt"), []byte(strconv.FormatInt(seed, 10)+"\n"))
-	t.Logf("replay with AISCAN_HARNESS_SEED=%d", seed)
+	t.Logf("replay with CYBER_HARNESS_SEED=%d", seed)
 	random := rand.New(rand.NewSource(seed))
 	steps := 12
-	if configured := os.Getenv("AISCAN_HARNESS_STEPS"); configured != "" {
+	if configured := os.Getenv("CYBER_HARNESS_STEPS"); configured != "" {
 		parsed, err := strconv.Atoi(configured)
 		if err != nil || parsed < 1 || parsed > 100 {
-			t.Fatal("AISCAN_HARNESS_STEPS must be an integer from 1 to 100")
+			t.Fatal("CYBER_HARNESS_STEPS must be an integer from 1 to 100")
 		}
 		steps = parsed
 	}

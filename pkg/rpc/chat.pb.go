@@ -7,8 +7,8 @@
 package rpc
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/pkg/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -26,44 +26,44 @@ var File_rpc_chat_proto protoreflect.FileDescriptor
 
 const file_rpc_chat_proto_rawDesc = "" +
 	"\n" +
-	"\x0erpc/chat.proto\x12\x0faiscan.rpc.chat\x1a\x0eaop/chat.proto\x1a\x10types/chat.proto2\xf5\x03\n" +
-	"\x0eSessionService\x12S\n" +
-	"\fListSessions\x12 .aiscan.chat.ListSessionsRequest\x1a!.aiscan.chat.ListSessionsResponse\x12M\n" +
+	"\x0erpc/chat.proto\x12\x0ecyber.rpc.chat\x1a\x0eaop/chat.proto\x1a\x10types/chat.proto2\xeb\x03\n" +
+	"\x0eSessionService\x12Q\n" +
+	"\fListSessions\x12\x1f.cyber.chat.ListSessionsRequest\x1a .cyber.chat.ListSessionsResponse\x12K\n" +
 	"\n" +
-	"GetSession\x12\x1e.aiscan.chat.GetSessionRequest\x1a\x1f.aiscan.chat.GetSessionResponse\x12S\n" +
-	"\fResetSession\x12 .aiscan.chat.ResetSessionRequest\x1a!.aiscan.chat.ResetSessionResponse\x12V\n" +
-	"\rDeleteSession\x12!.aiscan.chat.DeleteSessionRequest\x1a\".aiscan.chat.DeleteSessionResponse\x12S\n" +
-	"\fListCommands\x12 .aiscan.chat.ListCommandsRequest\x1a!.aiscan.chat.ListCommandsResponse\x12=\n" +
+	"GetSession\x12\x1d.cyber.chat.GetSessionRequest\x1a\x1e.cyber.chat.GetSessionResponse\x12Q\n" +
+	"\fResetSession\x12\x1f.cyber.chat.ResetSessionRequest\x1a .cyber.chat.ResetSessionResponse\x12T\n" +
+	"\rDeleteSession\x12 .cyber.chat.DeleteSessionRequest\x1a!.cyber.chat.DeleteSessionResponse\x12Q\n" +
+	"\fListCommands\x12\x1f.cyber.chat.ListCommandsRequest\x1a .cyber.chat.ListCommandsResponse\x12=\n" +
 	"\n" +
-	"ListEvents\x12\x16.aop.ListEventsRequest\x1a\x17.aop.ListEventsResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"ListEvents\x12\x16.aop.ListEventsRequest\x1a\x17.aop.ListEventsResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_chat_proto_goTypes = []any{
-	(*types.ListSessionsRequest)(nil),   // 0: aiscan.chat.ListSessionsRequest
-	(*types.GetSessionRequest)(nil),     // 1: aiscan.chat.GetSessionRequest
-	(*types.ResetSessionRequest)(nil),   // 2: aiscan.chat.ResetSessionRequest
-	(*types.DeleteSessionRequest)(nil),  // 3: aiscan.chat.DeleteSessionRequest
-	(*types.ListCommandsRequest)(nil),   // 4: aiscan.chat.ListCommandsRequest
+	(*types.ListSessionsRequest)(nil),   // 0: cyber.chat.ListSessionsRequest
+	(*types.GetSessionRequest)(nil),     // 1: cyber.chat.GetSessionRequest
+	(*types.ResetSessionRequest)(nil),   // 2: cyber.chat.ResetSessionRequest
+	(*types.DeleteSessionRequest)(nil),  // 3: cyber.chat.DeleteSessionRequest
+	(*types.ListCommandsRequest)(nil),   // 4: cyber.chat.ListCommandsRequest
 	(*aop.ListEventsRequest)(nil),       // 5: aop.ListEventsRequest
-	(*types.ListSessionsResponse)(nil),  // 6: aiscan.chat.ListSessionsResponse
-	(*types.GetSessionResponse)(nil),    // 7: aiscan.chat.GetSessionResponse
-	(*types.ResetSessionResponse)(nil),  // 8: aiscan.chat.ResetSessionResponse
-	(*types.DeleteSessionResponse)(nil), // 9: aiscan.chat.DeleteSessionResponse
-	(*types.ListCommandsResponse)(nil),  // 10: aiscan.chat.ListCommandsResponse
+	(*types.ListSessionsResponse)(nil),  // 6: cyber.chat.ListSessionsResponse
+	(*types.GetSessionResponse)(nil),    // 7: cyber.chat.GetSessionResponse
+	(*types.ResetSessionResponse)(nil),  // 8: cyber.chat.ResetSessionResponse
+	(*types.DeleteSessionResponse)(nil), // 9: cyber.chat.DeleteSessionResponse
+	(*types.ListCommandsResponse)(nil),  // 10: cyber.chat.ListCommandsResponse
 	(*aop.ListEventsResponse)(nil),      // 11: aop.ListEventsResponse
 }
 var file_rpc_chat_proto_depIdxs = []int32{
-	0,  // 0: aiscan.rpc.chat.SessionService.ListSessions:input_type -> aiscan.chat.ListSessionsRequest
-	1,  // 1: aiscan.rpc.chat.SessionService.GetSession:input_type -> aiscan.chat.GetSessionRequest
-	2,  // 2: aiscan.rpc.chat.SessionService.ResetSession:input_type -> aiscan.chat.ResetSessionRequest
-	3,  // 3: aiscan.rpc.chat.SessionService.DeleteSession:input_type -> aiscan.chat.DeleteSessionRequest
-	4,  // 4: aiscan.rpc.chat.SessionService.ListCommands:input_type -> aiscan.chat.ListCommandsRequest
-	5,  // 5: aiscan.rpc.chat.SessionService.ListEvents:input_type -> aop.ListEventsRequest
-	6,  // 6: aiscan.rpc.chat.SessionService.ListSessions:output_type -> aiscan.chat.ListSessionsResponse
-	7,  // 7: aiscan.rpc.chat.SessionService.GetSession:output_type -> aiscan.chat.GetSessionResponse
-	8,  // 8: aiscan.rpc.chat.SessionService.ResetSession:output_type -> aiscan.chat.ResetSessionResponse
-	9,  // 9: aiscan.rpc.chat.SessionService.DeleteSession:output_type -> aiscan.chat.DeleteSessionResponse
-	10, // 10: aiscan.rpc.chat.SessionService.ListCommands:output_type -> aiscan.chat.ListCommandsResponse
-	11, // 11: aiscan.rpc.chat.SessionService.ListEvents:output_type -> aop.ListEventsResponse
+	0,  // 0: cyber.rpc.chat.SessionService.ListSessions:input_type -> cyber.chat.ListSessionsRequest
+	1,  // 1: cyber.rpc.chat.SessionService.GetSession:input_type -> cyber.chat.GetSessionRequest
+	2,  // 2: cyber.rpc.chat.SessionService.ResetSession:input_type -> cyber.chat.ResetSessionRequest
+	3,  // 3: cyber.rpc.chat.SessionService.DeleteSession:input_type -> cyber.chat.DeleteSessionRequest
+	4,  // 4: cyber.rpc.chat.SessionService.ListCommands:input_type -> cyber.chat.ListCommandsRequest
+	5,  // 5: cyber.rpc.chat.SessionService.ListEvents:input_type -> aop.ListEventsRequest
+	6,  // 6: cyber.rpc.chat.SessionService.ListSessions:output_type -> cyber.chat.ListSessionsResponse
+	7,  // 7: cyber.rpc.chat.SessionService.GetSession:output_type -> cyber.chat.GetSessionResponse
+	8,  // 8: cyber.rpc.chat.SessionService.ResetSession:output_type -> cyber.chat.ResetSessionResponse
+	9,  // 9: cyber.rpc.chat.SessionService.DeleteSession:output_type -> cyber.chat.DeleteSessionResponse
+	10, // 10: cyber.rpc.chat.SessionService.ListCommands:output_type -> cyber.chat.ListCommandsResponse
+	11, // 11: cyber.rpc.chat.SessionService.ListEvents:output_type -> aop.ListEventsResponse
 	6,  // [6:12] is the sub-list for method output_type
 	0,  // [0:6] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name

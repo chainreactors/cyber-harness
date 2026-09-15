@@ -4,7 +4,7 @@
 package tmux
 
 import (
-	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/utils/pty"
 )
 
@@ -60,7 +60,7 @@ var FormatCompletion = pty.FormatCompletion
 // Manager — embeds pty.Manager and bridges its events
 // ---------------------------------------------------------------------------
 
-// Manager wraps pty.Manager and exposes aiscan's event subscription API.
+// Manager wraps pty.Manager and exposes cyber's event subscription API.
 type Manager struct {
 	*pty.Manager
 	events *eventbus.Bus[Event]
@@ -72,7 +72,7 @@ func NewManager() *Manager {
 		Manager: pty.NewManager(),
 		events:  eventbus.New[Event](),
 	}
-	// Bridge pty.Manager events into the aiscan eventbus.
+	// Bridge pty.Manager events into the cyber eventbus.
 	m.SetOnEvent(func(ev Event) {
 		if m.events != nil {
 			m.events.Emit(ev)

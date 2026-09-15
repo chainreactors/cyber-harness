@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 	flags "github.com/jessevdk/go-flags"
 )
 

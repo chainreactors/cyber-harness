@@ -1,4 +1,4 @@
-module github.com/chainreactors/aiscan
+module github.com/chainreactors/cyber
 
 go 1.26
 
@@ -143,7 +143,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
-	github.com/chainreactors/aiscan/aop v0.0.0-20260818112202-76d90a72b2c5
+	github.com/chainreactors/cyber/aop v0.0.0-20260818112202-76d90a72b2c5
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
@@ -353,4 +353,4 @@ replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.
 
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.7.0-aiscan.1
 
-replace github.com/chainreactors/aiscan/aop => ./aop
+replace github.com/chainreactors/cyber/aop => ./aop

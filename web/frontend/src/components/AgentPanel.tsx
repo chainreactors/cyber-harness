@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next'
 import { LoaderCircle, Monitor, Search } from 'lucide-react'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import type { AgentView } from '../api'
-const terminalChunkReloadKey = 'aiscan-terminal-chunk-reload'
+const terminalChunkReloadKey = 'cyber-terminal-chunk-reload'
 const loadAgentTerminal = () => import('./terminal')
 async function loadAgentTerminalWithRecovery() {
   try {

@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
 	"google.golang.org/protobuf/proto"
 	"testing"
 )

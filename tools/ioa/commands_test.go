@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/ioa/protocols"
 )
 

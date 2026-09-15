@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/cyber/agent/tmux"
+	"github.com/chainreactors/cyber/core/truncate"
 )
 
 type tmuxCommand struct {
@@ -41,7 +41,7 @@ func NewTmuxCommand(bash *BashTool) Command {
 	runner := &tmuxCommand{manager: bash.Manager(), start: bash.Start}
 	return Command{
 		Name: "tmux", Usage: tmuxUsage,
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/tmux.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
 		Run:             runner.run,
 	}
 }

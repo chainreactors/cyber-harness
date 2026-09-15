@@ -1,6 +1,6 @@
 # Sniper
 
-Sniper is aiscan's vulnerability intelligence skill. Given discovered fingerprints, identify known public vulnerabilities.
+Sniper is cyber's vulnerability intelligence skill. Given discovered fingerprints, identify known public vulnerabilities.
 
 Rules:
 

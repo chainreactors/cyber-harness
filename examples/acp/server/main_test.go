@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
-	webservice "github.com/chainreactors/aiscan/pkg/web/service"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )

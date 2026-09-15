@@ -52,7 +52,7 @@ import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
-const webUserAgent = 'aiscan.web'
+const webUserAgent = 'cyber.web'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
@@ -389,7 +389,7 @@ export default function ChatPanel({
 
   // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
   // commands merged with the bound node's reported runtime, skill, and registry
-  // commands, so both menus mirror what that AIScan node can actually run.
+  // commands, so both menus mirror what that Cyber node can actually run.
   // Descriptions prefer the local i18n string (keyed cmd<Name>) and fall back to
   // the server's (used for dynamic skill commands that have no i18n key).
   const [chatCommands, setChatCommands] = useState<CommandHint[]>([])
@@ -1201,9 +1201,9 @@ function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: stri
   return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} />
 }
 
-// Phone-only greeting for a fresh, empty session: an AIScan hello + a 2×2 grid of
+// Phone-only greeting for a fresh, empty session: an Cyber hello + a 2×2 grid of
 // capability cards, each seeding the composer with a starter prompt (Doubao's
-// home pattern). Kept in AIScan's own skin — blue accent, warm reserved for
+// home pattern). Kept in Cyber's own skin — blue accent, warm reserved for
 // severity, no mascot. The scan card seeds the real "/scan " command; the others
 // seed editable natural-language templates the operator completes.
 function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {

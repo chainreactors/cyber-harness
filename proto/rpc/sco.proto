@@ -1,16 +1,16 @@
 syntax = "proto3";
 
-package aiscan.rpc.sco;
+package cyber.rpc.sco;
 
 import "types/sco.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+option go_package = "github.com/chainreactors/cyber/pkg/rpc;rpc";
 
 service SCOService {
-  rpc ListNodes(aiscan.sco.ListNodesRequest) returns (aiscan.sco.ListNodesResponse);
-  rpc GetNode(aiscan.sco.GetNodeRequest) returns (aiscan.sco.GetNodeResponse);
-  rpc GetStats(aiscan.sco.GetStatsRequest) returns (aiscan.sco.GetStatsResponse);
-  rpc DeleteNodes(aiscan.sco.DeleteNodesRequest) returns (aiscan.sco.DeleteNodesResponse);
-  rpc ImportNodes(aiscan.sco.ImportNodesRequest) returns (aiscan.sco.ImportNodesResponse);
-  rpc ListArtifacts(aiscan.sco.ListArtifactsRequest) returns (aiscan.sco.ListArtifactsResponse);
+  rpc ListNodes(cyber.sco.ListNodesRequest) returns (cyber.sco.ListNodesResponse);
+  rpc GetNode(cyber.sco.GetNodeRequest) returns (cyber.sco.GetNodeResponse);
+  rpc GetStats(cyber.sco.GetStatsRequest) returns (cyber.sco.GetStatsResponse);
+  rpc DeleteNodes(cyber.sco.DeleteNodesRequest) returns (cyber.sco.DeleteNodesResponse);
+  rpc ImportNodes(cyber.sco.ImportNodesRequest) returns (cyber.sco.ImportNodesResponse);
+  rpc ListArtifacts(cyber.sco.ListArtifactsRequest) returns (cyber.sco.ListArtifactsResponse);
 }

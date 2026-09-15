@@ -15,9 +15,9 @@ typedef struct {
     uint32_t width;
     uint32_t height;
     char title[512];
-} aiscan_x11_window;
+} cyber_x11_window;
 
-static xcb_atom_t aiscan_atom(xcb_connection_t *c, const char *name) {
+static xcb_atom_t cyber_atom(xcb_connection_t *c, const char *name) {
     xcb_intern_atom_cookie_t cookie = xcb_intern_atom(c, 0, strlen(name), name);
     xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(c, cookie, NULL);
     if (!reply) return XCB_ATOM_NONE;
@@ -26,16 +26,16 @@ static xcb_atom_t aiscan_atom(xcb_connection_t *c, const char *name) {
     return atom;
 }
 
-static xcb_screen_t *aiscan_screen(xcb_connection_t *c, int number) {
+static xcb_screen_t *cyber_screen(xcb_connection_t *c, int number) {
     const xcb_setup_t *setup = xcb_get_setup(c);
     xcb_screen_iterator_t it = xcb_setup_roots_iterator(setup);
     for (int i = 0; i < number && it.rem; i++) xcb_screen_next(&it);
     return it.rem ? it.data : NULL;
 }
 
-static int aiscan_window_info(xcb_connection_t *c, xcb_window_t window,
+static int cyber_window_info(xcb_connection_t *c, xcb_window_t window,
                               xcb_atom_t pid_atom, xcb_atom_t name_atom,
-                              aiscan_x11_window *out) {
+                              cyber_x11_window *out) {
     xcb_get_window_attributes_reply_t *attrs = xcb_get_window_attributes_reply(
         c, xcb_get_window_attributes(c, window), NULL);
     if (!attrs || attrs->map_state != XCB_MAP_STATE_VIEWABLE) {
@@ -77,8 +77,8 @@ static int aiscan_window_info(xcb_connection_t *c, xcb_window_t window,
 }
 
 // Returns 0 on success, 1 on connection error, 2 when no matching window exists.
-static int aiscan_x11_resolve(const char *display, uint32_t requested_window,
-                              uint32_t requested_pid, aiscan_x11_window *out,
+static int cyber_x11_resolve(const char *display, uint32_t requested_window,
+                              uint32_t requested_pid, cyber_x11_window *out,
                               uint32_t *screen_width, uint32_t *screen_height) {
     int screen_number = 0;
     xcb_connection_t *c = xcb_connect(display && display[0] ? display : NULL, &screen_number);
@@ -86,23 +86,23 @@ static int aiscan_x11_resolve(const char *display, uint32_t requested_window,
         if (c) xcb_disconnect(c);
         return 1;
     }
-    xcb_screen_t *screen = aiscan_screen(c, screen_number);
+    xcb_screen_t *screen = cyber_screen(c, screen_number);
     if (!screen) {
         xcb_disconnect(c);
         return 1;
     }
     *screen_width = screen->width_in_pixels;
     *screen_height = screen->height_in_pixels;
-    xcb_atom_t pid_atom = aiscan_atom(c, "_NET_WM_PID");
-    xcb_atom_t name_atom = aiscan_atom(c, "_NET_WM_NAME");
+    xcb_atom_t pid_atom = cyber_atom(c, "_NET_WM_PID");
+    xcb_atom_t name_atom = cyber_atom(c, "_NET_WM_NAME");
 
     if (requested_window) {
-        int ok = aiscan_window_info(c, requested_window, pid_atom, name_atom, out);
+        int ok = cyber_window_info(c, requested_window, pid_atom, name_atom, out);
         xcb_disconnect(c);
         return ok ? 0 : 2;
     }
 
-    xcb_atom_t list_atom = aiscan_atom(c, "_NET_CLIENT_LIST");
+    xcb_atom_t list_atom = cyber_atom(c, "_NET_CLIENT_LIST");
     xcb_get_property_reply_t *list = xcb_get_property_reply(c,
         xcb_get_property(c, 0, screen->root, list_atom, XCB_ATOM_WINDOW, 0, UINT32_MAX), NULL);
     if (!list) {
@@ -112,10 +112,10 @@ static int aiscan_x11_resolve(const char *display, uint32_t requested_window,
     int count = xcb_get_property_value_length(list) / (int)sizeof(xcb_window_t);
     xcb_window_t *windows = (xcb_window_t *)xcb_get_property_value(list);
     uint64_t best_area = 0;
-    aiscan_x11_window candidate;
+    cyber_x11_window candidate;
     memset(out, 0, sizeof(*out));
     for (int i = 0; i < count; i++) {
-        if (!aiscan_window_info(c, windows[i], pid_atom, name_atom, &candidate)) continue;
+        if (!cyber_window_info(c, windows[i], pid_atom, name_atom, &candidate)) continue;
         if (candidate.pid != requested_pid) continue;
         uint64_t area = (uint64_t)candidate.width * candidate.height;
         if (area > best_area) {
@@ -153,9 +153,9 @@ func resolvePlatformTarget(_ context.Context, req captureRequest) (resolvedTarge
 	}
 	cDisplay := C.CString(display)
 	defer C.free(unsafe.Pointer(cDisplay))
-	var info C.aiscan_x11_window
+	var info C.cyber_x11_window
 	var screenWidth, screenHeight C.uint32_t
-	code := C.aiscan_x11_resolve(
+	code := C.cyber_x11_resolve(
 		cDisplay,
 		C.uint32_t(req.WindowHandle),
 		C.uint32_t(req.PID),

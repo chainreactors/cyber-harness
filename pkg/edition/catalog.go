@@ -1,17 +1,17 @@
-// Package edition defines the explicit feature catalog linked into AIScan.
+// Package edition defines the explicit feature catalog linked into Cyber.
 // Build tags choose the descriptor list; package initialization has no effect
 // on any other profile or process-wide state.
 package edition
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/tools/curl"
-	"github.com/chainreactors/aiscan/tools/gogo"
-	"github.com/chainreactors/aiscan/tools/neutron"
-	"github.com/chainreactors/aiscan/tools/proton"
-	"github.com/chainreactors/aiscan/tools/scan"
-	"github.com/chainreactors/aiscan/tools/spray"
-	"github.com/chainreactors/aiscan/tools/zombie"
+	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/tools/curl"
+	"github.com/chainreactors/cyber/tools/gogo"
+	"github.com/chainreactors/cyber/tools/neutron"
+	"github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/cyber/tools/spray"
+	"github.com/chainreactors/cyber/tools/zombie"
 )
 
 func Catalog(extra ...capability.Descriptor) capability.Catalog {

@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     env:
-      AISCAN_INTEGRATION: '1'
+      CYBER_INTEGRATION: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6

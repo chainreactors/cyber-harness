@@ -20,7 +20,7 @@ def test_set_input_files(test_server, pw_page, pw_driver):
         )
         assert Path(tmp_path).name in file_name
 
-        # aiscan
+        # cyber
         pw_driver.execute("open", url, "--session", "file-t", "--timeout", "10")
         pw_driver.execute("set-input-files", "file-t", "#upload", tmp_path)
         out = pw_driver.execute(

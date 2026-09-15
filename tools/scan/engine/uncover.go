@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/projectdiscovery/uncover/sources"
 )
 
@@ -48,7 +48,7 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	applyCredentials(p, opts.Credentials)
 
 	keys := p.GetKeys()
-	// uncover currently expects a paired FOFA credential. AIScan's public
+	// uncover currently expects a paired FOFA credential. Cyber's public
 	// configuration is key-only, so populate the canonical key explicitly.
 	if keys.FofaKey == "" && opts.FofaKey != "" {
 		keys.FofaKey = opts.FofaKey

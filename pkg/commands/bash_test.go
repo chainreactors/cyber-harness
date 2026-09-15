@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	tmux "github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/agent/inbox"
+	tmux "github.com/chainreactors/cyber/agent/tmux"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 // ---------------------------------------------------------------------------
@@ -440,9 +440,9 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 			defer wg.Done()
 			// Keep the short-lived shell alive until the PTY reader is scheduled;
 			// this test exercises concurrent option isolation, not PTY drain timing.
-			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$AISCAN_RUN_VALUE"; pwd; sleep 0.05`, BashExecOptions{
+			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$CYBER_RUN_VALUE"; pwd; sleep 0.05`, BashExecOptions{
 				WorkDir: dirs[i],
-				Env:     map[string]string{"AISCAN_RUN_VALUE": fmt.Sprintf("value-%d", i)},
+				Env:     map[string]string{"CYBER_RUN_VALUE": fmt.Sprintf("value-%d", i)},
 				OnOutput: func(data []byte) {
 					_, _ = outputs[i].Write(data)
 				},

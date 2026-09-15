@@ -1,7 +1,7 @@
 package session
 
-import cfg "github.com/chainreactors/aiscan/core/config"
-import settings "github.com/chainreactors/aiscan/pkg/cli"
+import cfg "github.com/chainreactors/cyber/core/config"
+import settings "github.com/chainreactors/cyber/pkg/cli"
 
 // FlagGroups preserves the typed option schema and its existing defaults.
 // Declaration and --help never require an App or a loaded extension.

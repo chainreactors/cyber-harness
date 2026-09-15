@@ -60,15 +60,15 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
+**文件**: `pkg/web/service/service.go`, `cmd/cyber/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
 
 ---
 
 ## 4. Goal 模式 AOP 扩展
 
-Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；AIScan 专属字段编码为
-`Any<aiscan.agent.AgentRunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
-`type.googleapis.com/aiscan.agent.AgentRunOptions` 表达。普通对话和 evaluator 复用同一
+Goal 参数不再定义 Chat DTO。`RunTurnRequest` 是唯一输入；Cyber 专属字段编码为
+`Any<cyber.agent.AgentRunOptions>` 并放入 `RunTurnRequest.extensions`，类型身份只由标准
+`type.googleapis.com/cyber.agent.AgentRunOptions` 表达。普通对话和 evaluator 复用同一
 Run/Turn 生命周期。
 
 **文件**: `proto/types/agent.proto`, `pkg/exts/agent/protocol.go`, `pkg/web/service/service.go`
@@ -78,7 +78,7 @@ Run/Turn 生命周期。
 ## 5. Eval 事件透传与持久化
 
 agent 在 producer 边缘生成 `aop.Event`；hub 通过 `aop.Envelope` 原样转发。
-评估字段使用 `aiscan.agent.EvalDetail` protobuf `Any` 扩展，不做 flatten。
+评估字段使用 `cyber.agent.EvalDetail` protobuf `Any` 扩展，不做 flatten。
 
 eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事件，但不会再投影成另一套 agent 事件或 system message。会话正文只持久化到 `chat_aop_events`，刷新后从同一 AOP 源重建。
 
@@ -143,9 +143,9 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ## 8. 内嵌 Agent (Embedded Agent)
 
-`aiscan web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `aiscan agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`aiscan web --no-agent` 只启动 web 控制台。
+`cyber web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `cyber agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`cyber web --no-agent` 只启动 web 控制台。
 
-**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
+**文件**: `cmd/cyber/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
 
 ---
 
@@ -163,7 +163,7 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 
 ### 命令菜单
 
-`aiscan.chat.SessionService/ListCommands` 返回 `SessionMenu()` — hub 命令 + agent 注册时上报的命令元数据（从 `tui.Command` 提取，含 skill）。前端 "/" 弹出菜单通过生成的 Connect client 拉取；Scan 不属于 Chat 命令协议。
+`cyber.chat.SessionService/ListCommands` 返回 `SessionMenu()` — hub 命令 + agent 注册时上报的命令元数据（从 `tui.Command` 提取，含 skill）。前端 "/" 弹出菜单通过生成的 Connect client 拉取；Scan 不属于 Chat 命令协议。
 
 **文件**: `pkg/web/service.go`, `pkg/web/handler.go`
 
@@ -178,7 +178,7 @@ agent 端的 skill 命令和 `!bash` 从浏览器也能用。
 - `fallback`: 英文文本，供非 i18n 消费者 / 日志 / 测试使用
 
 AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
-`Any<aiscan.agent.WebMessageMetadata>` 放入 Event extension。通用 reducer
+`Any<cyber.agent.WebMessageMetadata>` 放入 Event extension。通用 reducer
 保留该扩展，因此实时流和重放使用同一参数来源。
 
 已定义的 code:
@@ -216,8 +216,8 @@ AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
 
 **机制**: Runtime 产生的 typed AOP event 是 Agent 消息、工具调用和 turn 状态的唯一语义来源。Web 层直接转发和持久化这些事件，不再合成第二套 assistant 完成事件，也不再为中间轮次维护独立的聊天事件协议。
 
-AIScan 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
-`Event.extension = Any<aiscan.scan.SessionScanEvent>` 表达。`Any.type_url` 是唯一类型身份，不再维护 `ExtensionEvent`、namespace 字符串或 `DomainEvent`。
+Cyber 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
+`Event.extension = Any<cyber.scan.SessionScanEvent>` 表达。`Any.type_url` 是唯一类型身份，不再维护 `ExtensionEvent`、namespace 字符串或 `DomainEvent`。
 
 **文件**: `pkg/runner/`, `aop/`, `pkg/web/service.go`
 
@@ -253,15 +253,15 @@ Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 
 
 ## 14. 环境变量优先级修正
 
-旧逻辑中 provider-scoped env（如 `ANTHROPIC_MODEL`）和 aiscan 自有 env（`AISCAN_MODEL`）在 `else if` 链中平级。hub 启动的 agent 继承 hub 环境后，Settings UI 配置的 model 被环境变量覆盖。
+旧逻辑中 provider-scoped env（如 `ANTHROPIC_MODEL`）和 cyber 自有 env（`CYBER_MODEL`）在 `else if` 链中平级。hub 启动的 agent 继承 hub 环境后，Settings UI 配置的 model 被环境变量覆盖。
 
 新逻辑拆为两个独立 `if`:
-1. 先看 aiscan 自有 env（`AISCAN_MODEL`）
+1. 先看 cyber 自有 env（`CYBER_MODEL`）
 2. 再检查 `option.Model` 是否仍为空，才 fallback 到 provider env
 
 对 `BaseURL`、`APIKey` 同理。
 
 **文件**: `core/config/env.go`
 
-所有 AIScan 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。
+所有 Cyber 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。
 

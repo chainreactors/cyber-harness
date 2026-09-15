@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
 )
 
 func TestHubOwnsProxyLifecycle(t *testing.T) {

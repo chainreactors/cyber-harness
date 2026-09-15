@@ -1,4 +1,4 @@
-// Command gen is the single protobuf generation entrypoint for AIScan.
+// Command gen is the single protobuf generation entrypoint for Cyber.
 package main
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const modulePath = "github.com/chainreactors/aiscan"
+const modulePath = "github.com/chainreactors/cyber"
 
 const (
 	protocVersion           = "35.1"
@@ -100,7 +100,7 @@ func main() {
 		}
 	}
 	if err := removeGeneratedFiles(typesDir, ".pb.go"); err != nil {
-		fatal("clear generated AIScan types", err)
+		fatal("clear generated Cyber types", err)
 	}
 
 	goInputs := append(append([]string{}, aopProtos...), typeProtos...)
@@ -141,7 +141,7 @@ func main() {
 	run(root, protoc, aopArgs...)
 
 	if err := os.MkdirAll(productTS, 0o755); err != nil {
-		fatal("create AIScan TypeScript output", err)
+		fatal("create Cyber TypeScript output", err)
 	}
 	productInputs := append(append([]string{}, typeProtos...), rpcProtos...)
 	sort.Strings(productInputs)
@@ -155,7 +155,7 @@ func main() {
 	productArgs = append(productArgs, absoluteInputs(cyberProto, productProto, productInputs)...)
 	run(root, protoc, productArgs...)
 	if err := rewriteProductAOPImports(productTS); err != nil {
-		fatal("rewrite AIScan TypeScript AOP imports", err)
+		fatal("rewrite Cyber TypeScript AOP imports", err)
 	}
 }
 

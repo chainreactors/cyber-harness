@@ -4,10 +4,10 @@ package proxy
 import (
 	"context"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	proxytool "github.com/chainreactors/aiscan/tools/proxy"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	proxytool "github.com/chainreactors/cyber/tools/proxy"
 )
 
 // Extension owns one proxy Resource. Consumers receive ProxyHub, whose type has no

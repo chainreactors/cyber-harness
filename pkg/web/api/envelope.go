@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	"github.com/chainreactors/cyber/pkg/terminal"
+	types "github.com/chainreactors/cyber/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -228,7 +228,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		}
 		request := value.GetRequest()
 		if request == nil || backends.Commands == nil {
-			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan command message"))
+			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported Cyber command message"))
 			return nil
 		}
 		go func() {
@@ -270,7 +270,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		}
 		request := value.GetWatchEventsRequest()
 		if request == nil {
-			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported AIScan scan message"))
+			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported Cyber scan message"))
 			return nil
 		}
 		subscriptionCtx, subscriptionCancel := context.WithCancel(ctx)

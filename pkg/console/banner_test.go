@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/cyber/agent"
+	outputpkg "github.com/chainreactors/cyber/core/output"
 )
 
 // assertUniformWidth checks every line of a rendered box has the same visible
@@ -38,7 +38,7 @@ func TestRenderFixedBoxNeverOverflows(t *testing.T) {
 // CJK runes are double-width; before the fix the right border drifted right under
 // Chinese text because padding counted runes, not cells.
 func TestRenderFixedBoxAlignsCJK(t *testing.T) {
-	body := "状态\n模型    anthropic / glm-5.2\n技能    /aiscan /passive 中文说明文字很长很长很长"
+	body := "状态\n模型    anthropic / glm-5.2\n技能    /cyber /passive 中文说明文字很长很长很长"
 	assertUniformWidth(t, renderFixedBox(body, 44, false))
 }
 
@@ -69,7 +69,7 @@ func TestClipVisiblePreservesANSIAndWidth(t *testing.T) {
 }
 
 func TestTruncMiddleKeepsTail(t *testing.T) {
-	p := "/var/lib/cloud-cli-proxy/hosts/57dfa9df-9093-4bcb/home/aiscan/dist/.aiscan/agent_history"
+	p := "/var/lib/cloud-cli-proxy/hosts/57dfa9df-9093-4bcb/home/cyber/dist/.cyber/agent_history"
 	got := truncMiddle(p, 40)
 	if n := visibleWidth(got); n > 40 {
 		t.Errorf("truncMiddle width = %d, want <= 40", n)
@@ -111,7 +111,7 @@ func TestRenderBoxTableAligns(t *testing.T) {
 
 func TestRenderBoxTableNodesSample(t *testing.T) {
 	rows := [][]string{
-		{"de12abca", "aiscan-tui"},
+		{"de12abca", "cyber-tui"},
 		{"b3a3e964", "local-1"},
 	}
 	box := renderFixedBox("nodes\n"+renderBoxTable(rows, false), 44, false)
@@ -147,8 +147,8 @@ func TestStatusSampleRender(t *testing.T) {
 		{Command: "render", Detail: "static · plain · space default"},
 		{Command: "task", Detail: "idle"},
 		{Command: "server", Detail: "http://127.0.0.1:3000"},
-		{Command: "history", Detail: truncMiddle("/var/lib/cloud-cli-proxy/hosts/57dfa9df-9093-4bcb-80e8-bafaf96927ee/home/aiscan/dist/.aiscan/agent_history", 64-4-helpRowCommandWidth)},
-		{Command: "skills", Detail: "/aiscan /passive"},
+		{Command: "history", Detail: truncMiddle("/var/lib/cloud-cli-proxy/hosts/57dfa9df-9093-4bcb-80e8-bafaf96927ee/home/cyber/dist/.cyber/agent_history", 64-4-helpRowCommandWidth)},
+		{Command: "skills", Detail: "/cyber /passive"},
 	}
 	box := renderFixedBox("status\n"+renderHelpRows(rows, false), 64, false)
 	t.Log("\n" + box)

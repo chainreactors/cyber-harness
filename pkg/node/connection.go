@@ -3,17 +3,17 @@ package node
 import (
 	"context"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/terminal"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 // agentEndpoint is the sole event ingress/egress point for a node connection.
@@ -36,7 +36,7 @@ type connectionConfig struct {
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
 	JSONFrames bool
 	Executor   tool.Executor
-	// Registry supplies the Bash pseudo-command projection to AIScan agent nodes.
+	// Registry supplies the Bash pseudo-command projection to Cyber agent nodes.
 	Registry commands.Executor
 	Bash     *commands.BashTool
 	// Agent owns connection-side events. Control uses the product runtime;

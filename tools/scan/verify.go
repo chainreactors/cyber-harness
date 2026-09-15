@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 type indexedLoot struct {

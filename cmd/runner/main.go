@@ -6,7 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"io"
 	"os"
 	"os/signal"
@@ -14,11 +14,11 @@ import (
 	"strings"
 	"syscall"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 
-	"github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 type options struct {

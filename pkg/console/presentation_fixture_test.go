@@ -2,10 +2,10 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	sessionconsole "github.com/chainreactors/aiscan/pkg/exts/session/console"
-	tuiext "github.com/chainreactors/aiscan/pkg/exts/tui"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
+	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	"testing"
 )
 

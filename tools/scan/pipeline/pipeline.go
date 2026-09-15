@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 type Event interface {

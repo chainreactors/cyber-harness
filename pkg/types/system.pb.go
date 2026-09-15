@@ -213,7 +213,7 @@ var File_types_system_proto protoreflect.FileDescriptor
 
 const file_types_system_proto_rawDesc = "" +
 	"\n" +
-	"\x12types/system.proto\x12\raiscan.system\"\x12\n" +
+	"\x12types/system.proto\x12\fcyber.system\"\x12\n" +
 	"\x10GetStatusRequest\"\xbf\x02\n" +
 	"\fSystemStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12#\n" +
@@ -226,9 +226,9 @@ const file_types_system_proto_rawDesc = "" +
 	"\rconfig_loaded\x18\a \x01(\bR\fconfigLoaded\x12\x16\n" +
 	"\x06agents\x18\b \x01(\rR\x06agents\x12\x1d\n" +
 	"\n" +
-	"server_url\x18\t \x01(\tR\tserverUrl\"H\n" +
-	"\x11GetStatusResponse\x123\n" +
-	"\x06status\x18\x01 \x01(\v2\x1b.aiscan.system.SystemStatusR\x06statusB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	"server_url\x18\t \x01(\tR\tserverUrl\"G\n" +
+	"\x11GetStatusResponse\x122\n" +
+	"\x06status\x18\x01 \x01(\v2\x1a.cyber.system.SystemStatusR\x06statusB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_system_proto_rawDescOnce sync.Once
@@ -244,12 +244,12 @@ func file_types_system_proto_rawDescGZIP() []byte {
 
 var file_types_system_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_types_system_proto_goTypes = []any{
-	(*GetStatusRequest)(nil),  // 0: aiscan.system.GetStatusRequest
-	(*SystemStatus)(nil),      // 1: aiscan.system.SystemStatus
-	(*GetStatusResponse)(nil), // 2: aiscan.system.GetStatusResponse
+	(*GetStatusRequest)(nil),  // 0: cyber.system.GetStatusRequest
+	(*SystemStatus)(nil),      // 1: cyber.system.SystemStatus
+	(*GetStatusResponse)(nil), // 2: cyber.system.GetStatusResponse
 }
 var file_types_system_proto_depIdxs = []int32{
-	1, // 0: aiscan.system.GetStatusResponse.status:type_name -> aiscan.system.SystemStatus
+	1, // 0: cyber.system.GetStatusResponse.status:type_name -> cyber.system.SystemStatus
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name

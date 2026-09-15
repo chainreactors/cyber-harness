@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	web "github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	web "github.com/chainreactors/cyber/pkg/web"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
 func (s *Service) aiAvailable() bool {

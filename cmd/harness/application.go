@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	app "github.com/chainreactors/aiscan/pkg/app"
-	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/extension"
+	app "github.com/chainreactors/cyber/pkg/app"
+	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 // AppEntries supplies a minimal App host graph for tests. Production code must

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -171,7 +171,7 @@ func (m *Runtime) configureSpace(ctx context.Context) error {
 	if m.config.Space == "" || m.client == nil || !m.client.Bound() {
 		return nil
 	}
-	info, err := m.client.Space(ctx, m.config.Space, "aiscan agent")
+	info, err := m.client.Space(ctx, m.config.Space, "cyber agent")
 	if err != nil {
 		return err
 	}

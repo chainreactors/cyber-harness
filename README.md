@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
-  <h1 align="center">aiscan</h1>
+  <img src="web/assets/logo.svg" width="180" alt="cyber logo">
+  <h1 align="center">cyber</h1>
   <p align="center">AI-driven single-binary pentest agent with a built-in multi-engine arsenal, ready to go</p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square&color=00E59B" alt="Release"></a>
-  <a href="https://github.com/chainreactors/aiscan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/aiscan/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
-  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
-  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/v/release/chainreactors/cyber?style=flat-square&color=00E59B" alt="Release"></a>
+  <a href="https://github.com/chainreactors/cyber/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/cyber/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/downloads/chainreactors/cyber/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/cyber/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/cyber/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/cyber?style=flat-square&color=yellow" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ---
 
-**aiscan** combines LLM agents with traditional security scanning engines. Three modes: **Scan** (deterministic pipeline, optional AI assist), **Agent** (natural-language autonomous assessment), **IOA** (multi-agent distributed collaboration).
+**cyber** combines LLM agents with traditional security scanning engines. Three modes: **Scan** (deterministic pipeline, optional AI assist), **Agent** (natural-language autonomous assessment), **IOA** (multi-agent distributed collaboration).
 
 > **Use only on explicitly authorized targets. Unauthorized use is illegal.**
 
@@ -26,10 +26,10 @@
 
 ```bash
 # No LLM needed — one-line scan
-aiscan scan -i 192.168.1.0/24
+cyber scan -i 192.168.1.0/24
 
 # With LLM — one-line agent
-aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
+cyber agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
   -p "scan targets and check for high-risk vulnerabilities" -i 192.168.1.0/24
 ```
 
@@ -37,50 +37,50 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 ### Download Binary
 
-From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
+From [GitHub Releases](https://github.com/chainreactors/cyber/releases/latest):
 
 | Edition | Description |
 | --- | --- |
-| **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | Full — adds Web, playwright, passive recon, and katana |
+| **cyber** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
+| **cyber-full** | Full — adds Web, playwright, passive recon, and katana |
 
 | OS | Arch | Standard | Full |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
+| Linux | amd64 / arm64 | `cyber_linux_<arch>.zip` | `cyber-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `cyber_darwin_<arch>.zip` | `cyber-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `cyber_windows_<arch>.zip` | `cyber-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64.zip
-unzip aiscan_linux_amd64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_linux_amd64.zip
+unzip cyber_linux_amd64.zip
+chmod +x cyber && sudo mv cyber /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64.zip
-unzip aiscan_darwin_arm64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_darwin_arm64.zip
+unzip cyber_darwin_arm64.zip
+chmod +x cyber && sudo mv cyber /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
-Expand-Archive .\aiscan.zip -DestinationPath .
-.\aiscan.exe --version
+Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/cyber_windows_amd64.zip" -OutFile cyber.zip
+Expand-Archive .\cyber.zip -DestinationPath .
+.\cyber.exe --version
 ```
 
 ### Web Console (Full Edition)
 
-The Web console is included in `aiscan-full`. It starts the browser UI and an
+The Web console is included in `cyber-full`. It starts the browser UI and an
 embedded local agent by default. Open `http://127.0.0.1:8080` and enter the
 access key printed at startup:
 
 ```bash
-aiscan-full web
+cyber-full web
 ```
 
 To listen on the network with a fixed access key:
 
 ```bash
-aiscan-full web --addr 0.0.0.0:8080 --token change-me
+cyber-full web --addr 0.0.0.0:8080 --token change-me
 ```
 
 Run the Web console as a hub without an embedded agent, then connect agents
@@ -88,19 +88,19 @@ from this or other hosts:
 
 ```bash
 # Hub
-aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+cyber-full web --addr 0.0.0.0:8080 --token change-me --no-agent
 
 # Remote node
-aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
+cyber agent --server-url http://change-me@server.example:8080 --node-name worker-01
 ```
 
 The Web console stores sessions, scans, assets, findings, and configuration in
-`aiscan-web.db` by default. Use `--db <path>` to select another SQLite file.
+`cyber-web.db` by default. Use `--db <path>` to select another SQLite file.
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/chainreactors/aiscan.git && cd aiscan
+git clone https://github.com/chainreactors/cyber.git && cd cyber
 
 make                                                       # standard edition
 make runner                                                # tag-free remote tool runner
@@ -108,7 +108,7 @@ make full                                                  # frontend + full edi
 ```
 
 The standalone agent executable is no longer a maintained build or release
-target. The single AIScan product entry is `cmd/aiscan`. `make full` requires Node.js/npm and a
+target. The single Cyber product entry is `cmd/cyber`. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
 assets are embedded into the binary. The native `record` tool is not included
 in the default full build; SDK and tool developers can build it explicitly with
@@ -185,33 +185,33 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 ### Scan Mode
 
 ```bash
-aiscan scan -i 192.168.1.0/24                                    # quick scan
-aiscan scan -i 192.168.1.0/24 --mode full                        # full scan
-aiscan scan -i http://target.example --verify=high --sniper       # AI-enhanced
-aiscan scan -i http://target.example --mode full --deep --report  # full + deep + report
+cyber scan -i 192.168.1.0/24                                    # quick scan
+cyber scan -i 192.168.1.0/24 --mode full                        # full scan
+cyber scan -i http://target.example --verify=high --sniper       # AI-enhanced
+cyber scan -i http://target.example --mode full --deep --report  # full + deep + report
 ```
 
 ### Agent Mode
 
 ```bash
 # One-shot task
-aiscan agent -p "scan and find web vulnerabilities" -i 192.168.1.0/24
+cyber agent -p "scan and find web vulnerabilities" -i 192.168.1.0/24
 
 # With goal evaluation
-aiscan agent -p "full scan" -i http://target.example -e "find all open ports with service fingerprints"
+cyber agent -p "full scan" -i http://target.example -e "find all open ports with service fingerprints"
 
 # Interactive REPL
-aiscan agent
+cyber agent
 ```
 
 ### IOA Mode
 
 ```bash
 # Start IOA server
-aiscan ioa serve --ioa-url http://0.0.0.0:8765
+cyber ioa serve --ioa-url http://0.0.0.0:8765
 
 # Start IOA worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
+cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
   -p "scan assigned targets and report findings"
 ```
 
@@ -222,10 +222,10 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI arguments
-aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
+cyber agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
 ```
 
-Config file `aiscan.yaml`:
+Config file `cyber.yaml`:
 
 ```yaml
 llm:
@@ -236,7 +236,7 @@ llm:
   max_tokens: 16384        # Maximum output per response
 ```
 
-`context_window` is a literal token count: use `128000`, not `128K`. Values below 8192 are accepted, but the Web UI warns that they may be too small. The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. If no output space remains, AIScan returns a clear error instead of sending a one-token request. Automatic compaction starts as the context approaches the configured window.
+`context_window` is a literal token count: use `128000`, not `128K`. Values below 8192 are accepted, but the Web UI warns that they may be too small. The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. If no output space remains, Cyber returns a clear error instead of sending a one-token request. Automatic compaction starts as the context approaches the configured window.
 
 ---
 
@@ -290,8 +290,8 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 ---
 
 <p align="center">
-  <a href="https://star-history.com/#chainreactors/aiscan&Date">
-    <img src="https://api.star-history.com/svg?repos=chainreactors/aiscan&type=Date" alt="Star History" width="600">
+  <a href="https://star-history.com/#chainreactors/cyber&Date">
+    <img src="https://api.star-history.com/svg?repos=chainreactors/cyber&type=Date" alt="Star History" width="600">
   </a>
 </p>
 

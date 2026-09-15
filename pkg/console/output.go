@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/core/util"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/cyber/core/util"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"golang.org/x/term"
 )
 

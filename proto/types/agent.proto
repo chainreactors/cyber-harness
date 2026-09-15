@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package aiscan.agent;
+package cyber.agent;
 
 import "aop/protocol.proto";
 import "types/command.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+option go_package = "github.com/chainreactors/cyber/pkg/types;types";
 
 message AgentView {
   aop.AgentHello hello = 1;
@@ -15,7 +15,7 @@ message AgentView {
   aop.AgentStats stats = 3;
   reserved 4;
   google.protobuf.Timestamp connected_at = 5;
-  repeated aiscan.command.CommandSpec commands = 6;
+  repeated cyber.command.CommandSpec commands = 6;
   bool busy = 7;
 }
 

@@ -3,9 +3,9 @@ package app
 import (
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {

@@ -2,8 +2,8 @@ package app
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 )
 
 type LLMHealth = provider.Health

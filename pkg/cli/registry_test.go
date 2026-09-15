@@ -3,7 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 	flags "github.com/jessevdk/go-flags"
 	"strings"
 	"testing"

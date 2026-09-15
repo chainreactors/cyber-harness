@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/hooks"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/hooks"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 // newTestApp supplies explicitly test-owned, unpublished registries. Tests that

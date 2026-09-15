@@ -1,8 +1,8 @@
 package client
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/skills"
 	"strings"
 	"testing"
 )
@@ -49,7 +49,7 @@ func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
 func TestIOAFindingConvention(t *testing.T) {
 	bundle, _ := Skills()
 	store, _ := skills.LoadAll(nil, capability.Catalog{}, bundle)
-	body, handled, err := store.ReadVirtualBody("aiscan://skills/aiscan/okf/runtime/ioa-finding.md")
+	body, handled, err := store.ReadVirtualBody("cyber://skills/cyber/okf/runtime/ioa-finding.md")
 	if err != nil || !handled {
 		t.Fatalf("ReadVirtualBody(ioa-finding) handled=%v err=%v", handled, err)
 	}
@@ -60,7 +60,7 @@ func TestIOAFindingConvention(t *testing.T) {
 		t.Fatal("ioa-finding must not reintroduce a separate finding-id")
 	}
 
-	main, _, err := store.ReadVirtual("aiscan://skills/ioa/SKILL.md")
+	main, _, err := store.ReadVirtual("cyber://skills/ioa/SKILL.md")
 	if err != nil {
 		t.Fatalf("ReadVirtual(SKILL.md) error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestIOAFindingConvention(t *testing.T) {
 		t.Fatal("SKILL.md does not reference the ioa-finding convention")
 	}
 
-	report, _, err := store.ReadVirtual("aiscan://skills/aiscan/reference/report.md")
+	report, _, err := store.ReadVirtual("cyber://skills/cyber/reference/report.md")
 	if err != nil {
 		t.Fatalf("ReadVirtual(report.md) error = %v", err)
 	}

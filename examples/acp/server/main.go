@@ -6,8 +6,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
-	webext "github.com/chainreactors/aiscan/pkg/exts/web"
+	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	"net"
 	"net/http"
 	"os"
@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
-	webservice "github.com/chainreactors/aiscan/pkg/web/service"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/web"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
@@ -37,7 +37,7 @@ func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.Ar
 	return service, pool, handler, nil
 }
 
-// acp server: AIScan headless control plane — no UI and no hidden local
+// acp server: Cyber headless control plane — no UI and no hidden local
 // application graph. Agents connect through the public AOP endpoint.
 //
 //	go run ./examples/acp/server --addr 127.0.0.1:8080

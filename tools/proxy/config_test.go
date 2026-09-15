@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 )
 
 func TestHubConstructionIsInert(t *testing.T) {
@@ -20,7 +20,7 @@ func TestHubConstructionIsInert(t *testing.T) {
 	if hub.ProxyURL() != "" {
 		t.Fatal("proxy listener started during construction")
 	}
-	if _, err := os.Stat(filepath.Join(workDir, ".aiscan")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(workDir, ".cyber")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("construction touched the filesystem: %v", err)
 	}
 	if err := resource.Start(t.Context()); err != nil {

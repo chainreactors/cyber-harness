@@ -13,7 +13,7 @@ export default {
   readyHintBefore: '输入消息，或使用 ',
   readyHintAfter: ' 开始扫描',
   // 手机端问候空状态 + 能力卡（仅移动端；桌面仍用 InstrumentIdle）
-  mobileGreetingTitle: '嗨，我是 AIScan',
+  mobileGreetingTitle: '嗨，我是 Cyber',
   mobileGreetingSubtitle: '说个目标，或从下面挑一个开始',
   cardScanTitle: '发起扫描',
   cardScanSub: '端口 + Web 指纹',
@@ -85,8 +85,8 @@ export default {
   agentOfflineBanner: '绑定的 agent 已离线，重连后可继续对话（/help、/agents 命令仍可用）。',
   deleteSessionConfirm: '确定删除该会话？其对话记录将被移除、实时连接会断开，此操作不可撤销。',
   // 仅供屏幕阅读器的回合状态（polite live region）。
-  a11yThinking: 'AIScan 正在处理',
-  a11yResponding: 'AIScan 正在回复',
+  a11yThinking: 'Cyber 正在处理',
+  a11yResponding: 'Cyber 正在回复',
   a11yTurnDone: '回复完成',
   // “@” 提及选择器(分类:CSTX 资产 / IOA 节点+消息 / 文件)。
   mention: {

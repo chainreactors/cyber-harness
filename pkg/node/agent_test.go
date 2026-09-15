@@ -3,7 +3,7 @@ package node
 import (
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 )
 
 func TestWebNodeID(t *testing.T) {

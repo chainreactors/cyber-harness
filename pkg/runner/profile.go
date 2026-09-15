@@ -3,11 +3,11 @@ package runner
 import (
 	"context"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
 func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (profile.Application, *agentext.Runtime, error) {

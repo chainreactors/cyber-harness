@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-var baseExpectedSkills = []string{"aiscan"}
+var baseExpectedSkills = []string{"cyber"}
 
 func expectedEmbeddedSkillNames() []string {
 	return append([]string(nil), baseExpectedSkills...)
@@ -29,9 +29,9 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 			t.Fatalf("missing %s", name)
 		}
 	}
-	skill, ok := store.ByName("aiscan")
+	skill, ok := store.ByName("cyber")
 	if !ok {
-		t.Fatal("missing aiscan")
+		t.Fatal("missing cyber")
 	}
 	if skill.Description == "" {
 		t.Fatal("description is empty")
@@ -41,15 +41,15 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 			t.Fatalf("description missing %q: %q", want, skill.Description)
 		}
 	}
-	if skill.Location != "aiscan://skills/aiscan/SKILL.md" {
+	if skill.Location != "cyber://skills/cyber/SKILL.md" {
 		t.Fatalf("location = %q", skill.Location)
 	}
-	body := store.ReadBody("aiscan")
+	body := store.ReadBody("cyber")
 	if body == "" {
 		t.Fatal("ReadBody returned empty")
 	}
 	for _, want := range []string{
-		"# AIScan ASM and Penetration Testing",
+		"# Cyber ASM and Penetration Testing",
 		"## General Execution Tools",
 		"## ASM and Penetration Tools",
 		"## Tool Invocation Rules",
@@ -79,8 +79,8 @@ func TestFormatForPrompt(t *testing.T) {
 	prompt := FormatForPrompt(loaded)
 	for _, want := range []string{
 		"<available_skills>",
-		"<name>aiscan</name>",
-		"aiscan://skills/aiscan/SKILL.md",
+		"<name>cyber</name>",
+		"cyber://skills/cyber/SKILL.md",
 		"Use the read tool to load a skill file",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -96,7 +96,7 @@ func TestFormatForPrompt(t *testing.T) {
 	hidden := []Skill{{
 		Name:        "hidden",
 		Description: "hidden skill",
-		Location:    "aiscan://skills/hidden/SKILL.md",
+		Location:    "cyber://skills/hidden/SKILL.md",
 		Internal:    true,
 	}}
 	if got := FormatForPrompt(hidden); got != "" {
@@ -110,11 +110,11 @@ func TestExpandCommand(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 
-	expanded := ExpandCommand("/skill:aiscan check this target", store)
+	expanded := ExpandCommand("/skill:cyber check this target", store)
 	for _, want := range []string{
-		`<skill name="aiscan" location="aiscan://skills/aiscan/SKILL.md">`,
-		"References are relative to aiscan://skills/aiscan.",
-		"# AIScan ASM and Penetration Testing",
+		`<skill name="cyber" location="cyber://skills/cyber/SKILL.md">`,
+		"References are relative to cyber://skills/cyber.",
+		"# Cyber ASM and Penetration Testing",
 		"check this target",
 	} {
 		if !strings.Contains(expanded, want) {
@@ -133,18 +133,18 @@ func TestExpandCommand(t *testing.T) {
 
 func TestReadVirtual(t *testing.T) {
 	store, _ := LoadEmbeddedStore()
-	content, handled, err := store.ReadVirtual("aiscan://skills/aiscan/SKILL.md")
+	content, handled, err := store.ReadVirtual("cyber://skills/cyber/SKILL.md")
 	if err != nil {
 		t.Fatalf("ReadVirtual() error = %v", err)
 	}
 	if !handled {
 		t.Fatal("ReadVirtual() handled = false")
 	}
-	if !strings.Contains(content, "name: aiscan") || !strings.Contains(content, "# AIScan ASM and Penetration Testing") {
+	if !strings.Contains(content, "name: cyber") || !strings.Contains(content, "# Cyber ASM and Penetration Testing") {
 		t.Fatalf("unexpected content:\n%s", content)
 	}
 
-	_, handled, err = store.ReadVirtual("aiscan://skills/missing/SKILL.md")
+	_, handled, err = store.ReadVirtual("cyber://skills/missing/SKILL.md")
 	if !handled || err == nil {
 		t.Fatalf("missing handled=%v err=%v, want handled error", handled, err)
 	}
@@ -152,7 +152,7 @@ func TestReadVirtual(t *testing.T) {
 
 func TestReadVirtualOKFConcept(t *testing.T) {
 	store, _ := LoadEmbeddedStore()
-	content, handled, err := store.ReadVirtual("aiscan://skills/aiscan/okf/easm/gogo.md")
+	content, handled, err := store.ReadVirtual("cyber://skills/cyber/okf/easm/gogo.md")
 	if err != nil || !handled {
 		t.Fatalf("ReadVirtual(easm/gogo) handled=%v err=%v", handled, err)
 	}
@@ -160,7 +160,7 @@ func TestReadVirtualOKFConcept(t *testing.T) {
 		t.Fatalf("unexpected concept content:\n%s", content)
 	}
 
-	body, handled, err := store.ReadVirtualBody("aiscan://skills/aiscan/okf/easm/gogo.md")
+	body, handled, err := store.ReadVirtualBody("cyber://skills/cyber/okf/easm/gogo.md")
 	if err != nil || !handled {
 		t.Fatalf("ReadVirtualBody(easm/gogo) handled=%v err=%v", handled, err)
 	}
@@ -168,7 +168,7 @@ func TestReadVirtualOKFConcept(t *testing.T) {
 		t.Fatalf("ReadVirtualBody should strip frontmatter:\n%s", body)
 	}
 
-	_, handled, err = store.ReadVirtual("aiscan://skills/aiscan/okf/easm/missing.md")
+	_, handled, err = store.ReadVirtual("cyber://skills/cyber/okf/easm/missing.md")
 	if !handled || err == nil {
 		t.Fatalf("missing concept handled=%v err=%v, want handled error", handled, err)
 	}
@@ -303,11 +303,11 @@ func TestLoadFromFileDefaultsName(t *testing.T) {
 
 func TestOverrideEmbeddedWithLocal(t *testing.T) {
 	dir := t.TempDir()
-	skillDir := filepath.Join(dir, "aiscan")
+	skillDir := filepath.Join(dir, "cyber")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nname: aiscan\ndescription: Overridden aiscan skill\n---\n# Overridden\nLocal override body"
+	content := "---\nname: cyber\ndescription: Overridden cyber skill\n---\n# Overridden\nLocal override body"
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -317,17 +317,17 @@ func TestOverrideEmbeddedWithLocal(t *testing.T) {
 	all := append(embedded, local...)
 	store := newStoreWithOverride(all)
 
-	skill, ok := store.ByName("aiscan")
+	skill, ok := store.ByName("cyber")
 	if !ok {
-		t.Fatal("missing aiscan")
+		t.Fatal("missing cyber")
 	}
 	if skill.Source != SourceProject {
 		t.Fatalf("source = %q, want project (override)", skill.Source)
 	}
-	if skill.Description != "Overridden aiscan skill" {
+	if skill.Description != "Overridden cyber skill" {
 		t.Fatalf("description = %q", skill.Description)
 	}
-	body := store.ReadBody("aiscan")
+	body := store.ReadBody("cyber")
 	if !strings.Contains(body, "Local override body") {
 		t.Fatalf("body = %q, want local override", body)
 	}

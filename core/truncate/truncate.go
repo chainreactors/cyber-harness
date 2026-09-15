@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/chainreactors/aiscan/core/util"
+	"github.com/chainreactors/cyber/core/util"
 )
 
 // ── Tier 1: 通用工具结果 (bash/read/grep/find/ls/inbox/agent result) ──

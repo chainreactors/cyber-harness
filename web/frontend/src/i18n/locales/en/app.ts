@@ -42,7 +42,7 @@ export default {
   // Mobile session drawer (opened from the header menu button)
   openSessions: 'Chat history',
   authChecking: 'Checking session…',
-  loginTitle: 'Access AIScan',
+  loginTitle: 'Access Cyber',
   loginDescription: 'Enter the access token generated at startup or configured on the command line.',
   loginTokenLabel: 'Access token',
   loginTokenPlaceholder: 'Enter token',

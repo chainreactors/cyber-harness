@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 func msg(role, content string) *aop.Message {

@@ -15,7 +15,7 @@ import (
 )
 
 func shellCommandAdapterEndpoint(runtimeDir string) string {
-	return `\\.\pipe\aiscan-shell-commands-` + fmt.Sprintf("%d-%s", os.Getpid(), filepath.Base(runtimeDir))
+	return `\\.\pipe\cyber-shell-commands-` + fmt.Sprintf("%d-%s", os.Getpid(), filepath.Base(runtimeDir))
 }
 
 func listenShellCommandAdapter(endpoint string) (net.Listener, error) {

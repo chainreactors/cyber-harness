@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/go-rod/rod/lib/launcher"
 )
 
@@ -521,9 +521,9 @@ func TestIntegration_UnifiedSessionCommands(t *testing.T) {
 	execString(t, cmd, context.Background(), []string{"network", "s1", "--stop"})
 
 	execString(t, cmd, context.Background(), []string{"dialog", "s1", "--arm"})
-	execString(t, cmd, context.Background(), []string{"evaluate", "s1", "alert('aiscan_dialog_canary')"})
+	execString(t, cmd, context.Background(), []string{"evaluate", "s1", "alert('cyber_dialog_canary')"})
 	out = execString(t, cmd, context.Background(), []string{"dialog", "s1", "--check"})
-	if !strings.Contains(out, "aiscan_dialog_canary") {
+	if !strings.Contains(out, "cyber_dialog_canary") {
 		t.Fatalf("expected captured dialog, got:\n%s", out)
 	}
 }

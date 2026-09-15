@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/chainreactors/aiscan/aop"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
+	"github.com/chainreactors/cyber/aop"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 )
 
 type applicationProbe struct{}

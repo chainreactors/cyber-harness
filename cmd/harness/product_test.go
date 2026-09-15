@@ -31,7 +31,7 @@ var (
 // The harness deliberately imports no application implementation packages.
 // Every scenario drives the same executable a user starts from the command line.
 func TestMain(m *testing.M) {
-	if pidText := os.Getenv("AISCAN_HARNESS_SIGNAL_PID"); pidText != "" {
+	if pidText := os.Getenv("CYBER_HARNESS_SIGNAL_PID"); pidText != "" {
 		pid, err := strconv.Atoi(pidText)
 		if err == nil && pid > 0 {
 			err = interruptProduct(pid)
@@ -53,7 +53,7 @@ func runHarness(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	parent := os.Getenv("AISCAN_HARNESS_ARTIFACTS")
+	parent := os.Getenv("CYBER_HARNESS_ARTIFACTS")
 	if parent == "" {
 		parent = filepath.Join(root, ".runlogs", "harness")
 	}
@@ -71,7 +71,7 @@ func runHarness(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	productBinary = filepath.Join(artifactRoot, "aiscan")
+	productBinary = filepath.Join(artifactRoot, "cyber")
 	if runtime.GOOS == "windows" {
 		productBinary += ".exe"
 	}
@@ -109,7 +109,7 @@ func buildProduct(t *testing.T) string {
 		defer cancel()
 		// The full edition implies cstx, which only compiles with cgo. The
 		// harness runner's default CGO_ENABLED=1 covers that.
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full cstx", "-o", productBinary, "./cmd/aiscan")
+		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full cstx", "-o", productBinary, "./cmd/cyber")
 		cmd.Dir = root
 		data, err := cmd.CombinedOutput()
 		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {
@@ -140,7 +140,7 @@ func newWorkspace(t *testing.T) *workspace {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &workspace{dir: dir, config: filepath.Join(dir, "aiscan.yaml"), db: filepath.Join(dir, "web.db")}
+	w := &workspace{dir: dir, config: filepath.Join(dir, "cyber.yaml"), db: filepath.Join(dir, "web.db")}
 	writeFile(t, w.config, []byte("{}\n"))
 	t.Logf("workspace: %s", dir)
 	return w
@@ -163,7 +163,7 @@ func readFile(t *testing.T, path string) []byte {
 }
 
 func redactSecrets(data []byte) []byte {
-	key := strings.TrimSpace(os.Getenv("AISCAN_HARNESS_LLM_API_KEY"))
+	key := strings.TrimSpace(os.Getenv("CYBER_HARNESS_LLM_API_KEY"))
 	if key == "" {
 		return data
 	}
@@ -240,10 +240,10 @@ func productEnvironment(includeLLM bool) []string {
 	}
 	if includeLLM {
 		for source, target := range map[string]string{
-			"AISCAN_HARNESS_LLM_API_KEY":  "AISCAN_API_KEY",
-			"AISCAN_HARNESS_LLM_BASE_URL": "AISCAN_BASE_URL",
-			"AISCAN_HARNESS_LLM_MODEL":    "AISCAN_MODEL",
-			"AISCAN_HARNESS_LLM_PROVIDER": "AISCAN_PROVIDER",
+			"CYBER_HARNESS_LLM_API_KEY":  "CYBER_API_KEY",
+			"CYBER_HARNESS_LLM_BASE_URL": "CYBER_BASE_URL",
+			"CYBER_HARNESS_LLM_MODEL":    "CYBER_MODEL",
+			"CYBER_HARNESS_LLM_PROVIDER": "CYBER_PROVIDER",
 		} {
 			if value := os.Getenv(source); value != "" {
 				env = append(env, target+"="+value)
@@ -292,7 +292,7 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *product {
 	return p
 }
 
-var listening = regexp.MustCompile(`aiscan server listening on http://(127\.0\.0\.1:\d+)`)
+var listening = regexp.MustCompile(`cyber server listening on http://(127\.0\.0\.1:\d+)`)
 
 func (w *workspace) start(t *testing.T) *product {
 	t.Helper()
@@ -360,7 +360,7 @@ func (p *product) interrupt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	controller := exec.CommandContext(ctx, bin, "-test.run=^$")
-	controller.Env = append(productEnvironment(false), "AISCAN_HARNESS_SIGNAL_PID="+strconv.Itoa(p.cmd.Process.Pid))
+	controller.Env = append(productEnvironment(false), "CYBER_HARNESS_SIGNAL_PID="+strconv.Itoa(p.cmd.Process.Pid))
 	if output, err := controller.CombinedOutput(); err != nil {
 		t.Fatalf("interrupt product: %v\n%s", err, output)
 	}
@@ -437,7 +437,7 @@ func (u *userClient) call(t *testing.T, method, path string, input any, wantStat
 	return result
 }
 
-const configRPC = "/aiscan.rpc.config.ConfigService/"
+const configRPC = "/cyber.rpc.config.ConfigService/"
 
 func (u *userClient) config(t *testing.T) map[string]any {
 	t.Helper()

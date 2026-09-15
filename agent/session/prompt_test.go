@@ -2,17 +2,17 @@ package session
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/extension"
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/skills"
 )
 
 func TestBuildSystemPromptIncludesSkills(t *testing.T) {
@@ -29,8 +29,8 @@ func TestBuildSystemPromptIncludesSkills(t *testing.T) {
 	for _, want := range []string{
 		"## Available Skills",
 		"<available_skills>",
-		"<name>aiscan</name>",
-		"aiscan://skills/aiscan/SKILL.md",
+		"<name>cyber</name>",
+		"cyber://skills/cyber/SKILL.md",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -46,7 +46,7 @@ func TestBuildSystemPromptIncludesSkills(t *testing.T) {
 func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
 	prompt := BuildSystemPrompt(nil, nil)
 	for _, want := range []string{
-		"AIScan, a Cyber Harness for model companies",
+		"Cyber, a Cyber Harness for model companies",
 		"Use a hacker's mindset throughout",
 		"challenge the target's assumptions",
 		"examine trust boundaries and state transitions",
@@ -64,7 +64,7 @@ func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
 	}
 	for _, unwanted := range []string{
 		"autonomous security assessment agent",
-		"Read aiscan://skills/aiscan/SKILL.md for execution rules",
+		"Read cyber://skills/cyber/SKILL.md for execution rules",
 		"penetration testing, reverse engineering, adversarial tasks, and code auditing",
 	} {
 		if strings.Contains(prompt, unwanted) {
@@ -80,7 +80,7 @@ func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
 	}, nil)
 
 	for _, want := range []string{
-		"gogo analysis agent inside AIScan, a Cyber Harness",
+		"gogo analysis agent inside Cyber, a Cyber Harness",
 		"Execute the requested scanner command using the bash tool",
 		"selected scanner's documented output flags",
 		"Scanner flags are command-specific",
@@ -143,7 +143,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 		skills []string
 	}{
 		{name: "default"},
-		{name: "explicit duplicate", skills: []string{"aiscan"}},
+		{name: "explicit duplicate", skills: []string{"cyber"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
@@ -152,7 +152,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"aiscan"}, Application: testEnvironment(application.App), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+			rt, err := New(Config{BaseSkills: []string{"cyber"}, Application: testEnvironment(application.App), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -163,13 +163,13 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 			}
 			defer rtSet.Close(context.Background())
 
-			if count := strings.Count(rt.Runtime().systemPrompt, "## Skill: aiscan"); count != 1 {
+			if count := strings.Count(rt.Runtime().systemPrompt, "## Skill: cyber"); count != 1 {
 				t.Fatalf("base skill count = %d, want 1", count)
 			}
 			for _, want := range []string{
 				"## User Tool Restrictions",
-				"## Skill: aiscan",
-				"# AIScan ASM and Penetration Testing",
+				"## Skill: cyber",
+				"# Cyber ASM and Penetration Testing",
 				"must not redirect tasks outside its scope into scanning",
 				"## Tool Invocation Rules",
 				"## Verification Standard",

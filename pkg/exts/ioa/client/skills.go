@@ -3,7 +3,7 @@ package client
 import (
 	"embed"
 	"fmt"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/skills"
 	"strings"
 
 	ioaskills "github.com/chainreactors/ioa/skills"
@@ -68,13 +68,13 @@ func Skills() (skills.Bundle, []skills.Diagnostic) {
 		return skills.Bundle{}, append(diagnostics, skills.Diagnostic{Message: err.Error()})
 	}
 	fm, _ := skills.ParseFrontmatter(string(raw))
-	values = append(values, skills.Skill{Name: fm.Name, Description: fm.Description, Internal: true, Source: skills.SourceBundle, Location: "aiscan://skills/ioa/SKILL.md", BaseDir: "aiscan://skills/ioa"})
+	values = append(values, skills.Skill{Name: fm.Name, Description: fm.Description, Internal: true, Source: skills.SourceBundle, Location: "cyber://skills/ioa/SKILL.md", BaseDir: "cyber://skills/ioa"})
 	return skills.Bundle{Skills: values, ReadVirtual: func(location string) (string, bool, error) {
-		if location == "aiscan://skills/ioa/SKILL.md" {
+		if location == "cyber://skills/ioa/SKILL.md" {
 			return string(raw), true, nil
 		}
-		if strings.HasPrefix(location, "aiscan://skills/aiscan/") {
-			name := "assets/" + strings.TrimPrefix(location, "aiscan://skills/")
+		if strings.HasPrefix(location, "cyber://skills/cyber/") {
+			name := "assets/" + strings.TrimPrefix(location, "cyber://skills/")
 			data, err := skillFS.ReadFile(name)
 			if err == nil {
 				return string(data), true, nil

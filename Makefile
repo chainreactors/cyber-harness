@@ -17,9 +17,9 @@ EXE :=
 NPM ?= npm
 endif
 
-STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
-FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
-RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
+STANDARD_BIN ?= $(BIN_DIR)/cyber$(EXE)
+FULL_BIN ?= $(BIN_DIR)/cyber-full$(EXE)
+RECORD_BIN ?= $(BIN_DIR)/cyber-record$(EXE)
 RUNNER_BIN ?= $(BIN_DIR)/runner$(EXE)
 
 # Standard/full match release artifacts.
@@ -41,7 +41,7 @@ RECORD_PLATFORM := unsupported
 endif
 RECORD_ARCH ?= $(shell $(GO) env GOARCH)
 RECORD_NATIVE_OUTPUT ?= dist/native
-RECORD_PREFIX := $(if $(AISCAN_RECORD_PREFIX),$(AISCAN_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/record-native/$(RECORD_PLATFORM)-$(RECORD_ARCH))
+RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/record-native/$(RECORD_PLATFORM)-$(RECORD_ARCH))
 ifeq ($(RECORD_PLATFORM),windows)
 RECORD_PKG_CONFIG := $(PROJECT_ROOT)/.github/native/pkg-config-static.cmd
 RECORD_EXTRA_LDFLAGS := -static -static-libgcc
@@ -54,8 +54,8 @@ RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_
 .PHONY: help prepare frontend proto-gen standard runner full record record-native record-native-source record-native-package web-build web-run web all clean harness harness-llm check-architecture
 
 help:
-	@echo "AIScan build targets:"
-	@echo "  make / make standard  Build the standard AIScan edition"
+	@echo "Cyber build targets:"
+	@echo "  make / make standard  Build the standard Cyber edition"
 	@echo "  make runner           Build the tag-free runner binary"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
@@ -64,7 +64,7 @@ help:
 	@echo "  make record-native    Download the prebuilt FFmpeg/x264 recorder SDK"
 	@echo "  make record-native-source  Build the recorder SDK from pinned sources"
 	@echo "  make record-native-package Package a source-built recorder SDK"
-	@echo "  make proto-gen        Regenerate all AOP and AIScan protobuf bindings"
+	@echo "  make proto-gen        Regenerate all AOP and Cyber protobuf bindings"
 	@echo "  make harness          Run user scenarios against the real product process"
 	@echo "  make harness-llm      Run real LLM scenarios (requires explicit credentials)"
 	@echo "  make check-architecture  Run static repository and dependency guards"
@@ -102,7 +102,7 @@ frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
 standard: prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
+	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/cyber
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 runner: prepare
@@ -114,7 +114,7 @@ record-native:
 ifeq ($(RECORD_PLATFORM),unsupported)
 	@echo "record native backend is not supported on this platform"
 else
-	@if [ "$(AISCAN_RECORD_BUILD_FROM_SOURCE)" = "1" ]; then \
+	@if [ "$(CYBER_RECORD_BUILD_FROM_SOURCE)" = "1" ]; then \
 		"$(BASH)" ".github/native/sdk.sh" build "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
 	else \
 		"$(BASH)" ".github/native/sdk.sh" fetch "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"; \
@@ -136,7 +136,7 @@ else
 endif
 
 full: frontend prepare
-	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/cyber
 	@echo "Built full edition: $(FULL_BIN)"
 
 ifeq ($(RECORD_PLATFORM),unsupported)
@@ -145,7 +145,7 @@ record:
 	@exit 1
 else
 record: frontend record-native prepare
-	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
+	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/cyber
 	@echo "Built record-enabled edition: $(RECORD_BIN)"
 endif
 

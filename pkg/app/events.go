@@ -1,9 +1,9 @@
 package app
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
 )
 
 // Publish stamps and publishes an event on the application's shared stream.

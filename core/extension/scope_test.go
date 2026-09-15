@@ -3,7 +3,7 @@ package extension_test
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 	"testing"
 )
 

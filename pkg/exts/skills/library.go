@@ -3,9 +3,9 @@ package skills
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/skills"
 	"path/filepath"
 )
 

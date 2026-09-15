@@ -1,14 +1,14 @@
 version: 2
 
-project_name: aiscan-community
+project_name: cyber-community
 
 before:
   hooks: []
 
 builds:
-  - id: aiscan
-    main: ./cmd/aiscan
-    binary: "aiscan"
+  - id: cyber
+    main: ./cmd/cyber
+    binary: "cyber"
     env:
       - CGO_ENABLED=0
     goos:
@@ -32,23 +32,23 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X 'github.com/chainreactors/aiscan/core/config.Version={{.Version}}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultProvider=deepseek'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultModel=deepseek-chat'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubURL={{ .Env.COMMUNITY_CYBERHUB_URL }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubKey={{ .Env.COMMUNITY_CYBERHUB_KEY }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubMode=merge'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultVerify=auto'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultTavilyKeys={{ .Env.COMMUNITY_TAVILY_KEYS }}'
+        -X 'github.com/chainreactors/cyber/core/config.Version={{.Version}}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultProvider=deepseek'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultModel=deepseek-chat'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubURL={{ .Env.COMMUNITY_CYBERHUB_URL }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubKey={{ .Env.COMMUNITY_CYBERHUB_KEY }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubMode=merge'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultVerify=auto'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultTavilyKeys={{ .Env.COMMUNITY_TAVILY_KEYS }}'
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: aiscan-agent
+  - id: cyber-agent
     main: ./cmd/agent
-    binary: "aiscan-agent"
+    binary: "cyber-agent"
     env:
       - CGO_ENABLED=0
     goos:
@@ -72,15 +72,15 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X 'github.com/chainreactors/aiscan/core/config.Version={{.Version}}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultProvider=deepseek'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultModel=deepseek-chat'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubURL={{ .Env.COMMUNITY_CYBERHUB_URL }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubKey={{ .Env.COMMUNITY_CYBERHUB_KEY }}'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultCyberhubMode=merge'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultVerify=auto'
-        -X 'github.com/chainreactors/aiscan/core/config.DefaultTavilyKeys={{ .Env.COMMUNITY_TAVILY_KEYS }}'
+        -X 'github.com/chainreactors/cyber/core/config.Version={{.Version}}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultProvider=deepseek'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultAPIKey={{ .Env.COMMUNITY_LLM_KEY }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultModel=deepseek-chat'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubURL={{ .Env.COMMUNITY_CYBERHUB_URL }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubKey={{ .Env.COMMUNITY_CYBERHUB_KEY }}'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultCyberhubMode=merge'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultVerify=auto'
+        -X 'github.com/chainreactors/cyber/core/config.DefaultTavilyKeys={{ .Env.COMMUNITY_TAVILY_KEYS }}'
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
@@ -93,16 +93,16 @@ upx:
       - amd64
 
 archives:
-  - id: aiscan
-    builds: [aiscan]
+  - id: cyber
+    builds: [cyber]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
     files:
       - none*
 
-  - id: aiscan-agent
-    builds: [aiscan-agent]
+  - id: cyber-agent
+    builds: [cyber-agent]
     name_template: "{{ .ProjectName }}-agent_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip

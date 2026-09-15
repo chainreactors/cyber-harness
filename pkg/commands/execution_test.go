@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/tmux"
+	"github.com/chainreactors/cyber/agent/tmux"
 	"github.com/chainreactors/utils/pty"
 )
 

@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"slices"
 
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
-	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
-	observeext "github.com/chainreactors/aiscan/pkg/exts/observe"
-	signalsext "github.com/chainreactors/aiscan/pkg/exts/signals"
-	skillmount "github.com/chainreactors/aiscan/pkg/exts/skills"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	files "github.com/chainreactors/aiscan/tools/files"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	harnessext "github.com/chainreactors/cyber/pkg/exts/harness"
+	observeext "github.com/chainreactors/cyber/pkg/exts/observe"
+	signalsext "github.com/chainreactors/cyber/pkg/exts/signals"
+	skillmount "github.com/chainreactors/cyber/pkg/exts/skills"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	files "github.com/chainreactors/cyber/tools/files"
 )
 
 type workspaceProfileConfig struct {

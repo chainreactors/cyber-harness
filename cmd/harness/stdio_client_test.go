@@ -190,7 +190,7 @@ func (p *stdioClient) request(t *testing.T, namespace, operation string, value a
 
 func (p *stdioClient) command(t *testing.T, line string) (string, error) {
 	t.Helper()
-	response := p.request(t, "aiscan.command.CommandProtocolMessage", "request", map[string]any{"sessionId": "operator", "line": "!" + line})
+	response := p.request(t, "cyber.command.CommandProtocolMessage", "request", map[string]any{"sessionId": "operator", "line": "!" + line})
 	if failure := field(response, "protocolError"); failure != nil {
 		return "", fmt.Errorf("%v", failure)
 	}

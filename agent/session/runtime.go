@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	prompt "github.com/chainreactors/aiscan/agent/prompt"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	prompt "github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/skills"
 )
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 
 	nodeName := rc.NodeName
 	if nodeName == "" {
-		nodeName = "aiscan"
+		nodeName = "cyber"
 	}
 	rt.nodeName = nodeName
 	executor := coretool.EmptyExecutor()

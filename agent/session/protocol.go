@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -35,7 +35,7 @@ func (rt *Runtime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop
 	for _, extension := range req.Extensions {
 		if extension != nil && extension.MessageIs(options) {
 			if err := extension.UnmarshalTo(options); err != nil {
-				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid AIScan run options: "+err.Error())}
+				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid Cyber run options: "+err.Error())}
 				return response
 			}
 			break

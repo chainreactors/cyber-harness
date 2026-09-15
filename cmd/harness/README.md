@@ -1,6 +1,6 @@
 # Repository harness
 
-`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/aiscan` 的 `full`
+`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/cyber` 的 `full`
 版本，启动真实产品子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
 进程重启与资源释放。场景测试不导入业务实现包，不注入 fake store、Provider 或 Host。
 
@@ -21,9 +21,9 @@ make harness
 
 需要 Go 与完整产品构建、运行所需的原生依赖；缺失时直接失败，不跳过或替换实现。
 Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启动两个独立的
-`aiscan agent --transport stdio` 进程。每个场景有独立的配置、数据库与
+`cyber agent --transport stdio` 进程。每个场景有独立的配置、数据库与
 数据目录。无 LLM 场景仅继承操作系统及动态库加载所需环境变量。真实 LLM 场景
-只额外注入明确配置的 `AISCAN_HARNESS_LLM_*`，不读取个人默认模型设置。
+只额外注入明确配置的 `CYBER_HARNESS_LLM_*`，不读取个人默认模型设置。
 
 当前验收范围：
 
@@ -37,12 +37,12 @@ Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启�
 | `TestLiveLLMMultiAgentIOAThreadAndIsolation`（`live_llm`） | 两个独立 AI 上下文经两个产品进程实际调用 IOA；随机任务、计算回复、节点定向与原消息引用、回执、完整线程读取、空间切换与隔离 |
 | `TestLiveLLMParentDelegatesIOASiblings`（`live_llm`） | 产品主 Agent 实际调用 `subagent` 创建两个异步子会话；子会话经 IOA 交换 offer → reply → ack；主 Agent 收到两份完成通知后读取线程并结束；校验父子事件和自动 handoff 记录 |
 
-随机场景打印种子并写入 `seed.txt`。设置 `AISCAN_HARNESS_SEED=<整数>` 可重放操作序列，
-`AISCAN_HARNESS_STEPS` 控制切换次数（默认 12，范围 1–100，CI 使用 48）；
+随机场景打印种子并写入 `seed.txt`。设置 `CYBER_HARNESS_SEED=<整数>` 可重放操作序列，
+`CYBER_HARNESS_STEPS` 控制切换次数（默认 12，范围 1–100，CI 使用 48）；
 线程调度不保证逐次一致。每次运行都记录各客户端的请求路径、响应、状态和耗时，
 以及产品进程日志、实际 YAML、数据库。真实模型密钥只经环境和内存中的 HTTP 请求传递，
 不写入 YAML。日志按完整行脱敏，HTTP 响应也在记录和报错前脱敏。默认保存在 `.runlogs/harness/<run>/`；
-`AISCAN_HARNESS_ARTIFACTS` 可指定保存父目录。临时产品二进制在运行结束后删除。
+`CYBER_HARNESS_ARTIFACTS` 可指定保存父目录。临时产品二进制在运行结束后删除。
 
 当前 CLI 在二次退出确认后调用 `os.Exit(130)`；退出测试不能证明 App 的 defer 收尾执行。
 Web 长期服务也不受 `--timeout` 控制。两点按实际用户行为记录，不把强制退出称为优雅关闭。
@@ -144,10 +144,10 @@ make harness-llm-subagent
 
 | 配置 | 类型 | 要求 |
 | --- | --- | --- |
-| `AISCAN_HARNESS_LLM_API_KEY` | Secret | 必填，使用独立测试密钥 |
-| `AISCAN_HARNESS_LLM_BASE_URL` | Actions Variable | 必填，HTTP(S) API 根地址，不含 URL 凭据或查询参数 |
-| `AISCAN_HARNESS_LLM_MODEL` | Actions Variable | 必填，支持 function calling 的模型；本地验证使用 `deepseek-chat` |
-| `AISCAN_HARNESS_LLM_PROVIDER` | Actions Variable | 可选，默认 `openai`；完整 live suite 的 IOA 操作器当前支持 `openai`、`deepseek`（OpenAI 兼容接口）；连接场景单独运行时仍支持产品其他 Provider |
+| `CYBER_HARNESS_LLM_API_KEY` | Secret | 必填，使用独立测试密钥 |
+| `CYBER_HARNESS_LLM_BASE_URL` | Actions Variable | 必填，HTTP(S) API 根地址，不含 URL 凭据或查询参数 |
+| `CYBER_HARNESS_LLM_MODEL` | Actions Variable | 必填，支持 function calling 的模型；本地验证使用 `deepseek-chat` |
+| `CYBER_HARNESS_LLM_PROVIDER` | Actions Variable | 可选，默认 `openai`；完整 live suite 的 IOA 操作器当前支持 `openai`、`deepseek`（OpenAI 兼容接口）；连接场景单独运行时仍支持产品其他 Provider |
 
 本地使用同名环境变量后执行 `make harness-llm`，或：
 

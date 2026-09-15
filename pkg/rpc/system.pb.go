@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,17 +25,17 @@ var File_rpc_system_proto protoreflect.FileDescriptor
 
 const file_rpc_system_proto_rawDesc = "" +
 	"\n" +
-	"\x10rpc/system.proto\x12\x11aiscan.rpc.system\x1a\x12types/system.proto2_\n" +
-	"\rSystemService\x12N\n" +
-	"\tGetStatus\x12\x1f.aiscan.system.GetStatusRequest\x1a .aiscan.system.GetStatusResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"\x10rpc/system.proto\x12\x10cyber.rpc.system\x1a\x12types/system.proto2]\n" +
+	"\rSystemService\x12L\n" +
+	"\tGetStatus\x12\x1e.cyber.system.GetStatusRequest\x1a\x1f.cyber.system.GetStatusResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_system_proto_goTypes = []any{
-	(*types.GetStatusRequest)(nil),  // 0: aiscan.system.GetStatusRequest
-	(*types.GetStatusResponse)(nil), // 1: aiscan.system.GetStatusResponse
+	(*types.GetStatusRequest)(nil),  // 0: cyber.system.GetStatusRequest
+	(*types.GetStatusResponse)(nil), // 1: cyber.system.GetStatusResponse
 }
 var file_rpc_system_proto_depIdxs = []int32{
-	0, // 0: aiscan.rpc.system.SystemService.GetStatus:input_type -> aiscan.system.GetStatusRequest
-	1, // 1: aiscan.rpc.system.SystemService.GetStatus:output_type -> aiscan.system.GetStatusResponse
+	0, // 0: cyber.rpc.system.SystemService.GetStatus:input_type -> cyber.system.GetStatusRequest
+	1, // 1: cyber.rpc.system.SystemService.GetStatus:output_type -> cyber.system.GetStatusResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

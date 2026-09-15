@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/host"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/pkg/host"
 	"google.golang.org/protobuf/proto"
 )
 

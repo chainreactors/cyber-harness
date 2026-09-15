@@ -3,7 +3,7 @@ package tool
 import (
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 // Result is the value returned by Tool.Execute — the AOP tool result proto.

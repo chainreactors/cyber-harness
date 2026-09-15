@@ -13,7 +13,7 @@ import './index.css'
 registerChatExtensions()
 
 // @cyber/ui's ConfirmDialog is i18n-agnostic (no react-i18next dependency): it
-// defaults to English and takes localised strings via `labels`. Inject aiscan's
+// defaults to English and takes localised strings via `labels`. Inject cyber's
 // translations here so the shared atom speaks the app's language without the
 // library having to know about our i18n setup.
 function LocalizedConfirmProvider({ children }: { children: React.ReactNode }) {
@@ -29,13 +29,13 @@ function LocalizedConfirmProvider({ children }: { children: React.ReactNode }) {
 
 declare global {
   interface Window {
-    __AISCAN_REACT_ROOT__?: ReturnType<typeof ReactDOM.createRoot>
+    __CYBER_REACT_ROOT__?: ReturnType<typeof ReactDOM.createRoot>
   }
 }
 
 const rootElement = document.getElementById('root')!
-const root = window.__AISCAN_REACT_ROOT__ ?? ReactDOM.createRoot(rootElement)
-window.__AISCAN_REACT_ROOT__ = root
+const root = window.__CYBER_REACT_ROOT__ ?? ReactDOM.createRoot(rootElement)
+window.__CYBER_REACT_ROOT__ = root
 
 root.render(
   <React.StrictMode>

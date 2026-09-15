@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	types "github.com/chainreactors/cyber/pkg/types"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
 // Protobuf JSON base64-encodes SCO import bytes, so the 50 MiB business limit

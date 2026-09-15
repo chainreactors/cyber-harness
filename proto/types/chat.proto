@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package aiscan.chat;
+package cyber.chat;
 
 import "aop/chat.proto";
 import "types/command.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+option go_package = "github.com/chainreactors/cyber/pkg/types;types";
 
 // SessionHistory is persisted as an AOP event extension. It makes transcript
 // inheritance explicit without changing the shared AOP protocol schema.
@@ -84,5 +84,5 @@ message ListCommandsRequest {
 }
 
 message ListCommandsResponse {
-  repeated aiscan.command.CommandSpec commands = 1;
+  repeated cyber.command.CommandSpec commands = 1;
 }

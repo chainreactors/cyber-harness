@@ -20,12 +20,12 @@ func TestDiscoverPriority(t *testing.T) {
 	}{
 		{
 			name:          "environment overrides system browser",
-			configured:    " /opt/aiscan/chrome ",
+			configured:    " /opt/cyber/chrome ",
 			configuredSet: true,
-			resolvePath:   "/opt/aiscan/chrome",
+			resolvePath:   "/opt/cyber/chrome",
 			systemPath:    "/usr/bin/chrome",
 			systemFound:   true,
-			want:          Binary{Path: "/opt/aiscan/chrome", Source: SourceEnvironment},
+			want:          Binary{Path: "/opt/cyber/chrome", Source: SourceEnvironment},
 		},
 		{
 			name:          "invalid environment is an error",

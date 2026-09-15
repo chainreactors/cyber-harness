@@ -858,7 +858,7 @@ const file_aop_content_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12&\n" +
-	"\acontent\x18\x04 \x03(\v2\f.aop.ContentR\acontentB%Z#github.com/chainreactors/aiscan/aopb\x06proto3"
+	"\acontent\x18\x04 \x03(\v2\f.aop.ContentR\acontentB$Z\"github.com/chainreactors/cyber/aopb\x06proto3"
 
 var (
 	file_aop_content_proto_rawDescOnce sync.Once

@@ -14,7 +14,7 @@ export default {
   members: '成员',
   metadata: '元数据',
   noNodes: '暂无 IOA 节点连接',
-  noNodesHint: '将 Agent 接入 AIScan Server 后，会在这里注册对应的 IOA 节点。',
+  noNodesHint: '将 Agent 接入 Cyber Server 后，会在这里注册对应的 IOA 节点。',
   noSpaces: '暂无 IOA 空间',
   noSpacesHint: 'Agent 加入协作上下文后，空间会显示在这里。',
   noMessages: '当前空间暂无消息',

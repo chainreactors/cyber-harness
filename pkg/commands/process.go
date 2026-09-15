@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/utils/pty"
 )
 

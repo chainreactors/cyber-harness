@@ -3,8 +3,8 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	cfg "github.com/chainreactors/cyber/core/config"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/types/known/structpb"
 	"net/url"
 	"reflect"

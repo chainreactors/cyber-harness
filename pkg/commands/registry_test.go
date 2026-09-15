@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
 type testCommandGroup struct {

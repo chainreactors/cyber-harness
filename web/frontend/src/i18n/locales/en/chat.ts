@@ -13,7 +13,7 @@ export default {
   readyHintBefore: 'Type a message or use ',
   readyHintAfter: ' to start scanning',
   // Mobile greeting empty state + capability cards (mobile only; desktop keeps InstrumentIdle)
-  mobileGreetingTitle: "Hi, I'm AIScan",
+  mobileGreetingTitle: "Hi, I'm Cyber",
   mobileGreetingSubtitle: 'Name a target, or pick one below',
   cardScanTitle: 'Run a scan',
   cardScanSub: 'Ports + web fingerprint',
@@ -85,8 +85,8 @@ export default {
   agentOfflineBanner: 'The bound agent is offline — reconnect it to continue chatting (/help and /agents still work).',
   deleteSessionConfirm: 'Delete this session? Its transcript is removed and the live connection is closed. This cannot be undone.',
   // Screen-reader-only turn status (polite live region).
-  a11yThinking: 'AIScan is working',
-  a11yResponding: 'AIScan is responding',
+  a11yThinking: 'Cyber is working',
+  a11yResponding: 'Cyber is responding',
   a11yTurnDone: 'Response complete',
   // "@" mention picker (categorized: CSTX assets / IOA nodes + messages / File).
   mention: {

@@ -5,10 +5,10 @@ package console
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/commandline"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/core/commandline"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	"github.com/chainreactors/cyber/pkg/types"
 	"github.com/spf13/cobra"
 )
 

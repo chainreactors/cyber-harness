@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/tmux"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/terminal"
+	"github.com/chainreactors/cyber/agent/tmux"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/terminal"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive

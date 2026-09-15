@@ -8,17 +8,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/console"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/console"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/pkg/terminal"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
@@ -177,7 +177,7 @@ func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, er
 	if filename == "." || filename == "" {
 		filename = "upload"
 	}
-	dir := filepath.Join(os.TempDir(), "aiscan-uploads")
+	dir := filepath.Join(os.TempDir(), "cyber-uploads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}

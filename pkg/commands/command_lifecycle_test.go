@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 )
 
 func TestCommandRegistrationsAreGroupedAndImmutable(t *testing.T) {

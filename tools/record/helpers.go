@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 func normalizeDuration(seconds float64, required bool) (time.Duration, error) {
@@ -82,7 +82,7 @@ func (t *Tool) outputPath(ctx context.Context, requested, base, ext string) (str
 	path := strings.TrimSpace(requested)
 	if path == "" {
 		if invocationDir := operation.InvocationFromContext(ctx).WorkDir; invocationDir != "" {
-			path = filepath.Join(invocationDir, ".aiscan", "record", base+ext)
+			path = filepath.Join(invocationDir, ".cyber", "record", base+ext)
 		} else {
 			path = filepath.Join(t.outputDir, base+ext)
 		}

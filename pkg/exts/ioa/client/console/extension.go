@@ -3,9 +3,9 @@ package console
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	"github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	"github.com/chainreactors/cyber/tools/ioa"
 )
 
 // Extension installs IOA presentation only when a profile selects a TUI.

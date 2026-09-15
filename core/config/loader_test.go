@@ -9,7 +9,7 @@ import (
 
 func writeTestConfig(t *testing.T, dir, content string) string {
 	t.Helper()
-	path := filepath.Join(dir, "aiscan.yaml")
+	path := filepath.Join(dir, "cyber.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ ioa:
 `)
 
 	var opt Option
-	err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt)
+	err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ ioa:
 
 func TestLoadConfigIgnoresNonYamlSuffix(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "aiscan.yaml.tmp-123")
+	path := filepath.Join(dir, "cyber.yaml.tmp-123")
 	if err := os.WriteFile(path, []byte("llm:\n  provider: openai\n  model: staged-model\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ recon:
 `)
 
 	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &opt); err != nil {
 		t.Fatal(err)
 	}
 	if opt.ReconLimit == nil || *opt.ReconLimit != 0 {
@@ -159,7 +159,7 @@ cyberhub:
 `)
 
 	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &opt); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &opt); err != nil {
 		t.Fatal(err)
 	}
 	if opt.Provider != "" {
@@ -189,7 +189,7 @@ cyberhub:
 	option.APIKey = "cli-key"
 
 	var loaded Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
 		t.Fatal(err)
 	}
 	mergeOption(&option, &loaded)
@@ -246,7 +246,7 @@ llm:
 
 		option := Option{}
 		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
+		if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
 			t.Fatal(err)
 		}
 		mergeOption(&option, &loaded)
@@ -274,7 +274,7 @@ llm:
 
 		option := Option{}
 		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &loaded); err != nil {
+		if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
 			t.Fatal(err)
 		}
 		mergeOption(&option, &loaded)
@@ -298,7 +298,7 @@ search:
 `)
 
 	var option Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &option); err != nil {
 		t.Fatal(err)
 	}
 	if option.SearchConfig.TavilyKeys != "K1,K2" {
@@ -314,7 +314,7 @@ scan:
 `)
 
 	var option Option
-	if err := LoadConfig(filepath.Join(dir, "aiscan.yaml"), &option); err != nil {
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &option); err != nil {
 		t.Fatal(err)
 	}
 	if got := option.ScanConfig.Verify; got != "critical" {
@@ -340,7 +340,7 @@ llm:
 	}
 
 	if path == "" {
-		t.Fatal("expected aiscan.yaml to be found")
+		t.Fatal("expected cyber.yaml to be found")
 	}
 	if option.Provider != "found-provider" {
 		t.Errorf("Provider: got %q, want %q", option.Provider, "found-provider")
@@ -384,7 +384,7 @@ llm:
 
 func TestLoadAndApplyConfigRejectsMalformedFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "aiscan.yaml")
+	path := filepath.Join(dir, "cyber.yaml")
 	if err := os.WriteFile(path, []byte("llm:\n  provider: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestInitDefaultConfig(t *testing.T) {
 
 	var opt Option
 	dir := t.TempDir()
-	path := filepath.Join(dir, "aiscan.yaml")
+	path := filepath.Join(dir, "cyber.yaml")
 	os.WriteFile(path, []byte(content), 0o644)
 	if err := LoadConfig(path, &opt); err != nil {
 		t.Errorf("generated config should be parseable: %v", err)
@@ -499,11 +499,11 @@ llm:
 cyberhub:
   url: http://config-hub:9000
 `)
-	t.Setenv("AISCAN_MODEL", "env-model")
-	t.Setenv("AISCAN_BASE_URL", "https://env.example/v1")
-	t.Setenv("AISCAN_API_KEY", "env-key")
-	t.Setenv("AISCAN_LLM_PROXY", "http://env-proxy:7890")
-	t.Setenv("AISCAN_CYBERHUB_URL", "http://env-hub:9000")
+	t.Setenv("CYBER_MODEL", "env-model")
+	t.Setenv("CYBER_BASE_URL", "https://env.example/v1")
+	t.Setenv("CYBER_API_KEY", "env-key")
+	t.Setenv("CYBER_LLM_PROXY", "http://env-proxy:7890")
+	t.Setenv("CYBER_CYBERHUB_URL", "http://env-hub:9000")
 
 	withDefaults(t, func() {
 		origDir, _ := os.Getwd()
@@ -537,9 +537,9 @@ func TestResolveRuntimeConfigCLIWinsOverEnv(t *testing.T) {
 llm:
   model: config-model
 `)
-	t.Setenv("AISCAN_MODEL", "env-model")
-	t.Setenv("AISCAN_BASE_URL", "https://env.example/v1")
-	t.Setenv("AISCAN_API_KEY", "env-key")
+	t.Setenv("CYBER_MODEL", "env-model")
+	t.Setenv("CYBER_BASE_URL", "https://env.example/v1")
+	t.Setenv("CYBER_API_KEY", "env-key")
 
 	withDefaults(t, func() {
 		origDir, _ := os.Getwd()
@@ -631,8 +631,8 @@ llm:
 }
 
 func TestResolveRuntimeConfigRejectsUnsupportedProvider(t *testing.T) {
-	t.Setenv("AISCAN_PROVIDER", "")
-	t.Setenv("AISCAN_API_KEY", "")
+	t.Setenv("CYBER_PROVIDER", "")
+	t.Setenv("CYBER_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "openai-compatible-key")
 
@@ -674,9 +674,9 @@ func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
 
 func TestApplyEnvironmentCentralizesRuntimeAndUncoverValues(t *testing.T) {
 	values := map[string]string{
-		"AISCAN_DATA_DIR":        "env-data",
-		"AISCAN_RENDER":          "static",
-		"AISCAN_REPL":            "fast",
+		"CYBER_DATA_DIR":        "env-data",
+		"CYBER_RENDER":          "static",
+		"CYBER_REPL":            "fast",
 		"PLAYWRIGHT_CLI_SESSION": "browser-1",
 		"SHODAN_API_KEY":         "shodan-key",
 	}
@@ -725,9 +725,9 @@ func TestResolveRuntimeConfigTavilyPriority(t *testing.T) {
 
 // A provider-scoped model env (ANTHROPIC_MODEL) is often injected by the
 // surrounding environment for another tool (a Claude-Code style gateway). It must
-// NOT override a model the user configured for aiscan itself — otherwise editing
-// the model in the config file / Settings UI has no effect at runtime. AISCAN_MODEL
-// (aiscan's own namespace) keeps overriding; the fallback provider env only fills
+// NOT override a model the user configured for cyber itself — otherwise editing
+// the model in the config file / Settings UI has no effect at runtime. CYBER_MODEL
+// (cyber's own namespace) keeps overriding; the fallback provider env only fills
 // an empty slot.
 func TestResolveRuntimeConfigConfigModelBeatsFallbackProviderModelEnv(t *testing.T) {
 	dir := t.TempDir()
@@ -830,7 +830,7 @@ llm:
 
 func TestResolveRuntimeConfigCandidateUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
 	for _, key := range []string{
-		"AISCAN_PROVIDER", "AISCAN_MODEL", "AISCAN_BASE_URL", "AISCAN_API_KEY",
+		"CYBER_PROVIDER", "CYBER_MODEL", "CYBER_BASE_URL", "CYBER_API_KEY",
 		"OPENAI_MODEL", "OPENAI_BASE_URL", "OPENAI_API_KEY",
 	} {
 		t.Setenv(key, "")
@@ -850,7 +850,7 @@ llm:
       api_key: staged-key
       model: staged-model
 `)
-	path := filepath.Join(dir, "aiscan.yaml")
+	path := filepath.Join(dir, "cyber.yaml")
 
 	staged := Option{MiscOptions: MiscOptions{ConfigFile: path}}
 	if _, err := ResolveRuntimeConfig(&staged, false); err != nil {

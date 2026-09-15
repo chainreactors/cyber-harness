@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	agentprovider "github.com/chainreactors/aiscan/agent/provider"
-	configpkg "github.com/chainreactors/aiscan/core/config"
-	probe "github.com/chainreactors/aiscan/pkg/probe"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	agentprovider "github.com/chainreactors/cyber/agent/provider"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	probe "github.com/chainreactors/cyber/pkg/probe"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API

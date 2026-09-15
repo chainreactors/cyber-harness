@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/utils/pty"
 )
 

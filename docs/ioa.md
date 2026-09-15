@@ -1,6 +1,6 @@
 # IOA 客户端与服务端扩展
 
-IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。AIScan 通过两个独立扩展集成：
+IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。Cyber 通过两个独立扩展集成：
 
 | 扩展 | 所有权 | 对外业务能力 |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/r
 提供 `/spaces`、`/nodes`、`/messages`、`/context`、补全和状态行，复用同一个已注册身份。
 Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭客户端；查询随扩展关闭而取消并排空。
 
-独立查询 CLI 在 `cmd/aiscan` 装配仅含 client ext 的图；连通性探测使用一次性的只读 client ext，
+独立查询 CLI 在 `cmd/cyber` 装配仅含 client ext 的图；连通性探测使用一次性的只读 client ext，
 支持已有 bearer token，且不自动注册节点。Console、Node、Runner 和 Web 不直接构造 IOA SDK。
 
 
@@ -53,7 +53,7 @@ Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭�
 
 只有 client/server 两个生命周期扩展。`client/cli`、`client/console`、`client/probe` 和
 `server/cli` 是静态适配代码，不创建第三个 Extension，也不加入另一套生命周期。
-`cmd/aiscan/ioa_composition.go` 在解析参数前注册它们；运行时选择仍由具体 Profile 决定。
+`cmd/cyber/ioa_composition.go` 在解析参数前注册它们；运行时选择仍由具体 Profile 决定。
 
 - `core/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
 - `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
@@ -99,16 +99,16 @@ Web protobuf 增加 `extensions` 数据及脱敏视图；旧 IOA protobuf 字段
 客户端提供静态 `skills.Bundle`，由 Profile 在构造 App 时选择。
 未安装客户端时，不加载 IOA 使用说明或协议 skills。
 
-- 使用说明：`aiscan://skills/ioa/SKILL.md`
+- 使用说明：`cyber://skills/ioa/SKILL.md`
 - 协议定义：`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`
 - 协议 schema：`ioa://skills/<name>/schema.json`
 
-覆盖顺序为内置 → 扩展 Bundle → `.aiscan/skills` → `.agent/skills` → CLI 路径。
+覆盖顺序为内置 → 扩展 Bundle → `.cyber/skills` → `.agent/skills` → CLI 路径。
 Bundle 不提供热注册或另一套生命周期。
 
 ## 服务端托管
 
-独立 `aiscan ioa serve` 和 Web 都安装同一个服务端扩展，分别挂载根路径和 `/ioa/`。
+独立 `cyber ioa serve` 和 Web 都安装同一个服务端扩展，分别挂载根路径和 `/ioa/`。
 服务端默认使用内存 SQLite；业务 Store 与 Web 管理数据库不合并。
 构造时不打开数据库。扩展加载后才发布业务能力；未加载和关闭后的 handler 返回 503。
 关闭先拒绝新请求、取消 SSE、等待请求退出，最后关闭 Store；等待超时保留 Store 供重试。
@@ -125,8 +125,8 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 根目录 `go.work` 联调 workspace 随之移除，构建不再依赖相邻仓库的本地路径。
 
 ```text
-go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service
+go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/cyber ./pkg/web/service
 go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./skills
-go test -tags full cstx ./cmd/aiscan ./pkg/web/service
+go test -tags full cstx ./cmd/cyber ./pkg/web/service
 go test github.com/chainreactors/ioa/server
 ```

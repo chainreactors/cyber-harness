@@ -3,10 +3,10 @@ package tools
 import (
 	"fmt"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/scan"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
 func NewScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (commands.Command, error) {
@@ -23,7 +23,7 @@ func NewScanCommand(engines *engine.Set, options []scan.Option, proxy string, ev
 	impl := scan.New(engines, scanOptions...)
 	return commands.Command{
 		Name: impl.Name(), Usage: impl.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/easm/scan.md",
+		DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
 		Run:             impl.Run,
 	}, nil
 }

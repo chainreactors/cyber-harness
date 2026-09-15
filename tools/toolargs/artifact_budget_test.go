@@ -8,11 +8,11 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/operation"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/operation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,7 +97,7 @@ func TestOversizedRecordKeepsItsFieldsAndLosesOnlyBulk(t *testing.T) {
 		"response.body": record.Response.Body,
 		"response.raw":  record.Response.Raw,
 	} {
-		assert.Contains(t, cut, "aiscan: truncated, 5242880 bytes total", name)
+		assert.Contains(t, cut, "cyber: truncated, 5242880 bytes total", name)
 		assert.LessOrEqual(t, len(cut), maxArtifactStringBytes, name)
 	}
 }
@@ -125,7 +125,7 @@ func TestManySmallStringsAreBoundedAndNeverDropped(t *testing.T) {
 		Budget   struct {
 			OriginalBytes int  `json:"original_bytes"`
 			Truncated     bool `json:"truncated"`
-		} `json:"_aiscan_artifact"`
+		} `json:"_cyber_artifact"`
 	}
 	require.NoError(t, json.Unmarshal(bounded, &probe), "the result is always valid JSON")
 	assert.Equal(t, "http://target/list", probe.Endpoint)
@@ -160,7 +160,7 @@ func TestTruncationMarkerFitsInsideStringBudget(t *testing.T) {
 	require.LessOrEqual(t, len(encoded), 512)
 	var decoded string
 	require.NoError(t, json.Unmarshal(encoded, &decoded))
-	assert.Contains(t, decoded, "aiscan: truncated")
+	assert.Contains(t, decoded, "cyber: truncated")
 	assert.True(t, utf8.ValidString(decoded))
 	assert.Less(t, len(decoded), len(value))
 }
@@ -195,7 +195,7 @@ func TestInvalidOversizedJSONFallsBackToBoundedRecord(t *testing.T) {
 			OriginalBytes  int  `json:"original_bytes"`
 			PayloadOmitted bool `json:"payload_omitted"`
 			Truncated      bool `json:"truncated"`
-		} `json:"_aiscan_artifact"`
+		} `json:"_cyber_artifact"`
 	}
 	require.NoError(t, json.Unmarshal(bounded, &record))
 	assert.Equal(t, len(data), record.Budget.OriginalBytes)

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/types"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {

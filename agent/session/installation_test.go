@@ -2,11 +2,11 @@ package session
 import (
  "context"
  "errors"
- "github.com/chainreactors/aiscan/agent"
- "github.com/chainreactors/aiscan/agent/prompt"
- "github.com/chainreactors/aiscan/core/extension"
- apppkg "github.com/chainreactors/aiscan/pkg/app"
- loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
+ "github.com/chainreactors/cyber/agent"
+ "github.com/chainreactors/cyber/agent/prompt"
+ "github.com/chainreactors/cyber/core/extension"
+ apppkg "github.com/chainreactors/cyber/pkg/app"
+ loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 )
 // Legacy integration scenarios exercise both resources through a test fixture.
 // Production profiles install separate Agent and Session nodes.

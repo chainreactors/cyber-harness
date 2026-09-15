@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/extension"
 )
 
 var ErrUnavailable = errors.New("agent extension is not active")

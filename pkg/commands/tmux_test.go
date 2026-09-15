@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
+	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
 )
 
 type testOutputWriter struct{ bytes.Buffer }

@@ -153,7 +153,7 @@ const file_aop_sco_protocol_proto_rawDesc = "" +
 	"\x0fProtocolMessage\x12&\n" +
 	"\x05nodes\x18\n" +
 	" \x01(\v2\x0e.aop.sco.NodesH\x00R\x05nodesB\t\n" +
-	"\amessageB-Z+github.com/chainreactors/aiscan/aop/sco;scob\x06proto3"
+	"\amessageB,Z*github.com/chainreactors/cyber/aop/sco;scob\x06proto3"
 
 var (
 	file_aop_sco_protocol_proto_rawDescOnce sync.Once

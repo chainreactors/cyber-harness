@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/pkg/types"
 	proto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -51,7 +51,7 @@ func (s *Service) PublishUserMessage(sessionID, turnID string, message *aop.Mess
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
 		SessionId: sessionID,
 		TurnId:    turnID,
-		Emitter:   "aiscan.web",
+		Emitter:   "cyber.web",
 		Payload:   &aop.Event_Message{Message: userMessage},
 	})
 }
@@ -119,10 +119,10 @@ func (s *Service) broadcastAOPEvent(sessionID string, event *aop.Event, cursor i
 // broadcastHubError emits a hub-originated failure as an AOP error event: the
 // code names a translatable template (mirrored under `sys.*` in the frontend
 // locales), message is the English fallback, and params feed i18n
-// interpolation via the aiscan.web extension.
+// interpolation via the cyber.web extension.
 func (s *Service) broadcastHubError(sessionID, code, message string, params map[string]any) {
 	event := &aop.Event{
-		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "cyber.web",
 		Payload: &aop.Event_Error{Error: &aop.ProtocolError{Code: code, Message: message}},
 	}
 	if len(params) > 0 {
@@ -136,7 +136,7 @@ func (s *Service) broadcastHubError(sessionID, code, message string, params map[
 func (s *Service) broadcastHubTurnEnded(sessionID, turnID, code, message string) {
 	ended := &aop.TurnEnded{StopReason: "error", Error: &aop.ProtocolError{Code: code, Message: message}}
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
-		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
+		SessionId: sessionID, TurnId: turnID, Emitter: "cyber.web",
 		Payload: &aop.Event_TurnEnded{TurnEnded: ended},
 	})
 }
@@ -169,7 +169,7 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 
 func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, metadata *types.WebMessageMetadata) {
 	event := &aop.Event{
-		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "cyber.web",
 		Payload: &aop.Event_Message{Message: &aop.Message{
 			Id: generateID(), Role: "system", Content: []*aop.Content{aop.Text(fallback)},
 		}},
@@ -197,7 +197,7 @@ func (s *Service) broadcastScanComplete(scanID string) {
 	}
 	s.BroadcastAOPEvent(sid, &aop.Event{
 		SessionId: sid,
-		Emitter:   "aiscan.web",
+		Emitter:   "cyber.web",
 		Payload:   &aop.Event_Extension{Extension: value},
 	})
 }

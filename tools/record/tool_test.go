@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/operation"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 type fakeBackend struct {
@@ -193,7 +193,7 @@ func TestDefaultOutputUsesInvocationRecordDir(t *testing.T) {
 	if err := json.Unmarshal([]byte(coretool.ResultText(result)), &meta); err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(dir, ".aiscan", "record")
+	wantDir := filepath.Join(dir, ".cyber", "record")
 	if filepath.Dir(meta.Output) != wantDir {
 		t.Fatalf("result directory = %s, want %s", filepath.Dir(meta.Output), wantDir)
 	}

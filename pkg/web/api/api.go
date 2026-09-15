@@ -1,4 +1,4 @@
-// Package api implements AIScan's protocol-neutral Web management API.
+// Package api implements Cyber's protocol-neutral Web management API.
 //
 // Methods consume and return generated protobuf messages. Transport packages
 // only adapt envelopes and error codes; Agent execution remains delegated to
@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type Code string

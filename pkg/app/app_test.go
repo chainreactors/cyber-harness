@@ -6,12 +6,12 @@ import (
 	"context"
 	"encoding/json"
 
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/pkg/commands"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/pkg/toolset"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,12 +19,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	providerapi "github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent"
+	providerapi "github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/utils/parsers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -146,7 +146,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	}
 
 	app.Publish(&aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "call-1", Name: "gogo"}},
 	})
 	app.Progress.Emit(&toolpb.Progress{Tool: "gogo", Text: "raw PTY bytes", CallId: "call-1"})
@@ -157,7 +157,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		t.Fatal(err)
 	}
 	artifactEvent := &aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 	}
 	artifactExtension, err := anypb.New(&toolpb.Artifact{
 		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: gogoResult.GetTarget(), Data: raw,
@@ -172,7 +172,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	}
 	app.Publish(artifactEvent)
 	app.Publish(&aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
 	})
 	if err := appSet.Close(context.Background()); err != nil {

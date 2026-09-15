@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 func TestAppConfigPreservesCaptureSelection(t *testing.T) {

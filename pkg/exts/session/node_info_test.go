@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/cmd/harness"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/skills"
 )
 
 func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
@@ -38,11 +38,11 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	registry := harness.Commands(t, "commands",
 		commands.Command{
 			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
-			DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
+			DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md",
 			Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
 		}, commands.Command{
 			Name: "tmux", Usage: "Usage: tmux <action>",
-			DescriptionPath: "aiscan://skills/aiscan/okf/runtime/tmux.md",
+			DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
 			Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
 		})
 	store, diagnostics := skills.LoadEmbeddedStore()
@@ -69,7 +69,7 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	if got["!tmux"] == nil || got["!tmux"].usage != "!tmux <action>" {
 		t.Fatalf("!tmux = %+v", got["!tmux"])
 	}
-	if got["!tmux"].description != "PTY session manager built into aiscan. Bash commands stay foreground by default and move to background only when the agent sets wait." {
+	if got["!tmux"].description != "PTY session manager built into cyber. Bash commands stay foreground by default and move to background only when the agent sets wait." {
 		t.Fatalf("!tmux description = %q", got["!tmux"].description)
 	}
 }

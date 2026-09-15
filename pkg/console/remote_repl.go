@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 
-	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/pkg/commands"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -42,7 +42,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 		option = &cfg.Option{}
 	}
 	control := rlterm.NewControl(true, 80, 24)
-	info, err := manager.CreateInteractiveFuncWithOptions(ctx, MainREPLName, "aiscan repl", pty.InteractiveOptions{
+	info, err := manager.CreateInteractiveFuncWithOptions(ctx, MainREPLName, "cyber repl", pty.InteractiveOptions{
 		Timeout: 0, StripANSI: false, Resize: control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		defer close(r.done)

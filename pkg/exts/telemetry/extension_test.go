@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/output"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/output"
+	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 type shortWriter struct{ writes int }

@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {

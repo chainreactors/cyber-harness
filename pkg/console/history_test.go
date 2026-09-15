@@ -2,22 +2,22 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/extension"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {

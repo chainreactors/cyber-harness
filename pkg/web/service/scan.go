@@ -13,13 +13,13 @@ import (
 	"runtime/debug"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	types "github.com/chainreactors/cyber/pkg/types"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -360,7 +360,7 @@ func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writ
 	app, release := s.acquireApp()
 	defer release()
 	if app == nil || app.Bash == nil {
-		return "", fmt.Errorf("aiscan runtime is not ready")
+		return "", fmt.Errorf("cyber runtime is not ready")
 	}
 	bash := app.Bash
 	var text strings.Builder

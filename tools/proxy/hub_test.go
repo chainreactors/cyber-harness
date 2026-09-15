@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // newTestHub starts a hub (capture or relay) with an isolated CA dir and returns

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/core/telemetry"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )

@@ -4,7 +4,7 @@ package skills
 import (
 	"context"
 	"fmt"
-	files "github.com/chainreactors/aiscan/tools/files"
+	files "github.com/chainreactors/cyber/tools/files"
 	"io"
 	"os"
 	"path"
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	coreextension "github.com/chainreactors/aiscan/core/extension"
+	coreextension "github.com/chainreactors/cyber/core/extension"
 )
 
 type Extension struct {

@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {

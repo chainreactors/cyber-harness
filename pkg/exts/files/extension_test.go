@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
@@ -239,7 +239,7 @@ func TestSymlinkCannotLeaveConfiguredRoot(t *testing.T) {
 }
 
 func TestProductionDependenciesStayIndependent(t *testing.T) {
-	const prefix = "github.com/chainreactors/aiscan/"
+	const prefix = "github.com/chainreactors/cyber/"
 	cmd := exec.CommandContext(t.Context(), "go", "list", "-mod=readonly", "-deps", prefix+"pkg/exts/files")
 	output, err := cmd.CombinedOutput()
 	if err != nil {

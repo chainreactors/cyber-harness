@@ -24,9 +24,9 @@ import (
 	"sync"
 	"time"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // A single stable, modern Chrome identity. Keeping one fingerprint per process
@@ -857,8 +857,8 @@ func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, 
 		BodyLength:  size,
 	}
 	// The compact observation follows CSTX's web schema, which the server reads
-	// as its "spray" artifact; aiscan names the producer.
-	c.EmitArtifactCtx(ctx, "aiscan", toolpb.ArtifactKindWeb, summary.URL, summary)
+	// as its "spray" artifact; cyber names the producer.
+	c.EmitArtifactCtx(ctx, "cyber", toolpb.ArtifactKindWeb, summary.URL, summary)
 }
 
 func headerValue(headers []traffic.Pair, name string) string {

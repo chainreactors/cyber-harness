@@ -3,10 +3,10 @@ package app
 import (
 	"strings"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/edition"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/edition"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type RuntimeFeatures struct {

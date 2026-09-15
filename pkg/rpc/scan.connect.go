@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// ScanServiceName is the fully-qualified name of the ScanService service.
-	ScanServiceName = "aiscan.rpc.scan.ScanService"
+	ScanServiceName = "cyber.rpc.scan.ScanService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,19 +34,19 @@ const (
 // period.
 const (
 	// ScanServiceSubmitScanProcedure is the fully-qualified name of the ScanService's SubmitScan RPC.
-	ScanServiceSubmitScanProcedure = "/aiscan.rpc.scan.ScanService/SubmitScan"
+	ScanServiceSubmitScanProcedure = "/cyber.rpc.scan.ScanService/SubmitScan"
 	// ScanServiceGetScanProcedure is the fully-qualified name of the ScanService's GetScan RPC.
-	ScanServiceGetScanProcedure = "/aiscan.rpc.scan.ScanService/GetScan"
+	ScanServiceGetScanProcedure = "/cyber.rpc.scan.ScanService/GetScan"
 	// ScanServiceListScansProcedure is the fully-qualified name of the ScanService's ListScans RPC.
-	ScanServiceListScansProcedure = "/aiscan.rpc.scan.ScanService/ListScans"
+	ScanServiceListScansProcedure = "/cyber.rpc.scan.ScanService/ListScans"
 	// ScanServiceCancelScanProcedure is the fully-qualified name of the ScanService's CancelScan RPC.
-	ScanServiceCancelScanProcedure = "/aiscan.rpc.scan.ScanService/CancelScan"
+	ScanServiceCancelScanProcedure = "/cyber.rpc.scan.ScanService/CancelScan"
 	// ScanServiceGetScanReportProcedure is the fully-qualified name of the ScanService's GetScanReport
 	// RPC.
-	ScanServiceGetScanReportProcedure = "/aiscan.rpc.scan.ScanService/GetScanReport"
+	ScanServiceGetScanReportProcedure = "/cyber.rpc.scan.ScanService/GetScanReport"
 )
 
-// ScanServiceClient is a client for the aiscan.rpc.scan.ScanService service.
+// ScanServiceClient is a client for the cyber.rpc.scan.ScanService service.
 type ScanServiceClient interface {
 	SubmitScan(context.Context, *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error)
 	GetScan(context.Context, *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error)
@@ -55,7 +55,7 @@ type ScanServiceClient interface {
 	GetScanReport(context.Context, *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error)
 }
 
-// NewScanServiceClient constructs a client for the aiscan.rpc.scan.ScanService service. By default,
+// NewScanServiceClient constructs a client for the cyber.rpc.scan.ScanService service. By default,
 // it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
 // sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
 // or connect.WithGRPCWeb() options.
@@ -108,32 +108,32 @@ type scanServiceClient struct {
 	getScanReport *connect.Client[types.GetScanReportRequest, types.GetScanReportResponse]
 }
 
-// SubmitScan calls aiscan.rpc.scan.ScanService.SubmitScan.
+// SubmitScan calls cyber.rpc.scan.ScanService.SubmitScan.
 func (c *scanServiceClient) SubmitScan(ctx context.Context, req *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error) {
 	return c.submitScan.CallUnary(ctx, req)
 }
 
-// GetScan calls aiscan.rpc.scan.ScanService.GetScan.
+// GetScan calls cyber.rpc.scan.ScanService.GetScan.
 func (c *scanServiceClient) GetScan(ctx context.Context, req *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error) {
 	return c.getScan.CallUnary(ctx, req)
 }
 
-// ListScans calls aiscan.rpc.scan.ScanService.ListScans.
+// ListScans calls cyber.rpc.scan.ScanService.ListScans.
 func (c *scanServiceClient) ListScans(ctx context.Context, req *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error) {
 	return c.listScans.CallUnary(ctx, req)
 }
 
-// CancelScan calls aiscan.rpc.scan.ScanService.CancelScan.
+// CancelScan calls cyber.rpc.scan.ScanService.CancelScan.
 func (c *scanServiceClient) CancelScan(ctx context.Context, req *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error) {
 	return c.cancelScan.CallUnary(ctx, req)
 }
 
-// GetScanReport calls aiscan.rpc.scan.ScanService.GetScanReport.
+// GetScanReport calls cyber.rpc.scan.ScanService.GetScanReport.
 func (c *scanServiceClient) GetScanReport(ctx context.Context, req *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
 	return c.getScanReport.CallUnary(ctx, req)
 }
 
-// ScanServiceHandler is an implementation of the aiscan.rpc.scan.ScanService service.
+// ScanServiceHandler is an implementation of the cyber.rpc.scan.ScanService service.
 type ScanServiceHandler interface {
 	SubmitScan(context.Context, *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error)
 	GetScan(context.Context, *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error)
@@ -179,7 +179,7 @@ func NewScanServiceHandler(svc ScanServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(scanServiceMethods.ByName("GetScanReport")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.scan.ScanService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.scan.ScanService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ScanServiceSubmitScanProcedure:
 			scanServiceSubmitScanHandler.ServeHTTP(w, r)
@@ -201,21 +201,21 @@ func NewScanServiceHandler(svc ScanServiceHandler, opts ...connect.HandlerOption
 type UnimplementedScanServiceHandler struct{}
 
 func (UnimplementedScanServiceHandler) SubmitScan(context.Context, *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.scan.ScanService.SubmitScan is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.SubmitScan is not implemented"))
 }
 
 func (UnimplementedScanServiceHandler) GetScan(context.Context, *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.scan.ScanService.GetScan is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.GetScan is not implemented"))
 }
 
 func (UnimplementedScanServiceHandler) ListScans(context.Context, *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.scan.ScanService.ListScans is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.ListScans is not implemented"))
 }
 
 func (UnimplementedScanServiceHandler) CancelScan(context.Context, *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.scan.ScanService.CancelScan is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.CancelScan is not implemented"))
 }
 
 func (UnimplementedScanServiceHandler) GetScanReport(context.Context, *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.scan.ScanService.GetScanReport is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.GetScanReport is not implemented"))
 }

@@ -1114,7 +1114,7 @@ const file_aop_chat_proto_rawDesc = "" +
 	"\x12ListEventsResponse\x12*\n" +
 	"\x06events\x18\x01 \x03(\v2\x12.aop.EventDeliveryR\x06events\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
-	"nextCursorB%Z#github.com/chainreactors/aiscan/aopb\x06proto3"
+	"nextCursorB$Z\"github.com/chainreactors/cyber/aopb\x06proto3"
 
 var (
 	file_aop_chat_proto_rawDescOnce sync.Once

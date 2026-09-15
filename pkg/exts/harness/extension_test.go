@@ -6,11 +6,11 @@ import (
  "reflect"
  "testing"
  "time"
- "github.com/chainreactors/aiscan/core/extension"
- "github.com/chainreactors/aiscan/core/hooks"
- "github.com/chainreactors/aiscan/core/tool"
- "github.com/chainreactors/aiscan/pkg/commands"
- harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
+ "github.com/chainreactors/cyber/core/extension"
+ "github.com/chainreactors/cyber/core/hooks"
+ "github.com/chainreactors/cyber/core/tool"
+ "github.com/chainreactors/cyber/pkg/commands"
+ harnessext "github.com/chainreactors/cyber/pkg/exts/harness"
 )
 
 type blockingTool struct { entered,release chan struct{} }

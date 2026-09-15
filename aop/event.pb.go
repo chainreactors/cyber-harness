@@ -1340,7 +1340,7 @@ const file_aop_event_proto_rawDesc = "" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11DIRECTION_REQUEST\x10\x01\x12\x16\n" +
-	"\x12DIRECTION_RESPONSE\x10\x02B%Z#github.com/chainreactors/aiscan/aopb\x06proto3"
+	"\x12DIRECTION_RESPONSE\x10\x02B$Z\"github.com/chainreactors/cyber/aopb\x06proto3"
 
 var (
 	file_aop_event_proto_rawDescOnce sync.Once

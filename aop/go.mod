@@ -1,4 +1,4 @@
-module github.com/chainreactors/aiscan/aop
+module github.com/chainreactors/cyber/aop
 
 go 1.26
 

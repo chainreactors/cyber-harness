@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestIOAProbeUsesReadOnlyExtension(t *testing.T) {

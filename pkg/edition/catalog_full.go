@@ -3,9 +3,9 @@
 package edition
 
 import (
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/tools/katana"
-	"github.com/chainreactors/aiscan/tools/passive"
+	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/tools/katana"
+	"github.com/chainreactors/cyber/tools/passive"
 )
 
 func platformCapabilities() []capability.Descriptor {

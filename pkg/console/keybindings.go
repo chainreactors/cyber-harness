@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	outputpkg "github.com/chainreactors/aiscan/core/output"
+	outputpkg "github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/tui/console"
 	"github.com/chainreactors/tui/readline/inputrc"
 )

@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
 )

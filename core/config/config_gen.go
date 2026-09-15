@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-const configFileHeader = `# aiscan 配置文件
+const configFileHeader = `# cyber 配置文件
 #
-# 运行时: aiscan 自动加载 ./aiscan.yaml 或 <二进制所在目录>/aiscan.yaml
-# 优先级: CLI > AIScan/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
-# 生成:   aiscan --init
+# 运行时: cyber 自动加载 ./cyber.yaml 或 <二进制所在目录>/cyber.yaml
+# 优先级: CLI > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
+# 生成:   cyber --init
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
 #

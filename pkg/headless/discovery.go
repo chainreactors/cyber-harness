@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	// PathEnv explicitly selects the Chrome-compatible browser binary used by AIScan.
-	PathEnv = "AISCAN_BROWSER_PATH"
+	// PathEnv explicitly selects the Chrome-compatible browser binary used by Cyber.
+	PathEnv = "CYBER_BROWSER_PATH"
 )
 
 // Source identifies how a browser binary was selected.
@@ -31,7 +31,7 @@ type Binary struct {
 }
 
 // Discover resolves the browser shared by Playwright, nuclei headless, and Katana.
-// An explicit AISCAN_BROWSER_PATH is authoritative. If neither it nor a system
+// An explicit CYBER_BROWSER_PATH is authoritative. If neither it nor a system
 // browser is available, an empty result lets Rod use its cached/download fallback.
 func Discover() (Binary, error) {
 	configured, configuredSet := os.LookupEnv(PathEnv)

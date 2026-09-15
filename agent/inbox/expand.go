@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/cyber/core/truncate"
 )
 
 const defaultMaxFileSize = truncate.DefaultMaxBytes

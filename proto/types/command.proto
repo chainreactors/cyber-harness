@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package aiscan.command;
+package cyber.command;
 
 import "aop/content.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+option go_package = "github.com/chainreactors/cyber/pkg/types;types";
 
 message CommandSpec {
   string name = 1;

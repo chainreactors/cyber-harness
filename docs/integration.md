@@ -1,6 +1,6 @@
-# 第三方语言接入 aiscan
+# 第三方语言接入 cyber
 
-本文档面向 Android/Kotlin、Java、Swift、Python、TypeScript 等非 Go 客户端，说明如何从 aiscan protobuf schema 生成代码，并接入两组外部 API。
+本文档面向 Android/Kotlin、Java、Swift、Python、TypeScript 等非 Go 客户端，说明如何从 cyber protobuf schema 生成代码，并接入两组外部 API。
 
 | 功能组 | 传输 | 用途 |
 |--------|------|------|
@@ -17,7 +17,7 @@ Application/AOP schema：
 web/frontend/cyber-ui/packages/aop/proto/aop/
 ```
 
-ConnectRPC service 和 aiscan 类型：
+ConnectRPC service 和 cyber 类型：
 
 ```text
 proto/rpc/
@@ -360,11 +360,11 @@ ListEvents(aop.ListEventsRequest) -> aop.ListEventsResponse
 主要 procedure：
 
 ```text
-/aiscan.rpc.chat.SessionService/ListSessions
-/aiscan.rpc.chat.SessionService/ListEvents
-/aiscan.rpc.scan.ScanService/ListScans
-/aiscan.rpc.agent.AgentService/ListAgents
-/aiscan.rpc.system.SystemService/GetStatus
+/cyber.rpc.chat.SessionService/ListSessions
+/cyber.rpc.chat.SessionService/ListEvents
+/cyber.rpc.scan.ScanService/ListScans
+/cyber.rpc.agent.AgentService/ListAgents
+/cyber.rpc.system.SystemService/GetStatus
 ```
 
 第三方语言应通过生成的 Connect/gRPC client 调用，不需要手写这些 HTTP body。

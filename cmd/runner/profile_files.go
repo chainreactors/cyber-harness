@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
-	harnessext "github.com/chainreactors/aiscan/pkg/exts/harness"
-	signalsext "github.com/chainreactors/aiscan/pkg/exts/signals"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	filesystem "github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	harnessext "github.com/chainreactors/cyber/pkg/exts/harness"
+	signalsext "github.com/chainreactors/cyber/pkg/exts/signals"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	filesystem "github.com/chainreactors/cyber/tools/files"
 )
 
 const fileSystemID = "files"

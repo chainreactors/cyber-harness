@@ -15,26 +15,26 @@ import (
 	"time"
 
 	"github.com/carapace-sh/carapace"
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	outputpkg "github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/spf13/cobra"
 )
 
 const agentPromptCommandName = "__prompt"
-const agentConsoleInterruptCommandName = "aiscan-interrupt"
-const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
-const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
+const agentConsoleInterruptCommandName = "cyber-interrupt"
+const agentConsoleCtrlCCommandName = "cyber-ctrl-c"
+const agentConsoleToggleVerbosityCommandName = "cyber-toggle-verbosity"
 const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 
 // Some terminal applications leave focus reporting or Windows Terminal's
@@ -42,7 +42,7 @@ const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 // remain active, ordinary keys can arrive as strings such as
 // "\x1b[191;53;47;1;0;1_" and leak into the editable line. Reset them at the
 // application boundary before every read rather than teaching the shared
-// readline package about an aiscan-specific terminal lifecycle.
+// readline package about an cyber-specific terminal lifecycle.
 const agentConsoleResetInputModes = "\x1b[?1004l\x1b[?9001l"
 
 var errAgentConsoleExit = errors.New("agent console exit")
@@ -97,7 +97,7 @@ func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentex
 	}
 
 	isTerminal := t.Control != nil && t.Control.IsTerminal()
-	c := console.NewWithTerminal("aiscan", t)
+	c := console.NewWithTerminal("cyber", t)
 	c.NewlineAfter = true
 	configureAgentReadline(c)
 	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
@@ -392,10 +392,10 @@ func (r *AgentConsole) promptString() string {
 
 func agentPromptString(output *AgentOutput) string {
 	if output != nil && output.color.Enabled {
-		return output.color.Code(outputpkg.ANSIBold+outputpkg.ANSICyan) + "aiscan" +
+		return output.color.Code(outputpkg.ANSIBold+outputpkg.ANSICyan) + "cyber" +
 			output.color.Code(outputpkg.ANSIReset) + " " + output.color.Dim("❯") + " "
 	}
-	return "aiscan> "
+	return "cyber> "
 }
 
 func agentComposerPrompt(output *AgentOutput, bridge *readlineConsoleBridge) string {
@@ -441,7 +441,7 @@ func (r *AgentConsole) executeArgs(ctx context.Context, args []string) error {
 
 func (r *AgentConsole) rootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use: "agent", Short: "aiscan interactive agent",
+		Use: "agent", Short: "cyber interactive agent",
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	root.CompletionOptions.HiddenDefaultCmd = true

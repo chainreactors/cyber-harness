@@ -2,7 +2,7 @@ package provider
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"net"
 	"net/http"
 	"net/http/httptest"

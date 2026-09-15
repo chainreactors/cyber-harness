@@ -1,15 +1,15 @@
 syntax = "proto3";
 
-package aiscan.rpc.scan;
+package cyber.rpc.scan;
 
 import "types/scan.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/rpc;rpc";
+option go_package = "github.com/chainreactors/cyber/pkg/rpc;rpc";
 
 service ScanService {
-  rpc SubmitScan(aiscan.scan.SubmitScanRequest) returns (aiscan.scan.SubmitScanResponse);
-  rpc GetScan(aiscan.scan.GetScanRequest) returns (aiscan.scan.GetScanResponse);
-  rpc ListScans(aiscan.scan.ListScansRequest) returns (aiscan.scan.ListScansResponse);
-  rpc CancelScan(aiscan.scan.CancelScanRequest) returns (aiscan.scan.CancelScanResponse);
-  rpc GetScanReport(aiscan.scan.GetScanReportRequest) returns (aiscan.scan.GetScanReportResponse);
+  rpc SubmitScan(cyber.scan.SubmitScanRequest) returns (cyber.scan.SubmitScanResponse);
+  rpc GetScan(cyber.scan.GetScanRequest) returns (cyber.scan.GetScanResponse);
+  rpc ListScans(cyber.scan.ListScansRequest) returns (cyber.scan.ListScansResponse);
+  rpc CancelScan(cyber.scan.CancelScanRequest) returns (cyber.scan.CancelScanResponse);
+  rpc GetScanReport(cyber.scan.GetScanReportRequest) returns (cyber.scan.GetScanReportResponse);
 }

@@ -1,6 +1,6 @@
 # Verify
 
-Verify is aiscan's active loot validation skill. Scanner output is a lead, not proof. Use this skill to decide whether available evidence supports `confirmed`, `info`, `not_confirmed`, or `inconclusive`.
+Verify is cyber's active loot validation skill. Scanner output is a lead, not proof. Use this skill to decide whether available evidence supports `confirmed`, `info`, `not_confirmed`, or `inconclusive`.
 
 ## Core Rule
 

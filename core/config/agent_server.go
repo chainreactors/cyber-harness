@@ -26,10 +26,10 @@ func ResolveAgentServerURLs(option *Option) error {
 func validateAgentServerURL(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", fmt.Errorf("invalid AIScan server URL %q", raw)
+		return "", fmt.Errorf("invalid Cyber server URL %q", raw)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("AIScan server URL must use http or https")
+		return "", fmt.Errorf("Cyber server URL must use http or https")
 	}
 	parsed.Fragment = ""
 	return strings.TrimRight(parsed.String(), "/"), nil

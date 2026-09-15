@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	"github.com/chainreactors/aiscan/pkg/host"
-	"github.com/chainreactors/aiscan/pkg/profile"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/host"
+	"github.com/chainreactors/cyber/pkg/profile"
 )
 
 // RunStdio assembles the product runtime around the transport-only host.

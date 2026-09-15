@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"errors"
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -106,7 +106,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].GetMessage().GetId() != "input-1" || events[0].GetEmitter() != "aiscan.web" {
+	if len(events) != 1 || events[0].GetMessage().GetId() != "input-1" || events[0].GetEmitter() != "cyber.web" {
 		t.Fatalf("canonical user history = %+v", events)
 	}
 	conflicting := proto.Clone(request).(*aop.RunTurnRequest)
@@ -372,11 +372,11 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	session := createTestSession(t, svc, "agent-1", "replay me")
 	arguments, _ := aop.JSONValue(map[string]string{"command": "ls"})
 	stored := []*aop.Event{
-		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+		{Id: "e-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 1, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "cyber",
 			Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("hi")}}}},
-		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+		{Id: "e-2", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 2, 0, time.UTC)), SessionId: session.GetSession().GetId(), Emitter: "cyber",
 			Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "tc-1", Name: "bash", Arguments: arguments}}},
-		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.GetSession().GetId(), TurnId: "turn-1", Emitter: "aiscan",
+		{Id: "e-3", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 3, 0, time.UTC)), SessionId: session.GetSession().GetId(), TurnId: "turn-1", Emitter: "cyber",
 			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}},
 	}
 	for _, event := range stored {
@@ -429,7 +429,7 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 	session := createTestSession(t, svc, "", "resume")
 	for seq := 1; seq <= 3; seq++ {
 		if err := store.AddAOPEvent(context.Background(), session.GetSession().GetId(), &aop.Event{
-			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.GetSession().GetId(), Emitter: "aiscan",
+			Id: string(rune('0' + seq)), EmittedAt: timestamppb.Now(), SessionId: session.GetSession().GetId(), Emitter: "cyber",
 			Payload: &aop.Event_Status{Status: &aop.Status{State: "running"}},
 		}); err != nil {
 			t.Fatal(err)

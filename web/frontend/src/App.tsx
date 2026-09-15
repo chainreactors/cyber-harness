@@ -24,7 +24,7 @@ import { isSessionAgentOnline } from './lib/session-agent'
 import type { IOAConsoleTarget } from './lib/ioa-navigation'
 import { cn } from '@cyber/theme'
 
-const sidebarStorageKey = 'aiscan-sidebar-open'
+const sidebarStorageKey = 'cyber-sidebar-open'
 
 const EMPTY_SEED = { text: '', nonce: 0 }
 type ToolPanel = 'assets' | 'ioa' | 'agents' | 'tools' | 'settings'
@@ -35,7 +35,7 @@ type ToolPanel = 'assets' | 'ioa' | 'agents' | 'tools' | 'settings'
 // otherwise every reload snaps back to the light default.
 function getInitialTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light'
-  const v = window.localStorage.getItem('aiscan-theme')
+  const v = window.localStorage.getItem('cyber-theme')
   return v === 'dark' || v === 'light' ? v : 'light'
 }
 
@@ -211,7 +211,7 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider initial={getInitialTheme()} storageKey="aiscan-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
+    <ThemeProvider initial={getInitialTheme()} storageKey="cyber-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
     <TooltipProvider delayDuration={300}>
       <div className="flex h-[100dvh] flex-col overflow-hidden">
         <header className="relative z-[60] flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 pt-safe sm:px-4">
@@ -228,7 +228,7 @@ export default function App() {
               <Menu className="h-4 w-4" />
             </Button>
             <BrandLogo size={22} />
-            <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">AIScan</span>
+            <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">Cyber</span>
             <LLMProfileSwitcher
               profiles={llmProfiles}
               activeProfileID={activeLLMProfile}

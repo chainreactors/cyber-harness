@@ -4,9 +4,9 @@ package arsenal
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	tool "github.com/chainreactors/aiscan/tools/arsenal"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	tool "github.com/chainreactors/cyber/tools/arsenal"
 	"path/filepath"
 )
 

@@ -1,6 +1,6 @@
 # Deep Testing
 
-Deep testing is aiscan's dynamic assessment skill. It runs after web endpoints or fingerprinted assets are discovered. Use it to decide which leads deserve deeper manual or browser-backed validation, not to follow a fixed vulnerability checklist.
+Deep testing is cyber's dynamic assessment skill. It runs after web endpoints or fingerprinted assets are discovered. Use it to decide which leads deserve deeper manual or browser-backed validation, not to follow a fixed vulnerability checklist.
 
 ## Assessment Standard
 

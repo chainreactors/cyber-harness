@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 	goflags "github.com/jessevdk/go-flags"

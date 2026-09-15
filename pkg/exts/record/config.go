@@ -2,14 +2,14 @@ package record
 
 import (
 	"fmt"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/tools/record"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/tools/record"
 	"strconv"
 	"strings"
 )
 
 const (
-	maxConcurrentEnv     = "AISCAN_RECORD_MAX_CONCURRENT"
+	maxConcurrentEnv     = "CYBER_RECORD_MAX_CONCURRENT"
 	defaultMaxConcurrent = record.DefaultMaxConcurrent
 	maxConcurrentLimit   = record.MaxConcurrentLimit
 )

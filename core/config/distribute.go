@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
 
-// LoadDistributeConfigYAML parses an aiscan.yaml file into the canonical proto
+// LoadDistributeConfigYAML parses an cyber.yaml file into the canonical proto
 // representation. It bridges YAML's snake-case keys with the proto message.
 func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 	var raw map[string]any

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils"
 	"github.com/chainreactors/utils/parsers"

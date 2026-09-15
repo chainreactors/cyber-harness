@@ -8,7 +8,7 @@ export default {
   running: '{{count}} 运行中',
   noScansYet: '暂无扫描记录',
   noAgentsConnected: '无 Agent 连接',
-  startAgentToBegin: '启动 aiscan agent 以开始',
+  startAgentToBegin: '启动 cyber agent 以开始',
   busy: '忙碌',
   idle: '空闲',
   terminal: '终端',

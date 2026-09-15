@@ -46,7 +46,7 @@ func hasHTTPBasicAuthChallenge(ctx context.Context, parsed *url.URL, hostHeader 
 	if hostHeader != "" {
 		req.Host = hostHeader
 	}
-	req.Header.Set("User-Agent", "aiscan")
+	req.Header.Set("User-Agent", "cyber")
 	req.Close = true
 
 	client := httpAuthClient(timeoutSeconds, proxy)

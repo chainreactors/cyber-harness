@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	protoncmd "github.com/chainreactors/aiscan/tools/proton"
+	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/core/resources"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	protoncmd "github.com/chainreactors/cyber/tools/proton"
 )
 
 // ---------------------------------------------------------------------------

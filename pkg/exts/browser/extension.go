@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/playwright"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/playwright"
 )
 
 // Extension owns the browser command registration and the browser processes
@@ -51,7 +51,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
 	if err := m.registry.Register("browser", "browser", commands.Command{
 		Name: command.Name(), Usage: command.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/easm/playwright.md",
+		DescriptionPath: "cyber://skills/cyber/okf/easm/playwright.md",
 		Run:             command.Run,
 	}); err != nil {
 		command.Close()

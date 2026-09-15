@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 const (
@@ -25,7 +25,7 @@ const (
 	maxFetchBody   = truncate.MaxFetchBody
 	maxURLLength   = 2000
 	maxRedirects   = 10
-	fetchUserAgent = "Mozilla/5.0 (compatible; aiscan/1.0; +https://github.com/chainreactors/aiscan)"
+	fetchUserAgent = "Mozilla/5.0 (compatible; cyber/1.0; +https://github.com/chainreactors/cyber)"
 
 	cacheTTL      = 15 * time.Minute
 	maxCacheBytes = 50 * 1024 * 1024

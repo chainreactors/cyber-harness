@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/util"
+	"github.com/chainreactors/cyber/core/resources"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/util"
 	"github.com/chainreactors/fingers/alias"
 	fingersLib "github.com/chainreactors/fingers/fingers"
 	sdkfingers "github.com/chainreactors/sdk/fingers"

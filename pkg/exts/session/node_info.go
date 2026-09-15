@@ -7,20 +7,20 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	types "github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/skills"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // DefaultRuntimeInfo returns OS process metadata for AOP node registration.
 func DefaultRuntimeInfo() *aop.AgentRuntimeInfo {
-	metadata, _ := structpb.NewStruct(map[string]any{"client": "aiscan"})
+	metadata, _ := structpb.NewStruct(map[string]any{"client": "cyber"})
 	runtimeInfo := &aop.AgentRuntimeInfo{
 		Os:       runtime.GOOS,
 		Arch:     runtime.GOARCH,

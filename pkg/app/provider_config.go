@@ -3,9 +3,9 @@ package app
 import (
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	cfg "github.com/chainreactors/cyber/core/config"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func defaultProviderConfig() agent.ProviderConfig {

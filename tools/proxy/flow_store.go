@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 // FlowStore owns completed metadata and its optional files. The fixed pair is
@@ -94,7 +94,7 @@ func (s *FlowStore) evictLocked() {
 
 func (s *FlowStore) Add(f Flow) Flow { return s.addFiles(f, [2]*os.File{}) }
 
-// addFiles takes ownership of closed temporary files from the AIScan adapter.
+// addFiles takes ownership of closed temporary files from the Cyber adapter.
 // Only this store assigns final names; no arbitrary path travels on the bus.
 func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 	s.publishMu.Lock()

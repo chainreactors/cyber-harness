@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
 func TestCommandSelectionRequiresRegistry(t *testing.T) {

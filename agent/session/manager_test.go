@@ -5,9 +5,9 @@ import (
  "fmt"
  "sync"
  "testing"
- "github.com/chainreactors/aiscan/agent"
- "github.com/chainreactors/aiscan/aop"
- "github.com/chainreactors/aiscan/pkg/types"
+ "github.com/chainreactors/cyber/agent"
+ "github.com/chainreactors/cyber/aop"
+ "github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestStandaloneManagerAndLiveCommandRegistration(t *testing.T) {

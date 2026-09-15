@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# aiscan 构建脚本
+# cyber 构建脚本
 # 用法:
 #   ./build.sh                                  # standard: 编译全部纯 Go 平台
 #   ./build.sh -g                               # 仅打印生成的 ldflags，不编译
@@ -15,7 +15,7 @@ set -euo pipefail
 
 # ─── 变量 ───────────────────────────────────────────────────────
 
-CONFIG_FILE="aiscan.yaml"
+CONFIG_FILE="cyber.yaml"
 OSARCH=""
 EXTRA_TAGS=""
 OUTPUT_DIR="dist"
@@ -24,9 +24,9 @@ EMBED_RESOURCES=false
 BUILD_IOA=false
 QUICK_TARGET=""
 PROFILE="mini"
-AISCAN_BIN="aiscan"
+CYBER_BIN="cyber"
 
-# CLI 覆盖（优先级高于 aiscan.yaml）
+# CLI 覆盖（优先级高于 cyber.yaml）
 OPT_PROVIDER=""
 OPT_BASE_URL=""
 OPT_API_KEY=""
@@ -42,7 +42,7 @@ OPT_VERIFY=""
 OPT_VERIFY_TIMEOUT=""
 OPT_TAVILY_KEYS=""
 
-MODULE="github.com/chainreactors/aiscan/core/config"
+MODULE="github.com/chainreactors/cyber/core/config"
 
 DEFAULT_OSARCH="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
 
@@ -92,12 +92,12 @@ while [[ $# -gt 0 ]]; do
         --tavily-keys)      OPT_TAVILY_KEYS="$2"; shift 2 ;;
         -h|--help)
             cat <<'HELP'
-aiscan 构建脚本
+cyber 构建脚本
 
 用法: ./build.sh [选项]
 
 配置:
-  --config, -c FILE     配置文件路径 (默认: aiscan.yaml)
+  --config, -c FILE     配置文件路径 (默认: cyber.yaml)
   -g, --ldflags         仅打印生成的 ldflags，不编译
 
 构建:
@@ -105,10 +105,10 @@ aiscan 构建脚本
   --tags TAGS           额外 build tags，逗号分隔
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
-  --ioa                 (已废弃, ioa serve 已集成到 aiscan 主二进制)
+  --ioa                 (已废弃, ioa serve 已集成到 cyber 主二进制)
   --profile PROFILE     构建配置: mini (默认), full
 
-LLM 覆盖（优先级高于 aiscan.yaml）:
+LLM 覆盖（优先级高于 cyber.yaml）:
   --llm-provider TYPE   openai (OpenAI-compatible) or anthropic
   --llm-base-url URL
   --llm-api-key KEY
@@ -186,7 +186,7 @@ CFG_VERIFY_TIMEOUT=$(resolve "$OPT_VERIFY_TIMEOUT" "$(yaml_val "$CONFIG_FILE" sc
 
 CFG_TAVILY_KEYS=$(resolve "$OPT_TAVILY_KEYS" "$(yaml_val "$CONFIG_FILE" search tavily_keys)")
 
-# build 段仅从 aiscan.yaml 读取（不做 CLI 覆盖）
+# build 段仅从 cyber.yaml 读取（不做 CLI 覆盖）
 if [ -z "$OSARCH" ]; then
     OSARCH=$(yaml_val "$CONFIG_FILE" build osarch)
 fi
@@ -217,10 +217,10 @@ add_ldflag DefaultScannerProxy  "$CFG_SCANNER_PROXY"
 add_ldflag DefaultCyberhubURL  "$CFG_CYBERHUB_URL"
 add_ldflag DefaultCyberhubKey  "$CFG_CYBERHUB_KEY"
 add_ldflag DefaultCyberhubMode "$CFG_CYBERHUB_MODE"
-add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
-add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
+add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+add_ldflag DefaultURL         "$CFG_IOA_URL" "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 add_ldflag DefaultNodeName    "$CFG_IOA_NODE_NAME"
-add_ldflag DefaultSpace       "$CFG_IOA_SPACE" "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
+add_ldflag DefaultSpace       "$CFG_IOA_SPACE" "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 add_ldflag DefaultVerify       "$CFG_VERIFY"
 add_ldflag DefaultVerifyTimeout "$CFG_VERIFY_TIMEOUT"
 add_ldflag DefaultTavilyKeys   "$CFG_TAVILY_KEYS"
@@ -234,7 +234,7 @@ fi
 
 # ─── 打印配置摘要 ────────────────────────────────────────────────
 
-echo "=== aiscan build ==="
+echo "=== cyber build ==="
 echo "profile:  $PROFILE"
 [ -f "$CONFIG_FILE" ] && echo "config:   $CONFIG_FILE" || echo "config:   (none)"
 [ -n "$CFG_PROVIDER" ]     && echo "provider: $CFG_PROVIDER"
@@ -246,7 +246,7 @@ echo "profile:  $PROFILE"
 
 # ─── Profile ────────────────────────────────────────────────────
 
-AISCAN_MAIN="./cmd/aiscan"
+CYBER_MAIN="./cmd/cyber"
 CGO_MODE=0
 
 case "$PROFILE" in
@@ -255,7 +255,7 @@ case "$PROFILE" in
         # full 隐含 cstx，cstx 只在 cgo 下编译，所以 full 必须 CGO_ENABLED=1。
         EXTRA_TAGS="full,re2_cgo,re2_static,cstx${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
-        AISCAN_BIN="aiscan-full"
+        CYBER_BIN="cyber-full"
         CGO_MODE=1
         ;;
 esac
@@ -327,14 +327,14 @@ build_one() {
 OSARCH_NORMALIZED=$(echo "$OSARCH" | tr ',' ' ')
 read -ra TARGETS <<< "$OSARCH_NORMALIZED"
 
-echo "编译 aiscan..."
+echo "编译 cyber..."
 for target in "${TARGETS[@]}"; do
     IFS='/' read -ra PARTS <<< "$target"
-    build_one "${PARTS[0]}" "${PARTS[1]}" "$AISCAN_MAIN" "$AISCAN_BIN"
+    build_one "${PARTS[0]}" "${PARTS[1]}" "$CYBER_MAIN" "$CYBER_BIN"
 done
 
 # ─── 完成 ────────────────────────────────────────────────────────
 
 echo ""
 echo "构建完成:"
-ls -lh "$OUTPUT_DIR"/aiscan* 2>/dev/null || true
+ls -lh "$OUTPUT_DIR"/cyber* 2>/dev/null || true

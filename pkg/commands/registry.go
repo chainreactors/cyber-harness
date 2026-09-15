@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	coreregistry "github.com/chainreactors/aiscan/core/registry"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/pkg/types"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	coreregistry "github.com/chainreactors/cyber/core/registry"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	"github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 

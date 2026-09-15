@@ -219,19 +219,19 @@ var File_types_reload_proto protoreflect.FileDescriptor
 
 const file_types_reload_proto_rawDesc = "" +
 	"\n" +
-	"\x12types/reload.proto\x12\raiscan.reload\x1a\x12types/config.proto\"H\n" +
-	"\rReloadRequest\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.aiscan.config.DistributeConfigR\x06config\"f\n" +
+	"\x12types/reload.proto\x12\fcyber.reload\x1a\x12types/config.proto\"G\n" +
+	"\rReloadRequest\x126\n" +
+	"\x06config\x18\x01 \x01(\v2\x1e.cyber.config.DistributeConfigR\x06config\"f\n" +
 	"\fReloadResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x03 \x01(\tR\x05model\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x93\x01\n" +
-	"\x15ReloadProtocolMessage\x128\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x91\x01\n" +
+	"\x15ReloadProtocolMessage\x127\n" +
 	"\arequest\x18\n" +
-	" \x01(\v2\x1c.aiscan.reload.ReloadRequestH\x00R\arequest\x125\n" +
-	"\x06result\x18\v \x01(\v2\x1b.aiscan.reload.ReloadResultH\x00R\x06resultB\t\n" +
-	"\amessageB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	" \x01(\v2\x1b.cyber.reload.ReloadRequestH\x00R\arequest\x124\n" +
+	"\x06result\x18\v \x01(\v2\x1a.cyber.reload.ReloadResultH\x00R\x06resultB\t\n" +
+	"\amessageB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_reload_proto_rawDescOnce sync.Once
@@ -247,15 +247,15 @@ func file_types_reload_proto_rawDescGZIP() []byte {
 
 var file_types_reload_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_types_reload_proto_goTypes = []any{
-	(*ReloadRequest)(nil),         // 0: aiscan.reload.ReloadRequest
-	(*ReloadResult)(nil),          // 1: aiscan.reload.ReloadResult
-	(*ReloadProtocolMessage)(nil), // 2: aiscan.reload.ReloadProtocolMessage
-	(*DistributeConfig)(nil),      // 3: aiscan.config.DistributeConfig
+	(*ReloadRequest)(nil),         // 0: cyber.reload.ReloadRequest
+	(*ReloadResult)(nil),          // 1: cyber.reload.ReloadResult
+	(*ReloadProtocolMessage)(nil), // 2: cyber.reload.ReloadProtocolMessage
+	(*DistributeConfig)(nil),      // 3: cyber.config.DistributeConfig
 }
 var file_types_reload_proto_depIdxs = []int32{
-	3, // 0: aiscan.reload.ReloadRequest.config:type_name -> aiscan.config.DistributeConfig
-	0, // 1: aiscan.reload.ReloadProtocolMessage.request:type_name -> aiscan.reload.ReloadRequest
-	1, // 2: aiscan.reload.ReloadProtocolMessage.result:type_name -> aiscan.reload.ReloadResult
+	3, // 0: cyber.reload.ReloadRequest.config:type_name -> cyber.config.DistributeConfig
+	0, // 1: cyber.reload.ReloadProtocolMessage.request:type_name -> cyber.reload.ReloadRequest
+	1, // 2: cyber.reload.ReloadProtocolMessage.result:type_name -> cyber.reload.ReloadResult
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

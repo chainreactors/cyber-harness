@@ -9,17 +9,17 @@ import (
 	"strings"
 	"sync"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/extension"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/extension"
 	libcstx "github.com/chainreactors/libcstx/go"
 	"github.com/chainreactors/libcstx/go/proto/cstxproto"
 )
 
 const nativeExtension = "easm"
 
-// aiscanArtifact is the producer name the orchestrator uses for its own
+// cyberArtifact is the producer name the orchestrator uses for its own
 // observations, as opposed to the name of a scanner-native format.
-const aiscanArtifact = "aiscan"
+const cyberArtifact = "cyber"
 
 // ArtifactStore is the persistence capability required by the importer. It is
 // intentionally smaller than the management API's SCOStore: importing
@@ -72,7 +72,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	runtime, err := libcstx.Open(ctx, &cstxproto.RuntimeConfig{ProjectId: "aiscan"})
+	runtime, err := libcstx.Open(ctx, &cstxproto.RuntimeConfig{ProjectId: "cyber"})
 	if err != nil {
 		return fmt.Errorf("open CSTX runtime: %w", err)
 	}
@@ -206,7 +206,7 @@ func (e *Extension) Close(context.Context) error {
 // the orchestrator is not a format, so its compact HTTP observations are read
 // with the web schema CSTX calls "spray".
 func nativeArtifact(producer string) string {
-	if producer == aiscanArtifact {
+	if producer == cyberArtifact {
 		return "spray"
 	}
 	return producer

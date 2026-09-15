@@ -4,13 +4,13 @@ package session
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/prompt"
-	impl "github.com/chainreactors/aiscan/agent/session"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	impl "github.com/chainreactors/cyber/agent/session"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
 type Config struct {

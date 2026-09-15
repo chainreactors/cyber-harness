@@ -21,6 +21,7 @@ dist/
 *.db
 *.db-*
 *.sock.lock
+/cyber
 /aiscan
 /spray
 out/
@@ -34,7 +35,9 @@ web/frontend/test-results/
 community.yaml
 
 # Local runtime state / operator artifacts
+.cyber/
 .aiscan/
+/cyber-deploy.yaml
 /aiscan-deploy.yaml
 /*.log
 /.claude/
@@ -61,5 +64,6 @@ web/static-stale/
 /monitor/
 /scripts/
 /scan_report.md
+cyber.yaml
 aiscan.yaml
 .runlogs/harness/

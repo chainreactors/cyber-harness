@@ -3,8 +3,8 @@ package server
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
-	service "github.com/chainreactors/aiscan/tools/ioa/server"
+	"github.com/chainreactors/cyber/core/extension"
+	service "github.com/chainreactors/cyber/tools/ioa/server"
 )
 
 type Extension struct{ resource *service.Resource }

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/cyber/core/output"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils/parsers"
 )

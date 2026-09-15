@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	web "github.com/chainreactors/aiscan/pkg/web"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/pkg/types"
+	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 

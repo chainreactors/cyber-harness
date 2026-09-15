@@ -1,11 +1,11 @@
 package app
 
 import (
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/capability"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/core/capability"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/skills"
 )
 
 type Config struct {

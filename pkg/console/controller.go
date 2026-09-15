@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 // Admission is synchronized with Close; Runtime is the only execution queue.

@@ -1,6 +1,6 @@
 package cli
 
-import "github.com/chainreactors/aiscan/core/config"
+import "github.com/chainreactors/cyber/core/config"
 
 // Declaration is a capability's inert contribution to the settings provider.
 // Contributors depend on this contract, not on its lifecycle implementation.

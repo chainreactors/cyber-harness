@@ -12,7 +12,7 @@ def test_set_viewport(test_server, pw_page, pw_driver):
     assert pw_w == 800
     assert pw_h == 600
 
-    # aiscan — set viewport then reload to pick up new dimensions
+    # cyber — set viewport then reload to pick up new dimensions
     pw_driver.execute("open", url, "--session", "vp-t", "--timeout", "10")
     pw_driver.execute("set-viewport", "vp-t", "800", "600")
     pw_driver.execute("reload", "vp-t")

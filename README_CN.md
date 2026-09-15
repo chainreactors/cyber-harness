@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
-  <h1 align="center">aiscan</h1>
+  <img src="web/assets/logo.svg" width="180" alt="cyber logo">
+  <h1 align="center">cyber</h1>
   <p align="center">AI 驱动的面向实战的单文件渗透 agent，内置多引擎武器库开箱即用</p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square&color=00E59B" alt="Release"></a>
-  <a href="https://github.com/chainreactors/aiscan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/aiscan/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
-  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
-  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/v/release/chainreactors/cyber?style=flat-square&color=00E59B" alt="Release"></a>
+  <a href="https://github.com/chainreactors/cyber/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/cyber/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/downloads/chainreactors/cyber/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/cyber/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/cyber/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/cyber?style=flat-square&color=yellow" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ---
 
-**aiscan** 融合 LLM agent 与传统安全扫描引擎。三种模式：**Scan**（确定性流水线扫描，AI 可选辅助）、**Agent**（自然语言驱动的自主安全评估）、**IOA**（多 agent 分布式协作）。
+**cyber** 融合 LLM agent 与传统安全扫描引擎。三种模式：**Scan**（确定性流水线扫描，AI 可选辅助）、**Agent**（自然语言驱动的自主安全评估）、**IOA**（多 agent 分布式协作）。
 
 > **请只在明确授权的目标上使用，未经授权的使用属于违法行为。**
 
@@ -26,10 +26,10 @@
 
 ```bash
 # 无需 LLM，一行启动扫描
-aiscan scan -i 192.168.1.0/24
+cyber scan -i 192.168.1.0/24
 
 # 有 LLM，一行启动 agent
-aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
+cyber agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
   -p "扫描目标并检查高风险漏洞" -i 192.168.1.0/24
 ```
 
@@ -37,49 +37,49 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 ### 下载二进制
 
-从 [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest) 下载：
+从 [GitHub Releases](https://github.com/chainreactors/cyber/releases/latest) 下载：
 
 | 版本 | 说明 |
 | --- | --- |
-| **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | 完整版 — 额外包含 Web、playwright、passive 和 katana |
+| **cyber** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
+| **cyber-full** | 完整版 — 额外包含 Web、playwright、passive 和 katana |
 
 | 系统 | 架构 | 标准版 | 完整版 |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
+| Linux | amd64 / arm64 | `cyber_linux_<arch>.zip` | `cyber-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `cyber_darwin_<arch>.zip` | `cyber-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `cyber_windows_<arch>.zip` | `cyber-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64.zip
-unzip aiscan_linux_amd64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_linux_amd64.zip
+unzip cyber_linux_amd64.zip
+chmod +x cyber && sudo mv cyber /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64.zip
-unzip aiscan_darwin_arm64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_darwin_arm64.zip
+unzip cyber_darwin_arm64.zip
+chmod +x cyber && sudo mv cyber /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
-Expand-Archive .\aiscan.zip -DestinationPath .
-.\aiscan.exe --version
+Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/cyber_windows_amd64.zip" -OutFile cyber.zip
+Expand-Archive .\cyber.zip -DestinationPath .
+.\cyber.exe --version
 ```
 
 ### Web 控制台（完整版）
 
-Web 控制台包含在 `aiscan-full` 中，默认同时启动浏览器界面和一个内嵌本地
+Web 控制台包含在 `cyber-full` 中，默认同时启动浏览器界面和一个内嵌本地
 Agent。启动后访问 `http://127.0.0.1:8080`，并输入终端中显示的 access key：
 
 ```bash
-aiscan-full web
+cyber-full web
 ```
 
 监听局域网地址并使用固定 access key：
 
 ```bash
-aiscan-full web --addr 0.0.0.0:8080 --token change-me
+cyber-full web --addr 0.0.0.0:8080 --token change-me
 ```
 
 也可以让 Web 只作为 Hub 运行，不启动内嵌 Agent，再从本机或其他主机接入
@@ -87,26 +87,26 @@ aiscan-full web --addr 0.0.0.0:8080 --token change-me
 
 ```bash
 # Hub
-aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+cyber-full web --addr 0.0.0.0:8080 --token change-me --no-agent
 
 # 远程执行节点
-aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
+cyber agent --server-url http://change-me@server.example:8080 --node-name worker-01
 ```
 
-Web 默认使用 `aiscan-web.db` 保存会话、扫描、资产、发现和配置；可以通过
+Web 默认使用 `cyber-web.db` 保存会话、扫描、资产、发现和配置；可以通过
 `--db <path>` 指定其他 SQLite 数据库路径。
 
 ### 从源码构建
 
 ```bash
-git clone https://github.com/chainreactors/aiscan.git && cd aiscan
+git clone https://github.com/chainreactors/cyber.git && cd cyber
 
 make                                                       # 标准版
 make full                                                  # 前端 + 完整版
 ```
 
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
-唯一的 AIScan 产品入口是 `cmd/aiscan`。执行
+唯一的 Cyber 产品入口是 `cmd/cyber`。执行
 `make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
 `web/static` 嵌入 full 二进制。默认 full 构建不包含原生 `record` 工具；SDK 和工具
 开发者可通过 `make record` 显式构建，详见 [record 文档](docs/record.md)。
@@ -182,33 +182,33 @@ libstdc++、libgcc 或 winpthread DLL。
 ### Scan 模式
 
 ```bash
-aiscan scan -i 192.168.1.0/24                                    # 快速扫描
-aiscan scan -i 192.168.1.0/24 --mode full                        # 完整扫描
-aiscan scan -i http://target.example --verify=high --sniper       # AI 增强
-aiscan scan -i http://target.example --mode full --deep --report  # 完整 + 深度 + 报告
+cyber scan -i 192.168.1.0/24                                    # 快速扫描
+cyber scan -i 192.168.1.0/24 --mode full                        # 完整扫描
+cyber scan -i http://target.example --verify=high --sniper       # AI 增强
+cyber scan -i http://target.example --mode full --deep --report  # 完整 + 深度 + 报告
 ```
 
 ### Agent 模式
 
 ```bash
 # 一次性任务
-aiscan agent -p "扫描目标，发现所有 Web 服务并检查高风险漏洞" -i 192.168.1.0/24
+cyber agent -p "扫描目标，发现所有 Web 服务并检查高风险漏洞" -i 192.168.1.0/24
 
 # 带 Goal Evaluation
-aiscan agent -p "全面扫描目标" -i http://target.example -e "发现所有开放端口并输出服务指纹"
+cyber agent -p "全面扫描目标" -i http://target.example -e "发现所有开放端口并输出服务指纹"
 
 # 交互式 REPL
-aiscan agent
+cyber agent
 ```
 
 ### IOA 模式
 
 ```bash
 # 启动 IOA Server
-aiscan ioa serve --ioa-url http://0.0.0.0:8765
+cyber ioa serve --ioa-url http://0.0.0.0:8765
 
 # 启动 IOA worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
+cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
   -p "scan assigned targets and report findings"
 ```
 
@@ -219,10 +219,10 @@ aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI 参数
-aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
+cyber agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
 ```
 
-配置文件 `aiscan.yaml`：
+配置文件 `cyber.yaml`：
 
 ```yaml
 llm:
@@ -233,7 +233,7 @@ llm:
   max_tokens: 16384        # 单次最大输出
 ```
 
-`context_window` 填写真实 Token 数，例如 `128000`，不要写 `128K`。小于 8192 的值可以保存，但 Web 页面会提示窗口可能过小。实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`；如果已没有输出空间，AIScan 会返回明确错误，而不是发送只允许输出 1 Token 的请求。上下文接近配置窗口时会自动压缩。
+`context_window` 填写真实 Token 数，例如 `128000`，不要写 `128K`。小于 8192 的值可以保存，但 Web 页面会提示窗口可能过小。实际请求的输出上限会按剩余上下文自动收紧：`min(max_tokens, context_window - 当前上下文 - 4096)`；如果已没有输出空间，Cyber 会返回明确错误，而不是发送只允许输出 1 Token 的请求。上下文接近配置窗口时会自动压缩。
 
 ---
 
@@ -290,7 +290,7 @@ llm:
 ---
 
 <p align="center">
-  <a href="https://star-history.com/#chainreactors/aiscan&Date">
-    <img src="https://api.star-history.com/svg?repos=chainreactors/aiscan&type=Date" alt="Star History" width="600">
+  <a href="https://star-history.com/#chainreactors/cyber&Date">
+    <img src="https://api.star-history.com/svg?repos=chainreactors/cyber&type=Date" alt="Star History" width="600">
   </a>
 </p>

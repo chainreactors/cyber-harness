@@ -1,6 +1,6 @@
-# aiscan 外部接入 API
+# cyber 外部接入 API
 
-本文档描述外部程序集成 aiscan 时使用的两组 API。
+本文档描述外部程序集成 cyber 时使用的两组 API。
 
 | 功能组 | 传输 | 语义 |
 |--------|------|------|
@@ -45,12 +45,12 @@ Upgrade: websocket
 | `https://host` | `wss://host/api/aop/application/ws` |
 
 - 外部 client 使用 Bearer token。
-- 浏览器登录后也可以使用 `aiscan_session` cookie。
+- 浏览器登录后也可以使用 `cyber_session` cookie。
 - 鉴权失败时 upgrade 返回 HTTP 401。
-- `aiscan web` 未指定 `--token` 时会自动生成 access key，而不是关闭鉴权。
+- `cyber web` 未指定 `--token` 时会自动生成 access key，而不是关闭鉴权。
 - Application Endpoint 不需要握手消息。首个 envelope 如果包含 `AgentHello`，会返回 `WRONG_ENDPOINT`。
 
-每个 WebSocket message 必须是 BinaryMessage，内容为一个序列化的 `aop.Envelope`。文本 JSON frame 不属于 aiscan Application WebSocket wire format。
+每个 WebSocket message 必须是 BinaryMessage，内容为一个序列化的 `aop.Envelope`。文本 JSON frame 不属于 cyber Application WebSocket wire format。
 
 ### 2. Envelope
 
@@ -179,7 +179,7 @@ Envelope{
 | `input` | 通常是 | 用户 `Message`；`continue_session=true` 时允许没有内容 |
 | `continue_session` | 否 | 继续已有 agent 上下文，不发布新的用户消息 |
 | `max_turns` | 否 | 本次执行允许的最大内部 Turn 数 |
-| `extensions` | 否 | AIScan 或其他 namespace 的请求扩展 |
+| `extensions` | 否 | Cyber 或其他 namespace 的请求扩展 |
 
 普通自然语言输入：
 
@@ -388,7 +388,7 @@ go run ./examples/acp/client --server http://127.0.0.1:8080 --token demo --node 
 
 ### 1. 定位
 
-本节的 ConnectRPC 指 aiscan 的 unary 管理服务。它与 Application WebSocket 使用相同的 server base URL 和 access key，但解决不同的问题。
+本节的 ConnectRPC 指 cyber 的 unary 管理服务。它与 Application WebSocket 使用相同的 server base URL 和 access key，但解决不同的问题。
 
 > `AOPService.Connect` 是 Application 协议的双向流投影，不属于 unary 管理功能组。普通 Web/ACP client 应优先使用 `/api/aop/application/ws`；本节重点描述管理 RPC。
 
@@ -425,8 +425,8 @@ response, err := client.ListSessions(ctx, request)
 HTTP procedure 示例：
 
 ```text
-/aiscan.rpc.chat.SessionService/ListSessions
-/aiscan.rpc.chat.SessionService/ListEvents
+/cyber.rpc.chat.SessionService/ListSessions
+/cyber.rpc.chat.SessionService/ListEvents
 ```
 
 #### ScanService
@@ -560,7 +560,7 @@ Application/AOP schema：
 web/frontend/cyber-ui/packages/aop/proto/aop/*.proto
 ```
 
-ConnectRPC service 和 AIScan 类型：
+ConnectRPC service 和 Cyber 类型：
 
 ```text
 proto/rpc/*.proto

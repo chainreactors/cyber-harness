@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// SystemServiceName is the fully-qualified name of the SystemService service.
-	SystemServiceName = "aiscan.rpc.system.SystemService"
+	SystemServiceName = "cyber.rpc.system.SystemService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,15 +34,15 @@ const (
 // period.
 const (
 	// SystemServiceGetStatusProcedure is the fully-qualified name of the SystemService's GetStatus RPC.
-	SystemServiceGetStatusProcedure = "/aiscan.rpc.system.SystemService/GetStatus"
+	SystemServiceGetStatusProcedure = "/cyber.rpc.system.SystemService/GetStatus"
 )
 
-// SystemServiceClient is a client for the aiscan.rpc.system.SystemService service.
+// SystemServiceClient is a client for the cyber.rpc.system.SystemService service.
 type SystemServiceClient interface {
 	GetStatus(context.Context, *connect.Request[types.GetStatusRequest]) (*connect.Response[types.GetStatusResponse], error)
 }
 
-// NewSystemServiceClient constructs a client for the aiscan.rpc.system.SystemService service. By
+// NewSystemServiceClient constructs a client for the cyber.rpc.system.SystemService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -67,12 +67,12 @@ type systemServiceClient struct {
 	getStatus *connect.Client[types.GetStatusRequest, types.GetStatusResponse]
 }
 
-// GetStatus calls aiscan.rpc.system.SystemService.GetStatus.
+// GetStatus calls cyber.rpc.system.SystemService.GetStatus.
 func (c *systemServiceClient) GetStatus(ctx context.Context, req *connect.Request[types.GetStatusRequest]) (*connect.Response[types.GetStatusResponse], error) {
 	return c.getStatus.CallUnary(ctx, req)
 }
 
-// SystemServiceHandler is an implementation of the aiscan.rpc.system.SystemService service.
+// SystemServiceHandler is an implementation of the cyber.rpc.system.SystemService service.
 type SystemServiceHandler interface {
 	GetStatus(context.Context, *connect.Request[types.GetStatusRequest]) (*connect.Response[types.GetStatusResponse], error)
 }
@@ -90,7 +90,7 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("GetStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.system.SystemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.system.SystemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SystemServiceGetStatusProcedure:
 			systemServiceGetStatusHandler.ServeHTTP(w, r)
@@ -104,5 +104,5 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 type UnimplementedSystemServiceHandler struct{}
 
 func (UnimplementedSystemServiceHandler) GetStatus(context.Context, *connect.Request[types.GetStatusRequest]) (*connect.Response[types.GetStatusResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.system.SystemService.GetStatus is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.system.SystemService.GetStatus is not implemented"))
 }

@@ -1452,7 +1452,7 @@ const file_aop_pty_protocol_proto_rawDesc = "" +
 	"\bdetached\x18\x17 \x01(\v2\x11.aop.pty.DetachedH\x00R\bdetached\x12#\n" +
 	"\x04kill\x18\x18 \x01(\v2\r.aop.pty.KillH\x00R\x04kill\x12)\n" +
 	"\x06closed\x18\x19 \x01(\v2\x0f.aop.pty.ClosedH\x00R\x06closedB\t\n" +
-	"\amessageB-Z+github.com/chainreactors/aiscan/aop/pty;ptyb\x06proto3"
+	"\amessageB,Z*github.com/chainreactors/cyber/aop/pty;ptyb\x06proto3"
 
 var (
 	file_aop_pty_protocol_proto_rawDescOnce sync.Once

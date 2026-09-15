@@ -7,7 +7,7 @@
 package types
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -424,14 +424,14 @@ var File_types_command_proto protoreflect.FileDescriptor
 
 const file_types_command_proto_rawDesc = "" +
 	"\n" +
-	"\x13types/command.proto\x12\x0eaiscan.command\x1a\x11aop/content.proto\"s\n" +
+	"\x13types/command.proto\x12\rcyber.command\x1a\x11aop/content.proto\"s\n" +
 	"\vCommandSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aaliases\x18\x02 \x03(\tR\aaliases\x12\x14\n" +
 	"\x05usage\x18\x03 \x01(\tR\x05usage\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\"I\n" +
-	"\x0eCommandCatalog\x127\n" +
-	"\bcommands\x18\x01 \x03(\v2\x1b.aiscan.command.CommandSpecR\bcommands\"C\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\"H\n" +
+	"\x0eCommandCatalog\x126\n" +
+	"\bcommands\x18\x01 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommands\"C\n" +
 	"\x0eCommandRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
@@ -444,14 +444,14 @@ const file_types_command_proto_rawDesc = "" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x14\n" +
-	"\x05state\x18\x03 \x01(\tR\x05state\"\x90\x02\n" +
-	"\x16CommandProtocolMessage\x12:\n" +
+	"\x05state\x18\x03 \x01(\tR\x05state\"\x8c\x02\n" +
+	"\x16CommandProtocolMessage\x129\n" +
 	"\arequest\x18\n" +
-	" \x01(\v2\x1e.aiscan.command.CommandRequestH\x00R\arequest\x127\n" +
-	"\x06result\x18\v \x01(\v2\x1d.aiscan.command.CommandResultH\x00R\x06result\x12:\n" +
-	"\acatalog\x18\f \x01(\v2\x1e.aiscan.command.CommandCatalogH\x00R\acatalog\x12:\n" +
-	"\areceipt\x18\r \x01(\v2\x1e.aiscan.command.CommandReceiptH\x00R\areceiptB\t\n" +
-	"\amessageB1Z/github.com/chainreactors/aiscan/pkg/types;typesb\x06proto3"
+	" \x01(\v2\x1d.cyber.command.CommandRequestH\x00R\arequest\x126\n" +
+	"\x06result\x18\v \x01(\v2\x1c.cyber.command.CommandResultH\x00R\x06result\x129\n" +
+	"\acatalog\x18\f \x01(\v2\x1d.cyber.command.CommandCatalogH\x00R\acatalog\x129\n" +
+	"\areceipt\x18\r \x01(\v2\x1d.cyber.command.CommandReceiptH\x00R\areceiptB\t\n" +
+	"\amessageB0Z.github.com/chainreactors/cyber/pkg/types;typesb\x06proto3"
 
 var (
 	file_types_command_proto_rawDescOnce sync.Once
@@ -467,21 +467,21 @@ func file_types_command_proto_rawDescGZIP() []byte {
 
 var file_types_command_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_types_command_proto_goTypes = []any{
-	(*CommandSpec)(nil),            // 0: aiscan.command.CommandSpec
-	(*CommandCatalog)(nil),         // 1: aiscan.command.CommandCatalog
-	(*CommandRequest)(nil),         // 2: aiscan.command.CommandRequest
-	(*CommandResult)(nil),          // 3: aiscan.command.CommandResult
-	(*CommandReceipt)(nil),         // 4: aiscan.command.CommandReceipt
-	(*CommandProtocolMessage)(nil), // 5: aiscan.command.CommandProtocolMessage
+	(*CommandSpec)(nil),            // 0: cyber.command.CommandSpec
+	(*CommandCatalog)(nil),         // 1: cyber.command.CommandCatalog
+	(*CommandRequest)(nil),         // 2: cyber.command.CommandRequest
+	(*CommandResult)(nil),          // 3: cyber.command.CommandResult
+	(*CommandReceipt)(nil),         // 4: cyber.command.CommandReceipt
+	(*CommandProtocolMessage)(nil), // 5: cyber.command.CommandProtocolMessage
 	(*aop.Content)(nil),            // 6: aop.Content
 }
 var file_types_command_proto_depIdxs = []int32{
-	0, // 0: aiscan.command.CommandCatalog.commands:type_name -> aiscan.command.CommandSpec
-	6, // 1: aiscan.command.CommandResult.content:type_name -> aop.Content
-	2, // 2: aiscan.command.CommandProtocolMessage.request:type_name -> aiscan.command.CommandRequest
-	3, // 3: aiscan.command.CommandProtocolMessage.result:type_name -> aiscan.command.CommandResult
-	1, // 4: aiscan.command.CommandProtocolMessage.catalog:type_name -> aiscan.command.CommandCatalog
-	4, // 5: aiscan.command.CommandProtocolMessage.receipt:type_name -> aiscan.command.CommandReceipt
+	0, // 0: cyber.command.CommandCatalog.commands:type_name -> cyber.command.CommandSpec
+	6, // 1: cyber.command.CommandResult.content:type_name -> aop.Content
+	2, // 2: cyber.command.CommandProtocolMessage.request:type_name -> cyber.command.CommandRequest
+	3, // 3: cyber.command.CommandProtocolMessage.result:type_name -> cyber.command.CommandResult
+	1, // 4: cyber.command.CommandProtocolMessage.catalog:type_name -> cyber.command.CommandCatalog
+	4, // 5: cyber.command.CommandProtocolMessage.receipt:type_name -> cyber.command.CommandReceipt
 	6, // [6:6] is the sub-list for method output_type
 	6, // [6:6] is the sub-list for method input_type
 	6, // [6:6] is the sub-list for extension type_name

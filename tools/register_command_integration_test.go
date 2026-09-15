@@ -10,20 +10,20 @@ import (
 	"testing"
 	"time"
 
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	_ "github.com/chainreactors/aiscan/tools/gogo"
-	_ "github.com/chainreactors/aiscan/tools/neutron"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
-	_ "github.com/chainreactors/aiscan/tools/spray"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/resources"
+	"github.com/chainreactors/cyber/core/telemetry"
+	_ "github.com/chainreactors/cyber/tools/gogo"
+	_ "github.com/chainreactors/cyber/tools/neutron"
+	"github.com/chainreactors/cyber/tools/scan/engine"
+	_ "github.com/chainreactors/cyber/tools/spray"
 	"github.com/chainreactors/utils/parsers"
 )
 
 func TestScannerPublicIntegration(t *testing.T) {
-	if os.Getenv("AISCAN_INTEGRATION") != "1" {
-		t.Skip("set AISCAN_INTEGRATION=1 to run public network regression tests")
+	if os.Getenv("CYBER_INTEGRATION") != "1" {
+		t.Skip("set CYBER_INTEGRATION=1 to run public network regression tests")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

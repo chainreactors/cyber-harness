@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 func TestExecutionCompletion(t *testing.T) {

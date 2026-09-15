@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -151,7 +151,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	assistant := &aop.Event{
-		Id: "e-message", EmittedAt: timestamppb.New(created.Add(time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Id: "e-message", EmittedAt: timestamppb.New(created.Add(time.Second)), SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{
 			Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("hi there")},
 		}},
@@ -161,7 +161,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 	}
 	// Deltas are streaming fragments and must never be persisted.
 	delta := &aop.Event{
-		Id: "e-delta", EmittedAt: timestamppb.New(created.Add(2 * time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Id: "e-delta", EmittedAt: timestamppb.New(created.Add(2 * time.Second)), SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{
 			MessageId: "m-1", ContentIndex: 0, Value: &aop.MessageDelta_Text{Text: "hi"},
 		}},
@@ -205,7 +205,7 @@ func TestSQLiteStoreAppendAOPEventIsIdempotentByEventID(t *testing.T) {
 	defer store.Close()
 	createStoredSession(t, store, "s1")
 	event := &aop.Event{
-		Id: "event-retry", SessionId: "s1", Emitter: "aiscan",
+		Id: "event-retry", SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("once")}}},
 	}
 	firstCursor, firstPersisted, err := store.AppendAOPEvent(context.Background(), "s1", event)

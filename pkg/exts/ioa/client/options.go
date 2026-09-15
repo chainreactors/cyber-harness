@@ -2,9 +2,9 @@ package client
 
 import (
 	"fmt"
-	"github.com/chainreactors/aiscan/core/capability"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/capability"
+	cfg "github.com/chainreactors/cyber/core/config"
+	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"
 	"strings"
@@ -74,7 +74,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 type localIdentity struct{ ref protocols.NodeRef }
 
 func (i localIdentity) IOABinding() protocols.IdentityBinding {
-	return protocols.IdentityBinding{Namespace: "aiscan.memory", Subject: i.ref.URI()}
+	return protocols.IdentityBinding{Namespace: "cyber.memory", Subject: i.ref.URI()}
 }
 func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	value, err := ReadOptions(option)
@@ -84,7 +84,7 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	if value.URL == "" {
 		return nil, nil
 	}
-	return &service.Config{URL: value.URL, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "aiscan"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://aiscan"}}}, nil
+	return &service.Config{URL: value.URL, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
 }
 func Preamble(config service.Config) string {
 	if config.Space == "" {

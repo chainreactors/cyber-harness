@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/chainreactors/aiscan/cmd/harness"
-	protoncmd "github.com/chainreactors/aiscan/tools/proton"
+	"github.com/chainreactors/cyber/cmd/harness"
+	protoncmd "github.com/chainreactors/cyber/tools/proton"
 )
 
 func TestFactoryBuildsProtonWithScannerGroup(t *testing.T) {

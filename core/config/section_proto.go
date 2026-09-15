@@ -1,7 +1,7 @@
 package config
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

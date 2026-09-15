@@ -9,11 +9,11 @@ import (
 	"strings"
 	"syscall"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-// Application WebSocket example: send one natural-language prompt to aiscan
+// Application WebSocket example: send one natural-language prompt to cyber
 // and stream the agent's events back to stdout. Management queries use the
 // separate examples/acp/connectrpc program.
 //
@@ -26,7 +26,7 @@ func main() {
 		prompt    string
 		title     string
 	)
-	flag.StringVar(&serverURL, "server", "", "aiscan server URL, e.g. http://127.0.0.1:8080")
+	flag.StringVar(&serverURL, "server", "", "cyber server URL, e.g. http://127.0.0.1:8080")
 	flag.StringVar(&token, "token", "", "server access token")
 	flag.StringVar(&nodeID, "node", "", "agent node ID to open the session on")
 	flag.StringVar(&prompt, "p", "", "natural-language prompt for the turn")

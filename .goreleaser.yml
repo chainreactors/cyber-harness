@@ -1,6 +1,6 @@
 version: 2
 
-project_name: aiscan
+project_name: cyber
 
 before:
   hooks:
@@ -9,8 +9,8 @@ before:
     - go generate ./core/resources
 
 builds:
-  - id: aiscan
-    main: ./cmd/aiscan
+  - id: cyber
+    main: ./cmd/cyber
     binary: "{{ .ProjectName }}"
     env:
       - CGO_ENABLED=0
@@ -30,14 +30,14 @@ builds:
       - osusergo
       - netgo
     ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{.Version}}
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: aiscan-full
-    main: ./cmd/aiscan
+  - id: cyber-full
+    main: ./cmd/cyber
     binary: "{{ .ProjectName }}-full"
     env:
       # Full links the native libcstx runtime. The official release workflow
@@ -67,7 +67,7 @@ builds:
       - re2_cgo
       - re2_static
     ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{.Version}}
     asmflags:
       - all=-trimpath={{.Env.GOPATH}}
     gcflags:
@@ -80,8 +80,8 @@ upx:
       - amd64
 
 archives:
-  - id: aiscan
-    ids: [aiscan]
+  - id: cyber
+    ids: [cyber]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
@@ -89,8 +89,8 @@ archives:
       - src: README.md
       - src: docs/*
 
-  - id: aiscan-full
-    ids: [aiscan-full]
+  - id: cyber-full
+    ids: [cyber-full]
     name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
@@ -115,7 +115,7 @@ changelog:
 release:
   github:
     owner: chainreactors
-    name: aiscan
+    name: cyber
   draft: true
   prerelease: auto
   replace_existing_draft: true

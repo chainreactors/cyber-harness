@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	searchtools "github.com/chainreactors/aiscan/tools/search"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	searchtools "github.com/chainreactors/cyber/tools/search"
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
@@ -54,7 +54,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
 	fetchCommand := commands.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/fetch.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/fetch.md",
 		Run:             fetch.Run,
 	}
 
@@ -65,7 +65,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	cyberhub := searchtools.NewCyberhubSearch(index)
 	cyberhubCommand := commands.Command{
 		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/search.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
 		Run:             cyberhub.Run,
 	}
 	searchTool := searchtools.NewWebSearchTool(e.config.Search, tavily)

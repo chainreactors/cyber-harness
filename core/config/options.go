@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/skills"
 )
 
 var Version = "dev"
@@ -46,7 +46,7 @@ type SearchConfigOptions struct {
 type LLMOptions struct {
 	Provider      string             `long:"provider" config:"provider" description:"LLM protocol: openai (OpenAI-compatible, default) or anthropic"`
 	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
-	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
+	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, CYBER_API_KEY)"`
 	Model         string             `long:"model" config:"model" description:"LLM model name"`
 	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
 	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
@@ -95,7 +95,7 @@ type AgentOptions struct {
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalMaxRetries        int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
-	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
+	ServerURL             string   `long:"server-url" config:"server_url" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
@@ -142,9 +142,9 @@ type NodeOptions struct {
 }
 
 type MiscOptions struct {
-	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
-	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
-	InitConfig   bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
+	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./cyber.yaml, <binary_dir>/cyber.yaml)"`
+	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.cyber)"`
+	InitConfig   bool   `long:"init" description:"Generate default cyber.yaml and exit"`
 	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
 	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
 	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
