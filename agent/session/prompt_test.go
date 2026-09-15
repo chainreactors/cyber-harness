@@ -2,8 +2,8 @@ package session
 
 import (
 	"context"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"strings"
 	"testing"
 
@@ -157,7 +157,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := extensiontest.Set(t, extension.Entry{ID: "rt", Extension: rt})
+			rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

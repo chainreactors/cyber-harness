@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
+	"github.com/chainreactors/aiscan/cmd/harness"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/skills"
@@ -35,7 +35,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 }
 
 func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
-	registry := extensiontest.Commands(t, "commands",
+	registry := harness.Commands(t, "commands",
 		commands.Command{
 			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
 			DescriptionPath: "aiscan://skills/aiscan/okf/easm/gogo.md",
@@ -51,7 +51,10 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	}
 
 	owner, err := New(Config{Application: &apppkg.App{Commands: registry, Skills: store}})
- if err != nil { t.Fatal(err) }; runtime := owner.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := owner.Runtime()
 	catalog := runtime.CommandCatalog()
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
 	for _, spec := range catalog {
@@ -72,7 +75,7 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 }
 
 func TestCommandCatalogMissingDescriptionPathStaysVisible(t *testing.T) {
-	registry := extensiontest.Commands(t, "custom", commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
+	registry := harness.Commands(t, "custom", commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
 	catalog := RegistryCommandCatalog(registry, nil)
 	for _, spec := range catalog {
 		if spec.GetName() == "!custom" && spec.GetDescription() != "" {

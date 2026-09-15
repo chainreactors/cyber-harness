@@ -1,12 +1,12 @@
 package agent
 
 import (
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"testing"
+
+	coretool "github.com/chainreactors/aiscan/core/tool"
 )
 
 func newTestTools(t testing.TB, tools ...coretool.Tool) coretool.Executor {
 	t.Helper()
-	return extensiontest.Tools(t, tools...)
+	return testTools(t, tools...)
 }

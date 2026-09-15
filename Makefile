@@ -76,21 +76,21 @@ help:
 	@echo "  WEB_TOKEN=token       Optional fixed Web access token"
 
 harness:
-	$(GO) test -count=1 -v -timeout 5m ./harness/...
+	$(GO) test -count=1 -v -timeout 5m ./cmd/harness/...
 
 harness-llm:
-	$(GO) test -tags live_llm -run '^TestLiveLLM' -count=1 -v -timeout 8m ./harness/...
+	$(GO) test -tags live_llm -run '^TestLiveLLM' -count=1 -v -timeout 8m ./cmd/harness/...
 
 .PHONY: harness-llm-ioa
 harness-llm-ioa:
-	$(GO) test -tags live_llm -run '^TestLiveLLMMultiAgentIOAThreadAndIsolation$$' -count=1 -v -timeout 5m ./harness/...
+	$(GO) test -tags live_llm -run '^TestLiveLLMMultiAgentIOAThreadAndIsolation$$' -count=1 -v -timeout 5m ./cmd/harness/...
 
 .PHONY: harness-llm-subagent
 harness-llm-subagent:
-	$(GO) test -tags live_llm -run '^TestLiveLLMParentDelegatesIOASiblings$$' -count=1 -v -timeout 5m ./harness/...
+	$(GO) test -tags live_llm -run '^TestLiveLLMParentDelegatesIOASiblings$$' -count=1 -v -timeout 5m ./cmd/harness/...
 
 check-architecture:
-	$(GO) test -count=1 . ./core/extension ./core/registry
+	$(GO) test -count=1 ./core/extension ./core/registry
 
 prepare:
 	mkdir -p "$(BIN_DIR)"

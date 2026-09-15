@@ -9,9 +9,8 @@ import (
 	coreevents "github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 	"net/http"
 	"net/http/httptest"
@@ -132,13 +131,13 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	events := coreevents.New()
-	recorder, err := telemetry.New(events, telemetry.Options{Path: path})
+	recorder, err := telemetryext.New(events, telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
 	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{Events: events})
 	app := appResource.App
-	appSet := extensiontest.Set(t,
+	appSet := testSet(t,
 		extension.Entry{ID: "output", Extension: recorder},
 		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: appResource},
 	)
@@ -225,4 +224,3 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		t.Fatalf("gogo result = %#v", decoded)
 	}
 }
-

@@ -9,7 +9,6 @@ import (
 	"github.com/chainreactors/aiscan/core/events"
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/internal/extensiontest"
 	"github.com/chainreactors/aiscan/pkg/commands"
 	"github.com/chainreactors/aiscan/pkg/toolset"
 )
@@ -54,7 +53,7 @@ func TestAppCloseDoesNotCloseBorrowedRegistries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := extensiontest.Set(t,
+	set := testSet(t,
 		extension.Entry{ID: "app", Extension: resource},
 		extension.Entry{ID: "commands", DependsOn: []string{"app"}, Extension: cmds},
 		extension.Entry{ID: "tools", DependsOn: []string{"app"}, Extension: tools},

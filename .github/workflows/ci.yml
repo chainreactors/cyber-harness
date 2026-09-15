@@ -138,7 +138,7 @@ jobs:
             test_args=(-timeout 10m -p 4)
           fi
           package_list="$(go list ./...)"
-          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/aiscan/harness\(/\|$\)')
+          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/aiscan/cmd/harness\(/\|$\)')
           go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
@@ -219,7 +219,7 @@ jobs:
         run: |
           mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
           set -o pipefail
-          go test -race -count=1 -shuffle=on -json -timeout 8m ./harness/... \
+          go test -race -count=1 -shuffle=on -json -timeout 8m ./cmd/harness/... \
             | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
       - name: Upload harness evidence
         if: ${{ always() && env.ACT != 'true' }}
@@ -262,7 +262,7 @@ jobs:
           mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
           set -o pipefail
           go test -race -tags live_llm -run '^TestLiveLLM' -count=1 -shuffle=on \
-            -json -timeout 8m ./harness/... | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
+            -json -timeout 8m ./cmd/harness/... | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
       - name: Upload live harness evidence
         if: ${{ always() && env.ACT != 'true' }}
         uses: actions/upload-artifact@v7
