@@ -329,8 +329,8 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 }
 
 // newCapturingHub wraps a store in a recording ProxyHub so a bare captureAddon
-// can route flows through hub.ingest in tests without starting the hub's own
-// listener (the test attaches the addon to its own proxy).
+// can route flows through hub.ingestFiles in tests without starting the hub's
+// own listener (the test attaches the addon to its own proxy).
 func newCapturingHub(store *FlowStore) *ProxyHub {
 	return NewProxyHub(nil, store, "", true, nil).ProxyHub
 }
