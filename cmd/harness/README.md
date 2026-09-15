@@ -138,7 +138,7 @@ make harness-llm-subagent
 
 普通单元覆盖率任务排除 harness 包，由独立 job 验收产品进程，避免重复运行。
 两条路径均保存 JSON 测试结果和运行产物 14 天。race 检查当前覆盖测试驱动，
-产品子进程仍由普通 `go build -tags full` 构建。
+产品子进程仍由普通 `go build -tags full cstx` 构建。
 
 在 GitHub 仓库设置中配置：
 

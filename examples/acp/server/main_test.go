@@ -1,4 +1,4 @@
-//go:build full
+//go:build full && cstx
 
 package main
 
@@ -14,6 +14,8 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/aiscan/core/extension"
+	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
 	webservice "github.com/chainreactors/aiscan/pkg/web/service"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
@@ -38,11 +40,23 @@ func newTestServer(t *testing.T) *httptest.Server {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	ingestor, err := webservice.NewArtifactImporter(store)
+	artifactExt, err := cstxext.New(store)
 	if err != nil {
 		t.Fatalf("open artifact ingestor: %v", err)
 	}
-	t.Cleanup(func() { _ = ingestor.Close() })
+	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifactSet.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := artifactSet.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	ingestor := artifactExt.Importer()
 	service, _, handler, err := newHeadlessHandler(store, ingestor, "test-token")
 	if err != nil {
 		t.Fatal(err)

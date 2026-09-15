@@ -24,7 +24,7 @@ RUNNER_BIN ?= $(BIN_DIR)/runner$(EXE)
 
 # Standard/full match release artifacts.
 STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
-FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static
+FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static
 RECORD_TAGS := $(FULL_TAGS) record_ffmpeg
 BUILD_FLAGS := -trimpath -buildvcs=false
 GO_LDFLAGS ?= -s -w

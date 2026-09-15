@@ -22,6 +22,7 @@ import (
 	"github.com/chainreactors/aiscan/core/extension"
 	"github.com/chainreactors/aiscan/core/telemetry"
 	apppkg "github.com/chainreactors/aiscan/pkg/app"
+	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
 	serverext "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
 	node "github.com/chainreactors/aiscan/pkg/node"
 	profile "github.com/chainreactors/aiscan/pkg/profile"
@@ -45,11 +46,19 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
-	ingestor, err := webservice.NewArtifactImporter(store)
+	artifactExt, err := cstxext.New(store)
 	if err != nil {
 		return fmt.Errorf("init artifact normalization: %w", err)
 	}
-	defer ingestor.Close()
+	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, artifactSet.Close(context.Background())) }()
+	if err := artifactSet.Load(ctx); err != nil {
+		return err
+	}
+	ingestor := artifactExt.Importer()
 
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for

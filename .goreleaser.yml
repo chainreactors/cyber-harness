@@ -63,6 +63,7 @@ builds:
       - netgo
       - full
       - sqlite
+      - cstx
       - re2_cgo
       - re2_static
     ldflags:

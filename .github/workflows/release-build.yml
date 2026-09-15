@@ -88,7 +88,7 @@ jobs:
             runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/amd64"
             cgo: "1"
           - id: aiscan-full-linux-arm64
@@ -96,7 +96,7 @@ jobs:
             runner: ubuntu-24.04-arm
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/arm64"
             cgo: "1"
           - id: aiscan-full-darwin
@@ -104,7 +104,7 @@ jobs:
             runner: ubuntu-22.04
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "darwin/amd64 darwin/arm64"
             cgo: "1"
             cross: darwin
@@ -113,7 +113,7 @@ jobs:
             runner: windows-2022
             main: ./cmd/aiscan
             binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite re2_cgo re2_static"
+            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "windows/amd64"
             cgo: "1"
 

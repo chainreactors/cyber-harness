@@ -127,6 +127,6 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 ```text
 go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service
 go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./skills
-go test -tags full ./cmd/aiscan ./pkg/web/service
+go test -tags full cstx ./cmd/aiscan ./pkg/web/service
 go test github.com/chainreactors/ioa/server
 ```
