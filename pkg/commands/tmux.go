@@ -151,7 +151,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 
 // createSession starts the session's command. A detached session outlives the
 // tool call that created it, so it hands its lifetime to the process manager;
-// a foreground session stays bound to the call, so cancelling the call also
+// a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
 func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (tmux.Info, error) {
 	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
