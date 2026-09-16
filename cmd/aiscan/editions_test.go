@@ -94,7 +94,7 @@ func assertEditionTags(t *testing.T, edition string) {
 // both of which exist only under cgo, so a full build that quietly ran with
 // CGO_ENABLED=0 would select different files and test a different binary — the
 // same reason ci.yml refuses to build full with cgo off.
-func assertEditionCGO(t *testing.T, edition string) {
+func assertEditionCGO(t *testing.T, edition string) { //nolint:unused // called by the full-tag and record-tag files, which the lint build tags exclude
 	t.Helper()
 	want := editionValue(t, readEditions(t), edition+"_CGO")
 	if got := buildSetting(t, "CGO_ENABLED"); got != want {
