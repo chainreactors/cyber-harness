@@ -1,4 +1,4 @@
-//go:build full && record_ffmpeg && cgo && (windows || linux)
+//go:build full && record && cgo && (windows || linux)
 
 package main
 
@@ -9,14 +9,12 @@ import (
 
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/edition"
 )
 
-func TestRecordFullCapabilitySet(t *testing.T) {
-	want := []string{"arsenal", "browser", "core", "curl", "gogo", "katana", "neutron", "passive", "proton", "proxy", "record", "scan", "search", "spray", "zombie"}
-	if got := edition.Catalog().IDsSorted(); !slices.Equal(got, want) {
-		t.Fatalf("record full capabilities = %#v, want %#v", got, want)
+func TestRecordFullScannerSet(t *testing.T) {
+	want := []string{"curl", "gogo", "katana", "neutron", "passive", "proton", "scan", "spray", "zombie"}
+	if got := scannerNames(); !slices.Equal(got, want) {
+		t.Fatalf("record full scanners = %#v, want %#v", got, want)
 	}
 }
 
@@ -28,10 +26,9 @@ func TestRecordEditionBuildTags(t *testing.T) {
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	product, err := newCyberProfile(cyberProfileConfig{
 		Option: &cfg.Option{},
-		Application: apppkg.Config{
-			Tools: apppkg.ToolConfig{BashTimeout: 1}, Logger: telemetry.NopLogger(), SkipEngines: true,
+		Application: applicationConfig{
+			Logger: telemetry.NopLogger(), SkipEngines: true,
 		},
-		Logger: telemetry.NopLogger(),
 	})
 	if err != nil {
 		t.Fatal(err)

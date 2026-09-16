@@ -9,7 +9,7 @@ import (
 
 func TestCancelRevokesOldSnapshot(t *testing.T) {
 	r := New()
-	p := Point[int, struct{}]{Kind: "test"}
+	p := NewPoint[int, struct{}]("test")
 	var second *Subscription
 	p.On(r, "first", func(context.Context, int) (struct{}, error) { second.Cancel(); return struct{}{}, nil })
 	second = p.On(r, "second", func(context.Context, int) (struct{}, error) {
@@ -24,7 +24,7 @@ func TestCancelRevokesOldSnapshot(t *testing.T) {
 
 func TestCloseWaitsForAcceptedCallbackAndCanRetry(t *testing.T) {
 	r := New()
-	p := Point[int, struct{}]{Kind: "test"}
+	p := NewPoint[int, struct{}]("test")
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	sub := p.On(r, "worker", func(context.Context, int) (struct{}, error) { close(entered); <-release; return struct{}{}, nil })
 	go func() { defer close(done); _, _ = p.Emit(context.Background(), r, 0) }()
@@ -44,7 +44,7 @@ func TestCloseWaitsForAcceptedCallbackAndCanRetry(t *testing.T) {
 
 func TestConcurrentCancelAndClose(t *testing.T) {
 	r := New()
-	p := Point[int, struct{}]{Kind: "test"}
+	p := NewPoint[int, struct{}]("test")
 	sub := p.On(r, "worker", func(context.Context, int) (struct{}, error) { return struct{}{}, nil })
 	var wg sync.WaitGroup
 	for range 20 {
@@ -65,5 +65,5 @@ func TestNilRegistryRegistrationFails(t *testing.T) {
 			t.Fatal("missing registry silently accepted")
 		}
 	}()
-	Point[int, struct{}]{Kind: "test"}.On(nil, "policy", func(context.Context, int) (struct{}, error) { return struct{}{}, nil })
+	NewPoint[int, struct{}]("test").On(nil, "policy", func(context.Context, int) (struct{}, error) { return struct{}{}, nil })
 }

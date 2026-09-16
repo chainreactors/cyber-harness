@@ -14,15 +14,13 @@ import (
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
 	coreregistry "github.com/chainreactors/cyber/core/registry"
+	"github.com/chainreactors/cyber/core/resource"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 
-// Registry is the fixed native-command boundary for one product composition.
-// Commands are registered during extension loading and immutable after
-// activation. Close rejects new work, cancels accepted calls, and drains them
-// before command owners and their resources close.
+// Registry is the command resource Point and execution boundary for one Profile.
 type Registry struct {
 	hooks *hooks.Registry
 	store *coreregistry.Store[Command]
@@ -32,32 +30,32 @@ func NewRegistry(registry *hooks.Registry) *Registry {
 	return &Registry{hooks: registry, store: coreregistry.New[Command]()}
 }
 
-// Register atomically adds fixed declarations before activation. The registry
-// retains them for the whole composition; command resources remain borrowed.
-func (r *Registry) Register(source, group string, commands ...Command) error {
+func (r *Registry) Add(commands ...Command) (resource.Handle, error) {
 	if r == nil || r.store == nil || len(commands) == 0 {
-		return ErrInvalidCommand
+		return nil, ErrInvalidCommand
 	}
 	values := make([]coreregistry.Value[Command], 0, len(commands))
 	seen := make(map[string]struct{}, len(commands))
 	for _, command := range commands {
 		name := strings.TrimSpace(command.Name)
 		if name == "" || name != command.Name || strings.ContainsAny(name, " \t\r\n") || command.Run == nil {
-			return ErrInvalidCommand
+			return nil, ErrInvalidCommand
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("%w: %s (source %s repeated in batch)", ErrDuplicateCommand, name, source)
+			return nil, fmt.Errorf("%w: %s repeated in batch", ErrDuplicateCommand, name)
 		}
 		seen[name] = struct{}{}
 		values = append(values, coreregistry.Value[Command]{Name: name, Value: command})
 	}
-	_, err := r.store.Register(source, group, values...)
-	return err
+	return r.store.Add(values...)
 }
 
 func (r *Registry) Load(scope *extension.Scope) error {
 	if r == nil || r.store == nil || scope == nil {
 		return ErrUnavailable
+	}
+	if err := extension.Define[Command](scope, r); err != nil {
+		return err
 	}
 	return r.store.Activate(scope.Init())
 }
@@ -102,13 +100,6 @@ func (r *Registry) Names() []string {
 		return nil
 	}
 	return r.store.Names()
-}
-
-func (r *Registry) GroupNames(group string) []string {
-	if r == nil || r.store == nil {
-		return nil
-	}
-	return r.store.GroupNames(group)
 }
 
 func (r *Registry) DescriptionPath(name string) string {
@@ -160,7 +151,7 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 			err = errors.Join(err, cause)
 		}
 		endedAt := time.Now()
-		if r.hooks.Has(toolhooks.CommandCompleted.Kind) {
+		if toolhooks.CommandCompleted.Has(r.hooks) {
 			hooks.Notify(context.WithoutCancel(call), r.hooks, toolhooks.CommandCompleted, toolhooks.CommandCompletion{
 				Lifecycle: toolhooks.Lifecycle{
 					Operation: proto.Clone(correlation).(*operationpb.Ref), StartedAt: startedAt, EndedAt: endedAt, Err: err,
@@ -169,7 +160,7 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 			})
 		}
 	}()
-	if r.hooks.Has(toolhooks.BeforeCommand.Kind) {
+	if toolhooks.BeforeCommand.Has(r.hooks) {
 		admission, hookErr := toolhooks.BeforeCommand.Emit(call, r.hooks, event)
 		if err = toolhooks.Check(admission, hookErr); err != nil {
 			return nil, err
@@ -179,7 +170,7 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 		return nil, err
 	}
 	startedAt = time.Now()
-	if r.hooks.Has(toolhooks.CommandStarted.Kind) {
+	if toolhooks.CommandStarted.Has(r.hooks) {
 		hooks.Notify(call, r.hooks, toolhooks.CommandStarted, event)
 	}
 	if err = context.Cause(call); err != nil {
@@ -239,3 +230,4 @@ func commandSpec(command Command) *types.CommandSpec {
 }
 
 var _ extension.Extension = (*Registry)(nil)
+var _ resource.Point[Command] = (*Registry)(nil)

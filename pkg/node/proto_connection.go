@@ -31,7 +31,6 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	"github.com/chainreactors/cyber/pkg/terminal"
 	toolset "github.com/chainreactors/cyber/pkg/toolset"
@@ -227,7 +226,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	} else if cc.Chat == nil {
 		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
 	}
-	hello.Capabilities = append(hello.Capabilities, cc.ExtraCapabilities...)
 	helloEnvelope, err := aop.Wrap(nextEnvelopeID("hello"), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
 	if err != nil {
 		return err
@@ -307,7 +305,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	// operations tracks live tool/exec calls by id; sealed remembers the ids
 	// whose artifact window this connection has already closed — either because
 	// the terminal is about to be sent (handleAgentToolMessage) or because the
-	// hub canceled the call (handleAgentCoreMessage). The artifact-forwarding
+	// hub canceled the call. The artifact-forwarding
 	// subscriber below reads sealed to drop a streaming tool's trailing
 	// artifacts. Both are declared here (rather than just above the mux) so the
 	// subscriber can see them.
@@ -411,7 +409,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		case <-connectionCtx.Done():
 		}
 	}
-	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, router, send, sendEnvelope, &operationsMu, operations, sealed)
+	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, router, send, &operationsMu, operations, sealed)
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
@@ -434,6 +432,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			default:
 			}
 			return err
+		}
+		intercepted, err := interceptCancelOperation(envelope, &operationsMu, operations, sealed)
+		if err != nil {
+			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
+			continue
+		}
+		if intercepted {
+			continue
 		}
 		handled, err := namespaceMux.Dispatch(envelope, reply)
 		if err != nil {
@@ -458,7 +464,6 @@ func newAgentConnectionNamespaceMux(
 	cc connectionConfig,
 	router *terminal.Router,
 	send func(string, protobuf.Message),
-	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 	sealed map[string]time.Time,
@@ -470,28 +475,7 @@ func newAgentConnectionNamespaceMux(
 			_ = mux.Close(context.Background())
 		}
 	}()
-	if err := mux.Register("agent", &aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, ok := message.(*aop.ProtocolMessage)
-		if !ok {
-			return fmt.Errorf("unexpected core namespace message %T", message)
-		}
-		return handleAgentCoreMessage(ctx, cc.Control, envelope, value, send, sendEnvelope, operationsMu, operations, sealed)
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register("agent.commands", &types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		if cc.Control != nil {
-			return cc.Control.HandleCommandNamespace(ctx, envelope, message, func(response *aop.Envelope) error {
-				sendEnvelope(response)
-				return nil
-			})
-		}
-		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "command handler is unavailable"))
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register("tools", &toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*toolpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected tool namespace message %T", message)
@@ -501,7 +485,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("files", &filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*filepb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected file namespace message %T", message)
@@ -511,7 +495,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("terminal", &execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*execpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected exec namespace message %T", message)
@@ -521,7 +505,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("config", &types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*types.ReloadProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected reload namespace message %T", message)
@@ -531,7 +515,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("terminal", &ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*ptypb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected PTY namespace message %T", message)
@@ -541,8 +525,8 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if cc.RegisterResourceNamespaces != nil {
-		if err := cc.RegisterResourceNamespaces(mux); err != nil {
+	if cc.RegisterNamespaces != nil {
+		if err := cc.RegisterNamespaces(mux); err != nil {
 			return nil, err
 		}
 	}
@@ -550,44 +534,45 @@ func newAgentConnectionNamespaceMux(
 	return mux, nil
 }
 
-// handleAgentCoreMessage intercepts the connection-local CancelOperation
-// payload, then calls the same session handler registered for stdio/inline.
-func handleAgentCoreMessage(
-	ctx context.Context,
-	control *agentext.Runtime,
+// interceptCancelOperation handles connection-local call cancellation before
+// typed namespace dispatch. Session control remains owned by its contributed
+// aop.ProtocolMessage binding, so a connection never installs a second handler
+// for the same protobuf namespace.
+func interceptCancelOperation(
 	envelope *aop.Envelope,
-	value *aop.ProtocolMessage,
-	send func(string, protobuf.Message),
-	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 	sealed map[string]time.Time,
-) error {
-	if payload, ok := value.Message.(*aop.ProtocolMessage_CancelOperation); ok {
-		targetID := payload.CancelOperation.GetTargetId()
-		operationsMu.Lock()
-		cancel := operations[targetID]
-		operationsMu.Unlock()
-		if cancel == nil {
-			return nil
-		}
-		// Cancellation is advisory: a scanner that ignores its context (katana's
-		// Crawl takes no ctx) keeps running and emitting for the rest of its
-		// crawl. The hub has already given up on this call, so seal it now —
-		// otherwise every one of those artifacts crosses the wire only to be
-		// rejected on arrival.
-		sealCall(operationsMu, sealed, targetID)
-		cancel()
-		return nil
+) (bool, error) {
+	prototype := &aop.ProtocolMessage{}
+	if envelope == nil || envelope.Payload == nil || !envelope.Payload.MessageIs(prototype) {
+		return false, nil
 	}
-	if control != nil {
-		return control.HandleCoreNamespace(ctx, envelope, value, func(response *aop.Envelope) error {
-			sendEnvelope(response)
-			return nil
-		})
+	canonical := "type.googleapis.com/" + string(prototype.ProtoReflect().Descriptor().FullName())
+	if envelope.Payload.TypeUrl != canonical {
+		return false, fmt.Errorf("non-canonical type URL %q, want %q", envelope.Payload.TypeUrl, canonical)
 	}
-	send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "chat handler is unavailable"))
-	return nil
+	value := new(aop.ProtocolMessage)
+	if err := envelope.Payload.UnmarshalTo(value); err != nil {
+		return false, fmt.Errorf("decode core protocol message: %w", err)
+	}
+	payload, ok := value.Message.(*aop.ProtocolMessage_CancelOperation)
+	if !ok {
+		return false, nil
+	}
+	targetID := payload.CancelOperation.GetTargetId()
+	operationsMu.Lock()
+	cancel := operations[targetID]
+	operationsMu.Unlock()
+	if cancel == nil {
+		return true, nil
+	}
+	// Cancellation is advisory: a scanner that ignores its context (katana's
+	// Crawl takes no ctx) keeps running and emitting for the rest of its crawl.
+	// Seal the call before cancellation so trailing artifacts stay off the wire.
+	sealCall(operationsMu, sealed, targetID)
+	cancel()
+	return true, nil
 }
 
 func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *toolpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc, sealed map[string]time.Time) {

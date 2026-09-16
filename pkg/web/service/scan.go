@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -364,7 +365,7 @@ func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writ
 	}
 	bash := app.Bash
 	var text strings.Builder
-	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
+	if _, err := bash.RunForeground(ctx, commandline.JoinCommandLine("scan", args), commands.BashExecOptions{
 		OnOutput: func(data []byte) {
 			_, _ = text.Write(data)
 			if stream != nil {

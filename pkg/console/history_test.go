@@ -10,12 +10,13 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	"github.com/chainreactors/cyber/pkg/types"
 )
@@ -40,7 +41,7 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 
 type consoleProvider struct{ usage *aop.TokenUsage }
 
-func loadConsoleApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
+func loadConsoleApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
 	return harness.AppLoad(t, ctx, application)
 }
 
@@ -51,19 +52,19 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentext.Runtime {
+func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentsession.Runtime {
 	t.Helper()
-	a := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+	a := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 
 	aSet := loadConsoleApplication(t, t.Context(), a)
-	a.App.SetProvider(provider, agent.ProviderConfig{Model: "test"})
+	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
 	t.Cleanup(func() { _ = aSet.Close(context.Background()) })
-	rt, err := agentext.New(agentext.Config{Application: a.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	rt, err := sessionext.New(agentsession.Config{Application: a, Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +101,12 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 	provider := &consoleProvider{usage: provider.TokenUsage(8192, 0, 8200, 0, 0)}
 	rt := newConsoleRuntime(t, provider)
-	session, err := rt.OpenSession(context.Background(), agentext.SessionOptions{ID: "session-1"})
+	session, err := rt.OpenSession(context.Background(), agentsession.SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	run, err := session.Run(context.Background(), agentext.RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	run, err := session.Run(context.Background(), agentsession.RunInput{Content: []*aop.Content{aop.Text("hello")}})
 	if err != nil {
 		t.Fatal(err)
 	}

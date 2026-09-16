@@ -9,6 +9,7 @@ import (
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/terminal"
+	"github.com/chainreactors/utils/pty"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
@@ -36,10 +37,10 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *termin
 	if mgr == nil || router == nil || send == nil {
 		return func() {}
 	}
-	notify := make(chan tmux.EventAction, 1)
-	unsub := mgr.Subscribe(func(ev tmux.Event) {
+	notify := make(chan pty.EventAction, 1)
+	unsub := mgr.Subscribe(func(ev pty.Event) {
 		switch ev.Action {
-		case tmux.EventSessionCreated, tmux.EventSessionUpdated, tmux.EventSessionOutput, tmux.EventSessionClosed:
+		case pty.EventSessionCreated, pty.EventSessionUpdated, pty.EventSessionOutput, pty.EventSessionClosed:
 			select {
 			case notify <- ev.Action:
 			default:
@@ -54,7 +55,7 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *termin
 		for {
 			select {
 			case action := <-notify:
-				if action == tmux.EventSessionOutput {
+				if action == pty.EventSessionOutput {
 					dirty = true
 					continue
 				}

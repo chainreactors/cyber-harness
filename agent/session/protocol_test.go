@@ -14,6 +14,15 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
+func registerRuntimeNamespaces(rt *Runtime, mux *aop.NamespaceMux) error {
+	for _, binding := range rt.NamespaceBindings() {
+		if err := binding.Register(mux); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	request := &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: &types.CommandRequest{SessionId: "absent", Line: "/status"}}}
@@ -45,7 +54,7 @@ func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 func TestInlineHostSharesRuntimeAcrossReconnect(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	mux := aop.NewNamespaceMux(t.Context())
-	if err := rt.RegisterNamespaces(mux); err != nil {
+	if err := registerRuntimeNamespaces(rt, mux); err != nil {
 		t.Fatal(err)
 	}
 	open := aop.MustWrap("open", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionRequest{
@@ -68,7 +77,7 @@ func TestInlineHostSharesRuntimeAcrossReconnect(t *testing.T) {
 	// Reconnect to the same application. Closing the communication Host must
 	// neither close its session nor cancel the runtime that owns that session.
 	secondMux := aop.NewNamespaceMux(t.Context())
-	if err := rt.RegisterNamespaces(secondMux); err != nil {
+	if err := registerRuntimeNamespaces(rt, secondMux); err != nil {
 		t.Fatal(err)
 	}
 	second := host.New(secondMux)
@@ -91,7 +100,7 @@ func handleRuntimeMessage(t *testing.T, rt *Runtime, id string, message protobuf
 	request := aop.MustWrap(id, "", message)
 	var response *aop.Envelope
 	mux := aop.NewNamespaceMux(t.Context())
-	if err := rt.RegisterNamespaces(mux); err != nil {
+	if err := registerRuntimeNamespaces(rt, mux); err != nil {
 		t.Fatal(err)
 	}
 	h := host.New(mux)

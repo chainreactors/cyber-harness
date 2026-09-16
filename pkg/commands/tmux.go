@@ -9,6 +9,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent/tmux"
 	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/utils/pty"
 )
 
 type tmuxCommand struct {
@@ -81,7 +82,7 @@ func (t *tmuxCommand) run(ctx context.Context, execution *Execution) (any, error
 
 func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
 	cmdLine := strings.Join(args, " ")
-	info, err := t.createSession(ctx, cmdLine, "", tmux.DefaultTimeout, true)
+	info, err := t.createSession(ctx, cmdLine, "", pty.DefaultTimeout, true)
 	if err != nil {
 		return "", err
 	}
@@ -119,7 +120,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	}
 
 	cmdLine := strings.Join(cmdParts, " ")
-	timeout := tmux.DefaultTimeout
+	timeout := pty.DefaultTimeout
 	if timeoutStr != "" {
 		d, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -153,10 +154,10 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 // tool call that created it, so it hands its lifetime to the process manager;
 // a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
-func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (tmux.Info, error) {
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (pty.Info, error) {
 	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
 	if err != nil {
-		return tmux.Info{}, err
+		return pty.Info{}, err
 	}
 	if detached {
 		execution.DetachParent()
@@ -176,7 +177,7 @@ func (t *tmuxCommand) cmdListSessions() (string, error) {
 	var sb strings.Builder
 	for _, it := range items {
 		var elapsed time.Duration
-		if it.State == tmux.StateRunning {
+		if it.State == pty.StateRunning {
 			elapsed = time.Since(it.StartedAt).Round(time.Second)
 		} else {
 			elapsed = it.EndedAt.Sub(it.StartedAt).Round(time.Second)
@@ -332,7 +333,7 @@ func (t *tmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if info.State == tmux.StateRunning {
+	if info.State == pty.StateRunning {
 		return fmt.Sprintf("%s: still running (%s elapsed)",
 			info.ID, time.Since(info.StartedAt).Round(time.Second)), nil
 	}

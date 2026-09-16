@@ -456,7 +456,6 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		"Limits: context=128000 · max_output=8192 · timeout=45s",
 		"Tools: ready",
 		"bash",
-		"Scanners: disabled",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status missing %q:\n%s", want, text)
@@ -628,29 +627,23 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	ctx, cancel := context.WithCancel(context.Background())
 	reg := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
-	terminal, err := terminaltools.New(nil, tools, reg, terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
+	terminal, err := terminaltools.New(nil, reg, terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := []extension.Entry{{ID: "terminal", Extension: terminal}}
-	commandDependencies := []string{"terminal"}
+	entries := []extension.Extension{reg, tools, terminal}
 	if len(values) > 0 {
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return reg.Register("test", "test", values...)
+			return extension.Add(scope, values...)
 		}}
-		entries = append(entries, extension.Entry{ID: "test-commands", Extension: contributor})
-		commandDependencies = append(commandDependencies, "test-commands")
+		entries = append(entries, contributor)
 	}
-	entries = append(entries,
-		extension.Entry{ID: "command-registry", DependsOn: commandDependencies, Extension: reg},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
-	)
 	terminalSet := harness.Set(t, entries...)
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
 	bash := terminal.Bash()
-	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{}).App
+	application := newTestApp(t, nil, apppkg.Dependencies{})
 	application.Commands = reg
 	application.Tools = tools
 	application.Bash = bash

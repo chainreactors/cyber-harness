@@ -31,7 +31,7 @@ type adapterTestCommands struct {
 func newAdapterTestBash(t *testing.T) (*BashTool, *Registry, *adapterTestCommands) {
 	t.Helper()
 	state := &adapterTestCommands{started: make(chan struct{}), canceled: make(chan struct{})}
-	registry, _ := loadTestRegistry(t, commandGroup("adapter-commands", "test",
+	registry, _ := loadTestRegistry(t, commandBatch(
 		Command{Name: "memory_echo", Run: func(_ context.Context, execution *Execution) (any, error) {
 			fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
 			return nil, nil

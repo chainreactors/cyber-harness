@@ -3,7 +3,6 @@
 package scanner
 
 import (
-	"github.com/chainreactors/cyber/core/capability"
 	"github.com/chainreactors/cyber/core/telemetry"
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
@@ -13,15 +12,8 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func editionScannerCommands(application *app.App, plan capability.Plan, engines *engine.Set, logger telemetry.Logger, proxyURL string) ([]commands.Command, error) {
-	var result []commands.Command
-	if plan.Has("katana") {
-		result = append(result, katana.NewCommand(logger, proxyURL, application))
-	}
-	if plan.Has("passive") {
-		result = append(result, passive.NewCommand(engines, logger))
-	}
-	return result, nil
+func editionScannerCommands(application *app.App, engines *engine.Set, logger telemetry.Logger, proxyURL string) ([]commands.Command, error) {
+	return []commands.Command{katana.NewCommand(logger, proxyURL, application), passive.NewCommand(engines, logger)}, nil
 }
 
 func editionScanOptions() []scan.Option { return scan.KatanaOptions() }

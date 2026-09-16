@@ -13,7 +13,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/skills"
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -21,19 +21,17 @@ import (
 // lend ownership of the receiver to IOA.
 type DeliverFunc func(context.Context, inbox.Message) error
 
-// Services are the runtime contracts consumed by the IOA client extension.
-// They are supplied by the profile's extension service table.
-type Services struct {
-	Commands commands.Runtime
-	Events   *events.Stream
-	Deliver  DeliverFunc
-	Logger   telemetry.Logger
+type Dependencies struct {
+	Events  *events.Stream
+	Deliver DeliverFunc
+	Logger  telemetry.Logger
+	Skills  []skills.Bundle
 }
 
 type Extension struct {
 	resource      *service.Resource
 	config        service.Config
-	deps          Services
+	deps          Dependencies
 	sub           *eventbus.Subscription[*aop.Event]
 	receiveCancel context.CancelFunc
 	sendCancel    context.CancelFunc
@@ -43,14 +41,11 @@ type Extension struct {
 	outputErr     error
 }
 
-func New(config service.Config, deps Services) (*Extension, error) {
-	if config.RegisterCommands && deps.Commands == nil {
-		return nil, fmt.Errorf("IOA command registration requires a command registry")
-	}
+func New(config service.Config, deps Dependencies) *Extension {
 	if deps.Logger == nil {
 		deps.Logger = telemetry.NopLogger()
 	}
-	return &Extension{resource: service.New(config, deps.Logger), config: config, deps: deps}, nil
+	return &Extension{resource: service.New(config, deps.Logger), config: config, deps: deps}
 }
 
 func (e *Extension) Runtime() *service.Runtime {
@@ -61,12 +56,17 @@ func (e *Extension) Runtime() *service.Runtime {
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
+	if len(e.deps.Skills) > 0 {
+		if err := extension.Add(scope, e.deps.Skills...); err != nil {
+			return err
+		}
+	}
 	if err := e.resource.Start(scope.Init()); err != nil {
 		return err
 	}
 	if e.config.RegisterCommands {
 		if values := e.resource.Commands(); len(values) > 0 {
-			if err := e.deps.Commands.Register("ioa.client", "ioa", values...); err != nil {
+			if err := extension.Add(scope, values...); err != nil {
 				return err
 			}
 		}

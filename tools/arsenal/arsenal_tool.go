@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chainreactors/cyber/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // ArsenalCommand is a pseudo-command invoked via bash:

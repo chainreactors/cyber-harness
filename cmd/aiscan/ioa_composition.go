@@ -3,56 +3,67 @@ package main
 import (
 	"context"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	clientcli "github.com/chainreactors/cyber/pkg/exts/ioa/client/cli"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	servercli "github.com/chainreactors/cyber/pkg/exts/ioa/server/cli"
 	"github.com/chainreactors/cyber/pkg/exts/record"
-	settings "github.com/chainreactors/cyber/pkg/exts/settings"
 	"gopkg.in/yaml.v3"
 )
 
-func declareProductCLI(reg *hostcli.Registry) error {
-	e, err := settings.New(productDeclarations(false))
-	if err != nil {
+func declareProductCLI(resources *resource.Registry) error {
+	if err := clientcli.Declare(resources, runIOAClientCommand); err != nil {
 		return err
 	}
-	return e.Declare(reg)
+	if err := servercli.Declare(resources, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
+		return runIOAServe(ctx, option, env.Logger)
+	}); err != nil {
+		return err
+	}
+	_, err := resource.Add[hostcli.Contribution](resources,
+		func(registry *hostcli.Registry) error {
+			return registry.Group("agent", client.ConfigKey, client.FlagGroup())
+		},
+		func(registry *hostcli.Registry) error {
+			return registry.Group("web", client.ConfigKey, client.FlagGroup())
+		},
+	)
+	return err
 }
 
-// Product declarations are inert and independent of runtime IOA connections.
-// Other profiles select only the declaration layers they actually expose.
-func productDeclarations(serving bool) []settings.Declaration {
-	c, s := client.Section(), server.Section()
-	if serving {
-		c.Aliases = nil
-		s.Aliases = []string{"ioa"}
+func declareProductConfig(resources *resource.Registry, serving bool) error {
+	if !serving {
+		if err := client.Declare(resources); err != nil {
+			return err
+		}
+		if err := server.Declare(resources); err != nil {
+			return err
+		}
+	} else {
+		clientSection, serverSection := client.Section(), server.Section()
+		clientSection.Aliases = nil
+		serverSection.Aliases = []string{"ioa"}
+		if _, err := resource.Add[cfg.Section](resources, clientSection, serverSection); err != nil {
+			return err
+		}
 	}
-	return []settings.Declaration{
-		{ID: client.ConfigKey, Config: []cfg.Section{c},
-			Flags: []settings.Flag{
-				{Command: "agent", Key: client.ConfigKey, Group: client.FlagGroup()},
-				{Command: "web", Key: client.ConfigKey, Group: client.FlagGroup()},
-			},
-			DeclareCLI: func(reg *hostcli.Registry) error {
-				return clientcli.Register(reg, runIOAClientCommand)
-			}},
-		{ID: server.ConfigKey, Config: []cfg.Section{s}, DeclareCLI: func(reg *hostcli.Registry) error {
-			return servercli.Register(reg, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
-				return runIOAServe(ctx, option, env.Logger)
-			})
-		}},
-		{ID: record.ConfigKey, Config: []cfg.Section{record.Section()}},
-	}
+	return record.Declare(resources)
 }
 
 func productSections(serving bool) *cfg.Sections {
-	e, err := settings.New(productDeclarations(serving))
-	if err != nil {
+	resources := resource.New()
+	sections := cfg.NewSections()
+	if _, err := resource.Define[cfg.Section](resources, sections); err != nil {
 		panic(err)
 	}
-	return e.Sections()
+	if err := declareProductConfig(resources, serving); err != nil {
+		panic(err)
+	}
+	resources.Freeze()
+	sections.Seal()
+	return sections
 }
 func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent

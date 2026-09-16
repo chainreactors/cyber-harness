@@ -32,7 +32,7 @@ func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
 	parent := newExecution(manager, "parent", nil, t.TempDir(), nil)
 	parent.bindID(info.ID)
 	var child *Execution
-	registry, _ := loadTestRegistry(t, commandGroup("child", "test", Command{Name: "child", Run: func(_ context.Context, execution *Execution) (any, error) {
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: "child", Run: func(_ context.Context, execution *Execution) (any, error) {
 		child = execution
 		return nil, nil
 	}}))

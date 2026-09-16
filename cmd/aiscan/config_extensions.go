@@ -2,6 +2,7 @@ package main
 
 import (
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	ioaprobe "github.com/chainreactors/cyber/pkg/exts/ioa/client/probe"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
@@ -66,14 +67,17 @@ func marshalProductConfig(config *types.DistributeConfig) ([]byte, error) {
 }
 func productConfigAPI() managementapi.ConfigOptions {
 	probes := probe.New()
-	for name, check := range map[string]probe.Check{"cyberhub": scannerprobe.Cyberhub, "recon": scannerprobe.Recon, "search": searchprobe.Check} {
-		if err := probes.Register(name, name, check); err != nil {
+	resources := resource.New()
+	if _, err := resource.Define[probe.Definition](resources, probes); err != nil {
+		panic(err)
+	}
+	for _, declare := range []func(*resource.Registry) error{scannerprobe.Declare, searchprobe.Declare, ioaprobe.Declare} {
+		if err := declare(resources); err != nil {
 			panic(err)
 		}
 	}
-	if err := probes.Register("ioa.client", "ioa", ioaprobe.Check); err != nil {
-		panic(err)
-	}
+	resources.Freeze()
+	probes.Seal()
 	return managementapi.ConfigOptions{Probes: probes, Sections: productSections(false), Project: func(config *types.DistributeConfig, view *types.ConfigView) {
 		client.ProjectView(config, view)
 		if ext := view.Extensions[server.ConfigKey]; ext != nil && ext.Values != nil {

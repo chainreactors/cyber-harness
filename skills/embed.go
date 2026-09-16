@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"embed"
 	"encoding/xml"
 	"errors"
@@ -11,10 +12,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/chainreactors/cyber/core/capability"
+	"github.com/chainreactors/cyber/core/resource"
 )
 
 const uriPrefix = "cyber://skills/"
@@ -69,33 +71,41 @@ type Bundle struct {
 }
 
 type Store struct {
-	Diagnostics []Diagnostic
-	bundles     []Bundle
-	Skills      []Skill
+	mu          sync.RWMutex
+	base        []Skill
+	diagnostics []Diagnostic
+	batches     []*bundleBatch
+	snapshot    storeSnapshot
+}
 
-	byName  map[string]Skill
-	catalog capability.Catalog
+type storeSnapshot struct {
+	Bundles []Bundle
+	Skills  []Skill
+	ByName  map[string]Skill
+}
+
+type bundleBatch struct {
+	bundles []Bundle
+	store   *Store
+	closed  bool
+	mu      sync.Mutex
 }
 
 // LoadAll loads skills from all sources with override support.
 // Priority (later overrides earlier): embedded < .cyber/skills/ < .agent/skills/ < CLI paths.
-func LoadAll(cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
+func LoadAll(cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 	directory, _ := os.Getwd()
-	return LoadFrom(directory, cliPaths, catalog, bundles...)
+	return LoadFrom(directory, cliPaths, bundles...)
 }
 
 // LoadFrom resolves project and relative CLI paths against the profile directory.
-func LoadFrom(directory string, cliPaths []string, catalog capability.Catalog, bundles ...Bundle) (*Store, []Diagnostic) {
+func LoadFrom(directory string, cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
 
 	embedded, diags := LoadEmbedded()
 	allSkills = append(allSkills, embedded...)
 	allDiags = append(allDiags, diags...)
-
-	for _, bundle := range bundles {
-		allSkills = append(allSkills, bundle.Skills...)
-	}
 
 	for _, rel := range []struct {
 		dir    string
@@ -138,19 +148,11 @@ func LoadFrom(directory string, cliPaths []string, catalog capability.Catalog, b
 		}
 	}
 
-	store := newStoreWithOverride(allSkills)
-	store.bundles = append([]Bundle(nil), bundles...)
-	store.catalog = catalog
-	filtered := store.Skills[:0]
-	for _, skill := range store.Skills {
-		if catalog.SkillEnabled(skill.Name) {
-			filtered = append(filtered, skill)
-		} else {
-			delete(store.byName, skill.Name)
-		}
+	store := NewStore(allSkills)
+	store.diagnostics = append([]Diagnostic(nil), allDiags...)
+	if len(bundles) > 0 {
+		_, _ = store.Add(bundles...)
 	}
-	store.Skills = filtered
-	store.Diagnostics = allDiags
 	return store, allDiags
 }
 
@@ -265,13 +267,8 @@ func LoadEmbeddedStore() (*Store, []Diagnostic) {
 }
 
 func NewStore(skills []Skill) *Store {
-	store := &Store{
-		Skills: append([]Skill(nil), skills...),
-		byName: make(map[string]Skill, len(skills)),
-	}
-	for _, skill := range skills {
-		store.byName[skill.Name] = skill
-	}
+	store := &Store{base: append([]Skill(nil), skills...)}
+	store.rebuildLocked()
 	return store
 }
 
@@ -290,14 +287,103 @@ func newStoreWithOverride(skills []Skill) *Store {
 		seen[s.Name] = true
 		deduped = append(deduped, byName[s.Name])
 	}
-	return &Store{Skills: deduped, byName: byName}
+	return &Store{base: append([]Skill(nil), deduped...), snapshot: storeSnapshot{Skills: deduped, ByName: byName}}
+}
+
+func (s *Store) Add(bundles ...Bundle) (resource.Handle, error) {
+	if s == nil || len(bundles) == 0 {
+		return nil, resource.ErrInvalid
+	}
+	batch := &bundleBatch{store: s, bundles: append([]Bundle(nil), bundles...)}
+	s.mu.Lock()
+	s.batches = append(s.batches, batch)
+	s.rebuildLocked()
+	s.mu.Unlock()
+	return batch, nil
+}
+
+func (b *bundleBatch) Close(context.Context) error {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
+	b.store.mu.Lock()
+	for i, candidate := range b.store.batches {
+		if candidate == b {
+			b.store.batches = append(b.store.batches[:i], b.store.batches[i+1:]...)
+			break
+		}
+	}
+	b.store.rebuildLocked()
+	b.store.mu.Unlock()
+	b.closed = true
+	return nil
+}
+
+func (s *Store) rebuildLocked() {
+	var all []Skill
+	for _, skill := range s.base {
+		if skill.Source == SourceEmbedded {
+			all = append(all, skill)
+		}
+	}
+	var bundles []Bundle
+	for _, batch := range s.batches {
+		bundles = append(bundles, batch.bundles...)
+		for _, bundle := range batch.bundles {
+			all = append(all, bundle.Skills...)
+		}
+	}
+	for _, skill := range s.base {
+		if skill.Source != SourceEmbedded {
+			all = append(all, skill)
+		}
+	}
+	resolved := newStoreWithOverride(all).snapshot
+	resolved.Bundles = bundles
+	s.snapshot = resolved
+}
+
+func (s *Store) All() []Skill {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]Skill(nil), s.snapshot.Skills...)
+}
+
+func (s *Store) Diagnostics() []Diagnostic {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]Diagnostic(nil), s.diagnostics...)
+}
+
+func (s *Store) Replace(skills []Skill, diagnostics []Diagnostic) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.base = append(s.base[:0], skills...)
+	s.diagnostics = append(s.diagnostics[:0], diagnostics...)
+	s.rebuildLocked()
+	s.mu.Unlock()
 }
 
 func (s *Store) ByName(name string) (Skill, bool) {
 	if s == nil {
 		return Skill{}, false
 	}
-	skill, ok := s.byName[name]
+	s.mu.RLock()
+	skill, ok := s.snapshot.ByName[name]
+	s.mu.RUnlock()
 	return skill, ok
 }
 
@@ -306,7 +392,7 @@ func (s *Store) AgentTypes() []Skill {
 		return nil
 	}
 	var agents []Skill
-	for _, skill := range s.Skills {
+	for _, skill := range s.All() {
 		if skill.Agent {
 			agents = append(agents, skill)
 		}
@@ -316,7 +402,10 @@ func (s *Store) AgentTypes() []Skill {
 
 // ReadVirtual reads a file from skill sources (embedded or local).
 func (s *Store) ReadVirtual(location string) (string, bool, error) {
-	for _, bundle := range s.bundles {
+	s.mu.RLock()
+	bundles := append([]Bundle(nil), s.snapshot.Bundles...)
+	s.mu.RUnlock()
+	for _, bundle := range bundles {
 		if bundle.ReadVirtual != nil {
 			if raw, handled, err := bundle.ReadVirtual(location); handled || err != nil {
 				return raw, handled, err
@@ -343,9 +432,6 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 			return "", false, nil
 		}
 	}
-	if name := skillNameFromEmbedPath(embedPath); name != "" && !s.catalog.SkillEnabled(name) {
-		return "", true, fmt.Errorf("virtual file not available in this build: %s", location)
-	}
 	data, err := fs.ReadFile(embeddedFS, embedPath)
 	if err != nil {
 		return "", true, fmt.Errorf("virtual file not found: %s", location)
@@ -354,7 +440,7 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 }
 
 func (s *Store) isKnownLocalPath(absPath string) bool {
-	for _, skill := range s.Skills {
+	for _, skill := range s.All() {
 		if skill.Source == SourceEmbedded || skill.Source == "" {
 			continue
 		}
@@ -373,15 +459,12 @@ func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
 		matches, err := fs.Glob(embeddedFS, embedPattern)
 		if err == nil {
 			for _, m := range matches {
-				if name := skillNameFromEmbedPath(m); name != "" && !s.catalog.SkillEnabled(name) {
-					continue
-				}
 				allMatches = append(allMatches, "skills/"+m)
 			}
 		}
 	}
 
-	for _, skill := range s.Skills {
+	for _, skill := range s.All() {
 		if skill.Source == SourceEmbedded || skill.Source == "" {
 			continue
 		}
@@ -404,7 +487,7 @@ func (s *Store) ReadBody(name string) string {
 	if s == nil {
 		return readEmbeddedBody(name)
 	}
-	skill, ok := s.byName[name]
+	skill, ok := s.ByName(name)
 	if !ok {
 		return readEmbeddedBody(name)
 	}

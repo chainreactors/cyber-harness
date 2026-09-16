@@ -59,7 +59,7 @@ Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭�
 - `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
 - `pkg/probe.Registry` 只执行显式注册的探测；普通 Web API 不包含 IOA 分支。
 - `pkg/profile.Application` 只发布通用 ConsoleBindings、Capabilities 和完整 AgentStatus。
-- `pkg/web.Route` 由产品传入；`/ioa/` 及浏览器身份桥接由 server 扩展与产品组合根装配。
+- `pkg/web.Route` 是 typed resource；Web 扩展定义目录，IOA server 扩展在启用浏览器桥接时自行贡献 `/ioa/`。
 
 新配置使用独立命名空间：
 
@@ -127,6 +127,6 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 ```text
 go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service
 go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./skills
-go test -tags full cstx ./cmd/aiscan ./pkg/web/service
+go test -tags full ./cmd/aiscan ./pkg/web/service
 go test github.com/chainreactors/ioa/server
 ```

@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/utils/pty"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -1105,10 +1106,10 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 
 	ib := inbox.NewBuffered(8)
 	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info tmux.Info) {
+	sessMgr.SetOnDone(func(info pty.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			tmux.FormatCompletion(info, tail))
+			pty.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{"session_id": info.ID}
 		ib.Push(msg)
 	})
@@ -1181,10 +1182,10 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 func TestSessionCompletionMetadata(t *testing.T) {
 	ib := inbox.NewBuffered(4)
 	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info tmux.Info) {
+	sessMgr.SetOnDone(func(info pty.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			tmux.FormatCompletion(info, tail))
+			pty.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{
 			"session_id":   info.ID,
 			"session_name": info.Name,

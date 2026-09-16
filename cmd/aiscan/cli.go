@@ -15,11 +15,11 @@ import (
 
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/core/telemetry"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
-	"github.com/chainreactors/cyber/pkg/edition"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	agentext "github.com/chainreactors/cyber/pkg/exts/session"
-	settings "github.com/chainreactors/cyber/pkg/exts/settings"
 	"github.com/chainreactors/cyber/pkg/runner"
 	transportpkg "github.com/chainreactors/cyber/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -29,7 +29,7 @@ const runModeWeb cfg.RunMode = "web"
 
 func cliCommandSummary() string {
 	base := "agent, web, serve"
-	summaries := edition.Catalog().Summaries()
+	summaries := scannerext.Summaries()
 	if len(summaries) == 0 {
 		return base
 	}
@@ -406,18 +406,17 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	cli.registry = hostcli.New(parser)
-	if err := declareProductCLI(cli.registry); err != nil {
+	resources := resource.New()
+	if _, err := resource.Define[hostcli.Contribution](resources, cli.registry); err != nil {
 		panic(err)
 	}
-	// Session flags are inert declarations installed before Parse/WriteHelp.
-	// Runtime Session loading is not part of command-line discovery.
-	settingsExt, err := settings.New([]settings.Declaration{agentext.Declaration(&cli.Agent.AgentOptions)})
-	if err != nil {
+	if err := declareProductCLI(resources); err != nil {
 		panic(err)
 	}
-	if err := settingsExt.Declare(cli.registry); err != nil {
+	if err := agentext.Declare(resources, &cli.Agent.AgentOptions); err != nil {
 		panic(fmt.Sprintf("invalid session flag declaration: %v", err))
 	}
+	resources.Freeze()
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}
@@ -440,7 +439,7 @@ Examples:
   aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan web --addr 0.0.0.0:8080
-  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(edition.Catalog().UsageLines(), "\n"))
+  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(scannerext.UsageLines(), "\n"))
 	return parser
 }
 
@@ -596,7 +595,7 @@ func argsAfterCommand(args []string, command string) []string {
 }
 
 func isScannerCommandName(name string) bool {
-	return edition.Catalog().CLIAvailable(name)
+	return scannerext.Available(name)
 }
 
 func selectedMode(parser *goflags.Parser) cfg.RunMode {
@@ -610,7 +609,7 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	case "web":
 		return runModeWeb
 	default:
-		if edition.Catalog().CLIAvailable(active.Name) {
+		if scannerext.Available(active.Name) {
 			return cfg.RunModeScanner
 		}
 	}
@@ -622,7 +621,7 @@ func selectedScanner(parser *goflags.Parser) string {
 	if active == nil {
 		return ""
 	}
-	if edition.Catalog().CLIAvailable(active.Name) {
+	if scannerext.Available(active.Name) {
 		return active.Name
 	}
 	return ""

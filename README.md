@@ -103,12 +103,12 @@ The Web console stores sessions, scans, assets, findings, and configuration in
 git clone https://github.com/chainreactors/cyber.git && cd cyber
 
 make                                                       # standard edition
-make runner                                                # tag-free remote tool runner
+make agent                                                 # minimal local agent
 make full                                                  # frontend + full edition
 ```
 
-The standalone agent executable is no longer a maintained build or release
-target. The single Cyber product entry is `cmd/aiscan`. `make full` requires Node.js/npm and a
+The minimal `cmd/agent` executable is built and tested but is not a release asset. Releases remain
+the standard and full `cmd/aiscan` editions. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
 assets are embedded into the binary. The native `record` tool is not included
 in the default full build; SDK and tool developers can build it explicitly with

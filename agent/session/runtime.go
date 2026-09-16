@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	prompt "github.com/chainreactors/cyber/agent/prompt"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/skills"
 )
 
@@ -24,13 +25,13 @@ import (
 type Runtime struct {
 	commands         []Command
 	commandIndex     map[string]Command
-	history HistoryStore
-	commandMu sync.RWMutex
+	history          HistoryStore
+	commandMu        sync.RWMutex
 	option           *cfg.Option
 	logger           telemetry.Logger
 	runtimeConfig    Config
 	primarySessionID string
-	app              *Environment
+	app              *apppkg.App
 	nodeName         string
 	systemPrompt     string
 	heartbeat        time.Duration
@@ -55,21 +56,17 @@ type Runtime struct {
 	maxPending       int
 }
 
-type PromptConfig = prompt.PromptConfig
-type LoadedSkill = prompt.LoadedSkill
-var BuildSystemPrompt = prompt.BuildSystemPrompt
-
 type Config struct {
-	History HistoryStore
+	History          HistoryStore
 	BaseSkills       []string
 	Commands         []Command
-	Application      *Environment
+	Application      *apppkg.App
 	NodeName         string
 	Preamble         string
 	Option           *cfg.Option
 	Logger           telemetry.Logger
 	PrimarySessionID string
-	PromptConfig     *PromptConfig
+	PromptConfig     *prompt.PromptConfig
 	MaxPending       int
 	// Loop supplies the algorithm; this extension owns admission and drain.
 	Loop agent.Loop
@@ -114,10 +111,8 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 	rt.heartbeat = time.Duration(option.Heartbeat) * time.Minute
 	rt.app = application
 	provider, providerConfig := rt.app.ProviderState()
-	if rt.app != nil {
-		rt.app.SetLogger(logger)
-		logger = rt.app.Logger()
-	}
+	rt.app.SetLogger(logger)
+	logger = rt.app.Logger()
 	var resumeCounter int64
 	if option.Resume != "" {
 		data, err := rt.history.Load(ctx, option.Resume)
@@ -144,15 +139,19 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 	if store == nil {
 		store = skills.NewStore(nil)
 	}
-	pc := &PromptConfig{
+	var scannerDocs string
+	if rt.app.Commands != nil {
+		scannerDocs = rt.app.Commands.UsageDocs()
+	}
+	pc := &prompt.PromptConfig{
 		Tools:       executor,
-		ScannerDocs: rt.app.Commands.UsageDocs(),
-		Skills:      store.Skills,
+		ScannerDocs: scannerDocs,
+		Skills:      store.All(),
 		NodeName:    nodeName,
 	}
 	if rc.PromptConfig != nil {
 		promptConfig := *rc.PromptConfig
-		promptConfig.LoadedSkills = append([]LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
+		promptConfig.LoadedSkills = append([]prompt.LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
 		pc = &promptConfig
 	}
 	pc.CustomPreamble = strings.TrimSpace(pc.CustomPreamble + "\n" + rc.Preamble)
@@ -172,10 +171,10 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 			body = skills.ReadFile(name)
 		}
 		if body != "" {
-			pc.LoadedSkills = append(pc.LoadedSkills, LoadedSkill{Name: name, Body: body})
+			pc.LoadedSkills = append(pc.LoadedSkills, prompt.LoadedSkill{Name: name, Body: body})
 		}
 	}
-	rt.systemPrompt = BuildSystemPrompt(pc, nil)
+	rt.systemPrompt = prompt.BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
 	rt.config = agent.Config{
@@ -201,7 +200,7 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 }
 
 // ready rejects business admission until the owning profile has completed
-// Load. Lifecycle wiring such as RegisterNamespaces and Observe may happen
+// Load. Lifecycle wiring such as namespace binding and Observe may happen
 // earlier, but their handlers cannot create sessions or runs through this
 // gate.
 func (rt *Runtime) ready() error {
@@ -216,7 +215,7 @@ func (rt *Runtime) ready() error {
 	return nil
 }
 
-func promptHasLoadedSkill(pc *PromptConfig, name string) bool {
+func promptHasLoadedSkill(pc *prompt.PromptConfig, name string) bool {
 	for _, loaded := range pc.LoadedSkills {
 		if loaded.Name == name {
 			return true
@@ -285,10 +284,8 @@ func (rt *Runtime) SetLogger(logger telemetry.Logger) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	if rt.app != nil {
-		rt.app.SetLogger(logger)
-		logger = rt.app.Logger()
-	}
+	rt.app.SetLogger(logger)
+	logger = rt.app.Logger()
 	rt.mu.Lock()
 	rt.config.Logger = logger
 	for _, sess := range rt.sessions {
@@ -303,7 +300,7 @@ func (rt *Runtime) ReloadProvider(option *cfg.Option) (agent.Provider, string, e
 	if option == nil {
 		return nil, "", fmt.Errorf("provider option is required")
 	}
-	provider, resolved, err := rt.reloadProvider(rt.app.ResolveProvider(option))
+	provider, resolved, err := rt.reloadProvider(apppkg.ProviderConfig(option))
 	return provider, resolved.Model, err
 }
 
@@ -322,7 +319,7 @@ func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, 
 }
 
 func (rt *Runtime) ReloadResolvedProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
- return rt.reloadProvider(config)
+	return rt.reloadProvider(config)
 }
 
 // SetProvider atomically updates the runtime template and every existing
@@ -354,7 +351,7 @@ func (rt *Runtime) applyProvider(provider agent.Provider, providerConfig agent.P
 }
 
 // App returns the concrete application used by this runtime.
-func (rt *Runtime) App() *Environment { return rt.app }
+func (rt *Runtime) App() *apppkg.App { return rt.app }
 
 // Context ends when the runtime shuts down. It is nil before Load.
 func (rt *Runtime) Context() context.Context { return rt.ctx }

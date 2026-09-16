@@ -3,7 +3,6 @@
 package console
 
 import (
-	"context"
 	"fmt"
 	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/extension"
@@ -16,23 +15,21 @@ type Catalog interface {
 	CommandSpecs(bool) []*types.CommandSpec
 }
 type Extension struct {
-	target  api.Registrar
 	catalog Catalog
 }
 
-func New(target api.Registrar, catalog Catalog) (*Extension, error) {
-	if target == nil || catalog == nil {
-		return nil, fmt.Errorf("session presentation requires TUI registrar and session catalog")
+func New(catalog Catalog) (*Extension, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("session presentation requires session catalog")
 	}
-	return &Extension{target: target, catalog: catalog}, nil
+	return &Extension{catalog: catalog}, nil
 }
 func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	return e.target.Register(api.Contribution{Source: "session", Bindings: Bind(e.catalog)})
+	return extension.Add(scope, Bind(e.catalog))
 }
-func (*Extension) Close(context.Context) error { return nil }
 
 // Bind snapshots the command catalog at installation. Runtime additions remain
 // available through the Session protocol; a TUI profile is a fixed installation.

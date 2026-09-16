@@ -27,7 +27,7 @@ func namespaceMessage[T protobuf.Message](message protobuf.Message) (T, error) {
 
 func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent) (*aop.NamespaceMux, error) {
 	mux := aop.NewNamespaceMux(ctx)
-	if err := mux.Register("agent-pool", &aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*aop.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -37,7 +37,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.CommandProtocolMessage](message)
 		if err != nil {
 			return err
@@ -47,7 +47,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*filepb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -57,7 +57,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*execpb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -67,7 +67,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.ReloadProtocolMessage](message)
 		if err != nil {
 			return err
@@ -77,7 +77,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*ptypb.ProtocolMessage](message)
 		if err != nil {
 			return err
@@ -87,7 +87,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("agent-pool", &toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*toolpb.ProtocolMessage](message)
 		if err != nil {
 			return err

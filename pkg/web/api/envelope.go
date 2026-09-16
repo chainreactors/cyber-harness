@@ -351,22 +351,21 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	mux := aop.NewNamespaceMux(ctx)
 	defer mux.Close(context.Background())
 	registrations := []struct {
-		source    string
 		enabled   bool
 		prototype protobuf.Message
 		handler   aop.NamespaceHandler
 	}{
-		{source: "agent", enabled: true, prototype: &aop.ProtocolMessage{}, handler: handleCore},
-		{source: "commands", enabled: backends.Commands != nil, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
-		{source: "files", enabled: backends.Files != nil, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
-		{source: "scanner", enabled: backends.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
-		{source: "terminal", enabled: backends.PTY != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
+		{enabled: true, prototype: &aop.ProtocolMessage{}, handler: handleCore},
+		{enabled: backends.Commands != nil, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
+		{enabled: backends.Files != nil, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
+		{enabled: backends.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
+		{enabled: backends.PTY != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
 	}
 	for _, registration := range registrations {
 		if !registration.enabled {
 			continue
 		}
-		if err := mux.Register(registration.source, registration.prototype, registration.handler); err != nil {
+		if err := mux.Register(registration.prototype, registration.handler); err != nil {
 			return fmt.Errorf("register application namespace: %w", err)
 		}
 	}

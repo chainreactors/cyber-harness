@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"gopkg.in/yaml.v3"
@@ -9,6 +10,9 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
+
+	"github.com/chainreactors/cyber/core/resource"
 )
 
 // Values is configuration data, never a registry of running services.
@@ -16,7 +20,6 @@ type Values map[string]map[string]any
 
 // Section is an inert, per-product configuration declaration.
 type Section struct {
-	Source      string
 	Key         string
 	Aliases     []string
 	New         func() any
@@ -27,6 +30,7 @@ type Section struct {
 	Normalize   func(any) error
 }
 type Sections struct {
+	mu           sync.Mutex
 	declarations map[string]Section
 	aliases      map[string]string
 	sealed       bool
@@ -36,25 +40,23 @@ func NewSections() *Sections {
 	return &Sections{declarations: map[string]Section{}, aliases: map[string]string{}}
 }
 
-// Register installs a declaration batch atomically. Source identifies the ext,
-// independently of its configuration keys and runtime resource ownership.
-func (r *Sections) Register(source string, sections ...Section) error {
+// Add installs one atomic declaration batch.
+func (r *Sections) Add(sections ...Section) (resource.Handle, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.sealed {
-		return fmt.Errorf("configuration declarations are sealed")
+		return nil, fmt.Errorf("configuration declarations are sealed")
 	}
-	if strings.TrimSpace(source) == "" {
-		return fmt.Errorf("configuration source is required")
+	names := map[string]bool{}
+	for key := range r.declarations {
+		names[key] = true
 	}
-	names := map[string]string{}
-	for key, section := range r.declarations {
-		names[key] = section.Source
-	}
-	for alias, key := range r.aliases {
-		names[alias] = r.declarations[key].Source
+	for alias := range r.aliases {
+		names[alias] = true
 	}
 	for _, section := range sections {
 		if strings.TrimSpace(section.Key) == "" || section.New == nil {
-			return fmt.Errorf("configuration section requires key and factory (%s)", source)
+			return nil, fmt.Errorf("configuration section requires key and factory")
 		}
 		local := map[string]bool{}
 		for index, name := range append([]string{section.Key}, section.Aliases...) {
@@ -64,26 +66,49 @@ func (r *Sections) Register(source string, sections ...Section) error {
 				continue
 			}
 			if strings.TrimSpace(name) == "" {
-				return fmt.Errorf("empty configuration name (%s)", source)
+				return nil, fmt.Errorf("empty configuration name")
 			}
-			if previous, ok := names[name]; ok {
-				return fmt.Errorf("duplicate configuration name %q (sources %s and %s)", name, previous, source)
+			if names[name] {
+				return nil, fmt.Errorf("duplicate configuration name %q", name)
 			}
-			names[name] = source
+			names[name] = true
 		}
 	}
+	registered := make([]Section, 0, len(sections))
 	for _, section := range sections {
-		section.Source = source
 		section.Aliases = append([]string(nil), section.Aliases...)
 		section.Secrets = append([]string(nil), section.Secrets...)
 		r.declarations[section.Key] = section
 		for _, alias := range section.Aliases {
 			r.aliases[alias] = section.Key
 		}
+		registered = append(registered, section)
 	}
-	return nil
+	closed := false
+	return resource.HandleFunc(func(context.Context) error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if closed {
+			return nil
+		}
+		closed = true
+		if r.sealed {
+			return nil
+		}
+		for _, section := range registered {
+			delete(r.declarations, section.Key)
+			for _, alias := range section.Aliases {
+				delete(r.aliases, alias)
+			}
+		}
+		return nil
+	}), nil
 }
-func (r *Sections) Seal() { r.sealed = true }
+func (r *Sections) Seal() {
+	r.mu.Lock()
+	r.sealed = true
+	r.mu.Unlock()
+}
 func CloneValues(values Values) Values {
 	out := Values{}
 	for key, fields := range values {

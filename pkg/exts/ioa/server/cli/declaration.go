@@ -3,11 +3,19 @@ package cli
 import (
 	"context"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 )
 
 type Execute func(context.Context, server.Options, hostcli.Environment) error
+
+func Declare(resources *resource.Registry, run Execute) error {
+	_, err := resource.Add[hostcli.Contribution](resources, func(registry *hostcli.Registry) error {
+		return Register(registry, run)
+	})
+	return err
+}
 
 func Register(reg *hostcli.Registry, run Execute) error {
 	for _, command := range []string{"serve", "ioa serve"} {
@@ -19,7 +27,7 @@ func Register(reg *hostcli.Registry, run Execute) error {
 		action := hostcli.Action{Persistent: true, Run: func(ctx context.Context, env hostcli.Environment) error {
 			section := server.Section()
 			registry := cfg.NewSections()
-			_ = registry.Register("ioa.server", section)
+			_, _ = registry.Add(section)
 			v, err := registry.Decode(server.ConfigKey, env.Config.Extensions[server.ConfigKey])
 			if err != nil {
 				return err
@@ -33,10 +41,10 @@ func Register(reg *hostcli.Registry, run Execute) error {
 			}
 			return run(ctx, value, env)
 		}}
-		if err := reg.Command("ioa.server", command, "Run the standalone IOA server", alias, action); err != nil {
+		if err := reg.Command(command, "Run the standalone IOA server", alias, action); err != nil {
 			return err
 		}
-		if err := reg.Group("ioa.server", command, server.ConfigKey, cfg.FlagGroup{Name: "IOA server", Options: &server.Options{}}); err != nil {
+		if err := reg.Group(command, server.ConfigKey, cfg.FlagGroup{Name: "IOA server", Options: &server.Options{}}); err != nil {
 			return err
 		}
 	}

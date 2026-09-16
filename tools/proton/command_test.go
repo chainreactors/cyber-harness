@@ -27,7 +27,7 @@ func e2eBash(t *testing.T) (*commands.BashTool, string) {
 	dir := t.TempDir()
 
 	rs := &resources.Set{}
-	registry := harness.Commands(t, "scanner", protoncmd.NewCommand(dir, rs, nil, "", nil))
+	registry := harness.Commands(t, protoncmd.NewCommand(dir, rs, nil, "", nil))
 
 	bash := commands.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)

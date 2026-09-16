@@ -83,17 +83,42 @@ jobs:
           fi
 
       - name: Check repository architecture and dependencies
-        run: go test -count=1 ./core/extension ./core/registry
+        run: go test -count=1 ./core/resource ./core/extension ./core/registry ./cmd/agent
 
-      # libcstx is a cgo-only dependency. It may only be reached through
-      # packages gated on `cstx && cgo`; the whole module is scanned so a new
-      # importer cannot hide outside the CLI's package graph.
-      - name: Ensure nothing depends on libcstx without the cstx tag
+      - name: Build the minimal agent
+        run: |
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
+          if go list -deps ./cmd/agent | grep -Eq '/(scanner|search|proxy|ioa|browser|record|web)(/|$)'; then
+            echo "::error::cmd/agent reaches a product feature outside the minimal agent graph"
+            exit 1
+          fi
+
+      # libcstx is a cgo-only dependency owned by pkg/exts/cstx. Standard
+      # composition must not reach that Extension.
+      - name: Ensure the standard edition does not depend on libcstx
         run: |
           if CGO_ENABLED=0 go list -deps \
             -tags "$STANDARD_TAGS" ./... \
             | grep -q '^github.com/chainreactors/libcstx/go$'; then
-            echo "::error::a package reaches libcstx without the cstx tag; gate it behind 'cstx && cgo'"
+            echo "::error::the standard edition reaches the CSTX Extension"
+            exit 1
+          fi
+
+      - name: Enforce native Extension ownership
+        run: |
+          tracked_native="$(git ls-files -- '*.a' '*.lib' '*.dll' '*.so' '*.dylib')"
+          if [[ -n "$tracked_native" ]]; then
+            printf '%s\n' "$tracked_native"
+            echo "::error::native libraries must come from pinned modules or Release SDKs, not the aiscan Git tree"
+            exit 1
+          fi
+          libcstx_imports="$(git grep -l 'github.com/chainreactors/libcstx/go' -- '*.go' || true)"
+          if printf '%s\n' "$libcstx_imports" | grep -v '^pkg/exts/cstx/' | grep -q .; then
+            echo "::error::libcstx may only be imported by pkg/exts/cstx"
+            exit 1
+          fi
+          if git grep -n -E 'go-astiav|#cgo[[:space:]]+pkg-config' -- pkg/exts/record tools/record; then
+            echo "::error::record must link only through its Extension-owned FFI"
             exit 1
           fi
 

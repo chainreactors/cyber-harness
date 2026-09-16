@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 	"github.com/chainreactors/cyber/cmd/harness"
-	"github.com/chainreactors/cyber/core/extension"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -33,11 +33,11 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+	application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: application.App, Option: option, Logger: telemetry.NopLogger(),
+	rt, err := sessionext.New(agentsession.Config{Application: application, Option: option, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -45,7 +45,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		info, ok := mgr.Get(initial.ID)
 		return !ok || info.State != pty.StateRunning
 	})
-	session, err := rt.Runtime().OpenSession(ctx, agentext.SessionOptions{ID: "after-console"})
+	session, err := rt.Runtime().OpenSession(ctx, agentsession.SessionOptions{ID: "after-console"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,11 +180,11 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+	application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 
 	applicationSet := loadConsoleApplication(t, ctx, application)
 	defer applicationSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: application.App, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
+	rt, err := sessionext.New(agentsession.Config{Application: application, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -192,7 +192,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

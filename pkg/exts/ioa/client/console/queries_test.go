@@ -43,13 +43,10 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := clientext.New(ioatools.Config{
+	client := clientext.New(ioatools.Config{
 		URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true,
-	}, clientext.Services{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "client", Extension: client})
+	}, clientext.Dependencies{})
+	set, err := extension.New(client)
 	if err != nil {
 		t.Fatal(err)
 	}

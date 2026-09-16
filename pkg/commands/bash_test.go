@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
-	tmux "github.com/chainreactors/cyber/agent/tmux"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/utils/pty"
 )
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTo
 	for _, c := range cmds {
 		commands = append(commands, Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run})
 	}
-	registry, _ := loadTestRegistry(t, commandGroup("commands", "test", commands...))
+	registry, _ := loadTestRegistry(t, commandBatch(commands...))
 	bash := NewBashTool(dir, 10, nil)
 	bash.SetCommandRegistry(registry)
 	return bash
@@ -115,7 +115,7 @@ func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTo
 
 func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 	impl := &simpleCommand{name: "spray"}
-	registry, _ := loadTestRegistry(t, commandGroup("spray", "test", Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	bash.SetCommandRegistry(registry)
 
@@ -191,7 +191,7 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 
 func TestNormalizeNoColorInjectForScan(t *testing.T) {
 	cmd := &argsCapture{name: "scan"}
-	reg, _ := loadTestRegistry(t, commandGroup("scan", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
@@ -208,7 +208,7 @@ func TestNormalizeNoColorInjectForScan(t *testing.T) {
 
 func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 	cmd := &argsCapture{name: "scan"}
-	reg, _ := loadTestRegistry(t, commandGroup("scan", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &Execution{Stdout: &output, Stderr: &output})
@@ -228,7 +228,7 @@ func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 
 func TestNormalizeNoColorSkipsNonScan(t *testing.T) {
 	cmd := &argsCapture{name: "gogo"}
-	reg, _ := loadTestRegistry(t, commandGroup("gogo", "test", Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
 	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &Execution{Stdout: &output, Stderr: &output})
@@ -490,7 +490,7 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 		"two": {Name: "two", Usage: "two", Run: (&stagedOutputCommand{name: "two", value: "two"}).Run},
 	}
 	bash := NewBashTool(root, 5, nil)
-	registry, _ := loadTestRegistry(t, commandGroup("commands", "test", commandsByName["one"], commandsByName["two"]))
+	registry, _ := loadTestRegistry(t, commandBatch(commandsByName["one"], commandsByName["two"]))
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
@@ -520,7 +520,7 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 
 func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 	want := map[string]any{"targets": 2}
-	registry, _ := loadTestRegistry(t, commandGroup("details", "test", Command{Name: "details",
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: "details",
 		Usage: "details",
 		Run: func(_ context.Context, execution *Execution) (any, error) {
 			fmt.Fprint(execution.Stdout, "done")
@@ -549,7 +549,7 @@ func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 }
 
 func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
-	registry, _ := loadTestRegistry(t, commandGroup("consume", "test", Command{Name: "consume",
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: "consume",
 		Usage: "consume",
 		Run: func(_ context.Context, execution *Execution) (any, error) {
 			data, err := io.ReadAll(execution.Stdin)
@@ -593,7 +593,7 @@ func TestBashRunForegroundStreams(t *testing.T) {
 		t.Fatalf("stream = %q", got)
 	}
 	session, retained := result.Session()
-	if !retained || session.ExitCode != 0 || session.State != tmux.StateCompleted {
+	if !retained || session.ExitCode != 0 || session.State != pty.StateCompleted {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -637,7 +637,7 @@ func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
 
 func TestBashWaitZeroStaysForeground(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 200 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 2, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -657,7 +657,7 @@ func TestBashWaitZeroStaysForeground(t *testing.T) {
 
 func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 1500 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 3, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -705,7 +705,7 @@ func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 
 func TestBashExplicitZeroTimeoutIsUnlimited(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 1200 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandGroup("delayed", "test", Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 1, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -740,7 +740,7 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 		t.Fatal("timeout did not stop the session promptly")
 	}
 	session, retained := result.Session()
-	if !retained || session.State != tmux.StateKilled || session.KillCause == "" {
+	if !retained || session.State != pty.StateKilled || session.KillCause == "" {
 		t.Fatalf("result = %+v", result)
 	}
 }

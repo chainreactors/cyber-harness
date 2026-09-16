@@ -516,7 +516,7 @@ func TestLLMIOAToolUsage(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "test-space"})
 	cmds := NewCommands(client, "llm-tester", nil)
 
-	registry := harness.Commands(t, "ioa", cmds...)
+	registry := harness.Commands(t, cmds...)
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)

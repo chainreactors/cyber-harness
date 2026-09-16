@@ -37,7 +37,7 @@ func TestClientLegacyYAMLAndCLIOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := cfg.NewSections()
-	if err := r.Register("ioa.client", Section()); err != nil {
+	if _, err := r.Add(Section()); err != nil {
 		t.Fatal(err)
 	}
 	for _, explicit := range []cfg.Values{nil, {ConfigKey: {"space": ""}}, {ConfigKey: {"space": "cli"}}} {

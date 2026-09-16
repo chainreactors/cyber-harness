@@ -6,12 +6,19 @@ import (
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/resource"
 	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	registry "github.com/chainreactors/cyber/pkg/probe"
 	types "github.com/chainreactors/cyber/pkg/types"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 	"strings"
 	"time"
 )
+
+func Declare(resources *resource.Registry) error {
+	_, err := resource.Add[registry.Definition](resources, registry.Definition{Section: "ioa", Check: Check})
+	return err
+}
 
 func Check(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
 	started := time.Now()
@@ -25,7 +32,7 @@ func Check(ctx context.Context, in, stored *types.DistributeConfig) []*types.Con
 				return Options{URL: config.Ioa.Url, Token: config.Ioa.Token}
 			}
 			sections := cfg.NewSections()
-			_ = sections.Register("ioa.client", clientext.Section())
+			_, _ = sections.Add(clientext.Section())
 			v, err := sections.Decode(clientext.ConfigKey, cfg.ValuesFromProto(config.Extensions)[clientext.ConfigKey])
 			if err != nil {
 				return Options{}
@@ -45,11 +52,8 @@ func Check(ctx context.Context, in, stored *types.DistributeConfig) []*types.Con
 		}
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		client, err := clientext.New(ioatools.Config{URL: value.URL, Token: value.Token}, clientext.Services{})
-		if err != nil {
-			return "", err
-		}
-		set, err := extension.New(extension.Entry{ID: "ioa-probe", Extension: client})
+		client := clientext.New(ioatools.Config{URL: value.URL, Token: value.Token}, clientext.Dependencies{})
+		set, err := extension.New(client)
 		if err != nil {
 			return "", err
 		}

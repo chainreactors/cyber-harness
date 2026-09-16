@@ -48,10 +48,10 @@ Settings UI 保存
   → BroadcastConfigReload() 向所有 agent 推 "config" 消息 (非阻塞)
   → agent 收到后异步:
       FetchRemoteConfig(hubURL) 拉取最新配置
-      → chatRuntimeManager.reloadProvider() 加锁重建 provider
-        ├─ rt.App.Provider = new
-        ├─ rt.Config.Provider = new
-        ├─ 遍历所有 live session: ag.SetProvider(new)
+      → node.ReloadConfig() 调用 Session Runtime 重建 provider
+        ├─ App 的 provider.State 原子发布新 provider/config/health
+        ├─ 更新 Session Runtime 的 Agent 配置模板
+        ├─ 遍历所有 live session: ag.SetProviderConfig(new)
         └─ 发 "agent.identity" {provider, model} 回报 hub
   → hub 合并 identity → UI 徽章实时更新
 ```
@@ -60,7 +60,7 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
+**文件**: `pkg/web/service/config.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/runtime_info.go`, `agent/session/runtime.go`, `agent/agent.go`
 
 ---
 
@@ -264,4 +264,3 @@ Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 
 **文件**: `core/config/env.go`
 
 所有 Cyber 运行时业务环境变量都由该入口读取一次。DataDir、TUI、Playwright、Tavily 和 Uncover 只消费解析后的配置，不再自行调用 `os.Getenv`。系统级 `PATH`、Go 标准代理环境变量和 Vite 构建期变量仍按各自平台语义处理。
-

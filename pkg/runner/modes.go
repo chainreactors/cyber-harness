@@ -9,15 +9,16 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/commandline"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cmdpkg "github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console"
-	"github.com/chainreactors/cyber/pkg/edition"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/cyber/skills"
@@ -52,7 +53,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -64,7 +65,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	return console.RunTask(ctx, rt, option, "task", "task", task, agentext.RunInput{
+	return console.RunTask(ctx, rt, option, "task", "task", task, agentsession.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
 	})
 }
@@ -74,7 +75,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -99,21 +100,16 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 
 func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
 	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
-	features, scannerArgs, err := DirectScannerRuntimeFeaturesWithDefault(rest, defaultVerify)
+	mode, scannerArgs, err := ResolveScannerModeWithDefault(rest, defaultVerify)
 	if err != nil {
 		return err
 	}
-	if features.Warning != "" && !option.Quiet {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", features.Warning)
-	}
-	if option.AI || features.ScannerAI {
-		features.ProviderEnabled = true
-		features.ProviderOptional = false
-		features.ToolsEnabled = true
-		features.AIEnabled = true
+	if option.AI || mode.Agent {
+		mode.Provider = profile.ProviderRequired
 	}
 	if cfg.IsScannerHelpRequest(scannerArgs) {
-		if usage, ok := edition.Catalog().Usage(scannerArgs[0]); ok {
+		if metadata, ok := scannerext.Lookup(scannerArgs[0]); ok && metadata.Usage != nil {
+			usage := metadata.Usage()
 			fmt.Print(usage)
 			if !strings.HasSuffix(usage, "\n") {
 				fmt.Println()
@@ -128,7 +124,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 		defer restoreLogs()
 	}
 
-	product, err := factory.Build(profile.Request{Option: option, Features: features, Logger: scannerLogger})
+	product, err := factory.Build(profile.Request{Option: option, ProviderMode: mode.Provider, Logger: scannerLogger})
 	if err != nil {
 		return fmt.Errorf("construct scanner profile: %w", err)
 	}
@@ -139,9 +135,6 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	application, err := product.App()
 	if err != nil {
 		return err
-	}
-	if err := application.WaitEngines(ctx); err != nil {
-		return fmt.Errorf("engine init: %w", err)
 	}
 	_, providerConfig := application.ProviderState()
 	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
@@ -192,15 +185,15 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 			DurationMs: uint64(time.Since(startedAt).Milliseconds()),
 		}
 		stopReason := string(agent.StopReasonCompleted)
-		closeReason := agentext.SessionCloseCompleted
+		closeReason := agentsession.SessionCloseCompleted
 		if runErr != nil {
 			result.Output = []*aop.Content{aop.Text(runErr.Error())}
 			stopReason = string(agent.StopReasonError)
-			closeReason = agentext.SessionCloseError
+			closeReason = agentsession.SessionCloseError
 		}
 		if isCanceled {
 			stopReason = string(agent.StopReasonCanceled)
-			closeReason = agentext.SessionCloseCanceled
+			closeReason = agentsession.SessionCloseCanceled
 		}
 		application.Publish(&aop.Event{
 			SessionId: sessionID, TurnId: turnID, Emitter: emitter,
@@ -214,7 +207,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}()
 	streaming := ShouldStreamScannerOutput(scannerArgs)
 	var captured strings.Builder
-	execution, err := bash.RunForeground(ctx, cmdpkg.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), cmdpkg.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, commandline.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), cmdpkg.BashExecOptions{
 		OnOutput: func(data []byte) {
 			if streaming {
 				_, _ = os.Stdout.Write(data)

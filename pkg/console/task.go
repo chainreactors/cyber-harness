@@ -7,14 +7,14 @@ import (
 	"strings"
 	"sync"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 // RunTask owns static presentation and its event subscription. Runtime only
 // executes the session and publishes events; Console owns presentation.
-func RunTask(ctx context.Context, rt *agentext.Runtime, option *cfg.Option, sessionID, label, display string, input agentext.RunInput) error {
+func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, sessionID, label, display string, input agentsession.RunInput) error {
 	format := "text"
 	if option != nil && strings.TrimSpace(option.OutputFormat) != "" {
 		format = strings.ToLower(strings.TrimSpace(option.OutputFormat))
@@ -44,7 +44,7 @@ func RunTask(ctx context.Context, rt *agentext.Runtime, option *cfg.Option, sess
 		return errors.New("agent event stream is unavailable")
 	}
 
-	session, err := rt.OpenSession(ctx, agentext.SessionOptions{ID: sessionID})
+	session, err := rt.OpenSession(ctx, agentsession.SessionOptions{ID: sessionID})
 	if err != nil {
 		unsubscribe.Cancel()
 		if textOutput != nil {
@@ -63,11 +63,11 @@ func RunTask(ctx context.Context, rt *agentext.Runtime, option *cfg.Option, sess
 	if err == nil {
 		_, err = run.Wait()
 	}
-	reason := agentext.SessionCloseCompleted
+	reason := agentsession.SessionCloseCompleted
 	if errors.Is(err, context.Canceled) {
-		reason = agentext.SessionCloseCanceled
+		reason = agentsession.SessionCloseCanceled
 	} else if err != nil {
-		reason = agentext.SessionCloseError
+		reason = agentsession.SessionCloseError
 	}
 	closeErr := rt.CloseSession(context.Background(), session.ID(), reason)
 	subErr := unsubscribe.Close(context.Background())

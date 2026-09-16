@@ -2,6 +2,7 @@ package console_test
 
 import (
 	"context"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/console/api"
@@ -16,22 +17,21 @@ import (
 
 func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	tui := tuiext.New()
-	session, err := sessionext.New(sessionext.Config{Commands: []sessionext.Command{{
+	session, err := sessionext.New(agentsession.Config{Commands: []agentsession.Command{{
 		Spec:    &types.CommandSpec{Name: "/inspect", Aliases: []string{"/i"}},
-		Handler: func(context.Context, *sessionext.Session, []string) (*types.CommandResult, error) { return nil, nil },
+		Handler: func(context.Context, *agentsession.Session, []string) (*types.CommandResult, error) { return nil, nil },
 	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	presentation, err := contributor.New(tui.Registrar(), session.Runtime())
+	presentation, err := contributor.New(session.Runtime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately reverse declaration order; the graph supplies ordering.
 	set, err := extension.New(
-		extension.Entry{ID: "session.repl", DependsOn: []string{"tui", "session"}, Extension: presentation},
-		extension.Entry{ID: "session", Extension: session},
-		extension.Entry{ID: "tui", Extension: tui},
+		tui,
+		session,
+		presentation,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -67,21 +67,20 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 }
 
 func TestMissingProviderLoadFailsContribution(t *testing.T) {
-	tui := tuiext.New() // Not included in this graph.
-	session, err := sessionext.New(sessionext.Config{})
+	session, err := sessionext.New(agentsession.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	presentation, err := contributor.New(tui.Registrar(), session.Runtime())
+	presentation, err := contributor.New(session.Runtime())
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "session.repl", Extension: presentation})
+	set, err := extension.New(presentation)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer set.Close(context.Background())
-	if err := set.Load(t.Context()); err == nil || !strings.Contains(err.Error(), "not accepting") {
+	if err := set.Load(t.Context()); err == nil || !strings.Contains(err.Error(), "resource type is not defined") {
 		t.Fatalf("missing TUI provider: %v", err)
 	}
 	if set.Active() {

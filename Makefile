@@ -43,7 +43,7 @@ endif
 STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
-RUNNER_BIN ?= $(BIN_DIR)/runner$(EXE)
+AGENT_BIN ?= $(BIN_DIR)/agent$(EXE)
 
 # The edition tag sets live in editions.env, which the CI workflows read too.
 include editions.env
@@ -87,11 +87,9 @@ RE2_LDFLAGS := -L$(RE2_PREFIX)/lib
 
 ifeq ($(NATIVE_OS),windows)
 RECORD_PLATFORM := windows
-RECORD_PKG_CONFIG := $(PROJECT_ROOT)/.github/native/pkg-config-static.cmd
 RECORD_EXTRA_LDFLAGS := -static -static-libgcc
 else ifeq ($(NATIVE_OS),linux)
 RECORD_PLATFORM := linux
-RECORD_PKG_CONFIG := $(CURDIR)/.github/native/pkg-config-static.sh
 RECORD_EXTRA_LDFLAGS :=
 else
 RECORD_PLATFORM := unsupported
@@ -99,14 +97,14 @@ endif
 RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/native/record/$(RECORD_PLATFORM)_$(RECORD_ARCH))
 # A single CGO_LDFLAGS must carry both prefixes: setting it twice in one recipe
 # line would silently drop the first.
-RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS) $(RE2_LDFLAGS)"
+RECORD_BUILD_ENV := CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS) $(RE2_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard runner full record record-native re2-static web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
+.PHONY: help prepare frontend proto-gen standard agent full record record-native re2-static web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
 
 help:
 	@echo "aiscan build targets:"
 	@echo "  make / make standard  Build the standard aiscan edition"
-	@echo "  make runner           Build the tag-free runner binary"
+	@echo "  make agent            Build the minimal local agent binary"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
 	@echo "  make web              Build the full edition and start the Web UI"
@@ -164,9 +162,9 @@ standard: $(EMBED_PREREQ) prepare
 	CGO_ENABLED=$(STANDARD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
-runner: prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o "$(RUNNER_BIN)" ./cmd/runner
-	@echo "Built runner: $(RUNNER_BIN)"
+agent: prepare
+	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o "$(AGENT_BIN)" ./cmd/agent
+	@echo "Built minimal agent: $(AGENT_BIN)"
 
 # Full and record-enabled binaries embed web/static, so frontend must finish first.
 record-native:
@@ -211,7 +209,7 @@ web-run:
 web: full
 	"$(FULL_BIN)" web --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
 
-all: standard runner full
+all: standard agent full
 
 clean:
-	rm -f "$(STANDARD_BIN)" "$(FULL_BIN)" "$(RECORD_BIN)" "$(RUNNER_BIN)"
+	rm -f "$(STANDARD_BIN)" "$(FULL_BIN)" "$(RECORD_BIN)" "$(AGENT_BIN)"

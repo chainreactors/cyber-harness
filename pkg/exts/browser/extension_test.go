@@ -18,8 +18,8 @@ func TestModuleOwnsBrowserRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := harness.Set(t,
-		extension.Entry{ID: "browser", Extension: instance},
-		extension.Entry{ID: "commands", DependsOn: []string{"browser"}, Extension: registry},
+		instance,
+		registry,
 	)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

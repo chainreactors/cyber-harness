@@ -9,6 +9,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
@@ -30,7 +31,7 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 		var subscription *hooks.Subscription
 		closes := 0
 		owner := extension.Func{
-			LoadFunc: func(*extension.Scope) error {
+			LoadFunc: func(scope *extension.Scope) error {
 				var err error
 				file, err = os.Create(path)
 				if err != nil {
@@ -39,10 +40,10 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 				subscription = toolhooks.Started.On(hookRegistry, "mixed", func(context.Context, toolhooks.CallEvent) (struct{}, error) {
 					return struct{}{}, nil
 				})
-				if err := tools.Register("test", echoTool("echo")); err != nil {
+				if err := extension.Add[tool.Tool](scope, echoTool("echo")); err != nil {
 					return err
 				}
-				if err := cmds.Register("test", "mixed", commands.Command{
+				if err := extension.Add(scope, commands.Command{
 					Name: "echo", Run: func(context.Context, *commands.Execution) (any, error) { return "ok", nil },
 				}); err != nil {
 					return err
@@ -66,9 +67,9 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 			},
 		}
 		set, err := extension.New(
-			extension.Entry{ID: "mixed", Extension: owner},
-			extension.Entry{ID: "commands", DependsOn: []string{"mixed"}, Extension: cmds},
-			extension.Entry{ID: "tools", DependsOn: []string{"mixed", "commands"}, Extension: tools},
+			cmds,
+			tools,
+			owner,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -106,7 +107,7 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 		if err := set.Close(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if closes != 1 || hookRegistry.Has(toolhooks.Started.Kind) {
+		if closes != 1 || toolhooks.Started.Has(hookRegistry) {
 			t.Fatal("owned resources not cleaned exactly once")
 		}
 		if _, err := file.WriteString("after close"); !errors.Is(err, os.ErrClosed) {

@@ -42,7 +42,7 @@ func (f *fakeConfigStore) ActivateConfig(context.Context, string) (*types.Config
 func newConfig(backend ConfigBackend) *Config {
 	registry := probe.New()
 	for name, check := range map[string]probe.Check{"cyberhub": scannerprobe.Cyberhub, "recon": scannerprobe.Recon, "search": searchprobe.Check} {
-		if err := registry.Register(name, name, check); err != nil {
+		if _, err := registry.Add(probe.Definition{Section: name, Check: check}); err != nil {
 			panic(err)
 		}
 	}

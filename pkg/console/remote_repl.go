@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -23,7 +23,7 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
+func StartPersistent(rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
 	if rt == nil || rt.App() == nil {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
@@ -33,7 +33,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 	}
 	ctx, cancel := context.WithCancel(rt.Context())
 	r := &REPL{cancel: cancel, done: make(chan struct{})}
-	session, err := rt.OpenSession(ctx, agentext.SessionOptions{ID: MainREPLName})
+	session, err := rt.OpenSession(ctx, agentsession.SessionOptions{ID: MainREPLName})
 	if err != nil {
 		cancel()
 		return nil, err
@@ -46,7 +46,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 		Timeout: 0, StripANSI: false, Resize: control.SetSize,
 	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
 		defer close(r.done)
-		defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted) }()
+		defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentsession.SessionCloseCompleted) }()
 		for {
 			err := runRemoteConsole(replCtx, rt, session, option, input, output, control, bindings)
 			if replCtx.Err() != nil {
@@ -59,7 +59,7 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 	})
 	if err != nil {
 		cancel()
-		_ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseError)
+		_ = rt.CloseSession(context.Background(), MainREPLName, agentsession.SessionCloseError)
 		return nil, err
 	}
 	manager.SetKind(info.ID, "repl")

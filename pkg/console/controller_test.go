@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"io"
 	"strings"
@@ -50,7 +50,7 @@ func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, s
 		option = &cfg.Option{}
 	}
 	rt := newConsoleRuntime(t, provider)
-	session, err := rt.OpenSession(context.Background(), agentext.SessionOptions{ID: "console-test"})
+	session, err := rt.OpenSession(context.Background(), agentsession.SessionOptions{ID: "console-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestConsoleSubmissionsUseRuntimeFIFOAndLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return p.calls.Load() == 1 }, "provider")
-	for i := 1; i < agentext.DefaultSessionPendingLimit; i++ {
+	for i := 1; i < agentsession.DefaultSessionPendingLimit; i++ {
 		if err := c.submitPrompt(fmt.Sprintf("queued-%02d", i), false); err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +91,7 @@ func TestConsoleSubmissionsUseRuntimeFIFOAndLimit(t *testing.T) {
 	}
 	close(p.release)
 	c.work.Wait()
-	if p.calls.Load() != agentext.DefaultSessionPendingLimit {
+	if p.calls.Load() != agentsession.DefaultSessionPendingLimit {
 		t.Fatalf("calls=%d", p.calls.Load())
 	}
 	p.mu.Lock()
@@ -120,7 +120,7 @@ func TestConsoleStopCancelsOnlyItsOwnSubmissions(t *testing.T) {
 	if err := c.submitPrompt("must cancel", false); err != nil {
 		t.Fatal(err)
 	}
-	other, err := c.session.Run(context.Background(), agentext.RunInput{Content: []*aop.Content{aop.Text("inline")}})
+	other, err := c.session.Run(context.Background(), agentsession.RunInput{Content: []*aop.Content{aop.Text("inline")}})
 	if err != nil {
 		t.Fatal(err)
 	}

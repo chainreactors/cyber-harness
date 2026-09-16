@@ -3,6 +3,8 @@ package probe
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/core/resource"
+	registry "github.com/chainreactors/cyber/pkg/probe"
 	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/cyber/tools/search"
 	"strings"
@@ -10,6 +12,11 @@ import (
 )
 
 const connProbeTimeout = 20 * time.Second
+
+func Declare(resources *resource.Registry) error {
+	_, err := resource.Add[registry.Definition](resources, registry.Definition{Section: "search", Check: Check})
+	return err
+}
 
 func Check(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
 	keys := fallbackStr(in.GetSearch().GetTavilyKeys(), stored.GetSearch().GetTavilyKeys())

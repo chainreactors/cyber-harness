@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,14 +33,14 @@ func TestProfileWithoutIOAHasNoCollaborationContributions(t *testing.T) {
 	if application.Commands.Has("ioa") || application.Skills.ReadBody("ioa") != "" || application.Skills.ReadBody("checkpoint") != "" {
 		t.Fatal("unselected client contributed commands or skills")
 	}
-	if product.ConsoleBindings() != nil || slices.Contains(product.Capabilities(), "ioa") || product.AgentStatus().Bound {
+	if product.ConsoleBindings() != nil || product.AgentStatus().Bound {
 		t.Fatal("unselected client exposed host capabilities")
 	}
 }
 
 func TestServerOutlivesClientProfileReplacement(t *testing.T) {
 	serverExtension := serverext.New(ioaservice.Config{AccessKey: "test-key"})
-	host, err := extension.New(extension.Entry{ID: "ioa-server", Extension: serverExtension})
+	host, err := extension.New(serverExtension)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +115,7 @@ func TestServerOutlivesClientProfileReplacement(t *testing.T) {
 
 func TestManagedHTTPShutdownCancelsSSEBeforeDraining(t *testing.T) {
 	owner := serverext.New(ioaservice.Config{AccessKey: "test-key"})
-	set, err := extension.New(extension.Entry{ID: "ioa-server", Extension: owner})
+	set, err := extension.New(owner)
 	if err != nil {
 		t.Fatal(err)
 	}

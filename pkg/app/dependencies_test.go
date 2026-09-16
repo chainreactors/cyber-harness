@@ -1,13 +1,10 @@
 package app
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
@@ -17,7 +14,7 @@ func TestNewRequiresProfileDependencies(t *testing.T) {
 	for _, missing := range []string{"hooks", "events", "command registry", "tool registry"} {
 		t.Run(missing, func(t *testing.T) {
 			hookRegistry := hooks.New()
-			deps := AppServices{
+			deps := Dependencies{
 				Hooks: hookRegistry, Events: events.New(),
 				Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
 			}
@@ -31,50 +28,10 @@ func TestNewRequiresProfileDependencies(t *testing.T) {
 			case "tool registry":
 				deps.Tools = nil
 			}
-			resource, err := New(Config{}, deps)
+			resource, err := New(nil, deps)
 			if resource != nil || err == nil || !strings.Contains(err.Error(), missing) {
 				t.Fatalf("New without %s = %v, %v", missing, resource, err)
 			}
 		})
-	}
-}
-
-func TestAppCloseDoesNotCloseBorrowedRegistries(t *testing.T) {
-	hookRegistry := hooks.New()
-	cmds, tools := commands.NewRegistry(hookRegistry), toolset.NewRegistry(hookRegistry)
-	if err := cmds.Register("test", "test", commands.Command{
-		Name: "ping", Run: func(context.Context, *commands.Execution) (any, error) { return "pong", nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
-	resource, err := New(Config{SkipEngines: true}, AppServices{
-		Hooks: hookRegistry, Events: events.New(), Commands: cmds, Tools: tools,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := testSet(t,
-		extension.Entry{ID: "app", Extension: resource},
-		extension.Entry{ID: "commands", DependsOn: []string{"app"}, Extension: cmds},
-		extension.Entry{ID: "tools", DependsOn: []string{"app"}, Extension: tools},
-	)
-	if err := set.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	// Isolate the App boundary: closing it must not dispose borrowed objects.
-	if err := resource.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if result, err := cmds.Execute(t.Context(), "ping", &commands.Execution{}); err != nil || result != "pong" {
-		t.Fatalf("borrowed command registry = %v, %v", result, err)
-	}
-	if _, err := tools.ExecuteTool(t.Context(), "missing", "{}"); !errors.Is(err, toolset.ErrUnknown) {
-		t.Fatalf("borrowed tool registry lost admission: %v", err)
-	}
-	if err := set.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tools.ExecuteTool(t.Context(), "missing", "{}"); !errors.Is(err, toolset.ErrUnavailable) {
-		t.Fatalf("owning Set did not close registry: %v", err)
 	}
 }

@@ -1,4 +1,5 @@
-// Package agent installs the generic harness loop and optional session host.
+// Package agent installs a generic Agent loop behind extension lifecycle
+// admission and drain.
 package agent
 
 import (
@@ -13,7 +14,7 @@ import (
 
 var ErrUnavailable = errors.New("agent extension is not active")
 
-type loopRuntime struct {
+type Runtime struct {
 	loop     agent.Loop
 	mu       sync.Mutex
 	lifetime context.Context
@@ -23,18 +24,11 @@ type loopRuntime struct {
 	done     chan struct{}
 }
 
-// Extension owns loop admission and session shutdown as one installation.
+// Extension owns one loop installation.
 type Extension struct{ runtime *Runtime }
 
-type Config struct{ Loop agent.Loop }
-type Runtime struct{ loop *loopRuntime }
-
-func (e *Extension) Descriptor() extension.Descriptor {
-	return extension.Descriptor{ID: "agent-loop", Description: "agent loop provider", Provides: []extension.Service{extension.ServiceOf[agent.Loop]("agent.loop")}}
-}
-
-func New(config Config) (*Extension, error) {
-	return &Extension{runtime: &Runtime{loop: &loopRuntime{loop: config.Loop, done: make(chan struct{})}}}, nil
+func New(loop agent.Loop) *Extension {
+	return &Extension{runtime: &Runtime{loop: loop, done: make(chan struct{})}}
 }
 
 // Runtime lends business operations, never ownership of this installation.
@@ -48,16 +42,10 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || e.runtime == nil || scope == nil {
 		return ErrUnavailable
 	}
-	rt := e.runtime
-	if rt.loop != nil {
-		if err := rt.loop.load(scope); err != nil {
-			return err
-		}
-	}
-	return nil
+	return e.runtime.load(scope)
 }
 
-func (r *loopRuntime) load(scope *extension.Scope) error {
+func (r *Runtime) load(scope *extension.Scope) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopping {
@@ -83,58 +71,48 @@ func (r *loopRuntime) load(scope *extension.Scope) error {
 }
 
 func (rt *Runtime) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
-	if rt == nil || rt.loop == nil {
+	if rt == nil {
 		return nil, ErrUnavailable
 	}
-	r := rt.loop
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	r.mu.Lock()
-	if r.lifetime == nil || r.stopping || r.lifetime.Err() != nil {
-		r.mu.Unlock()
+	rt.mu.Lock()
+	if rt.lifetime == nil || rt.stopping || rt.lifetime.Err() != nil {
+		rt.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
-		r.mu.Unlock()
+		rt.mu.Unlock()
 		return nil, err
 	}
-	r.active++
+	rt.active++
 	call, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(r.lifetime, cancel)
-	r.mu.Unlock()
+	stop := context.AfterFunc(rt.lifetime, cancel)
+	rt.mu.Unlock()
 	defer func() {
 		stop()
 		cancel()
-		r.mu.Lock()
-		r.active--
-		if r.stopping && r.active == 0 {
-			close(r.done)
+		rt.mu.Lock()
+		rt.active--
+		if rt.stopping && rt.active == 0 {
+			close(rt.done)
 		}
-		r.mu.Unlock()
+		rt.mu.Unlock()
 	}()
 	// Derived agent configs must retain the same lifecycle admission boundary.
 	config.Loop = rt
-	return r.loop.Run(call, config)
+	return rt.loop.Run(call, config)
 }
 
 func (e *Extension) Close(ctx context.Context) error {
 	if e == nil || e.runtime == nil {
 		return nil
 	}
-	rt := e.runtime
-	// Seal loop admission before waiting for any session or direct loop caller.
-	if rt.loop != nil {
-		rt.loop.stop()
-	}
-	var err error
-	if rt.loop != nil {
-		err = errors.Join(err, rt.loop.close(ctx))
-	}
-	return err
+	return e.runtime.close(ctx)
 }
 
-func (r *loopRuntime) stop() {
+func (r *Runtime) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopping {
@@ -148,7 +126,7 @@ func (r *loopRuntime) stop() {
 		close(r.done)
 	}
 }
-func (r *loopRuntime) close(ctx context.Context) error {
+func (r *Runtime) close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}

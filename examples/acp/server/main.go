@@ -1,4 +1,4 @@
-//go:build full && cstx
+//go:build full && cgo
 
 package main
 
@@ -29,10 +29,25 @@ func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.Ar
 	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
 	pool := webservice.NewAgentPool(service.Hub(), ingestor)
 	service.SetAgentPool(pool)
-	handler, err := web.NewHandler(service.Auth(), nil, webext.Routes(service)...)
+	routes := webext.New(service)
+	routeSet, err := extension.New(routes)
 	if err != nil {
 		_ = service.Close(context.Background())
 		return nil, nil, nil, err
+	}
+	if err := routeSet.Load(context.Background()); err != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, err
+	}
+	handler, err := web.NewHandler(service.Auth(), nil, routes.Routes()...)
+	closeErr := routeSet.Close(context.Background())
+	if err != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, err
+	}
+	if closeErr != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, closeErr
 	}
 	return service, pool, handler, nil
 }
@@ -71,7 +86,7 @@ func main() {
 		logger.Errorf("init artifact normalization: %v", err)
 		os.Exit(1)
 	}
-	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	artifactSet, err := extension.New(artifactExt)
 	if err != nil {
 		logger.Errorf("init artifact scope: %v", err)
 		os.Exit(1)

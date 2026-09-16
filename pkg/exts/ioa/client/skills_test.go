@@ -1,21 +1,20 @@
 package client
 
 import (
-	"github.com/chainreactors/cyber/core/capability"
 	"github.com/chainreactors/cyber/skills"
 	"strings"
 	"testing"
 )
 
 func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
-	without, _ := skills.LoadAll(nil, capability.Catalog{})
+	without, _ := skills.LoadAll(nil)
 	for _, name := range []string{"ioa", "checkpoint", "handoff", "swarm", "team"} {
 		if _, ok := without.ByName(name); ok {
 			t.Fatalf("unselected IOA skill %q was loaded", name)
 		}
 	}
 	bundle, _ := Skills()
-	store, diags := skills.LoadAll(nil, capability.Catalog{}, bundle)
+	store, diags := skills.LoadAll(nil, bundle)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %#v", diags)
 	}
@@ -48,7 +47,7 @@ func TestLoadAllIncludesIOAModuleSkills(t *testing.T) {
 
 func TestIOAFindingConvention(t *testing.T) {
 	bundle, _ := Skills()
-	store, _ := skills.LoadAll(nil, capability.Catalog{}, bundle)
+	store, _ := skills.LoadAll(nil, bundle)
 	body, handled, err := store.ReadVirtualBody("cyber://skills/cyber/okf/runtime/ioa-finding.md")
 	if err != nil || !handled {
 		t.Fatalf("ReadVirtualBody(ioa-finding) handled=%v err=%v", handled, err)

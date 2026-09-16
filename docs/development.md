@@ -1,66 +1,69 @@
 # Cyber 扩展开发手册
 
-新增结构化能力时，先阅读 [`tools/README.md`](../tools/README.md)。工具实现
-`core/tool.Tool`，静态声明可由 Profile 直接注册，需要资源就绪的声明在 Extension.Load 中注册；工具执行不依赖 Agent、Runtime
-或模型。
+新增能力前先确定它是声明、运行资源还是生命周期所有者，不要为同一个对象重复建立机制。
 
-## 工具与命令的边界
+## Tool、Command 与 Skill
 
-Flags、Config、静态 Skill、协议定义和宿主绑定同样是扩展点，不受 Tool/Command 分类限制。
-Flags 复用 `config.FlagGroup` 和普通 Options；入口先声明选项，再解析配置并选择运行扩展。
-Config 复用现有 struct/tag、加载、优先级和默认值机制，Profile 将结果注入具体功能。
-help、配置模板生成和参数校验不要求 Extension.Load。完整插件接入约定见
-[系统架构](architecture.md)。
+- 模型直接调用的结构化能力实现 `core/tool.Tool`。
+- bash 内的 pseudo-command 使用 `commands.Command`。
+- prompt/知识使用 `skills.Bundle` 或普通 Skill，不并入执行 Registry。
 
-原生 Tool 适合模型或外部框架直接调用：它提供名称、描述、AOP 定义和
-`Execute(context.Context, string)`。需要文件、代理、扫描引擎、IOA 或工作目录的
-工具通过构造参数接收这些依赖，资源由拥有它的模块关闭。
-
-Pseudo-command 仍适合通过 `bash` 暴露已有命令行语义。命令实现
-`pkg/commands.Command` 的 `Run`，从 `commands.Execution` 读取参数并写入该调用的
-输出。命令的注册也由 profile 或应用装配入口显式完成；不再通过 `init` 工厂列表、
-`Deps`/`Bag` 或空导入隐式激活。
+Tool Registry 和 Command Registry 在 Load 时分别定义自己的 typed Point。贡献 Extension 只需：
 
 ```go
 func (e *Extension) Load(scope *extension.Scope) error {
-    return e.commands.Register("scanner", commands.Command{
-        Name: "whatweb", Usage: "whatweb <url>",
-        Run: func(ctx context.Context, execution *commands.Execution) (any, error) {
-            return runWhatweb(ctx, execution)
-        },
-    })
+    return extension.Add[tool.Tool](scope, e.tool)
 }
 ```
 
-需要独立进程工具能力时，使用 `cmd/runner` 的显式文件组合：它组合具体
-`pkg/exts/files.Extension`（拥有 `tools/files.Files`）和 `toolset.Registry`，完整 Load 后返回 `tool.Executor`。AOP ToolNode 只负责协议
-入口；它不创建 Agent、Runtime、App 或第二套执行循环。
+批次必须原子校验。Scope 关闭时先撤销该批次并排空它的在途调用，不影响其他插件。名称、
+flag、section key 等由各领域校验；不要再增加 Plugin ID、owner token 或通用 typed ID。
+
+## 新资源类型
+
+资源类型是具体 Go 类型。基础 Extension 实现 `resource.Point[T]` 并调用
+`extension.Define[T]`，后续插件调用 `extension.Add[T]`。Point 负责该领域的重复、覆盖、
+快照和排空规则。不要在 `core/resource` 中加入这些业务策略。
+
+资源类型定义只在 Profile Load 阶段开放；完整 Load 后冻结。已有 Point 可继续接受运行时
+热增删。定义者必须排在贡献者前面，较早 Scope 无法反向使用较晚定义。
+
+## Config、Flag 与 Probe
+
+这些是解析前资源，不需要 Extension 生命周期：
 
 ```go
-// cmd/runner 中的产品装配入口；共享包不提供具体 Profile。
-profile, err := newFileProfile(files.Config{Directory: workDir})
-if err != nil { return err }
-defer profile.Close(context.Background())
-if err := profile.Load(ctx); err != nil { return err }
-executor, err := profile.Executor()
-if err != nil { return err }
-// 将 executor 交给入口。此处省略关闭错误处理；实际入口须检查
-// profile.Close 的结果，遇到 ErrCloseIncomplete 时保留实例并重试。
+resources := resource.New()
+sections := config.NewSections()
+resource.Define[config.Section](resources, sections)
+plugin.Declare(resources)
+resources.Freeze()
+sections.Seal()
 ```
 
-完整 Cyber 产品图和具体 `cyberProfile` 都声明在 `cmd/aiscan`。`pkg/profile.Application`
-是 host 契约，具体 Profile 直接持有 Set；命令入口在唯一 Set 中组合 App 能力和可选
-Agent Runtime。Runtime 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
-类型化事件观察；事件发布统一经 `App.Publish`。需要 Agent 时入口显式选择
-`agent.StandardLoop{}`，`pkg/exts/agent.Extension` 将受控 Loop 与 Session 宿主统一发布为一个
-Runtime。该扩展负责运行准入、寿命取消和排空；没有 Loop 时工具和命令仍可用，
-Agent Run 会明确返回未配置错误，不隐藏回退到默认 Loop。
+CLI 使用 `cli.Contribution`，连接测试使用 `probe.Definition`。贡献在 Seal 前可撤销；CLI 按
+注册顺序物化，因此后面的插件可以扩展前面声明的命令。不要恢复 settings Declaration DTO。
 
-需要初始化或清理的适配器实现 `core/extension.Extension` 的 `Load`/`Close`；底层资源和
-Agent Loop 保留普通实现。Profile 的固定 Entry 集合按依赖顺序装载、逆序关闭。
-App 的能力贡献者也必须并入该集合，不能在 App 或
-其他 Extension 内创建第二个 Set。依赖通过构造函数传递，`DependsOn` 只表达生命周期
-顺序，不用于运行时查找。不要增加全局容器、通用输出接口、线协议镜像类型或仅转接用的接口。
+## 依赖与生命周期
 
-测试至少覆盖：工具定义和结构化结果、取消与超时、profile Load/Close、在途调用排空、
-失败回滚，以及 `go list -deps` 的无 Agent 工具闭包。
+构造参数表达业务依赖，`extension.New(a, b, c)` 的顺序表达加载和关闭关系。没有 Entry、
+DependsOn、Service table、Descriptor 或 capability catalog。底层 Resource 由 Extension 保留，
+消费者只接收不含 Load/Close 的业务对象。
+
+Close 返回普通错误表示回收已经完成；只有仍需重试时返回或包装
+`extension.ErrCloseIncomplete`。初始化使用 `scope.Init()`，后台工作绑定
+`scope.Lifetime()`。
+
+## 组合与验证
+
+完整产品组合根在 `cmd/aiscan`。最小本地 Agent 在 `cmd/agent`，不得依赖 scanner、search、
+proxy、IOA、browser、record 或 Web。`pkg/runner` 保留 aiscan 的共享运行模式逻辑，不是命令。
+
+新增或修改资源至少验证：
+
+- 原子批次、重复拒绝和 handle 撤销。
+- Load 失败逆序回滚。
+- 热删除只取消并排空自己的在途调用。
+- Close context 超时后可重试。
+- `go test -race ./core/resource ./core/extension ./core/registry`。
+- `go list -deps ./cmd/agent` 仍满足最小依赖边界。

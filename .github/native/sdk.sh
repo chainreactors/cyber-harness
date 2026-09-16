@@ -14,7 +14,7 @@ usage() {
 usage: sdk.sh fetch <record|re2> [os] [arch]
        sdk.sh env   <record|re2> [os] [arch]
 
-  record  static FFmpeg + x264 for the optional record tool (linux, windows)
+  record  static record FFI + FFmpeg/x264 for the record Extension (linux, windows)
   re2     static libre2_cre2.a for the re2_cgo re2_static build (linux, windows, darwin)
 
 OS and architecture default to the current host. `env` prints the CGO
@@ -132,20 +132,14 @@ verify_manifest() {
 configure_link_env() {
   if [[ "${SDK_OS}" == windows ]] && command -v cygpath >/dev/null 2>&1; then
     SDK_PREFIX_UNIX="$(cygpath -m "${SDK_PREFIX}")"
-    SDK_ROOT_UNIX="$(cygpath -m "${ROOT}")"
   else
     SDK_PREFIX_UNIX="${SDK_PREFIX}"
-    SDK_ROOT_UNIX="${ROOT}"
   fi
   case "${SDK_FAMILY}" in
     record)
-      export PKG_CONFIG_PATH="${SDK_PREFIX_UNIX}/lib/pkgconfig"
-      export CGO_CFLAGS="-I${SDK_PREFIX_UNIX}/include"
       if [[ "${SDK_OS}" == windows ]]; then
-        export PKG_CONFIG="${SDK_ROOT_UNIX}/.github/native/pkg-config-static.cmd"
         export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib -static -static-libgcc"
       else
-        export PKG_CONFIG="${SDK_ROOT_UNIX}/.github/native/pkg-config-static.sh"
         export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib"
       fi
       ;;
@@ -158,15 +152,7 @@ configure_link_env() {
 }
 
 emit_link_env() {
-  if [[ "${SDK_FAMILY}" == record ]]; then
-    printf '%s\n' \
-      "PKG_CONFIG=${PKG_CONFIG}" \
-      "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" \
-      "CGO_CFLAGS=${CGO_CFLAGS}" \
-      "CGO_LDFLAGS=${CGO_LDFLAGS}"
-  else
-    printf '%s\n' "CGO_LDFLAGS=${CGO_LDFLAGS}"
-  fi
+  printf '%s\n' "CGO_LDFLAGS=${CGO_LDFLAGS}"
 }
 
 fetch_sdk() {
@@ -218,6 +204,14 @@ fetch_sdk() {
   tar -xzf "${tmp}/${SDK_ARCHIVE}" -C "${stage}"
   verify_manifest "${stage}/.versions" "${SDK_EXPECTED}"
   [[ -d "${stage}/lib" ]] || { echo "native SDK archive is missing lib/" >&2; exit 1; }
+  if [[ "${SDK_FAMILY}" == record ]]; then
+    [[ -f "${stage}/lib/librecord.a" ]] || { echo "record SDK archive is missing librecord.a" >&2; exit 1; }
+    [[ -f "${stage}/include/record_ffi.h" ]] || { echo "record SDK archive is missing record_ffi.h" >&2; exit 1; }
+    cmp -s "${stage}/include/record_ffi.h" "${ROOT}/pkg/exts/record/record_ffi.h" || {
+      echo "record SDK ABI header does not match pkg/exts/record/record_ffi.h" >&2
+      exit 1
+    }
+  fi
 
   [[ ! -e "${prefix}" ]] || mv "${prefix}" "${backup}"
   if ! mv "${stage}" "${prefix}"; then

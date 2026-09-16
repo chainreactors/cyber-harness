@@ -17,7 +17,7 @@ type SavedSession struct {
 func (s SavedSession) SortTime() time.Time { return s.UpdatedAt }
 func (r *AgentConsole) skillCommands() []*cobra.Command {
 	var cmds []*cobra.Command
-	for _, skill := range r.runtime.App().Skills.Skills {
+	for _, skill := range r.runtime.App().Skills.All() {
 		if strings.TrimSpace(skill.Name) == "" || skill.Internal {
 			continue
 		}

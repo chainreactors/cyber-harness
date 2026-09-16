@@ -9,25 +9,17 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/hooks"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
 	agentext "github.com/chainreactors/cyber/pkg/exts/agent"
-	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 type loopFunc func(context.Context, agent.Config) (*agent.Result, error)
 
 func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
-	value, err := agentext.New(agentext.Config{Loop: loopFunc(func(_ context.Context, config agent.Config) (*agent.Result, error) {
+	value := agentext.New(loopFunc(func(_ context.Context, config agent.Config) (*agent.Result, error) {
 		return &agent.Result{Output: config.SessionID}, nil
-	})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "agent", Extension: value})
+	}))
+	set, err := extension.New(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +46,8 @@ func (f loopFunc) Run(ctx context.Context, config agent.Config) (*agent.Result, 
 
 func load(t *testing.T, loop agent.Loop) (*agentext.Runtime, *extension.Set) {
 	t.Helper()
-	value, application := newLoopExtension(loop)
-	set, err := extension.New(
-		extension.Entry{ID: "application", Extension: application},
-		extension.Entry{ID: "agent", DependsOn: []string{"application"}, Extension: value},
-	)
+	value := newLoopExtension(loop)
+	set, err := extension.New(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +67,7 @@ func load(t *testing.T, loop agent.Loop) (*agentext.Runtime, *extension.Set) {
 func TestAdmissionAndInitializationLifetime(t *testing.T) {
 	var calls int
 	var runtime *agentext.Runtime
-	value, application := newLoopExtension(loopFunc(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	value := newLoopExtension(loopFunc(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		calls++
 		if config.Loop != runtime {
 			t.Fatal("derived configs bypass the installed lifecycle")
@@ -89,10 +78,7 @@ func TestAdmissionAndInitializationLifetime(t *testing.T) {
 	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
 		t.Fatalf("run before Load: %v", err)
 	}
-	set, err := extension.New(
-		extension.Entry{ID: "application", Extension: application},
-		extension.Entry{ID: "agent", DependsOn: []string{"application"}, Extension: value},
-	)
+	set, err := extension.New(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +104,7 @@ func TestCloseCancelsAndRetainsDependenciesUntilDrain(t *testing.T) {
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var unblock sync.Once
 	var dependencyClosed atomic.Bool
-	value, application := newLoopExtension(loopFunc(func(ctx context.Context, _ agent.Config) (*agent.Result, error) {
+	value := newLoopExtension(loopFunc(func(ctx context.Context, _ agent.Config) (*agent.Result, error) {
 		close(started)
 		<-ctx.Done()
 		close(canceled)
@@ -127,12 +113,11 @@ func TestCloseCancelsAndRetainsDependenciesUntilDrain(t *testing.T) {
 	}))
 	runtime := value.Runtime()
 	set, err := extension.New(
-		extension.Entry{ID: "resource", Extension: extension.Func{CloseFunc: func(context.Context) error {
+		extension.Func{CloseFunc: func(context.Context) error {
 			dependencyClosed.Store(true)
 			return nil
-		}}},
-		extension.Entry{ID: "application", DependsOn: []string{"resource"}, Extension: application},
-		extension.Entry{ID: "agent", DependsOn: []string{"application"}, Extension: value},
+		}},
+		value,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -233,11 +218,8 @@ func TestIndependentInstallationCanCloseWithoutStoppingAnother(t *testing.T) {
 func TestFailedLoadAndPanickingLoopReleaseOwnership(t *testing.T) {
 	for name, loop := range map[string]agent.Loop{"typed nil loop": loopFunc(nil)} {
 		t.Run(name, func(t *testing.T) {
-			value, application := newLoopExtension(loop)
-			set, err := extension.New(
-				extension.Entry{ID: "application", Extension: application},
-				extension.Entry{ID: "agent", DependsOn: []string{"application"}, Extension: value},
-			)
+			value := newLoopExtension(loop)
+			set, err := extension.New(value)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -270,18 +252,6 @@ func TestFailedLoadAndPanickingLoopReleaseOwnership(t *testing.T) {
 	})
 }
 
-func newLoopExtension(loop agent.Loop) (*agentext.Extension, *apppkg.Resource) {
-	hookRegistry := hooks.New()
-	application, err := apppkg.New(apppkg.Config{SkipEngines: true}, apppkg.AppServices{
-		Hooks: hookRegistry, Events: events.New(),
-		Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
-	})
-	if err != nil {
-		panic(err)
-	}
-	value, err := agentext.New(agentext.Config{Loop: loop})
-	if err != nil {
-		panic(err)
-	}
-	return value, application
+func newLoopExtension(loop agent.Loop) *agentext.Extension {
+	return agentext.New(loop)
 }

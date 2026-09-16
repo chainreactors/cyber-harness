@@ -3,6 +3,7 @@ package record
 import (
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/tools/record"
 	"strconv"
 	"strings"
@@ -58,6 +59,11 @@ func Section() cfg.Section {
 		value, err := maxConcurrentFromEnvironment(sources.LookupEnv)
 		return map[string]any{"max_concurrent": value}, nil, err
 	}}
+}
+
+func Declare(resources *resource.Registry) error {
+	_, err := resource.Add[cfg.Section](resources, Section())
+	return err
 }
 func ReadOptions(resolved *cfg.Resolved) (Options, error) {
 	if resolved == nil {

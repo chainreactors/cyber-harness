@@ -21,7 +21,6 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
 	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	node "github.com/chainreactors/cyber/pkg/node"
@@ -50,7 +49,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	if err != nil {
 		return fmt.Errorf("init artifact normalization: %w", err)
 	}
-	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	artifactSet, err := extension.New(artifactExt)
 	if err != nil {
 		return err
 	}
@@ -108,13 +107,8 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			}
 			// The candidate app runs exactly the proto config being committed —
 			// no second parse of the staged YAML through cfg.Option.
-			appCfg := apppkg.AppConfigFromDistribute(prepared.Config, apppkg.RuntimeFeatures{
-				ProviderEnabled:  true,
-				ProviderOptional: true,
-				ToolsEnabled:     true,
-				AIEnabled:        true,
-			}, logger)
-			appCfg = apppkg.MergeOptionExtras(appCfg, &candidateOption)
+			appCfg := applicationConfigFromDistribute(prepared.Config, profile.ProviderOptional, logger)
+			appCfg = mergeApplicationOptionExtras(appCfg, &candidateOption)
 			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
 			if err != nil {
 				return candidateProfile, err
@@ -140,18 +134,17 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	ioaExtension := serverext.New(ioaservice.Config{AccessKey: accessKey})
-	ioaSet, err := extension.New(extension.Entry{ID: "ioa-server", Extension: ioaExtension})
+	routes := webext.New(service)
+	ioaExtension := serverext.NewBrowser(ioaservice.Config{AccessKey: accessKey}, serverext.BrowserOptions{
+		Authenticate: service.Auth().Authenticate,
+		AuthEnabled:  service.Auth().Enabled(),
+	})
+	webSet, err := extension.New(routes, ioaExtension)
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, ioaSet.Close(context.Background())) }()
-	if err := ioaSet.Load(ctx); err != nil {
-		return err
-	}
-	ioaSvc := ioaExtension.Server()
-	ioaHandler, err := serverext.BrowserHandler(ctx, ioaSvc, service.Auth().Authenticate, service.Auth().Enabled())
-	if err != nil {
+	defer func() { resultErr = errors.Join(resultErr, webSet.Close(context.Background())) }()
+	if err := webSet.Load(ctx); err != nil {
 		return err
 	}
 
@@ -162,7 +155,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), append(webext.Routes(service), web.Route{Source: "ioa.server", Pattern: "/ioa/", Handler: http.StripPrefix("/ioa", ioaHandler)})...)
+	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), routes.Routes()...)
 	if err != nil {
 		return err
 	}
@@ -202,7 +195,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		case <-closeCtx.Done():
 			return closeCtx.Err()
 		}
-		return ioaSet.Close(closeCtx)
+		return webSet.Close(closeCtx)
 	})
 }
 
@@ -264,20 +257,14 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := apppkg.AppConfig(&option, apppkg.RuntimeFeatures{
-		ProviderEnabled:  true,
-		ProviderOptional: true,
-		ToolsEnabled:     true,
-		AIEnabled:        true,
-	}, logger)
+	appCfg := applicationConfigFromOption(&option, profile.ProviderOptional, logger)
 	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config, artifacts managementapi.ArtifactImporter) (*cyberProfile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg applicationConfig, artifacts managementapi.ArtifactImporter) (*cyberProfile, error) {
 	appCfg.SkipEngines = true
-	appCfg.Scanner.VerifyMode = "off"
 
-	profileConfig, err := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
+	profileConfig, err := profileConfigFromOption(option, profile.ProviderDisabled, nil, appCfg.Logger)
 	if err != nil {
 		return nil, err
 	}

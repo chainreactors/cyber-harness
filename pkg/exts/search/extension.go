@@ -5,17 +5,15 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/toolset"
 	searchtools "github.com/chainreactors/cyber/tools/search"
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
-	commands commands.Runtime
-	tools    toolset.Registrar
-	config   Config
+	config Config
 }
 
 type ProxyEndpoint interface {
@@ -32,12 +30,7 @@ type Config struct {
 	ResolveIndex func() *association.Index
 }
 
-func New(toolRegistry toolset.Registrar, cmdRegistry commands.Runtime, config Config) (*Extension, error) {
-	if toolRegistry == nil || cmdRegistry == nil {
-		return nil, fmt.Errorf("search requires tool and command registries")
-	}
-	return &Extension{tools: toolRegistry, commands: cmdRegistry, config: config}, nil
-}
+func New(config Config) *Extension { return &Extension{config: config} }
 
 func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
@@ -73,13 +66,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := e.tools.Register("search", searchTool); err != nil {
+	if err := extension.Add[tool.Tool](scope, searchTool); err != nil {
 		return err
 	}
-	if err := e.commands.Register("search", "search", entries...); err != nil {
+	if err := extension.Add(scope, entries...); err != nil {
 		return err
 	}
 	return nil
 }
-
-func (e *Extension) Close(context.Context) error { return nil }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
@@ -32,16 +33,15 @@ type Config struct {
 }
 type Extension struct {
 	mu                 sync.Mutex
-	tools              toolset.Registrar
-	commands           commands.Runtime
+	commands           commands.Executor
 	bash               *commands.BashTool
 	tmux               commands.Command
 	registered, closed bool
 	done               chan struct{}
 }
 
-func New(registry *hooks.Registry, tools toolset.Registrar, c commands.Runtime, config Config) (*Extension, error) {
-	if tools == nil || c == nil || config.Directory == "" {
+func New(registry *hooks.Registry, c commands.Executor, config Config) (*Extension, error) {
+	if c == nil || config.Directory == "" {
 		return nil, fmt.Errorf("terminal requires commands and a working directory")
 	}
 	bash := commands.NewBashTool(config.Directory, config.Timeout, registry).
@@ -60,7 +60,7 @@ func New(registry *hooks.Registry, tools toolset.Registrar, c commands.Runtime, 
 	if tmux.Name != "tmux" || tmux.Run == nil {
 		return nil, fmt.Errorf("terminal tmux command must be named tmux and executable")
 	}
-	return &Extension{tools: tools, commands: c, bash: bash, tmux: tmux}, nil
+	return &Extension{commands: c, bash: bash, tmux: tmux}, nil
 }
 func (m *Extension) Bash() *commands.BashTool { return m.bash }
 func (m *Extension) Load(scope *extension.Scope) error {
@@ -76,10 +76,10 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := m.commands.Register("terminal", "terminal", m.tmux); err != nil {
+	if err := extension.Add(scope, m.tmux); err != nil {
 		return err
 	}
-	if err := m.tools.Register("terminal", m.bash); err != nil {
+	if err := extension.Add[tool.Tool](scope, m.bash); err != nil {
 		return err
 	}
 	m.registered = true

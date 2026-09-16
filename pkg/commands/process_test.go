@@ -19,7 +19,7 @@ func TestProcessHooksFollowActualCompletion(t *testing.T) {
 			close(release)
 		}
 	}()
-	commands, _ := loadTestRegistry(t, commandGroup("wait", "test", Command{Name: "wait_for_test", Run: func(ctx context.Context, _ *Execution) (any, error) {
+	commands, _ := loadTestRegistry(t, commandBatch(Command{Name: "wait_for_test", Run: func(ctx context.Context, _ *Execution) (any, error) {
 		select {
 		case <-release:
 			return nil, nil

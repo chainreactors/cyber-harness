@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/core/capability"
 	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/truncate"
@@ -32,7 +31,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 
 	options := editionScanOptions()
 	model, providerConfig := application.ProviderState()
-	if config.Scanner.AIEnabled && model != nil {
+	if model != nil {
 		if loop == nil {
 			return nil, fmt.Errorf("scanner agent loop must be supplied by the profile")
 		}
@@ -64,57 +63,42 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 	}
 	options = append(options, scan.WithLogger(logger))
 
-	plan := config.Capabilities.Select(capability.Options{Groups: []string{"scanner"}})
 	var values []commands.Command
-	if plan.Has("curl") {
-		values = append(values, curltools.NewCommand(logger, proxyURL, application))
+	values = append(values, curltools.NewCommand(logger, proxyURL, application))
+	if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("gogo unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("gogo") {
-		if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("gogo unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := neutrontools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("neutron unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("neutron") {
-		if command, err := neutrontools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("neutron unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := spraytools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("spray unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("spray") {
-		if command, err := spraytools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("spray unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := zombietools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("zombie unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("zombie") {
-		if command, err := zombietools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("zombie unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
+	if command, err := toolimpl.NewScanCommand(engineSet, options, proxyURL, application); err != nil {
+		logger.Warnf("scan unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("proton") {
-		values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
-	}
-	if plan.Has("scan") {
-		if command, err := toolimpl.NewScanCommand(engineSet, options, proxyURL, application); err != nil {
-			logger.Warnf("scan unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
-	}
-	editionCommands, err := editionScannerCommands(application, plan, engineSet, logger, proxyURL)
+	editionCommands, err := editionScannerCommands(application, engineSet, logger, proxyURL)
 	if err != nil {
 		return nil, err
 	}
 	return append(values, editionCommands...), nil
 }
 
-func executeRegistryCommand(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
+func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
 	}
@@ -173,7 +157,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
+func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}

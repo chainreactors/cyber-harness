@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	execpb "github.com/chainreactors/cyber/aop/exec"
 	filepb "github.com/chainreactors/cyber/aop/file"
@@ -31,7 +32,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	types "github.com/chainreactors/cyber/pkg/types"
 	proxytool "github.com/chainreactors/cyber/tools/proxy"
@@ -190,15 +191,13 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 	canceled := false
 	operations["op-1"] = func() { canceled = true }
 
-	handleAgentCoreMessage(
-		context.Background(),
-		nil,
-		&aop.Envelope{Id: "cancel-1"},
-		&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}},
-		func(string, protobuf.Message) { t.Error("cancel must not answer on the wire") },
-		func(*aop.Envelope) { t.Error("cancel must not reach the runtime") },
+	intercepted, err := interceptCancelOperation(
+		aop.MustWrap("cancel-1", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}}),
 		&operationsMu, operations, sealed,
 	)
+	if err != nil || !intercepted {
+		t.Fatalf("intercept cancel: intercepted=%v err=%v", intercepted, err)
+	}
 
 	if !canceled {
 		t.Fatal("cancel did not reach the operation")
@@ -213,19 +212,16 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := newTestApp(t, apppkg.Config{
-		SkipEngines: true,
-		Logger:      telemetry.NopLogger(),
-	}, apppkg.AppServices{})
+	app := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 
 	appSet := loadNodeTestApplication(t, ctx, app)
 	defer appSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rt, err := sessionext.New(agentsession.Config{Application: app, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -628,19 +624,19 @@ func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 	}
 }
 
-func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
+func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
 	return harness.AppLoad(t, ctx, application)
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+	app := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 	appSet := loadNodeTestApplication(t, t.Context(), app)
 	defer appSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rt, err := sessionext.New(agentsession.Config{Application: app, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +648,15 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 		}}),
 	}
 	err = serveAgentConnection(context.Background(), connectionConfig{
-		Name: "embedded", NodeID: "embedded", Registry: app.App.Commands, Agent: rt.Runtime(), Control: rt.Runtime(),
+		Name: "embedded", NodeID: "embedded", Registry: app.Commands, Agent: rt.Runtime(),
+		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
+			for _, binding := range rt.Runtime().NamespaceBindings() {
+				if err := binding.Register(mux); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	}, telemetry.NopLogger(), stream)
 	if err != io.EOF {
 		t.Fatalf("connection: %v", err)
@@ -719,8 +723,12 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 	cc := connectionConfig{
 		Name: "runner-1", NodeID: "runner-1",
 		Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint(),
-		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
-			return proxytool.RegisterTrafficNamespace(mux, hub.ProxyHub)
+		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
+			binding, err := proxytool.TrafficNamespace(hub.ProxyHub)
+			if err != nil {
+				return err
+			}
+			return binding.Register(mux)
 		},
 	}
 	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {

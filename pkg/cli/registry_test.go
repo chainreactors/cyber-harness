@@ -13,7 +13,7 @@ func TestThirdExtensionDeclarationsAreInertAndPresenceAware(t *testing.T) {
 	parser := flags.NewNamedParser("fixture-host", flags.HelpFlag)
 	r := New(parser)
 	calls := 0
-	if err := r.Command("fixture", "fixture inspect", "Inspect fixture", &struct{}{}, Action{Run: func(context.Context, Environment) error { calls++; return nil }}); err != nil {
+	if err := r.Command("fixture inspect", "Inspect fixture", &struct{}{}, Action{Run: func(context.Context, Environment) error { calls++; return nil }}); err != nil {
 		t.Fatal(err)
 	}
 	options := &struct {
@@ -22,7 +22,7 @@ func TestThirdExtensionDeclarationsAreInertAndPresenceAware(t *testing.T) {
 		Enabled bool   `long:"fixture-enabled" config:"enabled"`
 		Token   string `long:"fixture-token" config:"token" default:"sensitive" default-mask:"***"`
 	}{}
-	if err := r.Group("fixture", "fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: options}); err != nil {
+	if err := r.Group("fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: options}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := parser.ParseArgs([]string{"fixture", "inspect", "--fixture-name=", "--fixture-count=0"}); err != nil {
@@ -55,14 +55,14 @@ func TestThirdExtensionDeclarationsAreInertAndPresenceAware(t *testing.T) {
 
 func TestDuplicateCommandsAndFlagsRejectedBeforeParsing(t *testing.T) {
 	r := New(flags.NewNamedParser("host", 0))
-	if err := r.Command("fixture", "fixture", "", &struct{}{}, Action{}); err != nil {
+	if err := r.Command("fixture", "", &struct{}{}, Action{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Command("fixture", "fixture", "", &struct{}{}, Action{}); err == nil {
+	if err := r.Command("fixture", "", &struct{}{}, Action{}); err == nil {
 		t.Fatal("duplicate command accepted")
 	}
 	for i := range 2 {
-		err := r.Group("fixture", "fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: &struct {
+		err := r.Group("fixture", "fixture", cfg.FlagGroup{Name: "Fixture", Options: &struct {
 			Value string `long:"value"`
 		}{}})
 		if (err != nil) != (i == 1) {
@@ -78,11 +78,11 @@ func TestRejectedDeclarationDoesNotPoisonParser(t *testing.T) {
 			Value string `long:"value" config:"value"`
 		}{}}
 	}
-	if err := r.Group("first", "", "first", group()); err != nil {
+	if err := r.Group("", "first", group()); err != nil {
 		t.Fatal(err)
 	}
-	err := r.Group("second", "", "second", group())
-	if err == nil || !strings.Contains(err.Error(), "first and second") {
+	err := r.Group("", "second", group())
+	if err == nil || !strings.Contains(err.Error(), "duplicate flag --value") {
 		t.Fatalf("conflict: %v", err)
 	}
 	if _, err := r.Parse([]string{"--value=kept"}); err != nil {
@@ -91,13 +91,13 @@ func TestRejectedDeclarationDoesNotPoisonParser(t *testing.T) {
 	if got := r.Values(); got["first"]["value"] != "kept" || len(got) != 1 {
 		t.Fatalf("residual registration: %#v", got)
 	}
-	if err := r.Group("late", "", "late", group()); err == nil {
+	if err := r.Group("", "late", group()); err == nil {
 		t.Fatal("registered after parse")
 	}
 }
 func TestRejectedCommandDoesNotLeaveParents(t *testing.T) {
 	r := New(flags.NewNamedParser("host", 0))
-	err := r.Command("bad", "parent broken", "", &struct {
+	err := r.Command("parent broken", "", &struct {
 		A string `long:"same"`
 		B string `long:"same"`
 	}{}, Action{})
@@ -106,5 +106,41 @@ func TestRejectedCommandDoesNotLeaveParents(t *testing.T) {
 	}
 	if r.Parser.Find("parent") != nil {
 		t.Fatal("failed declaration left a parent command")
+	}
+}
+
+func TestTypedContributionsMaterializeAtSealAndCanRetractBeforeIt(t *testing.T) {
+	parser := flags.NewNamedParser("host", 0)
+	r := New(parser)
+	declare := Contribution(func(registry *Registry) error {
+		return registry.Command("inspect", "Inspect", &struct{}{}, Action{})
+	})
+	handle, err := r.Add(declare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parser.Find("inspect") != nil {
+		t.Fatal("contribution materialized before seal")
+	}
+	if err := handle.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	if parser.Find("inspect") != nil {
+		t.Fatal("retracted contribution materialized")
+	}
+
+	parser = flags.NewNamedParser("host", 0)
+	r = New(parser)
+	if _, err := r.Add(declare); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	if parser.Find("inspect") == nil {
+		t.Fatal("sealed contribution was not materialized")
 	}
 }

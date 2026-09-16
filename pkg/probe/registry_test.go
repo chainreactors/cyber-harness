@@ -16,13 +16,13 @@ func TestOptionalProbeRegistration(t *testing.T) {
 		calls++
 		return []*types.ConnectionCheck{{Name: "fixture", Ok: true}}
 	}
-	if err := r.Register("fixture", "fixture", check); err != nil {
+	if _, err := r.Add(Definition{Section: "fixture", Check: check}); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 0 {
 		t.Fatal("declaration invoked probe")
 	}
-	if err := r.Register("fixture", "fixture", check); err == nil {
+	if _, err := r.Add(Definition{Section: "fixture", Check: check}); err == nil {
 		t.Fatal("duplicate accepted")
 	}
 	result, err := r.Test(t.Context(), "fixture", nil, nil)

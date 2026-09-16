@@ -22,21 +22,20 @@ type trafficHandler struct {
 	hub *ProxyHub
 }
 
-// RegisterTrafficNamespace installs the proxy control surface directly on a
-// connection-owned mux. The mux is the sole owner of admission and draining;
-// the profile-owned hub has no lifecycle API to transfer.
-func RegisterTrafficNamespace(mux *aop.NamespaceMux, hub *ProxyHub) error {
-	if mux == nil || hub == nil || hub.store == nil || hub.state == nil {
-		return fmt.Errorf("traffic namespace requires a mux and proxy hub")
+// TrafficNamespace declares the proxy control surface for the profile's typed
+// namespace catalog.
+func TrafficNamespace(hub *ProxyHub) (aop.NamespaceBinding, error) {
+	if hub == nil || hub.store == nil || hub.state == nil {
+		return aop.NamespaceBinding{}, fmt.Errorf("traffic namespace requires a proxy hub")
 	}
 	h := &trafficHandler{hub: hub}
-	return mux.Register("traffic", &traffic.ProtocolMessage{}, func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
+	return aop.NamespaceBinding{Prototype: &traffic.ProtocolMessage{}, Handler: func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
 		pm, ok := msg.(*traffic.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("traffic: unexpected message %T", msg)
 		}
 		return h.handle(ctx, env, pm, send)
-	})
+	}}, nil
 }
 
 func (h *trafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traffic.ProtocolMessage, send aop.SendFunc) error {

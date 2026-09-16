@@ -24,7 +24,7 @@ func testHost(t *testing.T, mux *aop.NamespaceMux) *Host {
 func testMux(t *testing.T, handler aop.NamespaceHandler) *aop.NamespaceMux {
 	t.Helper()
 	mux := aop.NewNamespaceMux(t.Context())
-	if err := mux.Register("test", &aop.ProtocolMessage{}, handler); err != nil {
+	if err := mux.Register(&aop.ProtocolMessage{}, handler); err != nil {
 		t.Fatal(err)
 	}
 	return mux
@@ -163,7 +163,7 @@ func TestCancellationPreventsDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	mux := aop.NewNamespaceMux(ctx)
-	if err := mux.Register("test", &aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
+	if err := mux.Register(&aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
 		t.Fatal("canceled request dispatched")
 		return nil
 	}); err != nil {

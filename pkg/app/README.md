@@ -1,20 +1,15 @@
-# App：内置 Agent 产品访问面
+# App
 
-`app.New(config, dependencies)` 无副作用，返回生命周期 `Resource`；Profile 仅发布其中不含
-Load/Close 的 `App`。`cmd/aiscan` 构造 App、能力贡献者、
-Command Registry 和 Tool Registry，并将它们直接加入 Profile 拥有的唯一
-`core/extension.Set`。App 不生成 Entry、不选择插件、不创建子 Set，也不维护资源关闭链。
+`app.New(logger, dependencies)` 通过直接构造注入接收 Hooks、Events、Tool/Command Registry、
+Skills 和 Bash。它不持有产品配置或 Scanner 状态，不读取 Service 表，不按 capability 选择
+插件，也不创建子 Set。
 
-App 向入口暴露 Provider、Tool Executor、Command Registry、Bash、Skills、Hooks，以及
-类型化只读事件观察和统一的 `Publish` 入口。实际资源由 Profile 图中的 Extension 拥有：Terminal 拥有 Bash/PTY，
-Scanner 拥有引擎并只向 App 提供只读状态，Proxy 和 IOA 的业务类型从定义上就不含 Close，Registry 拥有调用准入与 drain，
-Telemetry Extension 拥有输出文件。`Resource.Close` 只关闭 App 自身状态。
+构造直接返回不含 Load/Close 的 `App`。Profile 只在唯一的线性 `extension.Set` 完整激活后
+向入口发布 App。Terminal、Scanner、Provider 等 Extension 保留各自资源所有权；App 只借用
+业务接口，不伪装成没有实际资源的生命周期对象。
 
-```text
-Telemetry → Observe → Proxy / IOA → App + capability contributors
-            → Command Registry → Tool Registry → Agent Runtime
-```
+App 统一暴露 Provider 状态、Tool Executor、Command Registry、Skills、Hooks 和 AOP Event
+Stream。Provider 更新按 Run 快照隔离，迟到的健康探测不会覆盖后续配置。
 
-关闭逆序执行。App.Publish 始终委托 Profile 提供的 AOP EventBus 补全 Event ID、时间和 session
-内序号；Agent Runtime 只使用该流和已加载能力。Provider 更新按 Run 快照隔离，迟到的
-健康探测不会覆盖更新后的 Provider。
+产品配置留在 `cmd/aiscan` / `cmd/agent` 组合根，Scanner 配置归 Scanner Extension；扫描能力
+直接由其注册的 Command/Tool 资源表达，不维护第二份状态。

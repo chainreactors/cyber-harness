@@ -166,4 +166,3 @@ func writeMachineOutput(writer io.Writer, data []byte) error {
 	}
 	return err
 }
-

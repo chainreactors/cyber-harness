@@ -122,4 +122,3 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 		t.Fatal(err)
 	}
 }
-

@@ -1,14 +1,9 @@
-//go:build full && (!record_ffmpeg || !cgo || (!windows && !linux))
+//go:build full && (!record || !cgo || (!windows && !linux))
 
 package main
 
-import (
-	"github.com/chainreactors/cyber/core/capability"
-	"github.com/chainreactors/cyber/core/extension"
-	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/toolset"
-)
+import "github.com/chainreactors/cyber/core/extension"
 
-func appendRecorderEntry(entries []extension.Entry, _ app.Config, _ toolset.Runtime, _ capability.Plan, _ string) ([]extension.Entry, error) {
-	return entries, nil
+func appendRecorderExtension(values []extension.Extension, _ applicationConfig, _ string) ([]extension.Extension, error) {
+	return values, nil
 }

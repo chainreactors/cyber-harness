@@ -221,7 +221,7 @@ func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
 	select {
 	case <-p.done:
 		// The current CLI deliberately exits with 130 after confirmation. This
-		// checks the public behavior, not graceful application resource cleanup.
+		// checks the public behavior, not graceful profile cleanup.
 		if p.cmd.ProcessState.ExitCode() != 130 {
 			t.Fatalf("confirmed exit: got %v, want code 130\n%s", p.waitErr, readFile(t, p.logPath))
 		}

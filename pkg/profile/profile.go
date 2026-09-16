@@ -1,7 +1,7 @@
 // Package profile defines the lifecycle boundary shared by Cyber hosts.
-// Product-specific composition and capabilities belong to the executable that
-// implements Application and owns its extension.Set; this package validates
-// product factories without adding another lifecycle wrapper.
+// Product-specific composition belongs to the executable that implements
+// Application and owns its extension.Set; this package validates product
+// factories without adding another lifecycle wrapper.
 package profile
 
 import (
@@ -9,24 +9,24 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
-// Application is the complete capability surface published by a product
+// Application is the complete runtime surface published by a product
 // composition root. Load must publish nothing until the whole graph is active.
 type Application interface {
 	Load(context.Context) error
 	Close(context.Context) error
 	App() (*apppkg.App, error)
-	Runtime() (*agentext.Runtime, error)
-	RegisterResourceNamespaces(*aop.NamespaceMux) error
+	Runtime() (*agentsession.Runtime, error)
+	RegisterNamespaces(*aop.NamespaceMux) error
 	AgentStatus() *aop.AgentStatus
-	Capabilities() []string
 	// ConsoleBindings publishes optional presentation contributions.
 	ConsoleBindings() *consoleapi.Bindings
 }
@@ -34,17 +34,32 @@ type Application interface {
 // Request contains host-selected inputs. Extension selection and resource
 // construction remain decisions of the product Factory.
 type Request struct {
-	Option   *cfg.Option
-	Features apppkg.RuntimeFeatures
-	Runtime  *agentext.Config
-	Logger   telemetry.Logger
+	Option       *cfg.Option
+	ProviderMode ProviderMode
+	Runtime      *agentsession.Config
+	Logger       telemetry.Logger
 }
+
+// ProviderMode is the host's provider requirement for one product graph and
+// the mode consumed directly by provider startup.
+type ProviderMode = provider.StartupMode
+
+const (
+	ProviderDisabled = provider.StartupDisabled
+	ProviderRequired = provider.StartupRequired
+	ProviderOptional = provider.StartupOptional
+)
 
 // Factory constructs an unpublished product graph. The caller owns every
 // non-nil result, including cleanup when construction or loading fails.
 type Factory func(Request) (Application, error)
 
 func (f Factory) Build(request Request) (Application, error) {
+	switch request.ProviderMode {
+	case ProviderDisabled, ProviderRequired, ProviderOptional:
+	default:
+		return nil, fmt.Errorf("invalid provider mode %d", request.ProviderMode)
+	}
 	if f == nil {
 		return nil, fmt.Errorf("profile factory is required")
 	}

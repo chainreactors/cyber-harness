@@ -11,7 +11,7 @@ import (
 func TestNamespaceMuxRegistersAndDispatches(t *testing.T) {
 	mux := NewNamespaceMux(t.Context())
 	called := false
-	if err := mux.Register("test", &filepb.ProtocolMessage{}, func(_ context.Context, _ *Envelope, message proto.Message, _ SendFunc) error {
+	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, _ *Envelope, message proto.Message, _ SendFunc) error {
 		called = message.(*filepb.ProtocolMessage).GetReadRequest().GetPath() == "/tmp/x"
 		return nil
 	}); err != nil {
@@ -27,10 +27,10 @@ func TestNamespaceMuxRegistersAndDispatches(t *testing.T) {
 func TestNamespaceMuxRejectsDuplicate(t *testing.T) {
 	mux := NewNamespaceMux(t.Context())
 	handler := func(context.Context, *Envelope, proto.Message, SendFunc) error { return nil }
-	if err := mux.Register("test", &filepb.ProtocolMessage{}, handler); err != nil {
+	if err := mux.Register(&filepb.ProtocolMessage{}, handler); err != nil {
 		t.Fatal(err)
 	}
-	if err := mux.Register("test", &filepb.ProtocolMessage{}, handler); err == nil {
+	if err := mux.Register(&filepb.ProtocolMessage{}, handler); err == nil {
 		t.Fatal("duplicate namespace registration succeeded")
 	}
 }

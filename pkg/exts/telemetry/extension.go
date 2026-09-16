@@ -213,4 +213,3 @@ func (e *Extension) Close(ctx context.Context) error {
 }
 
 var _ coreevents.Consumer = (*Extension)(nil)
-

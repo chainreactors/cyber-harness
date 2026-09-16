@@ -16,7 +16,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
-	"github.com/chainreactors/cyber/agent/tmux"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -25,8 +24,8 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
-	"github.com/chainreactors/cyber/pkg/toolset"
 	types "github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/utils/pty"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -37,7 +36,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	owner := newLoopExtension(lifecycleLoop(func(context.Context, agent.Config) (*agent.Result, error) {
 		panic("test loop failure")
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: owner})
+	set := harness.Set(t, owner)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +72,12 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 }
 
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	application.App.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
+	application := newTestApp(t, nil, apppkg.Dependencies{})
+	application.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
 	var once sync.Once
-	owner, err := New(Config{Application: testEnvironment(application.App), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	owner, err := New(Config{Application: testEnvironment(application), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- struct{}{}
 		<-ctx.Done()
 		canceled <- struct{}{}
@@ -90,10 +89,10 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	}
 	entries := harness.AppEntries(t, application)
 	var dependencyClosed atomic.Bool
-	entries = append(entries, extension.Entry{ID: "dependency", Extension: extension.Func{CloseFunc: func(context.Context) error {
+	entries = append(entries, extension.Func{CloseFunc: func(context.Context) error {
 		dependencyClosed.Store(true)
 		return nil
-	}}}, extension.Entry{ID: "agent", DependsOn: []string{"application.tool-registry", "dependency"}, Extension: owner})
+	}}, owner)
 	set := harness.Set(t, entries...)
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	init, cancelInit := context.WithCancel(t.Context())
@@ -170,7 +169,7 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := harness.Set(t, managed)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +327,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := harness.Set(t, managed)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -385,13 +384,13 @@ type lifecycleOutput struct {
 	kinds []string
 }
 
-func loadTestApplication(t *testing.T, application *apppkg.Resource) *extension.Set {
+func loadTestApplication(t *testing.T, application *apppkg.App) *extension.Set {
 	return harness.AppLoad(t, t.Context(), application)
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	rt, err := New(Config{Application: testEnvironment(a.App), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	a := newTestApp(t, nil, apppkg.Dependencies{})
+	rt, err := New(Config{Application: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,9 +401,6 @@ func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
 		t.Fatal("runtime admitted a session before Load")
 	}
 	if err := rt.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -444,9 +440,9 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
-	app := appResource.App
-	terminal, err := terminalext.New(app.Hooks, app.Tools.(*toolset.Registry), app.Commands, terminalext.Config{
+	appResource := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
+	app := appResource
+	terminal, err := terminalext.New(app.Hooks, app.Commands, terminalext.Config{
 		Directory: t.TempDir(), Timeout: 1,
 	})
 	if err != nil {
@@ -454,7 +450,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 	app.Bash = terminal.Bash()
 	entries := harness.AppEntries(t, appResource)
-	entries[1].Extension = terminal
+	entries[len(entries)-1] = terminal
 	appSet := harness.Set(t, entries...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
@@ -467,7 +463,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := harness.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +499,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	if len(seen) == 0 || seen[len(seen)-1] != "session.ended" {
 		t.Fatalf("output detached before session end: %v", seen)
 	}
-	if current, ok := bash.Manager().Get(info.ID); !ok || current.State != tmux.StateRunning {
+	if current, ok := bash.Manager().Get(info.ID); !ok || current.State != pty.StateRunning {
 		t.Fatalf("Runtime closed App-owned work: %+v, found=%v", current, ok)
 	}
 
@@ -514,7 +510,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 
 	_ = appSet.Close(context.Background())
-	if current, ok := bash.Manager().Get(info.ID); ok && current.State == tmux.StateRunning {
+	if current, ok := bash.Manager().Get(info.ID); ok && current.State == pty.StateRunning {
 		t.Fatalf("terminal extension failed to stop owned work: %+v", current)
 	}
 }
@@ -867,10 +863,10 @@ func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistencePro
 func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{Events: stream})
-	app := appResource.App
+	appResource := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{Events: stream})
+	app := appResource
 	var dependencies []string
-	var entries []extension.Entry
+	var entries []extension.Extension
 	var output *telemetryext.Extension
 	if option.OutputFile != "" {
 		var outputErr error
@@ -878,7 +874,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
-		entries = append(entries, extension.Entry{ID: "output", Extension: output})
+		entries = append(entries, output)
 		dependencies = append(dependencies, "output")
 	}
 	applicationEntries := harness.AppEntries(t, appResource, dependencies...)
@@ -898,7 +894,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 		t.Fatal(err)
 	}
 
-	runtimeSet := harness.Set(t, extension.Entry{ID: "runtime", Extension: runtimeResource})
+	runtimeSet := harness.Set(t, runtimeResource)
 	if err := runtimeSet.Load(t.Context()); err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -989,16 +985,16 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{Events: bus})
+	a := newTestApp(t, nil, apppkg.Dependencies{Events: bus})
 	applicationEntries := harness.AppEntries(t, a, "output")
-	aSet := harness.Set(t, append([]extension.Entry{{ID: "output", Extension: output}}, applicationEntries...)...)
+	aSet := harness.Set(t, append([]extension.Extension{output}, applicationEntries...)...)
 	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
-	unsubscribe := a.App.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -1006,12 +1002,12 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer unsubscribe.Cancel()
 	var runtimes []*Extension
 	for range 2 {
-		rt, err := New(Config{Application: testEnvironment(a.App), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+		rt, err := New(Config{Application: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+		rtSet := harness.Set(t, rt)
 		if err := rtSet.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -1034,7 +1030,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 		t.Fatal("session runtime closed application output")
 	}
 	last := &aop.Event{SessionId: "shared", Id: "after-runtimes"}
-	a.App.Publish(last)
+	a.Publish(last)
 	mu.Lock()
 	defer mu.Unlock()
 	var sequence uint64

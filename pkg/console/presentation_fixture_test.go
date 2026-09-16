@@ -13,11 +13,11 @@ import (
 func testSessionBindings(t *testing.T, catalog sessionconsole.Catalog) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()
-	contribution, err := sessionconsole.New(tui.Registrar(), catalog)
+	contribution, err := sessionconsole.New(catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "tui", Extension: tui}, extension.Entry{ID: "session.repl", DependsOn: []string{"tui"}, Extension: contribution})
+	set, err := extension.New(tui, contribution)
 	if err != nil {
 		t.Fatal(err)
 	}

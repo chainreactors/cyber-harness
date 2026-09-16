@@ -85,19 +85,16 @@ func (rt *Runtime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionReq
 	return response
 }
 
-// RegisterNamespaces binds the existing session and command handlers to a
-// caller-owned mux. Call once during assembly, before using the communication Host.
-func (rt *Runtime) RegisterNamespaces(mux *aop.NamespaceMux) error {
-	if rt == nil || mux == nil {
-		return fmt.Errorf("runtime and namespace mux are required")
+// NamespaceBindings publishes the protocols implemented by this runtime. The
+// profile's typed namespace catalog installs them on each connection.
+func (rt *Runtime) NamespaceBindings() []aop.NamespaceBinding {
+	if rt == nil {
+		return nil
 	}
-	if err := mux.Register("runtime", &aop.ProtocolMessage{}, rt.HandleCoreNamespace); err != nil {
-		return err
+	return []aop.NamespaceBinding{
+		{Prototype: &aop.ProtocolMessage{}, Handler: rt.HandleCoreNamespace},
+		{Prototype: &types.CommandProtocolMessage{}, Handler: rt.HandleCommandNamespace},
 	}
-	if err := mux.Register("runtime", &types.CommandProtocolMessage{}, rt.HandleCommandNamespace); err != nil {
-		return err
-	}
-	return nil
 }
 
 // HandleCoreNamespace implements session control for all existing transports.

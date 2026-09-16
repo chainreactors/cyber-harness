@@ -24,14 +24,14 @@ func observeControlAccess(registry *corehooks.Registry, ctx context.Context, op 
 		Operation: operation.Correlation(ctx), Op: op, Source: filepb.AccessSource_ACCESS_SOURCE_CONTROL,
 		Path: resolveFileRPCPath(base, path), Directory: base, Data: data, Size: size, Err: value.err,
 	}
-	if registry.Has(toolhooks.FileAccessControl.Kind) {
+	if toolhooks.FileAccessControl.Has(registry) {
 		response, hookErr := toolhooks.FileAccessControl.Emit(ctx, registry, event)
 		if cause := toolhooks.CancellationCause(response, hookErr); cause != nil {
 			operation.RequestCancel(ctx, cause)
 			value.err = errors.Join(value.err, cause)
 		}
 	}
-	if registry.Has(toolhooks.FileAccessObserved.Kind) {
+	if toolhooks.FileAccessObserved.Has(registry) {
 		corehooks.Notify(ctx, registry, toolhooks.FileAccessObserved, event)
 	}
 }

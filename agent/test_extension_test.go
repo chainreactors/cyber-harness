@@ -14,7 +14,7 @@ import (
 // The harness imports pkg/app, which imports this package, so these tests build
 // their own hosts instead of importing the harness.
 
-func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
+func testSet(t testing.TB, entries ...extension.Extension) *extension.Set {
 	t.Helper()
 	set, err := extension.New(entries...)
 	if err != nil {
@@ -28,13 +28,11 @@ func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
 	return set
 }
 
-func testCommands(t testing.TB, group string, values ...commands.Command) *commands.Registry {
+func testCommands(t testing.TB, values ...commands.Command) *commands.Registry {
 	t.Helper()
 	registry := commands.NewRegistry(nil)
-	if err := registry.Register("fixture", group, values...); err != nil {
-		t.Fatal(err)
-	}
-	set := testSet(t, extension.Entry{ID: "command-registry", Extension: registry})
+	contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add(scope, values...) }}
+	set := testSet(t, registry, contributor)
 	if err := set.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +50,8 @@ func testToolsWithHooks(t testing.TB, registry *hooks.Registry, values ...coreto
 		return coretool.EmptyExecutor()
 	}
 	toolRegistry := toolset.NewRegistry(registry)
-	if err := toolRegistry.Register("fixture", values...); err != nil {
-		t.Fatal(err)
-	}
-	set := testSet(t, extension.Entry{ID: "tool-registry", Extension: toolRegistry})
+	contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add(scope, values...) }}
+	set := testSet(t, toolRegistry, contributor)
 	if err := set.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}

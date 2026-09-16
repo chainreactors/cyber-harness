@@ -7,14 +7,15 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
 	types "github.com/chainreactors/cyber/pkg/types"
@@ -267,10 +268,10 @@ func (p *recordingProfile) App() (*apppkg.App, error) {
 	}
 	return p.app, nil
 }
-func (p *recordingProfile) Runtime() (*agentext.Runtime, error) {
+func (p *recordingProfile) Runtime() (*agentsession.Runtime, error) {
 	return nil, errors.New("recording profile has no runtime")
 }
-func (p *recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error {
+func (p *recordingProfile) RegisterNamespaces(*aop.NamespaceMux) error {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return errors.New("recording profile is not active")
 	}
@@ -281,12 +282,16 @@ var _ profile.Application = (*recordingProfile)(nil)
 
 func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
 	t.Helper()
-	resource := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	extensions, err := extension.New(extension.Entry{ID: "application", Extension: resource})
+	resource := newTestApp(t, nil, apppkg.Dependencies{})
+	var closed atomic.Bool
+	extensions, err := extension.New(extension.Func{CloseFunc: func(context.Context) error {
+		closed.Store(true)
+		return nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := &recordingProfile{extensions: extensions, app: resource.App}
+	value := &recordingProfile{extensions: extensions, app: resource}
 	t.Cleanup(func() { _ = value.Close(context.Background()) })
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -295,9 +300,7 @@ func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() b
 	if err != nil {
 		t.Fatal(err)
 	}
-	return value, app, func() bool {
-		return app.Closed()
-	}
+	return value, app, closed.Load
 }
 
 func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
@@ -378,5 +381,3 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 func (*recordingProfile) AgentStatus() *aop.AgentStatus { return &aop.AgentStatus{} }
 
 func (*recordingProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
-
-func (*recordingProfile) Capabilities() []string { return nil }

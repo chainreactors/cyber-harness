@@ -7,14 +7,14 @@ import (
 	"strings"
 	"sync"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
-func runRemoteConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl, bindings *consoleapi.Bindings) error {
+func runRemoteConsole(ctx context.Context, rt *agentsession.Runtime, session *agentsession.Session, option *cfg.Option, input io.Reader, output io.Writer, control *rlterm.StreamControl, bindings *consoleapi.Bindings) error {
 	if control == nil {
 		control = rlterm.NewControl(true, 80, 24)
 	}

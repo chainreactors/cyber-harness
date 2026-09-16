@@ -61,7 +61,7 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 
 	for _, name := range []string{"katana", "passive"} {
 		if !registry.Has(name) {
-			t.Fatalf("full scanner registry missing %q; registered=%v", name, registry.GroupNames("scanner"))
+			t.Fatalf("full scanner registry missing %q; registered=%v", name, registry.Names())
 		}
 	}
 

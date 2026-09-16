@@ -34,6 +34,13 @@ func (e *Extension) Hub() *proxytool.ProxyHub {
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
+	binding, err := proxytool.TrafficNamespace(e.Hub())
+	if err != nil {
+		return err
+	}
+	if err := extension.Add(scope, binding); err != nil {
+		return err
+	}
 	return e.resource.Start(scope.Init())
 }
 

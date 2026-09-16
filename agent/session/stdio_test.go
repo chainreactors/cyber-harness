@@ -312,7 +312,7 @@ func initRuntimeStdioHost(t *testing.T, h *stdioHost, prov agent.Provider) {
 	t.Helper()
 	h.rt = newBareRuntime(t, nil, prov)
 	mux := aop.NewNamespaceMux(h.ctx)
-	if err := h.rt.RegisterNamespaces(mux); err != nil {
+	if err := registerRuntimeNamespaces(h.rt, mux); err != nil {
 		t.Fatal(err)
 	}
 	h.host = host.New(mux)

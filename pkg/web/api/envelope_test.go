@@ -31,7 +31,7 @@ func TestSessionOnlyApplicationCanAddItsOwnNamespace(t *testing.T) {
 	called := false
 	connection := &fixtureApplicationConnection{t: t}
 	backends := &ApplicationBackends{Sessions: &Sessions{}, NewID: func() string { return "reply" }, RegisterNamespaces: func(mux *aop.NamespaceMux) error {
-		return mux.Register("fixture", &filepb.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error { called = true; return nil })
+		return mux.Register(&filepb.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error { called = true; return nil })
 	}}
 	if err := ServeApplication(connection, first, backends); err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestSessionOnlyApplicationCanAddItsOwnNamespace(t *testing.T) {
 		t.Fatal("session-only application did not dispatch its extension")
 	}
 	backends.RegisterNamespaces = func(mux *aop.NamespaceMux) error {
-		return mux.Register("fixture", &aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error { return nil })
+		return mux.Register(&aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error { return nil })
 	}
 	rejected := &fixtureApplicationConnection{t: t}
 	if err := ServeApplication(rejected, first, backends); err == nil {

@@ -12,7 +12,7 @@ import (
 func ExampleHost_Handle() {
 	mux := aop.NewNamespaceMux(context.Background())
 	// An application registers its concrete handlers, without an adapter type.
-	err := mux.Register("test", &aop.ProtocolMessage{}, func(_ context.Context, request *aop.Envelope, message proto.Message, send aop.SendFunc) error {
+	err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, request *aop.Envelope, message proto.Message, send aop.SendFunc) error {
 		return send(aop.Reply(request.Id, message))
 	})
 	if err != nil {

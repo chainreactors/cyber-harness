@@ -45,7 +45,7 @@ func (e *contributor) Load(scope *extension.Scope) error {
 	if e.load != nil {
 		return e.load(scope)
 	}
-	return e.registry.Register("test", e.values...)
+	return extension.Add(scope, e.values...)
 }
 func (e *contributor) Close(ctx context.Context) error {
 	if e.close != nil {
@@ -54,17 +54,15 @@ func (e *contributor) Close(ctx context.Context) error {
 	return nil
 }
 
-func registrySet(t *testing.T, entries ...extension.Entry) (*toolset.Registry, *extension.Set) {
+func registrySet(t *testing.T, entries ...extension.Extension) (*toolset.Registry, *extension.Set) {
 	t.Helper()
 	registry := toolset.NewRegistry(nil)
-	dependencies := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		dependencies = append(dependencies, entry.ID)
-		if value, ok := entry.Extension.(*contributor); ok {
+		if value, ok := entry.(*contributor); ok {
 			value.registry = registry
 		}
 	}
-	entries = append(entries, extension.Entry{ID: "registry", DependsOn: dependencies, Extension: registry})
+	entries = append([]extension.Extension{registry}, entries...)
 	set, err := extension.New(entries...)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +77,7 @@ func registrySet(t *testing.T, entries ...extension.Entry) (*toolset.Registry, *
 
 func TestRegistryPublishesOnlyAfterLoad(t *testing.T) {
 	first := echoTool("echo")
-	registry, set := registrySet(t, extension.Entry{ID: "tools", Extension: &contributor{values: []tool.Tool{first}}})
+	registry, set := registrySet(t, &contributor{values: []tool.Tool{first}})
 	if len(registry.ToolDefinitions()) != 0 {
 		t.Fatal("staged definitions were published")
 	}
@@ -127,8 +125,8 @@ func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 	})
 	defer completed.Cancel()
 	set, err := extension.New(
-		extension.Entry{ID: "tools", Extension: &contributor{registry: registry, values: []tool.Tool{value}}},
-		extension.Entry{ID: "registry", DependsOn: []string{"tools"}, Extension: registry},
+		registry,
+		&contributor{registry: registry, values: []tool.Tool{value}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -157,9 +155,9 @@ func TestRegistryRegistrationIsAtomic(t *testing.T) {
 	first := &contributor{registry: registry, values: []tool.Tool{echoTool("echo")}}
 	second := &contributor{registry: registry, values: []tool.Tool{echoTool("new"), echoTool("echo")}}
 	set, err := extension.New(
-		extension.Entry{ID: "first", Extension: first},
-		extension.Entry{ID: "second", Extension: second},
-		extension.Entry{ID: "registry", DependsOn: []string{"first", "second"}, Extension: registry},
+		registry,
+		first,
+		second,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -176,17 +174,17 @@ func TestRegistryRejectsInvalidBatchWithoutPartialState(t *testing.T) {
 	registry := toolset.NewRegistry(nil)
 	value := &contributor{registry: registry, load: func(scope *extension.Scope) error {
 		var nilTool *registryTool
-		if err := registry.Register("test", echoTool("partial"), nilTool); err == nil {
+		if _, err := registry.Add(echoTool("partial"), nilTool); err == nil {
 			t.Fatal("accepted typed nil")
 		}
-		if err := registry.Register("test", echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
+		if _, err := registry.Add(echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
 			t.Fatal(err)
 		}
-		return registry.Register("test", echoTool("partial"))
+		return extension.Add[tool.Tool](scope, echoTool("partial"))
 	}}
 	set, err := extension.New(
-		extension.Entry{ID: "tools", Extension: value},
-		extension.Entry{ID: "registry", DependsOn: []string{"tools"}, Extension: registry},
+		registry,
+		value,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -217,9 +215,9 @@ func TestRegistryDrainProtectsContributorResources(t *testing.T) {
 			}
 			return nil, ctx.Err()
 		}
-		registry, set := registrySet(t, extension.Entry{ID: "resource", Extension: &contributor{
+		registry, set := registrySet(t, &contributor{
 			values: []tool.Tool{value}, close: func(context.Context) error { closed = true; return nil },
-		}})
+		})
 		if err := set.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +253,7 @@ func TestRegistryDrainProtectsContributorResources(t *testing.T) {
 func TestRegistryPanicReleasesAdmission(t *testing.T) {
 	value := echoTool("panic")
 	value.run = func(context.Context, string) (*tool.Result, error) { panic("private data") }
-	registry, set := registrySet(t, extension.Entry{ID: "tools", Extension: &contributor{values: []tool.Tool{value}}})
+	registry, set := registrySet(t, &contributor{values: []tool.Tool{value}})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

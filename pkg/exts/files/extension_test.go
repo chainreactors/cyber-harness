@@ -21,13 +21,13 @@ import (
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 	t.Helper()
 	registry := toolset.NewRegistry(nil)
-	f, err := fileext.New(registry, nil, cfg)
+	f, err := fileext.New(nil, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	set, err := extension.New(
-		extension.Entry{ID: "files", Extension: f},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: registry},
+		registry,
+		f,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -95,8 +95,7 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 }
 
 func TestFilesDoesNotExposeLifecycle(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
-	adapter, err := fileext.New(registry, nil, files.Config{Directory: t.TempDir()})
+	adapter, err := fileext.New(nil, files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +245,7 @@ func TestProductionDependenciesStayIndependent(t *testing.T) {
 		t.Fatalf("dependency inspection: %v\n%s", err, output)
 	}
 	allowed := []string{
-		"aop", "core/capability", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry",
+		"aop", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry", "core/resource",
 		"core/tool", "core/tool/hooks", "pkg/exts/files", "pkg/toolset", "tools/files",
 	}
 	for _, dep := range strings.Fields(string(output)) {

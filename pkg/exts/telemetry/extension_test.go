@@ -24,7 +24,7 @@ func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("constructor touched output: %v", err)
 	}
-	set, err := extension.New(extension.Entry{ID: "output", Extension: writer})
+	set, err := extension.New(writer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		set, err := extension.New(extension.Entry{ID: "output", Extension: writer})
+		set, err := extension.New(writer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +83,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "output", Extension: writer})
+	set, err := extension.New(writer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,4 +110,3 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 		t.Fatalf("closed output: %v %v", recorded, err)
 	}
 }
-

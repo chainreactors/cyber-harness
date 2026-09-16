@@ -1,4 +1,4 @@
-//go:build full && cstx
+//go:build full && cgo
 
 package main
 
@@ -44,7 +44,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatalf("open artifact ingestor: %v", err)
 	}
-	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
+	artifactSet, err := extension.New(artifactExt)
 	if err != nil {
 		t.Fatal(err)
 	}

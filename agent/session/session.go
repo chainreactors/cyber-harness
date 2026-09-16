@@ -14,13 +14,14 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/evaluator"
 	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
+	providerpkg "github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
+	commands "github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	toolpkg "github.com/chainreactors/cyber/core/tool"
-	providerpkg "github.com/chainreactors/cyber/agent/provider"
-	commands "github.com/chainreactors/cyber/core/commandline"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
 	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/cyber/skills"
 	"google.golang.org/protobuf/proto"
@@ -125,7 +126,7 @@ type commandOutcome struct {
 }
 
 // Session lifecycle payloads belong to this extension; App only stamps and publishes events.
-func emitSessionStarted(application *Environment, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+func emitSessionStarted(application *apppkg.App, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
 		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
@@ -133,7 +134,7 @@ func emitSessionStarted(application *Environment, sessionID, agentName string, s
 	application.Publish(event)
 }
 
-func emitSessionEnded(application *Environment, sessionID, agentName, reason string) {
+func emitSessionEnded(application *apppkg.App, sessionID, agentName, reason string) {
 	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
@@ -237,7 +238,7 @@ func (s *commandSession) statusText() string {
 
 	llmState := "not configured"
 	if app != nil {
-		health := app.LLMHealth()
+		health := app.ProviderHealth()
 		switch health.State {
 		case providerpkg.HealthReady:
 			llmState = "ready"
@@ -263,8 +264,6 @@ func (s *commandSession) statusText() string {
 	toolState := "unavailable"
 	toolNames := []string(nil)
 	commandNames := []string(nil)
-	scannerState := "unavailable"
-	scannerNames := []string(nil)
 	skillState := "not loaded"
 	if app != nil {
 		if app.Tools != nil {
@@ -279,19 +278,17 @@ func (s *commandSession) statusText() string {
 		}
 		if app.Commands != nil {
 			commandNames = app.Commands.Names()
-			scannerNames = app.Commands.GroupNames("scanner")
 		}
-		scannerState = app.ScannerState()
 		if app.Skills != nil {
 			visible := 0
-			for _, skill := range app.Skills.Skills {
+			for _, skill := range app.Skills.All() {
 				if strings.TrimSpace(skill.Name) != "" && !skill.Internal {
 					visible++
 				}
 			}
 			skillState = fmt.Sprintf("ready (%d loaded)", visible)
-			if len(app.Skills.Diagnostics) > 0 {
-				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(app.Skills.Diagnostics))
+			if diagnostics := app.Skills.Diagnostics(); len(diagnostics) > 0 {
+				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(diagnostics))
 			}
 		}
 	}
@@ -300,15 +297,15 @@ func (s *commandSession) statusText() string {
 	if names := summarizeStatusNames(toolNames, 12); names != "" {
 		toolDetail += " · " + names
 	}
-	scannerDetail := scannerState
-	if names := summarizeStatusNames(scannerNames, 12); names != "" {
-		scannerDetail += fmt.Sprintf(" (%d) · %s", len(scannerNames), names)
-	}
 	commandDetail := summarizeStatusNames(commandNames, 16)
 	if commandDetail == "" {
 		commandDetail = "-"
 	}
 
+	messages := 0
+	if s.state.agent != nil {
+		messages = len(s.state.agent.MessagesSnapshot())
+	}
 	return strings.Join([]string{
 		fmt.Sprintf("Session: %s", s.state.id),
 		fmt.Sprintf("Agent: %s", s.state.agentName),
@@ -318,9 +315,8 @@ func (s *commandSession) statusText() string {
 		fmt.Sprintf("Limits: context=%d · max_output=%d · timeout=%ds", contextWindow, maxTokens, timeout),
 		fmt.Sprintf("Tools: %s", toolDetail),
 		fmt.Sprintf("Commands: %s", commandDetail),
-		fmt.Sprintf("Scanners: %s", scannerDetail),
 		fmt.Sprintf("Skills: %s", skillState),
-		fmt.Sprintf("Messages: %d", len(s.state.agent.MessagesSnapshot())),
+		fmt.Sprintf("Messages: %d", messages),
 	}, "\n")
 }
 

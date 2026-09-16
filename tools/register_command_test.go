@@ -61,20 +61,19 @@ func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 		}
 	}
 	cyberhub := searchtools.NewCyberhubSearch(index)
-	return harness.CommandGroups(t,
-		harness.CommandGroup{Name: "scanner", Values: scannerCommandValues(engineSet, t.TempDir(), events, logger)},
-		harness.CommandGroup{Name: "search", Values: []commands.Command{
-			{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
-			{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
-		}},
+	values := scannerCommandValues(engineSet, t.TempDir(), events, logger)
+	values = append(values,
+		commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
+		commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
 	)
+	return harness.Commands(t, values...)
 }
 
 func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
 	t.Helper()
 	values := scannerCommandValues(engineSet, workDir, events, logger)
 	values = append(values, extra...)
-	return harness.Commands(t, "scanner", values...)
+	return harness.Commands(t, values...)
 }
 
 func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {
@@ -413,7 +412,7 @@ func requireFunctionalCoverage(t *testing.T, registry *commands.Registry, cases 
 	for _, name := range coveredElsewhere {
 		covered[name] = true
 	}
-	for _, name := range registry.GroupNames("scanner") {
+	for _, name := range registry.Names() {
 		if !covered[name] {
 			t.Fatalf("scanner %q has no functional regression case", name)
 		}
@@ -489,7 +488,7 @@ func TestScannerFunctionalRegression(t *testing.T) {
 	required := []string{"scan", "gogo", "spray", "zombie", "neutron", "proton"}
 	for _, name := range required {
 		if !registry.Has(name) {
-			t.Fatalf("scanner registry missing %q; registered=%v", name, registry.GroupNames("scanner"))
+			t.Fatalf("scanner registry missing %q; registered=%v", name, registry.Names())
 		}
 	}
 

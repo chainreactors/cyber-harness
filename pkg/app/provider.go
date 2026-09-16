@@ -6,15 +6,6 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 )
 
-type LLMHealth = provider.Health
-
-const (
-	LLMHealthNotConfigured = provider.HealthNotConfigured
-	LLMHealthConfigured    = provider.HealthConfigured
-	LLMHealthReady         = provider.HealthReady
-	LLMHealthFailed        = provider.HealthFailed
-)
-
 func (a *App) ProviderState() (agent.Provider, agent.ProviderConfig) {
 	if a == nil {
 		return nil, agent.ProviderConfig{}
@@ -25,9 +16,9 @@ func (a *App) SetProvider(p agent.Provider, config agent.ProviderConfig) { a.Pro
 func (a *App) ReloadProvider(ctx context.Context, config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
 	return a.Providers.Reload(ctx, config, a.Logger())
 }
-func (a *App) LLMHealth() LLMHealth {
+func (a *App) ProviderHealth() provider.Health {
 	if a == nil {
-		return LLMHealth{State: LLMHealthNotConfigured}
+		return provider.Health{State: provider.HealthNotConfigured}
 	}
 	return a.Providers.Health()
 }

@@ -7,13 +7,14 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 // The harness imports this package, so these tests build their own host instead
 // of importing the harness.
-func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
+func testSet(t testing.TB, entries ...extension.Extension) *extension.Set {
 	t.Helper()
 	set, err := extension.New(entries...)
 	if err != nil {
@@ -29,7 +30,7 @@ func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
 
 // newTestApp supplies explicitly test-owned, unpublished registries. Tests that
 // execute commands or tools must activate their registry in their own graph.
-func newTestApp(t testing.TB, config Config, deps AppServices) *Resource {
+func newTestApp(t testing.TB, logger telemetry.Logger, deps Dependencies) *App {
 	t.Helper()
 	if deps.Hooks == nil {
 		deps.Hooks = hooks.New()
@@ -55,9 +56,9 @@ func newTestApp(t testing.TB, config Config, deps AppServices) *Resource {
 			}
 		})
 	}
-	resource, err := New(config, deps)
+	application, err := New(logger, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resource
+	return application
 }

@@ -14,14 +14,14 @@ import (
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 	commands := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
-	instance, err := New(nil, tools, commands, Config{Directory: t.TempDir(), Timeout: 5})
+	instance, err := New(nil, commands, Config{Directory: t.TempDir(), Timeout: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	set, err := extension.New(
-		extension.Entry{ID: "terminal", Extension: instance},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"terminal"}, Extension: commands},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+		commands,
+		tools,
+		instance,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	commandRegistry := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
 	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return commandRegistry.Register("test", "control", commands.Command{
+		return extension.Add(scope, commands.Command{
 			Name: "proxy",
 			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
 		})
@@ -53,7 +53,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 		Name: "tmux",
 		Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
 	}
-	instance, err := New(nil, tools, commandRegistry, Config{
+	instance, err := New(nil, commandRegistry, Config{
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
@@ -63,10 +63,10 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	set, err := extension.New(
-		extension.Entry{ID: "control", Extension: control},
-		extension.Entry{ID: "terminal", Extension: instance},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"control", "terminal"}, Extension: commandRegistry},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+		commandRegistry,
+		tools,
+		control,
+		instance,
 	)
 	if err != nil {
 		t.Fatal(err)

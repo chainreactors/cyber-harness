@@ -17,7 +17,6 @@ import (
 // opened by that command. The profile owns the command registry.
 type Extension struct {
 	mu             sync.Mutex
-	registry       commands.Runtime
 	workDir        string
 	defaultSession string
 	command        *playwright.Command
@@ -28,11 +27,11 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry commands.Runtime, workDir, defaultSession string) (*Extension, error) {
-	if registry == nil || strings.TrimSpace(workDir) == "" {
-		return nil, fmt.Errorf("browser extension requires a command registry and working directory")
+func New(workDir, defaultSession string) (*Extension, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return nil, fmt.Errorf("browser extension requires a working directory")
 	}
-	return &Extension{registry: registry, workDir: workDir, defaultSession: defaultSession}, nil
+	return &Extension{workDir: workDir, defaultSession: defaultSession}, nil
 }
 
 func (m *Extension) Load(scope *extension.Scope) error {
@@ -49,7 +48,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
-	if err := m.registry.Register("browser", "browser", commands.Command{
+	if err := extension.Add(scope, commands.Command{
 		Name: command.Name(), Usage: command.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/easm/playwright.md",
 		Run:             command.Run,

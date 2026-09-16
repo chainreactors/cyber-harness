@@ -11,9 +11,9 @@ import (
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
-func Set(t testing.TB, entries ...extension.Entry) *extension.Set {
+func Set(t testing.TB, values ...extension.Extension) *extension.Set {
 	t.Helper()
-	s, err := extension.New(entries...)
+	s, err := extension.New(values...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,24 +25,11 @@ func Set(t testing.TB, entries ...extension.Entry) *extension.Set {
 	return s
 }
 
-func Commands(t testing.TB, group string, values ...commands.Command) *commands.Registry {
-	return CommandGroups(t, CommandGroup{Name: group, Values: values})
-}
-
-type CommandGroup struct {
-	Name   string
-	Values []commands.Command
-}
-
-func CommandGroups(t testing.TB, groups ...CommandGroup) *commands.Registry {
+func Commands(t testing.TB, values ...commands.Command) *commands.Registry {
 	t.Helper()
 	registry := commands.NewRegistry(nil)
-	for _, group := range groups {
-		if err := registry.Register("fixture", group.Name, group.Values...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	s := Set(t, extension.Entry{ID: "command-registry", Extension: registry})
+	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add(scope, values...) }}
+	s := Set(t, registry, contribution)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +38,7 @@ func CommandGroups(t testing.TB, groups ...CommandGroup) *commands.Registry {
 
 func Load(t testing.TB, ctx context.Context, value extension.Extension) *extension.Set {
 	t.Helper()
-	s := Set(t, extension.Entry{ID: "test", Extension: value})
+	s := Set(t, value)
 	if err := s.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -69,12 +56,8 @@ func ToolsWithHooks(t testing.TB, registry *hooks.Registry, values ...tool.Tool)
 		return tool.EmptyExecutor()
 	}
 	toolRegistry := toolset.NewRegistry(registry)
-	if err := toolRegistry.Register("fixture", values...); err != nil {
-		t.Fatal(err)
-	}
-	s := Set(t,
-		extension.Entry{ID: "tool-registry", Extension: toolRegistry},
-	)
+	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add(scope, values...) }}
+	s := Set(t, toolRegistry, contribution)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}

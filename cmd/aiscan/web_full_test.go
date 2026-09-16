@@ -93,7 +93,7 @@ func TestArtifactProjectionOwnsRawArtifactObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "artifacts", Extension: projection})
+	set, err := extension.New(projection)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestArtifactProjectionDoesNotBlockAOPPublisher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "artifacts", Extension: projection})
+	set, err := extension.New(projection)
 	if err != nil {
 		t.Fatal(err)
 	}

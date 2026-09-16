@@ -36,13 +36,13 @@ func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 			Flow:      proto.Clone(message).(*traffic.Flow),
 		}
 	}
-	if h.hooks.Has(toolhooks.FlowCompletedControl.Kind) {
+	if toolhooks.FlowCompletedControl.Has(h.hooks) {
 		response, hookErr := toolhooks.FlowCompletedControl.Emit(ctx, h.hooks, makeEvent())
 		if cause := toolhooks.CancellationCause(response, hookErr); cause != nil && correlation.cancel != nil {
 			correlation.cancel(cause)
 		}
 	}
-	if h.hooks.Has(toolhooks.FlowCompletedObserved.Kind) {
+	if toolhooks.FlowCompletedObserved.Has(h.hooks) {
 		corehooks.Notify(ctx, h.hooks, toolhooks.FlowCompletedObserved, makeEvent())
 	}
 }

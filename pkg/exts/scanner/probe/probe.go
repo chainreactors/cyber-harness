@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/cyber/core/resource"
+	registry "github.com/chainreactors/cyber/pkg/probe"
 	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 )
@@ -30,6 +32,14 @@ var (
 	FofaInfoEndpoint     = "https://fofa.info/api/v1/info/my"
 	HunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
 )
+
+func Declare(resources *resource.Registry) error {
+	_, err := resource.Add[registry.Definition](resources,
+		registry.Definition{Section: "cyberhub", Check: Cyberhub},
+		registry.Definition{Section: "recon", Check: Recon},
+	)
+	return err
+}
 
 // --- section probes ---
 

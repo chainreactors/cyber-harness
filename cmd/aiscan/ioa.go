@@ -30,11 +30,8 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 		return err
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
-	client, err := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, clientext.Services{Logger: env.Logger})
-	if err != nil {
-		return err
-	}
-	set, err := extension.New(extension.Entry{ID: ioaID, Extension: client})
+	client := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, clientext.Dependencies{Logger: env.Logger})
+	set, err := extension.New(client)
 	if err != nil {
 		return err
 	}
@@ -73,7 +70,7 @@ func runIOAServe(ctx context.Context, option serverext.Options, logger telemetry
 		return fmt.Errorf("invalid IOA listen URL")
 	}
 	server := serverext.New(service.Config{AccessKey: option.Token, MCP: true})
-	set, err := extension.New(extension.Entry{ID: "ioa-server", Extension: server})
+	set, err := extension.New(server)
 	if err != nil {
 		return err
 	}

@@ -6,277 +6,133 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
-	"slices"
 	"sync"
 	"sync/atomic"
+
+	"github.com/chainreactors/cyber/core/resource"
 )
 
-// ErrCloseIncomplete marks cleanup that must be retried before dependencies
-// can be released. A Close error without this marker means cleanup completed.
-var ErrCloseIncomplete = errors.New("extension cleanup incomplete")
+var ErrCloseIncomplete = resource.ErrCloseIncomplete
 
-// Extension owns a resource or a contribution with an independent lifetime.
-// Constructors must be inert. Load and Close must not call the owning Set.
+// Extension is one fixed-lifetime part of a Profile. Constructor injection
+// expresses dependencies; declaration order expresses lifecycle order. An
+// Extension that owns work or open resources may additionally implement
+// Close(context.Context) error.
 type Extension interface {
 	Load(*Scope) error
+}
+
+type closer interface {
 	Close(context.Context) error
 }
 
-// Entry declares lifecycle ordering. Dependencies are injected by constructors,
-// never looked up through DependsOn or Context. Each instance has one owner.
-type Entry struct {
-	ID        string
-	DependsOn []string
-	Extension Extension
-}
-type state uint8
-
-const (
-	newState state = iota
-	loadingState
-	activeState
-	stoppingState
-	closedState
-)
-
 type item struct {
 	extension Extension
-	deps      []string
-	state     state
 	scope     *Scope
 }
 
-// Set serializes the lifecycle of a fixed dependency graph. A failed Load seals
-// the Set; incomplete cleanup can be retried with a fresh Close context.
+// Set loads a fixed list in declaration order and closes it in reverse order.
+// It deliberately has no IDs, graph, service table, or instance ownership.
 type Set struct {
-	gate      chan struct{}
-	items     map[string]*item
-	order     []string
+	gate      sync.Mutex
+	items     []item
+	resources *resource.Registry
 	closing   atomic.Bool
-	published atomic.Bool
-	claims    []instanceClaim
-	claimed   bool
+	active    atomic.Bool
+	sealed    bool
+	nextClose int
 }
 
-type instanceID struct {
-	typeName string
-	pointer  uintptr
+func New(extensions ...Extension) (*Set, error) {
+	items := make([]item, len(extensions))
+	for i, value := range extensions {
+		if isNilExtension(value) {
+			return nil, fmt.Errorf("extension %d is nil", i)
+		}
+		items[i].extension = value
+	}
+	return &Set{items: items, resources: resource.New(), nextClose: -1}, nil
 }
 
-type instanceClaim struct {
-	identity instanceID
-	entry    string
-}
-
-var instanceClaims = struct {
-	sync.Mutex
-	owners map[instanceID]*Set
-}{owners: make(map[instanceID]*Set)}
-
-// New validates and orders entries without calling extensions. Entries must not
-// contain typed nils or reuse an instance within the graph. Load atomically
-// rejects reuse by another live Set.
-func New(entries ...Entry) (*Set, error) {
-	s := &Set{gate: make(chan struct{}, 1), items: make(map[string]*item, len(entries))}
-	identities := make(map[instanceID]string)
-	for _, e := range entries {
-		if e.ID == "" || isNilExtension(e.Extension) {
-			return nil, fmt.Errorf("extension entry requires id and extension")
-		}
-		if _, ok := s.items[e.ID]; ok {
-			return nil, fmt.Errorf("duplicate extension: %s", e.ID)
-		}
-		s.items[e.ID] = &item{extension: e.Extension, deps: slices.Clone(e.DependsOn)}
-		if identity, ok := extensionInstanceID(e.Extension); ok {
-			if previous, exists := identities[identity]; exists {
-				return nil, fmt.Errorf("extension instance is reused by %s and %s", previous, e.ID)
-			}
-			identities[identity] = e.ID
-			s.claims = append(s.claims, instanceClaim{identity: identity, entry: e.ID})
-		}
-	}
-	visiting, visited := map[string]bool{}, map[string]bool{}
-	var visit func(string) error
-	visit = func(id string) error {
-		it, ok := s.items[id]
-		if !ok {
-			return fmt.Errorf("missing extension: %s", id)
-		}
-		if visiting[id] {
-			return fmt.Errorf("extension dependency cycle at %s", id)
-		}
-		if visited[id] {
-			return nil
-		}
-		visiting[id] = true
-		for _, dep := range it.deps {
-			if err := visit(dep); err != nil {
-				return fmt.Errorf("extension %s: %w", id, err)
-			}
-		}
-		delete(visiting, id)
-		visited[id] = true
-		s.order = append(s.order, id)
-		return nil
-	}
-	for _, e := range entries {
-		if err := visit(e.ID); err != nil {
-			return nil, err
-		}
-	}
-	return s, nil
-}
-func (s *Set) lock(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case s.gate <- struct{}{}:
-		if err := ctx.Err(); err != nil {
-			<-s.gate
-			return err
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
 func (s *Set) Load(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("extension set is nil")
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.lock(ctx); err != nil {
-		return err
+	s.gate.Lock()
+	defer s.gate.Unlock()
+	if s.closing.Load() || s.sealed {
+		return fmt.Errorf("extension set is closing, closed, or already loaded")
 	}
-	defer func() { <-s.gate }()
-	if s.closing.Load() {
-		return fmt.Errorf("extension set is closing or closed")
-	}
-	if err := s.claimInstances(); err != nil {
-		return err
-	}
-	var started []string
-	for _, id := range s.order {
-		it := s.items[id]
-		if it.state == activeState {
-			continue
-		}
-		if it.state != newState {
-			return fmt.Errorf("extension %s is stopping or closed", id)
-		}
+	s.sealed = true
+	for i := range s.items {
+		it := &s.items[i]
 		if err := ctx.Err(); err != nil {
 			s.closing.Store(true)
-			s.published.Store(false)
-			closeErr := s.closeReverse(ctx, started)
-			s.releaseClaimsIfClosed()
-			return errors.Join(err, closeErr)
+			return errors.Join(err, s.closeFrom(context.WithoutCancel(ctx), i-1))
 		}
-		it.state = loadingState
-		started = append(started, id)
-		if it.scope == nil {
-			it.scope = newScope(ctx)
-		}
-		loadErr := invokeLoad(it.extension, it.scope)
-		if err := loadErr; err != nil {
+		s.nextClose = i
+		it.scope = newScope(ctx, s.resources.Scope(i+1))
+		if err := invokeLoad(it.extension, it.scope); err != nil {
 			s.closing.Store(true)
-			s.published.Store(false)
-			closeErr := s.closeReverse(ctx, started)
-			s.releaseClaimsIfClosed()
-			return errors.Join(fmt.Errorf("load extension %s: %w", id, err), closeErr)
-		}
-		if err := ctx.Err(); err != nil {
-			s.closing.Store(true)
-			s.published.Store(false)
-			closeErr := s.closeReverse(ctx, started)
-			s.releaseClaimsIfClosed()
-			return errors.Join(err, closeErr)
-		}
-		it.state = activeState
-		if s.closing.Load() {
-			s.published.Store(false)
-			closeErr := s.closeReverse(ctx, started)
-			s.releaseClaimsIfClosed()
-			return errors.Join(fmt.Errorf("extension set is closing or closed"), closeErr)
+			return errors.Join(fmt.Errorf("load extension %d (%T): %w", i, it.extension, err), s.closeFrom(context.WithoutCancel(ctx), i))
 		}
 	}
-	s.published.Store(true)
-	if s.closing.Load() {
-		s.published.Store(false)
-		closeErr := s.closeReverse(ctx, started)
-		s.releaseClaimsIfClosed()
-		return errors.Join(fmt.Errorf("extension set is closing or closed"), closeErr)
-	}
+	s.resources.Freeze()
+	s.active.Store(true)
 	return nil
 }
 
-// Active reports whether the complete graph has loaded and Close has not
-// started. It is the publication gate for capabilities retained by a
-// composition root.
 func (s *Set) Active() bool {
-	return s != nil && s.published.Load() && !s.closing.Load()
+	return s != nil && s.active.Load() && !s.closing.Load()
 }
 
 func (s *Set) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	s.closing.Store(true)
-	s.published.Store(false)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.lock(ctx); err != nil {
+	s.closing.Store(true)
+	s.active.Store(false)
+	if err := ctx.Err(); err != nil {
 		return errors.Join(ErrCloseIncomplete, err)
 	}
-	defer func() { <-s.gate }()
-	err := s.closeReverse(ctx, s.order)
-	s.releaseClaimsIfClosed()
-	return err
+	s.gate.Lock()
+	defer s.gate.Unlock()
+	return s.closeFrom(ctx, s.nextClose)
 }
-func (s *Set) closeReverse(ctx context.Context, ids []string) error {
+
+func (s *Set) closeFrom(ctx context.Context, start int) error {
 	var errs []error
-	for i := len(ids) - 1; i >= 0; i-- {
-		id := ids[i]
-		it := s.items[id]
-		if it.state == closedState {
-			continue
-		}
-		blocked := false
-		for _, o := range s.items {
-			if o.state != newState && o.state != closedState && slices.Contains(o.deps, id) {
-				blocked = true
-				break
-			}
-		}
-		if blocked {
-			errs = append(errs, fmt.Errorf("close extension %s: live dependent did not close: %w", id, ErrCloseIncomplete))
-			continue
-		}
-		if it.state == newState {
-			it.state = closedState
-			continue
-		}
-		it.state = stoppingState
+	for i := start; i >= 0; i-- {
+		it := &s.items[i]
 		if it.scope != nil {
 			it.scope.stop()
-		}
-		if err := incompleteOnCancellation(invokeClose(it.extension, ctx)); err != nil {
-			errs = append(errs, fmt.Errorf("close extension %s: %w", id, err))
-			if errors.Is(err, ErrCloseIncomplete) {
-				continue
+			if err := it.scope.close(ctx); err != nil {
+				err = incompleteOnCancellation(err)
+				errs = append(errs, fmt.Errorf("close resources for extension %d (%T): %w", i, it.extension, err))
+				if errors.Is(err, ErrCloseIncomplete) {
+					s.nextClose = i
+					return errors.Join(errs...)
+				}
 			}
 		}
-		it.state = closedState
+		if err := incompleteOnCancellation(invokeClose(it.extension, ctx)); err != nil {
+			errs = append(errs, fmt.Errorf("close extension %d (%T): %w", i, it.extension, err))
+			if errors.Is(err, ErrCloseIncomplete) {
+				s.nextClose = i
+				return errors.Join(errs...)
+			}
+		}
+		s.nextClose = i - 1
 	}
 	return errors.Join(errs...)
 }
 
-// incompleteOnCancellation keeps the retry contract in the lifecycle owner.
-// An extension that returns its Close context error necessarily did not finish
-// within that cleanup attempt; adapters must not all repeat this conversion.
 func incompleteOnCancellation(err error) error {
 	if err == nil || errors.Is(err, ErrCloseIncomplete) {
 		return err
@@ -297,12 +153,16 @@ func invokeLoad(value Extension, scope *Scope) (err error) {
 }
 
 func invokeClose(value Extension, ctx context.Context) (err error) {
+	owner, ok := value.(closer)
+	if !ok {
+		return nil
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = errors.Join(ErrCloseIncomplete, fmt.Errorf("extension Close panicked: %v\n%s", recovered, debug.Stack()))
 		}
 	}()
-	return value.Close(ctx)
+	return owner.Close(ctx)
 }
 
 func isNilExtension(value Extension) bool {
@@ -316,52 +176,4 @@ func isNilExtension(value Extension) bool {
 	default:
 		return false
 	}
-}
-
-func extensionInstanceID(value Extension) (instanceID, bool) {
-	v := reflect.ValueOf(value)
-	if v.Kind() != reflect.Pointer {
-		return instanceID{}, false
-	}
-	return instanceID{typeName: v.Type().String(), pointer: v.Pointer()}, true
-}
-
-func (s *Set) claimInstances() error {
-	if s.claimed {
-		return nil
-	}
-	instanceClaims.Lock()
-	defer instanceClaims.Unlock()
-	for _, claim := range s.claims {
-		if owner := instanceClaims.owners[claim.identity]; owner != nil && owner != s {
-			return fmt.Errorf("extension %s instance already belongs to another set", claim.entry)
-		}
-	}
-	for _, claim := range s.claims {
-		instanceClaims.owners[claim.identity] = s
-	}
-	s.claimed = true
-	return nil
-}
-
-func (s *Set) releaseClaimsIfClosed() {
-	if !s.claimed {
-		return
-	}
-	for _, it := range s.items {
-		if it.state != closedState {
-			return
-		}
-	}
-	instanceClaims.Lock()
-	defer instanceClaims.Unlock()
-	if !s.claimed {
-		return
-	}
-	for _, claim := range s.claims {
-		if instanceClaims.owners[claim.identity] == s {
-			delete(instanceClaims.owners, claim.identity)
-		}
-	}
-	s.claimed = false
 }

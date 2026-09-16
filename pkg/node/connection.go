@@ -11,7 +11,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/terminal"
 	types "github.com/chainreactors/cyber/pkg/types"
 )
@@ -25,12 +24,11 @@ type agentEndpoint interface {
 }
 
 type connectionConfig struct {
-	ServerURL         string
-	WSPath            string
-	Name              string
-	Token             string
-	Capabilities      []string
-	ExtraCapabilities []string
+	ServerURL    string
+	WSPath       string
+	Name         string
+	Token        string
+	Capabilities []string
 
 	// JSONFrames switches the wire codec from binary protobuf to standard
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
@@ -39,9 +37,7 @@ type connectionConfig struct {
 	// Registry supplies the Bash pseudo-command projection to Cyber agent nodes.
 	Registry commands.Executor
 	Bash     *commands.BashTool
-	// Agent owns connection-side events. Control uses the product runtime;
-	// nil denotes a tool-only node. No optional interface selects routing.
-	Control       *agentext.Runtime
+	// Agent owns connection-side events.
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
 	Logger        telemetry.Logger
@@ -53,9 +49,9 @@ type connectionConfig struct {
 	RunnerFileRPC bool
 	Hooks         *hooks.Registry
 	PTYRouter     func() (*terminal.Router, error)
-	// RegisterResourceNamespaces binds control protocols backed by resources
+	// RegisterNamespaces binds control protocols backed by resources
 	// owned by the loaded profile. The connection owns only their registrations.
-	RegisterResourceNamespaces func(*aop.NamespaceMux) error
+	RegisterNamespaces func(*aop.NamespaceMux) error
 }
 
 func connect(ctx context.Context, config connectionConfig) error {

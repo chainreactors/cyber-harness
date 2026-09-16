@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# One frontend bundle + standard/full/runner CI build matrix -> verified bundle
+# One frontend bundle + standard/full CI build matrix -> verified bundle
 # ---------------------------------------------------------------------------
 
 jobs:
@@ -69,10 +69,6 @@ jobs:
         include:
           - id: aiscan
             build: aiscan
-            runner: ubuntu-22.04
-            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
-          - id: runner
-            build: runner
             runner: ubuntu-22.04
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
           - id: aiscan-full-linux-amd64
@@ -243,11 +239,7 @@ jobs:
           done
 
           if [[ -x "${OUTDIR}/${BUILD}_linux_amd64" ]]; then
-            # Only the runner names itself in --version; both aiscan editions
-            # report the product name.
-            expected="aiscan"
-            [[ "$BUILD" == "runner" ]] && expected="runner"
-            test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "${expected} v${VERSION}"
+            test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "aiscan v${VERSION}"
           fi
 
           echo "=== Binaries ==="
@@ -311,9 +303,6 @@ jobs:
           for f in dist/build/*; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
-            # Runner is built and smoke-tested in CI for Cairn, but is not a
-            # GitHub Release asset.
-            [[ "$base" == runner_* ]] && continue
             archive_name="${base%.exe}"
             binary="${base%%_*}"
             inner_name="$binary"

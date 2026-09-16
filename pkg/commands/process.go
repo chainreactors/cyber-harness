@@ -36,7 +36,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 
 	completeStartFailure := func(startErr error) error {
 		wrapped := errors.Join(operation.ErrStartFailed, startErr)
-		if t.hooks.Has(toolhooks.ProcessCompleted.Kind) {
+		if toolhooks.ProcessCompleted.Has(t.hooks) {
 			corehooks.Notify(context.WithoutCancel(processCtx), t.hooks, toolhooks.ProcessCompleted, toolhooks.ProcessCompletion{
 				Lifecycle: toolhooks.Lifecycle{Operation: operation.Correlation(processCtx), StartedAt: startedAt, EndedAt: time.Now(), Err: wrapped},
 				Process:   event,
@@ -48,10 +48,10 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 		return wrapped
 	}
 
-	if t.hooks.Has(toolhooks.BeforeProcess.Kind) {
+	if toolhooks.BeforeProcess.Has(t.hooks) {
 		admission, hookErr := toolhooks.BeforeProcess.Emit(processCtx, t.hooks, event)
 		if err := toolhooks.Check(admission, hookErr); err != nil {
-			if t.hooks.Has(toolhooks.ProcessCompleted.Kind) {
+			if toolhooks.ProcessCompleted.Has(t.hooks) {
 				corehooks.Notify(context.WithoutCancel(processCtx), t.hooks, toolhooks.ProcessCompleted, toolhooks.ProcessCompletion{
 					Lifecycle: toolhooks.Lifecycle{Operation: ref, EndedAt: time.Now(), Err: err},
 					Process:   event,
@@ -65,7 +65,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	if cause := context.Cause(processCtx); cause != nil {
 		return nil, completeStartFailure(cause)
 	}
-	if t.hooks.Has(toolhooks.ProcessStarting.Kind) {
+	if toolhooks.ProcessStarting.Has(t.hooks) {
 		corehooks.Notify(processCtx, t.hooks, toolhooks.ProcessStarting, event)
 	}
 	if cause := context.Cause(processCtx); cause != nil {
@@ -98,7 +98,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	t.processMu.Unlock()
 
 	var cancelCause error
-	if t.hooks.Has(toolhooks.ProcessStartedControl.Kind) {
+	if toolhooks.ProcessStartedControl.Has(t.hooks) {
 		response, hookErr := toolhooks.ProcessStartedControl.Emit(processCtx, t.hooks, event)
 		cancelCause = toolhooks.CancellationCause(response, hookErr)
 		if cancelCause != nil {
@@ -106,7 +106,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 			_ = execution.Kill()
 		}
 	}
-	if t.hooks.Has(toolhooks.ProcessStartedObserved.Kind) {
+	if toolhooks.ProcessStartedObserved.Has(t.hooks) {
 		corehooks.Notify(processCtx, t.hooks, toolhooks.ProcessStartedObserved, event)
 	}
 
@@ -139,7 +139,7 @@ func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *Exec
 		completionErr = errors.Join(completionErr, cause)
 	}
 	session := executionSession(execution)
-	if t.hooks.Has(toolhooks.ProcessCompleted.Kind) {
+	if toolhooks.ProcessCompleted.Has(t.hooks) {
 		corehooks.Notify(context.WithoutCancel(ctx), t.hooks, toolhooks.ProcessCompleted, toolhooks.ProcessCompletion{
 			Lifecycle: toolhooks.Lifecycle{Operation: event.Operation, StartedAt: startedAt, EndedAt: time.Now(), Err: completionErr},
 			Process:   event,

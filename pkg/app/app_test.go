@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/pkg/commands"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
@@ -34,10 +33,9 @@ func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
 	hookRegistry := hooks.New()
 	commandRegistry := commands.NewRegistry(hookRegistry)
 	toolRegistry := toolset.NewRegistry(hookRegistry)
-	resource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{
+	application := newTestApp(t, telemetry.NopLogger(), Dependencies{
 		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
 	})
-	application := resource.App
 	if application.Commands != commandRegistry || application.Tools != toolRegistry || application.Hooks != hookRegistry {
 		t.Fatal("application replaced profile-owned registries")
 	}
@@ -67,7 +65,7 @@ func TestLogLLMProbeStatusReady(t *testing.T) {
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
-	if health.State != LLMHealthReady || health.LatencyMs < 0 || health.Error != "" {
+	if health.State != providerapi.HealthReady || health.LatencyMs < 0 || health.Error != "" {
 		t.Fatalf("health = %+v", health)
 	}
 
@@ -94,7 +92,7 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
-	if health.State != LLMHealthFailed || !strings.Contains(health.Error, "unauthorized") {
+	if health.State != providerapi.HealthFailed || !strings.Contains(health.Error, "unauthorized") {
 		t.Fatalf("health = %+v", health)
 	}
 
@@ -135,11 +133,9 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{Events: events})
-	app := appResource.App
+	app := newTestApp(t, telemetry.NopLogger(), Dependencies{Events: events})
 	appSet := testSet(t,
-		extension.Entry{ID: "output", Extension: recorder},
-		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: appResource},
+		recorder,
 	)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
 	types "github.com/chainreactors/cyber/pkg/types"
 	web "github.com/chainreactors/cyber/pkg/web"
@@ -24,7 +25,7 @@ import (
 )
 
 func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...string) *web.Handler {
-	handler, err := web.NewHandler(service.Auth(), static, webext.Routes(service)...)
+	handler, err := web.NewHandler(service.Auth(), static, loadedRoutes(service)...)
 	if err != nil {
 		panic(err)
 	}
@@ -32,9 +33,25 @@ func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...s
 }
 
 func registerConnectServices(mux *http.ServeMux, _ string, service web.Service) {
-	for _, route := range webext.Routes(service) {
+	for _, route := range loadedRoutes(service) {
 		mux.Handle(route.Pattern, route.Handler)
 	}
+}
+
+func loadedRoutes(service web.Service) []web.Route {
+	routes := webext.New(service)
+	set, err := extension.New(routes)
+	if err != nil {
+		panic(err)
+	}
+	if err := set.Load(context.Background()); err != nil {
+		panic(err)
+	}
+	result := routes.Routes()
+	if err := set.Close(context.Background()); err != nil {
+		panic(err)
+	}
+	return result
 }
 
 func newAccessKeyAuth(key string) func(http.Handler) http.Handler {
@@ -143,7 +160,7 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 
 func TestHandlerTestConnRouting(t *testing.T) {
 	probes := probe.New()
-	if err := probes.Register("scanner", "cyberhub", scannerprobe.Cyberhub); err != nil {
+	if _, err := probes.Add(probe.Definition{Section: "cyberhub", Check: scannerprobe.Cyberhub}); err != nil {
 		t.Fatal(err)
 	}
 	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Probes: probes}})

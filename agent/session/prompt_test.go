@@ -2,12 +2,12 @@ package session
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/cmd/harness"
-	"github.com/chainreactors/cyber/core/extension"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
+	agentprompt "github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/cmd/harness"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
@@ -22,7 +22,7 @@ func TestBuildSystemPromptIncludesSkills(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
 
-	prompt := BuildSystemPrompt(&PromptConfig{
+	prompt := agentprompt.BuildSystemPrompt(&agentprompt.PromptConfig{
 		Tools:  tools,
 		Skills: loaded,
 	}, nil)
@@ -44,7 +44,7 @@ func TestBuildSystemPromptIncludesSkills(t *testing.T) {
 }
 
 func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
-	prompt := BuildSystemPrompt(nil, nil)
+	prompt := agentprompt.BuildSystemPrompt(nil, nil)
 	for _, want := range []string{
 		"Cyber, a Cyber Harness for model companies",
 		"Use a hacker's mindset throughout",
@@ -74,7 +74,7 @@ func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
 }
 
 func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
-	prompt := BuildSystemPrompt(&PromptConfig{
+	prompt := agentprompt.BuildSystemPrompt(&agentprompt.PromptConfig{
 		ScannerAgentMode: true,
 		ScannerName:      "gogo",
 	}, nil)
@@ -102,8 +102,8 @@ func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
 }
 
 func TestSystemPromptFuncAdaptsToTools(t *testing.T) {
-	cfg := &PromptConfig{}
-	fn := SystemPromptFunc(cfg)
+	cfg := &agentprompt.PromptConfig{}
+	fn := agentprompt.SystemPromptFunc(cfg)
 
 	result := fn(nil)
 	if strings.Contains(result, "## Available Tools") {
@@ -112,8 +112,8 @@ func TestSystemPromptFuncAdaptsToTools(t *testing.T) {
 }
 
 func TestBuildSystemPromptLoadsSkillBody(t *testing.T) {
-	prompt := BuildSystemPrompt(&PromptConfig{
-		LoadedSkills: []LoadedSkill{
+	prompt := agentprompt.BuildSystemPrompt(&agentprompt.PromptConfig{
+		LoadedSkills: []agentprompt.LoadedSkill{
 			{Name: "scan/verify", Body: "Verify all high-priority findings with active probing."},
 			{Name: "scan/sniper", Body: "Search public CVEs for fingerprints."},
 		},
@@ -148,16 +148,16 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+			application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"cyber"}, Application: testEnvironment(application.App), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+			rt, err := New(Config{BaseSkills: []string{"cyber"}, Application: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+			rtSet := harness.Set(t, rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

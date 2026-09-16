@@ -6,7 +6,7 @@ Agent Runtime 不保存输出接口、PTY Manager 或终端模式。
 - `AttachLocalREPL(ctx, rt, option, bindings)`：直接使用进程终端，避免把 readline 控制序列写入可重放 PTY 缓冲。
 - `StartPersistent(rt, option, bindings)`：在 App 的 Bash Manager 中创建一个持久 REPL。传输断开只解除监视，重连复用同一终端。
 - `RunTask(...)`：拥有一次静态展示与事件订阅，调用已有 Session/Run，在会话关闭后注销订阅。
-- 可选命令、补全和状态行通过 TUI ext 提供的 `pkg/console/api.Registrar` 注册，Profile 加载完成后发布 `Bindings`。Session/IOA 的展示适配分别位于 `pkg/exts/session/console` 和 `pkg/exts/ioa/client/console`。
+- 可选命令、补全和状态行直接作为 `*console/api.Bindings` typed resource 注册，Profile 加载完成后发布组合结果。Session/IOA 的展示适配分别位于 `pkg/exts/session/console` 和 `pkg/exts/ioa/client/console`。
 - Console 不再主动枚举 Session 命令。直接嵌入 Console 的宿主也应显式安装展示贡献；传入 nil bindings 不会自动增加 `/status`、`/clear` 等 Session 命令。终端内置交互命令保持不变。
 
 返回的 `REPL` 只保存自己的 cancel 和完成 channel。这两个状态保证显式关闭可取消并等待

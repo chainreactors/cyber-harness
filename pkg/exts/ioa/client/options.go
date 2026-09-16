@@ -2,8 +2,8 @@ package client
 
 import (
 	"fmt"
-	"github.com/chainreactors/cyber/core/capability"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"
@@ -35,6 +35,11 @@ func Section() cfg.Section {
 		return nil
 	}}
 }
+
+func Declare(resources *resource.Registry) error {
+	_, err := resource.Add[cfg.Section](resources, Section())
+	return err
+}
 func ReadOptions(option *cfg.Option) (Options, error) {
 	value := Options{URL: DefaultURL, Space: DefaultSpace}
 	if option == nil {
@@ -46,7 +51,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 		decoded, err = cfg.Get[*Options](option.Resolved, ConfigKey)
 	} else {
 		registry := cfg.NewSections()
-		if err = registry.Register(ConfigKey, Section()); err != nil {
+		if _, err = registry.Add(Section()); err != nil {
 			return Options{}, err
 		}
 		raw, decodeErr := registry.Decode(ConfigKey, option.Extensions[ConfigKey])
@@ -91,10 +96,6 @@ func Preamble(config service.Config) string {
 		return ""
 	}
 	return "IOA collaboration space: " + config.Space
-}
-
-func Descriptor() capability.Descriptor {
-	return capability.Descriptor{ID: "ioa", Kind: capability.KindService, Group: "ioa"}
 }
 
 func FlagGroup() cfg.FlagGroup { return cfg.FlagGroup{Name: "IOA client", Options: &Options{}} }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/core/telemetry"
 	flags "github.com/jessevdk/go-flags"
 	"io"
@@ -21,22 +22,26 @@ type Action struct {
 	Run        func(context.Context, Environment) error
 	Persistent bool
 }
+type Contribution func(*Registry) error
 type binding struct {
 	key     string
 	command *flags.Command
 	group   *flags.Group
 }
+type contributionBatch struct {
+	values []Contribution
+	closed bool
+}
 type Registry struct {
-	Parser         *flags.Parser
-	actions        map[*flags.Command]Action
-	bindings       []binding
-	sources        map[*flags.Option]string
-	commandSources map[*flags.Command]string
-	sealed         bool
+	Parser        *flags.Parser
+	actions       map[*flags.Command]Action
+	bindings      []binding
+	contributions []*contributionBatch
+	sealed        bool
 }
 
 func New(parser *flags.Parser) *Registry {
-	return &Registry{Parser: parser, actions: map[*flags.Command]Action{}, sources: map[*flags.Option]string{}, commandSources: map[*flags.Command]string{}}
+	return &Registry{Parser: parser, actions: map[*flags.Command]Action{}}
 }
 func (r *Registry) command(path string) *flags.Command {
 	cmd := r.Parser.Command
@@ -48,8 +53,8 @@ func (r *Registry) command(path string) *flags.Command {
 	}
 	return cmd
 }
-func (r *Registry) Group(source, path, key string, group cfg.FlagGroup) error {
-	if err := r.writable(source); err != nil {
+func (r *Registry) Group(path, key string, group cfg.FlagGroup) error {
+	if err := r.writable(); err != nil {
 		return err
 	}
 	cmd := r.command(path)
@@ -62,21 +67,18 @@ func (r *Registry) Group(source, path, key string, group cfg.FlagGroup) error {
 	if err != nil {
 		return err
 	}
-	if err := r.validateOptions(cmd.Name, groupOptions(cmd.Group), groupOptions(candidate), source); err != nil {
+	if err := r.validateOptions(cmd.Name, groupOptions(cmd.Group), groupOptions(candidate)); err != nil {
 		return err
 	}
 	added, err := cmd.AddGroup(group.Name, group.Description, group.Options)
 	if err != nil {
 		return err
 	}
-	for _, option := range groupOptions(added) {
-		r.sources[option] = source
-	}
 	r.bindings = append(r.bindings, binding{key: key, group: added, command: cmd})
 	return r.Validate()
 }
-func (r *Registry) Command(source, path, description string, data any, action Action) error {
-	if err := r.writable(source); err != nil {
+func (r *Registry) Command(path, description string, data any, action Action) error {
+	if err := r.writable(); err != nil {
 		return err
 	}
 	parts := strings.Fields(path)
@@ -88,7 +90,7 @@ func (r *Registry) Command(source, path, description string, data any, action Ac
 	if err != nil {
 		return err
 	}
-	if err := r.validateOptions(path, nil, groupOptions(candidate.Group), source); err != nil {
+	if err := r.validateOptions(path, nil, groupOptions(candidate.Group)); err != nil {
 		return err
 	}
 	parent := r.Parser.Command
@@ -101,24 +103,17 @@ func (r *Registry) Command(source, path, description string, data any, action Ac
 				return err
 			}
 		}
-		if r.commandSources[child] == "" {
-			r.commandSources[child] = source
-		}
 		parent = child
 	}
 	name := parts[len(parts)-1]
 	if previous := parent.Find(name); previous != nil {
-		return fmt.Errorf("duplicate command %q (sources %s and %s)", path, r.commandSources[previous], source)
+		return fmt.Errorf("duplicate command %q", path)
 	}
 	cmd, err := parent.AddCommand(name, description, "", data)
 	if err != nil {
 		return err
 	}
 	r.actions[cmd] = action
-	r.commandSources[cmd] = source
-	for _, option := range groupOptions(cmd.Group) {
-		r.sources[option] = source
-	}
 	return r.Validate()
 }
 func (r *Registry) Selected() *Action {
@@ -174,10 +169,10 @@ func (r *Registry) Validate() error {
 				keys = append(keys, "-"+string(option.ShortName))
 			}
 			for _, key := range keys {
-				if previous, exists := names[key]; exists {
-					return fmt.Errorf("duplicate flag %s on command %s (sources %s and %s)", key, cmd.Name, previous, r.source(option))
+				if _, exists := names[key]; exists {
+					return fmt.Errorf("duplicate flag %s on command %s", key, cmd.Name)
 				}
-				names[key] = r.source(option)
+				names[key] = key
 			}
 		}
 		for _, child := range cmd.Commands() {
@@ -226,22 +221,26 @@ func (r *Registry) ValueArity() map[string]int {
 	return values
 }
 
-func (r *Registry) source(option *flags.Option) string {
-	if source := r.sources[option]; source != "" {
-		return source
-	}
-	return "host"
-}
-func (r *Registry) writable(source string) error {
+func (r *Registry) writable() error {
 	if r.sealed {
 		return fmt.Errorf("CLI declarations are sealed")
-	}
-	if strings.TrimSpace(source) == "" {
-		return fmt.Errorf("CLI source is required")
 	}
 	return nil
 }
 func (r *Registry) Seal() error {
+	if r.sealed {
+		return r.Validate()
+	}
+	for _, batch := range r.contributions {
+		if batch.closed {
+			continue
+		}
+		for _, declare := range batch.values {
+			if err := declare(r); err != nil {
+				return err
+			}
+		}
+	}
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -255,14 +254,10 @@ func (r *Registry) Parse(args []string) ([]string, error) {
 	return r.Parser.ParseArgs(args)
 }
 
-func (r *Registry) validateOptions(command string, existing, incoming []*flags.Option, source string) error {
+func (r *Registry) validateOptions(command string, existing, incoming []*flags.Option) error {
 	names := map[string]string{}
 	check := func(options []*flags.Option, incoming bool) error {
 		for _, option := range options {
-			owner := r.source(option)
-			if incoming {
-				owner = source
-			}
 			var keys []string
 			if option.LongName != "" {
 				keys = append(keys, "--"+option.LongNameWithNamespace())
@@ -271,10 +266,10 @@ func (r *Registry) validateOptions(command string, existing, incoming []*flags.O
 				keys = append(keys, "-"+string(option.ShortName))
 			}
 			for _, key := range keys {
-				if previous, exists := names[key]; exists {
-					return fmt.Errorf("duplicate flag %s on command %s (sources %s and %s)", key, command, previous, owner)
+				if _, exists := names[key]; exists {
+					return fmt.Errorf("duplicate flag %s on command %s", key, command)
 				}
-				names[key] = owner
+				names[key] = key
 			}
 		}
 		return nil
@@ -284,3 +279,34 @@ func (r *Registry) validateOptions(command string, existing, incoming []*flags.O
 	}
 	return check(incoming, true)
 }
+
+func (r *Registry) Add(values ...Contribution) (resource.Handle, error) {
+	if r == nil || len(values) == 0 || r.sealed {
+		return nil, resource.ErrInvalid
+	}
+	for _, declare := range values {
+		if declare == nil {
+			return nil, resource.ErrInvalid
+		}
+	}
+	batch := &contributionBatch{values: append([]Contribution(nil), values...)}
+	r.contributions = append(r.contributions, batch)
+	return resource.HandleFunc(func(context.Context) error {
+		if batch.closed {
+			return nil
+		}
+		batch.closed = true
+		if r.sealed {
+			return nil
+		}
+		for index, current := range r.contributions {
+			if current == batch {
+				r.contributions = append(r.contributions[:index], r.contributions[index+1:]...)
+				break
+			}
+		}
+		return nil
+	}), nil
+}
+
+var _ resource.Point[Contribution] = (*Registry)(nil)

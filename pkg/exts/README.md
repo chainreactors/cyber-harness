@@ -1,50 +1,21 @@
 # Extensions
 
-`pkg/exts` is the lifecycle adaptation boundary for product extensions. A package under
-`tools/` or `agent/` implements behavior and remains unaware of host
-lifecycle. An adapter in this package turns that behavior into an
-`extension.Extension`; `core/extension.Set` then provides one publication and
-shutdown contract.
+`pkg/exts` 是行为实现与产品生命周期之间的适配层。`tools/` 和 `agent/` 保持普通业务类型，
+需要初始化、后台工作或清理时才由这里的 Extension 持有。
 
-Only initialization or resource cleanup needs an Extension. Pure declarations
-are registered directly by the Profile; they need no tools/commands lifecycle
-adapter. An Extension may contribute to several unrelated domains.
-`pkg/exts/agent` owns admission, cancellation and draining for a selected
-`agent.Loop`. `pkg/exts/session` installs the independent `agent/session`
-manager and borrows that loop. Profiles can omit Agent
-execution while keeping the remaining tools and commands.
+Tool、Command、Skill 和 Runtime 才是调用者使用的 domain capabilities；Extension 本身不是
+业务能力接口。它只把这些对象包装成 harness 可管理的生命周期单元，并将其发布到对应 Point。
+这里的 capability 是领域含义，不引入通用 Capability 类型、Catalog 或 gating。
 
-Infrastructure extensions such as Harness and TUI own their domain registries.
-Contributors borrow narrow registration interfaces, not concrete lifecycle
-owners. Adapters must not create service locators or a second filesystem
-implementation. Resource ownership and dependency order belong to the Set
-entries assembled by the profile.
+Extension 通过构造参数接收依赖，通过 `extension.Define/Add` 使用 typed resources。它们不得
+创建 Service Locator、第二个 Set、通用 DTO 聚合器或字符串资源表。业务消费者只拿不含
+Close 的对象，例如 Files、ProxyHub、IOA Runtime 或 Agent Runtime；拥有者 Extension 负责
+停止准入、排空并关闭底层资源。App 只是这些对象的借用视图，本身没有空生命周期包装。
 
-For example, `pkg/exts/proxy.Extension` owns the proxy Resource and publishes
-its lifecycle-free Hub. Traffic protocol
-handlers are stateless bindings registered directly on a connection-owned
-`aop.NamespaceMux`; they are not a second Extension lifecycle.
+Tool Registry 与 Command Registry 直接定义各自 Point，Skill Library 定义 Bundle Point，
+TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CLI 和 Probe 是解析前的
+声明资源，插件以 `Declare(*resource.Registry)` 直接贡献，不需要生命周期 Extension。
 
-An adapter never publishes its lifecycle owner. Files, Proxy, IOA, and App
-construction separates a `Resource` from its named business object; only
-Resource has Start/Open/Load/Close, while consumers receive Files, ProxyHub,
-Runtime, or App directly. Agent follows the same boundary with one Extension
-and its published Runtime; Session has its own separate installation.
-There is no Borrow/Handle/sealed-interface layer. Extensions depend on business
-capabilities rather than importing one another. Event producers, observers and
-consumers share the profile's concrete `core/events.Stream`; it alone stamps
-events through Publish, Observe and Consume.
-
-IOA has two installations: `ioa/client` owns the complete client collaboration
-capability, and `ioa/server` owns server storage and request draining. They do not
-import each other. The client uses Commands, the canonical Event Stream and a
-rejectable Inbox delivery callback. Static protocol skills are selected as a
-`skills.Bundle` by the Profile. The server publishes only its business Server;
-HTTP listeners remain owned by the command entrypoint.
-
-The client owns its typed config, CLI declarations, console presentation, probes,
-and collaboration skill assets. The server owns its independent CLI/config and
-browser authentication bridge. Those adapters are inert contributions, not extra
-lifecycle extensions. Generic hosts accept config Sections, CLI Actions, Console
-Bindings, probe callbacks and HTTP Routes; none imports an IOA runtime. Product
-compatibility mapping stays in `cmd/aiscan`. See [IOA composition](../../docs/ioa.md).
+依赖顺序由产品组合根中的线性列表表达。可选功能由是否构造对应 Extension 决定，不使用
+Descriptor、Provides/Requires 或 capability gating。IOA client/server 相互独立；产品兼容
+映射留在 `cmd/aiscan`。完整约定见 [系统架构](../../docs/architecture.md)。

@@ -2,26 +2,21 @@
 package arsenal
 
 import (
-	"context"
 	"fmt"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/commands"
 	tool "github.com/chainreactors/cyber/tools/arsenal"
 	"path/filepath"
 )
 
-const ID = "arsenal"
-
 type Extension struct {
 	directory string
-	commands  commands.Runtime
 }
 
-func New(directory string, registry commands.Runtime) (*Extension, error) {
-	if !filepath.IsAbs(directory) || registry == nil {
-		return nil, fmt.Errorf("arsenal requires an absolute directory and commands")
+func New(directory string) (*Extension, error) {
+	if !filepath.IsAbs(directory) {
+		return nil, fmt.Errorf("arsenal requires an absolute directory")
 	}
-	return &Extension{directory: directory, commands: registry}, nil
+	return &Extension{directory: directory}, nil
 }
 func (e *Extension) BinDir() string { return filepath.Join(e.directory, "bin") }
 func (e *Extension) Load(scope *extension.Scope) error {
@@ -32,8 +27,5 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	return e.commands.Register(ID, ID, command)
+	return extension.Add(scope, command)
 }
-
-// The manager owns persistent files, not open handles. Registry drains its calls.
-func (e *Extension) Close(context.Context) error { return nil }

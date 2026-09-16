@@ -6,6 +6,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
@@ -13,7 +14,7 @@ import (
 
 // newTestApp supplies explicitly test-owned, unpublished registries. Tests that
 // execute commands or tools must activate their registry in their own graph.
-func newTestApp(t testing.TB, config apppkg.Config, deps apppkg.AppServices) *apppkg.Resource {
+func newTestApp(t testing.TB, logger telemetry.Logger, deps apppkg.Dependencies) *apppkg.App {
 	t.Helper()
 	if deps.Hooks == nil {
 		deps.Hooks = hooks.New()
@@ -39,9 +40,9 @@ func newTestApp(t testing.TB, config apppkg.Config, deps apppkg.AppServices) *ap
 			}
 		})
 	}
-	resource, err := apppkg.New(config, deps)
+	application, err := apppkg.New(logger, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resource
+	return application
 }

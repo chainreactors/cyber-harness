@@ -6,11 +6,11 @@ import (
 	"io"
 
 	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/host"
 	"github.com/chainreactors/cyber/pkg/profile"
 )
@@ -19,16 +19,12 @@ import (
 func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
+	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
 	mux := aop.NewNamespaceMux(ctx)
-	if err := rt.RegisterNamespaces(mux); err != nil {
-		_ = product.Close(context.Background())
-		return err
-	}
-	if err := product.RegisterResourceNamespaces(mux); err != nil {
+	if err := product.RegisterNamespaces(mux); err != nil {
 		_ = product.Close(context.Background())
 		return err
 	}

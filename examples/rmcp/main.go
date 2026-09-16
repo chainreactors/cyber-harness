@@ -20,12 +20,8 @@ import (
 func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
 	bash := commands.NewBashTool(workDir, 300, nil)
 	registry := toolset.NewRegistry(nil)
-	if err := registry.Register("terminal", bash); err != nil {
-		panic(err)
-	}
-	set, err := extension.New(
-		extension.Entry{ID: "tool-registry", Extension: registry},
-	)
+	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[tool.Tool](scope, bash) }}
+	set, err := extension.New(registry, contribution)
 	if err != nil {
 		panic(err)
 	}

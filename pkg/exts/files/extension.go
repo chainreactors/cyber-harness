@@ -3,29 +3,23 @@ package files
 
 import (
 	"context"
-	"errors"
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
 
 // Extension is the only files plugin and the sole lifecycle owner of Files.
 type Extension struct {
 	resource *files.Resource
-	registry toolset.Registrar
 }
 
-func New(registry toolset.Registrar, hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
-	if registry == nil {
-		return nil, errors.New("files extension requires a tool registry")
-	}
+func New(hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
 	value, err := files.New(config, hookRegistry)
 	if err != nil {
 		return nil, err
 	}
-	return &Extension{resource: value, registry: registry}, nil
+	return &Extension{resource: value}, nil
 }
 
 // Files returns the filesystem behavior. Its concrete type has no lifecycle
@@ -45,7 +39,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	return e.registry.Register("files", tools...)
+	return extension.Add(scope, tools...)
 }
 
 func (e *Extension) Close(ctx context.Context) error {

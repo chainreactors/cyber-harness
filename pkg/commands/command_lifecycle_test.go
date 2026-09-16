@@ -10,14 +10,14 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 )
 
-func TestCommandRegistrationsAreGroupedAndImmutable(t *testing.T) {
+func TestCommandRegistrationsPreserveOrderAndMetadataSnapshots(t *testing.T) {
 	run := func(context.Context, *Execution) (any, error) { return "ok", nil }
 	r, _ := loadTestRegistry(t,
-		commandGroup("first", "shared", Command{Name: "one", Run: run}),
-		commandGroup("second", "shared", Command{Name: "two", Run: run}),
+		commandBatch(Command{Name: "one", Run: run}),
+		commandBatch(Command{Name: "two", Run: run}),
 	)
-	if got := r.GroupNames("shared"); !slices.Equal(got, []string{"one", "two"}) {
-		t.Fatalf("group names = %v", got)
+	if got := r.Names(); !slices.Equal(got, []string{"one", "two"}) {
+		t.Fatalf("command names = %v", got)
 	}
 	cached, ok := r.Get("one")
 	if !ok {
@@ -35,11 +35,11 @@ func TestCommandRegistrationsAreGroupedAndImmutable(t *testing.T) {
 func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 	r := NewRegistry(nil)
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return r.Register("test", "shared", Command{Name: "one", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+		return extension.Add(scope, Command{Name: "one", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
 	registrySet, err := extension.New(
-		extension.Entry{ID: "first", Extension: first},
-		extension.Entry{ID: "registry", DependsOn: []string{"first"}, Extension: r},
+		r,
+		first,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -48,23 +48,27 @@ func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registrySet.Close(context.Background())
-	if err := r.Register("test", "shared", Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("registration after activation = %v", err)
+	hot, err := r.Add(Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+	if err != nil {
+		t.Fatalf("hot registration = %v", err)
 	}
-	if r.Has("fresh") {
-		t.Fatal("post-activation registration became visible")
+	if !r.Has("fresh") {
+		t.Fatal("hot registration was not visible")
+	}
+	if err := hot.Close(t.Context()); err != nil || r.Has("fresh") {
+		t.Fatalf("hot unregister = %v", err)
 	}
 
 	failed := NewRegistry(nil)
 	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return failed.Register("test", "group",
+		return extension.Add(scope,
 			Command{Name: "same", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 			Command{Name: "same", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 		)
 	}}
 	failedSet, err := extension.New(
-		extension.Entry{ID: "duplicate", Extension: duplicate},
-		extension.Entry{ID: "registry", DependsOn: []string{"duplicate"}, Extension: failed},
+		failed,
+		duplicate,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +88,7 @@ func TestRegistryCloseCancelsAndWaitsForActualReturn(t *testing.T) {
 	entered := make(chan struct{})
 	canceled := make(chan struct{})
 	release := make(chan struct{})
-	r, _ := loadTestRegistry(t, commandGroup("owner", "group", Command{Name: "hold", Run: func(ctx context.Context, _ *Execution) (any, error) {
+	r, _ := loadTestRegistry(t, commandBatch(Command{Name: "hold", Run: func(ctx context.Context, _ *Execution) (any, error) {
 		close(entered)
 		<-ctx.Done()
 		close(canceled)
@@ -116,7 +120,7 @@ func TestRegistryCloseCancelsAndWaitsForActualReturn(t *testing.T) {
 }
 
 func TestCommandPanicReleasesAdmission(t *testing.T) {
-	r, _ := loadTestRegistry(t, commandGroup("owner", "group", Command{Name: "panic", Run: func(context.Context, *Execution) (any, error) { panic("test") }}))
+	r, _ := loadTestRegistry(t, commandBatch(Command{Name: "panic", Run: func(context.Context, *Execution) (any, error) { panic("test") }}))
 	if _, err := r.Execute(t.Context(), "panic", &Execution{}); err == nil || !strings.Contains(err.Error(), "command panic") {
 		t.Fatalf("panic boundary: %v", err)
 	}
@@ -130,11 +134,11 @@ func TestCommandRegistrationRejectsAmbiguousNames(t *testing.T) {
 		name := name
 		r := NewRegistry(nil)
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return r.Register("test", "group", Command{Name: name, Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+			return extension.Add(scope, Command{Name: name, Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 		}}
 		set, err := extension.New(
-			extension.Entry{ID: "owner", Extension: contributor},
-			extension.Entry{ID: "registry", DependsOn: []string{"owner"}, Extension: r},
+			r,
+			contributor,
 		)
 		if err != nil {
 			t.Fatal(err)

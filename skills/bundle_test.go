@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/chainreactors/cyber/core/capability"
 )
 
 func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {
@@ -18,11 +16,11 @@ func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {
 		}
 		return "---\nname: extension-fixture\ndescription: fixture\n---\nBundle body", true, nil
 	}}
-	absent, _ := LoadAll(nil, capability.Catalog{})
+	absent, _ := LoadAll(nil)
 	if _, ok := absent.ByName(name); ok {
 		t.Fatal("unselected bundle was loaded")
 	}
-	store, _ := LoadAll(nil, capability.Catalog{}, bundle)
+	store, _ := LoadAll(nil, bundle)
 	if store.ReadBody(name) != "Bundle body" {
 		t.Fatal("bundle body was not resolved")
 	}
@@ -30,7 +28,7 @@ func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {
 	if err := os.WriteFile(local, []byte("---\nname: extension-fixture\ndescription: fixture\n---\nLocal body"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	store, diags := LoadAll([]string{local}, capability.Catalog{}, bundle)
+	store, diags := LoadAll([]string{local}, bundle)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %v", diags)
 	}

@@ -10,10 +10,12 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/edition"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/pkg/runner"
 	"github.com/chainreactors/cyber/skills"
 	goflags "github.com/jessevdk/go-flags"
@@ -318,10 +320,11 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 	for _, name := range []string{"scan", "gogo", "spray", "zombie", "neutron"} {
 		t.Run(name, func(t *testing.T) {
-			help, ok := edition.Catalog().Usage(name)
+			metadata, ok := scannerext.Lookup(name)
 			if !ok {
 				t.Fatalf("StaticScannerUsage(%q) was not registered", name)
 			}
+			help := metadata.Usage()
 			if !strings.Contains(help, "Usage:") || !strings.Contains(help, name+" [OPTIONS]") {
 				t.Fatalf("%s help was not rendered by its go-flags parser:\n%s", name, help)
 			}
@@ -336,10 +339,11 @@ func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 }
 
 func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
-	help, ok := edition.Catalog().Usage("proton")
+	metadata, ok := scannerext.Lookup("proton")
 	if !ok {
 		t.Fatal("proton scanner help was not registered")
 	}
+	help := metadata.Usage()
 	for _, want := range []string{"Usage: proton", "--template-list", "--severity"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("proton help missing %q:\n%s", want, help)
@@ -681,64 +685,64 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 	}
 }
 
-func TestDirectScannerRuntimeFeaturesForVerifyModes(t *testing.T) {
+func TestResolveScannerModeForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
 		cfg.DefaultVerify = "off"
-		features, args, err := runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1"})
+		mode, args, err := runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if features.ProviderEnabled || features.AIEnabled {
-			t.Fatalf("features = %#v", features)
+		if mode.Provider != profile.ProviderDisabled {
+			t.Fatalf("mode = %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1"}) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		features, args, err = runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1", "--verify=off"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if features.ProviderEnabled || features.AIEnabled {
-			t.Fatalf("features = %#v", features)
+		if mode.Provider != profile.ProviderDisabled {
+			t.Fatalf("mode = %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=off"}) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		features, args, err = runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1", "--deep"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if !features.ProviderEnabled || features.ProviderOptional || !features.AIEnabled || !features.ScannerAI {
-			t.Fatalf("deep features = %#v", features)
+		if mode.Provider != profile.ProviderRequired || !mode.Agent {
+			t.Fatalf("deep mode = %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--deep"}) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		features, _, err = runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"})
+		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if !features.ProviderEnabled || features.ProviderOptional || !features.AIEnabled || !features.ScannerAI {
-			t.Fatalf("features = %#v", features)
+		if mode.Provider != profile.ProviderRequired || !mode.Agent {
+			t.Fatalf("mode = %#v", mode)
 		}
 
-		features, _, err = runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1", "--sniper"})
+		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if !features.ProviderEnabled || features.ProviderOptional || !features.AIEnabled || !features.ScannerAI {
-			t.Fatalf("sniper features = %#v", features)
+		if mode.Provider != profile.ProviderRequired || !mode.Agent {
+			t.Fatalf("sniper mode = %#v", mode)
 		}
 
-		features, args, err = runner.DirectScannerRuntimeFeatures([]string{"scan", "-i", "127.0.0.1", "--ai"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"})
 		if err != nil {
-			t.Fatalf("DirectScannerRuntimeFeatures() error = %v", err)
+			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if features.ProviderEnabled || features.AIEnabled || features.ScannerAI {
-			t.Fatalf("scan-local --ai should not enable AI features: %#v", features)
+		if mode.Provider != profile.ProviderDisabled || mode.Agent {
+			t.Fatalf("scan-local --ai should not enable AI features: %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--ai"}) {
 			t.Fatalf("args = %#v", args)
@@ -757,21 +761,14 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 
 		opt := &cfg.Option{}
 		cfg.ApplyDefaults(opt)
-		appCfg := apppkg.AppConfig(opt, apppkg.RuntimeFeatures{
-			ProviderEnabled:  true,
-			ProviderOptional: true,
-			AIEnabled:        true,
-		}, telemetry.NopLogger())
-		if appCfg.Scanner.CyberhubURL != cfg.DefaultCyberhubURL || appCfg.Scanner.CyberhubKey != cfg.DefaultCyberhubKey || appCfg.Scanner.CyberhubMode != cfg.DefaultCyberhubMode {
+		appCfg := applicationConfigFromOption(opt, profile.ProviderOptional, telemetry.NopLogger())
+		if appCfg.Scanner.Resources.CyberhubURL != cfg.DefaultCyberhubURL || appCfg.Scanner.Resources.APIKey != cfg.DefaultCyberhubKey || appCfg.Scanner.Resources.Mode != cfg.DefaultCyberhubMode {
 			t.Fatalf("scanner cyberhub config = %#v", appCfg.Scanner)
-		}
-		if !appCfg.Scanner.AIEnabled {
-			t.Fatalf("scanner AI config = %#v", appCfg.Scanner)
 		}
 		if appCfg.Tools.TavilyKeys != cfg.DefaultTavilyKeys {
 			t.Fatalf("tool search config = %#v", appCfg.Tools)
 		}
-		if !appCfg.Provider.Enabled || !appCfg.Provider.Optional {
+		if appCfg.Provider.Mode != provider.StartupOptional {
 			t.Fatalf("provider config = %#v", appCfg.Provider)
 		}
 		if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {

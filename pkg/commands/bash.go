@@ -15,12 +15,14 @@ import (
 
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/tmux"
+	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/output"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/utils/pty"
 )
 
 const (
@@ -413,7 +415,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	leftToken := firstCommandToken(left)
 	if !hasPipe {
 		if cmd, ok := t.resolve(leftToken); ok {
-			if tokens, err := SplitCommandLine(left); err == nil {
+			if tokens, err := commandline.SplitCommandLine(left); err == nil {
 				if args, syntaxErr := stripShellSyntax(tokens[1:]); syntaxErr == nil {
 					args = normalizeNoColor(cmd.Name, args)
 					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
@@ -450,7 +452,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	}
 	env := t.runEnv(ctx, options.Env, nil, "")
 	if cmd, ok := t.resolve(leftToken); ok {
-		tokens, err := SplitCommandLine(left)
+		tokens, err := commandline.SplitCommandLine(left)
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +480,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	if hasPipe && right != "" {
 		rightToken := firstCommandToken(right)
 		if cmd, ok := t.resolve(rightToken); ok {
-			tokens, err := SplitCommandLine(right)
+			tokens, err := commandline.SplitCommandLine(right)
 			if err != nil {
 				return nil, err
 			}
@@ -736,11 +738,11 @@ func (t *BashTool) collectResult(execution *Execution) *coretool.Result {
 	if info.KillCause != "" {
 		text += fmt.Sprintf("\n[command stopped: %s]", info.KillCause)
 	}
-	if info.ExitCode != 0 && info.State != tmux.StateRunning {
+	if info.ExitCode != 0 && info.State != pty.StateRunning {
 		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
 	}
 	result := coretool.TextResult(text)
-	result.IsError = info.KillCause != "" || (info.ExitCode != 0 && info.State != tmux.StateRunning)
+	result.IsError = info.KillCause != "" || (info.ExitCode != 0 && info.State != pty.StateRunning)
 	return result
 }
 
@@ -797,7 +799,7 @@ func (t *BashTool) proxyEnv(ctx context.Context) []string {
 	return EgressEnvironment(proxy, ca)
 }
 
-func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {
+func (t *BashTool) startMonitor(info pty.Info, targetInbox inbox.Inbox) {
 	if targetInbox == nil {
 		return
 	}
@@ -821,7 +823,7 @@ func (t *BashTool) startMonitor(info tmux.Info, targetInbox inbox.Inbox) {
 			return
 		}
 		tail := t.tasks.PeekOrEmpty(info.ID, 20)
-		msg := inbox.NewMessage(inbox.OriginSession, "user", tmux.FormatCompletion(final, tail))
+		msg := inbox.NewMessage(inbox.OriginSession, "user", pty.FormatCompletion(final, tail))
 		msg.Priority = inbox.PriorityHigh
 		msg.Meta = map[string]any{
 			"session_id":   final.ID,
@@ -873,7 +875,7 @@ func stripCommentsAndBlanks(input string) string {
 }
 
 func firstCommandToken(input string) string {
-	tokens, err := SplitCommandLine(input)
+	tokens, err := commandline.SplitCommandLine(input)
 	if err != nil || len(tokens) == 0 {
 		return ""
 	}

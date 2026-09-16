@@ -349,7 +349,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	stub := &stubPseudoCommand{name: "scan", output: scanOutput}
 	bash := commands.NewBashTool(dir, 5, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := testCommands(t, "core",
+	commandRegistry := testCommands(t,
 		commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
 		tmuxCmd,
 	)
@@ -411,7 +411,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 			chatResponse(NewTextMessage("assistant", "done")),
 		},
 	}
-	systemPrompt := buildTestSystemPrompt(registry, nil, store.Skills)
+	systemPrompt := buildTestSystemPrompt(registry, nil, store.All())
 	task := skills.ExpandCommand("/skill:cyber scan 127.0.0.1", store)
 
 	result, err := (NewAgent(Config{Loop: StandardLoop{},
@@ -450,7 +450,7 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := testCommands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -604,7 +604,7 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := testCommands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -708,7 +708,7 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 30, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := testCommands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)
@@ -839,7 +839,7 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	dir := t.TempDir()
 	bash := commands.NewBashTool(dir, 60, nil)
 	tmuxCmd := commands.NewTmuxCommand(bash)
-	commandRegistry := testCommands(t, "core", tmuxCmd)
+	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
 	t.Cleanup(bash.Close)

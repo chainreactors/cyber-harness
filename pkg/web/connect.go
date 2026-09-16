@@ -44,37 +44,37 @@ func connectOptions(service Service) []connect.HandlerOption {
 func AOPRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewAOPServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "agent", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func SessionRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewSessionServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "agent", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func ScanRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewScanServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "scanner", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func ConfigRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewConfigServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "config", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func AgentRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewAgentServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "node", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func SystemRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewSystemServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "web", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func SCORoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewSCOServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "scanner", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 
 func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[aop.Envelope, aop.Envelope]) error {

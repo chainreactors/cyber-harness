@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/cyber/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // run executes arsenal as a Command and returns stdout.

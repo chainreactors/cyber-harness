@@ -5,19 +5,19 @@ import (
 	"errors"
 	"testing"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 )
 
 type applicationProbe struct{}
 
-func (*applicationProbe) Load(context.Context) error                         { return nil }
-func (*applicationProbe) Close(context.Context) error                        { return nil }
-func (*applicationProbe) App() (*apppkg.App, error)                          { return nil, nil }
-func (*applicationProbe) Runtime() (*agentext.Runtime, error)                { return nil, nil }
-func (*applicationProbe) RegisterResourceNamespaces(*aop.NamespaceMux) error { return nil }
+func (*applicationProbe) Load(context.Context) error                 { return nil }
+func (*applicationProbe) Close(context.Context) error                { return nil }
+func (*applicationProbe) App() (*apppkg.App, error)                  { return nil, nil }
+func (*applicationProbe) Runtime() (*agentsession.Runtime, error)    { return nil, nil }
+func (*applicationProbe) RegisterNamespaces(*aop.NamespaceMux) error { return nil }
 
 func TestFactoryRejectsNilImplementations(t *testing.T) {
 	var factory Factory
@@ -46,8 +46,13 @@ func TestFactoryRejectsNilImplementations(t *testing.T) {
 	}
 }
 
+func TestFactoryRejectsUnknownProviderMode(t *testing.T) {
+	factory := Factory(func(Request) (Application, error) { return &applicationProbe{}, nil })
+	if _, err := factory.Build(Request{ProviderMode: ProviderMode(99)}); err == nil {
+		t.Fatal("unknown provider mode was accepted")
+	}
+}
+
 func (*applicationProbe) AgentStatus() *aop.AgentStatus { return &aop.AgentStatus{} }
 
 func (*applicationProbe) ConsoleBindings() *consoleapi.Bindings { return nil }
-
-func (*applicationProbe) Capabilities() []string {return nil}

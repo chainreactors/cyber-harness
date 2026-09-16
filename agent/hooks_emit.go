@@ -11,7 +11,7 @@ import (
 // helper preserves the zero-handler fast path exposed by hooks.Registry.
 
 func runStartHook(ctx context.Context, cfg Config, systemPrompt string) (string, []*aop.Message) {
-	if !cfg.Hooks.Has(hooks.BeforeRun.Kind) {
+	if !hooks.BeforeRun.Has(cfg.Hooks) {
 		return systemPrompt, nil
 	}
 	result, _ := hooks.BeforeRun.Emit(ctx, cfg.Hooks, hooks.RunStartEvent{
@@ -41,7 +41,7 @@ func toolNames(cfg Config) []string {
 }
 
 func transformContextHook(ctx context.Context, cfg Config, messages []*aop.Message, turn int) []*aop.Message {
-	if !cfg.Hooks.Has(hooks.Context.Kind) {
+	if !hooks.Context.Has(cfg.Hooks) {
 		return messages
 	}
 	result, _ := hooks.Context.Emit(ctx, cfg.Hooks, hooks.ContextEvent{
@@ -56,7 +56,7 @@ func transformContextHook(ctx context.Context, cfg Config, messages []*aop.Messa
 }
 
 func compactCanceled(ctx context.Context, cfg Config, trigger string, contextTokens int) (bool, string) {
-	if !cfg.Hooks.Has(hooks.BeforeCompact.Kind) {
+	if !hooks.BeforeCompact.Has(cfg.Hooks) {
 		return false, ""
 	}
 	result, _ := hooks.BeforeCompact.Emit(ctx, cfg.Hooks, hooks.CompactEvent{
@@ -69,7 +69,7 @@ func compactCanceled(ctx context.Context, cfg Config, trigger string, contextTok
 }
 
 func emitRunEnd(ctx context.Context, cfg Config, result *Result) {
-	if result == nil || !cfg.Hooks.Has(hooks.RunEnd.Kind) {
+	if result == nil || !hooks.RunEnd.Has(cfg.Hooks) {
 		return
 	}
 	_, _ = hooks.RunEnd.Emit(ctx, cfg.Hooks, hooks.RunEndEvent{
@@ -85,14 +85,14 @@ func emitRunEnd(ctx context.Context, cfg Config, result *Result) {
 }
 
 func emitSessionStart(ctx context.Context, cfg Config) {
-	if !cfg.Hooks.Has(hooks.SessionStart.Kind) {
+	if !hooks.SessionStart.Has(cfg.Hooks) {
 		return
 	}
 	_, _ = hooks.SessionStart.Emit(ctx, cfg.Hooks, sessionEvent(cfg, ""))
 }
 
 func emitSessionEnd(ctx context.Context, cfg Config, reason string) {
-	if !cfg.Hooks.Has(hooks.SessionEnd.Kind) {
+	if !hooks.SessionEnd.Has(cfg.Hooks) {
 		return
 	}
 	_, _ = hooks.SessionEnd.Emit(ctx, cfg.Hooks, sessionEvent(cfg, reason))

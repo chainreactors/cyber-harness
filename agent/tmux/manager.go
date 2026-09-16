@@ -8,72 +8,20 @@ import (
 	"github.com/chainreactors/utils/pty"
 )
 
-// ---------------------------------------------------------------------------
-// Type aliases — keep all existing callers compiling without changes.
-// ---------------------------------------------------------------------------
-
-type State = pty.State
-
-const (
-	StateRunning   = pty.StateRunning
-	StateCompleted = pty.StateCompleted
-	StateKilled    = pty.StateKilled
-	StateFailed    = pty.StateFailed
-)
-
-type Info = pty.Info
-
-type EventAction = pty.EventAction
-
-const (
-	EventSessionCreated = pty.EventSessionCreated
-	EventSessionUpdated = pty.EventSessionUpdated
-	EventSessionOutput  = pty.EventSessionOutput
-	EventSessionClosed  = pty.EventSessionClosed
-)
-
-type Event = pty.Event
-
-type OutputBuffer = pty.OutputBuffer
-
-const (
-	DefaultTimeout   = pty.DefaultTimeout
-	DefaultBufferCap = pty.DefaultBufferCap
-)
-
-// Re-export buffer constructors.
-var (
-	NewOutputBuffer         = pty.NewOutputBuffer
-	NewOutputBufferWithFile = pty.NewOutputBufferWithFile
-)
-
-// Re-export shell helpers.
-var (
-	ShellCommand        = pty.ShellCommand
-	DefaultShellCommand = pty.DefaultShellCommand
-)
-
-// Re-export formatting.
-var FormatCompletion = pty.FormatCompletion
-
-// ---------------------------------------------------------------------------
-// Manager — embeds pty.Manager and bridges its events
-// ---------------------------------------------------------------------------
-
 // Manager wraps pty.Manager and exposes cyber's event subscription API.
 type Manager struct {
 	*pty.Manager
-	events *eventbus.Bus[Event]
+	events *eventbus.Bus[pty.Event]
 }
 
 // NewManager creates a Manager backed by a fresh pty.Manager.
 func NewManager() *Manager {
 	m := &Manager{
 		Manager: pty.NewManager(),
-		events:  eventbus.New[Event](),
+		events:  eventbus.New[pty.Event](),
 	}
 	// Bridge pty.Manager events into the cyber eventbus.
-	m.SetOnEvent(func(ev Event) {
+	m.SetOnEvent(func(ev pty.Event) {
 		if m.events != nil {
 			m.events.Emit(ev)
 		}
@@ -82,7 +30,7 @@ func NewManager() *Manager {
 }
 
 // Subscribe registers an event listener owned by the returned subscription.
-func (m *Manager) Subscribe(fn func(Event)) *eventbus.Subscription[Event] {
+func (m *Manager) Subscribe(fn func(pty.Event)) *eventbus.Subscription[pty.Event] {
 	if fn == nil {
 		return nil
 	}

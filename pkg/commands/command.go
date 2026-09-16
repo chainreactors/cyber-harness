@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	coreregistry "github.com/chainreactors/cyber/core/registry"
- "github.com/chainreactors/cyber/core/commandline"
 )
 
 var (
@@ -79,6 +78,3 @@ func normalizeNoColor(name string, args []string) []string {
 	}
 	return append(args, "--no-color")
 }
-
-func SplitCommandLine(input string) ([]string, error) { return commandline.SplitCommandLine(input) }
-func JoinCommandLine(name string, args []string) string { return commandline.JoinCommandLine(name, args) }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
+	"github.com/chainreactors/utils/pty"
 )
 
 type testOutputWriter struct{ bytes.Buffer }
@@ -288,7 +289,7 @@ func TestTmuxKillSession(t *testing.T) {
 
 	<-tmux.manager.Done(id)
 	info, _ := tmux.manager.Get(id)
-	if info.State != tmuxpkg.StateKilled {
+	if info.State != pty.StateKilled {
 		t.Fatalf("state = %s, want killed", info.State)
 	}
 }

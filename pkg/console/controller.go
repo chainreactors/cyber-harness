@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
 // Admission is synchronized with Close; Runtime is the only execution queue.
@@ -43,7 +43,7 @@ func (r *AgentConsole) submitPrompt(text string, continuation bool) error {
 	r.previews[id] = display
 	r.renderPreviewsLocked()
 	r.workMu.Unlock()
-	input := agentext.RunInput{TurnID: id, Continue: continuation}
+	input := agentsession.RunInput{TurnID: id, Continue: continuation}
 	if !continuation {
 		input.Content = []*aop.Content{aop.Text(prompt)}
 	}

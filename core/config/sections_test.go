@@ -21,7 +21,7 @@ type fixtureOptions struct {
 func fixtureSections(t *testing.T) *Sections {
 	t.Helper()
 	r := NewSections()
-	err := r.Register("fixture", Section{Key: "fixture", Aliases: []string{"old_fixture"}, Secrets: []string{"auth.token"},
+	_, err := r.Add(Section{Key: "fixture", Aliases: []string{"old_fixture"}, Secrets: []string{"auth.token"},
 		New: func() any { return &fixtureOptions{Name: "default", Count: 3, Enabled: true} },
 		Validate: func(value any) error {
 			if value.(*fixtureOptions).Count < 0 {
@@ -78,10 +78,10 @@ func TestExtensionConfigurationRejectsConflictsAndInvalidValues(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "conflicting") {
 		t.Fatalf("conflict = %v", err)
 	}
-	if err := r.Register("fixture", Section{Key: "fixture", New: func() any { return &fixtureOptions{} }}); err == nil {
+	if _, err := r.Add(Section{Key: "fixture", New: func() any { return &fixtureOptions{} }}); err == nil {
 		t.Fatal("duplicate key accepted")
 	}
-	if err := r.Register("fixture", Section{Key: "other", Aliases: []string{"old_fixture"}, New: func() any { return &fixtureOptions{} }}); err == nil {
+	if _, err := r.Add(Section{Key: "other", Aliases: []string{"old_fixture"}, New: func() any { return &fixtureOptions{} }}); err == nil {
 		t.Fatal("duplicate alias accepted")
 	}
 }
@@ -113,7 +113,7 @@ func TestExtensionConfigurationMasksAndPreservesNestedSecrets(t *testing.T) {
 func TestSnapshotValidatesOnceAndPreservesOwnedValues(t *testing.T) {
 	calls := 0
 	r := NewSections()
-	if err := r.Register("example", Section{Key: "example", Aliases: []string{"example"}, New: func() any { return &fixtureOptions{Count: 7, Enabled: true} }, Validate: func(any) error { calls++; return nil }, Environment: func(s Sources) (map[string]any, map[string]any, error) {
+	if _, err := r.Add(Section{Key: "example", Aliases: []string{"example"}, New: func() any { return &fixtureOptions{Count: 7, Enabled: true} }, Validate: func(any) error { calls++; return nil }, Environment: func(s Sources) (map[string]any, map[string]any, error) {
 		value, _ := s.LookupEnv("EXAMPLE_NAME")
 		return map[string]any{"name": value}, map[string]any{"count": 5}, nil
 	}}); err != nil {
@@ -141,7 +141,7 @@ func TestSnapshotValidatesOnceAndPreservesOwnedValues(t *testing.T) {
 	if err != nil || second.Name != "first" || calls != 1 {
 		t.Fatalf("snapshot leaked: %+v, calls %d, %v", second, calls, err)
 	}
-	if err := r.Register("late", Section{Key: "late", New: func() any { return &fixtureOptions{} }}); err == nil {
+	if _, err := r.Add(Section{Key: "late", New: func() any { return &fixtureOptions{} }}); err == nil {
 		t.Fatal("snapshot did not seal declarations")
 	}
 }
@@ -150,5 +150,22 @@ func TestSnapshotDoesNotDropUnencodableInput(t *testing.T) {
 	r := fixtureSections(t)
 	if _, err := r.ResolveValues(Values{"fixture": {"name": make(chan int)}}, nil, nil); err == nil {
 		t.Fatal("invalid input was silently replaced by defaults")
+	}
+}
+
+func TestDeclarationBatchCanRetractBeforeSeal(t *testing.T) {
+	r := NewSections()
+	handle, err := r.Add(Section{Key: "temporary", Aliases: []string{"old_temporary"}, New: func() any { return &fixtureOptions{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Keys()) != 0 {
+		t.Fatalf("retracted sections = %v", r.Keys())
+	}
+	if _, exists := r.aliases["old_temporary"]; exists {
+		t.Fatal("retracted alias remained registered")
 	}
 }

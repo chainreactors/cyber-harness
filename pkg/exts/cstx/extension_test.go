@@ -1,4 +1,4 @@
-//go:build cstx && cgo
+//go:build full && cgo
 
 package cstx
 
@@ -28,7 +28,7 @@ func loadImporter(t *testing.T, store ArtifactStore) Importer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(extension.Entry{ID: "cstx", Extension: instance})
+	set, err := extension.New(instance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestImporterIsUnavailableOutsideLoad(t *testing.T) {
 	if instance.Importer() != nil {
 		t.Fatal("importer must be nil before Load")
 	}
-	set, err := extension.New(extension.Entry{ID: "cstx", Extension: instance})
+	set, err := extension.New(instance)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/carapace-sh/carapace"
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/eventbus"
@@ -24,7 +25,6 @@ import (
 	outputpkg "github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
@@ -50,9 +50,9 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	runtime        *agentext.Runtime
+	runtime        *agentsession.Runtime
 	bindings       *consoleapi.Bindings
-	session        *agentext.Session
+	session        *agentsession.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -86,7 +86,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal, bindings *consoleapi.Bindings) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *agentsession.Runtime, session *agentsession.Session, option *cfg.Option, t *rlterm.Terminal, bindings *consoleapi.Bindings) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}

@@ -12,12 +12,7 @@ import (
 
 type Extension struct{ registry *api.Registry }
 
-func (e *Extension) Descriptor() extension.Descriptor {
-	return extension.Descriptor{ID: "tui", Description: "terminal presentation registry"}
-}
-
-func New() *Extension                         { return &Extension{registry: api.NewRegistry()} }
-func (e *Extension) Registrar() api.Registrar { return e.registry }
+func New() *Extension { return &Extension{registry: api.NewRegistry()} }
 
 // Bindings seals registration. Hosts call it only after the complete profile
 // has loaded its contributors. Terminal lifetimes remain owned by the host.
@@ -26,11 +21,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("tui requires scope")
 	}
-	if err := scope.Init().Err(); err != nil {
-		return err
-	}
-	return e.registry.Open()
+	return extension.Define[*api.Bindings](scope, e.registry)
 }
+
 func (e *Extension) Close(context.Context) error { e.registry.Close(); return nil }
 
 var _ extension.Extension = (*Extension)(nil)

@@ -30,9 +30,9 @@ func TestCreateAndCompletion(t *testing.T) {
 	}
 	mgr := NewManager()
 
-	var completed Info
+	var completed pty.Info
 	done := make(chan struct{})
-	mgr.SetOnDone(func(info Info) {
+	mgr.SetOnDone(func(info pty.Info) {
 		completed = info
 		close(done)
 	})
@@ -42,7 +42,7 @@ func TestCreateAndCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if info.State != StateRunning {
+	if info.State != pty.StateRunning {
 		t.Fatalf("initial state = %s, want running", info.State)
 	}
 
@@ -52,14 +52,14 @@ func TestCreateAndCompletion(t *testing.T) {
 		t.Fatal("OnDone not called within 5s")
 	}
 
-	if completed.State != StateCompleted {
+	if completed.State != pty.StateCompleted {
 		t.Fatalf("completed state = %s, want completed", completed.State)
 	}
 	if completed.ExitCode != 0 {
 		t.Fatalf("exit code = %d, want 0", completed.ExitCode)
 	}
 
-	formatted := FormatCompletion(completed, mgr.PeekOrEmpty(info.ID, 20))
+	formatted := pty.FormatCompletion(completed, mgr.PeekOrEmpty(info.ID, 20))
 	if !strings.Contains(formatted, "done") {
 		t.Fatalf("completion missing stdout: %v", formatted)
 	}
@@ -67,8 +67,8 @@ func TestCreateAndCompletion(t *testing.T) {
 
 func TestSubscribeReceivesLifecycleEvents(t *testing.T) {
 	mgr := NewManager()
-	events := make(chan Event, 8)
-	unsub := mgr.Subscribe(func(ev Event) {
+	events := make(chan pty.Event, 8)
+	unsub := mgr.Subscribe(func(ev pty.Event) {
 		events <- ev
 	})
 	defer unsub.Cancel()
@@ -87,16 +87,16 @@ func TestSubscribeReceivesLifecycleEvents(t *testing.T) {
 		t.Fatalf("CreateFunc: %v", err)
 	}
 
-	seen := make(map[EventAction]bool)
-	waitForEventActions(t, events, info.ID, seen, EventSessionCreated, EventSessionOutput)
+	seen := make(map[pty.EventAction]bool)
+	waitForEventActions(t, events, info.ID, seen, pty.EventSessionCreated, pty.EventSessionOutput)
 
 	close(release)
-	waitForEventActions(t, events, info.ID, seen, EventSessionClosed)
+	waitForEventActions(t, events, info.ID, seen, pty.EventSessionClosed)
 }
 
-func waitForEventActions(t *testing.T, events <-chan Event, sessionID string, seen map[EventAction]bool, actions ...EventAction) {
+func waitForEventActions(t *testing.T, events <-chan pty.Event, sessionID string, seen map[pty.EventAction]bool, actions ...pty.EventAction) {
 	t.Helper()
-	want := make(map[EventAction]bool, len(actions))
+	want := make(map[pty.EventAction]bool, len(actions))
 	for _, action := range actions {
 		want[action] = true
 	}
@@ -167,10 +167,10 @@ func TestKillCascadesToGrandchild(t *testing.T) {
 
 	waitUntil(t, 5*time.Second, func() bool {
 		final, _ := mgr.Get(info.ID)
-		return final.State != StateRunning
+		return final.State != pty.StateRunning
 	})
 	final, _ := mgr.Get(info.ID)
-	if final.State != StateKilled {
+	if final.State != pty.StateKilled {
 		t.Fatalf("state after Kill = %s, want killed", final.State)
 	}
 
@@ -223,7 +223,7 @@ func TestWaitRespectsTimeoutAndContext(t *testing.T) {
 	if time.Since(start) > 600*time.Millisecond {
 		t.Fatalf("Wait took too long")
 	}
-	if got.State != StateRunning {
+	if got.State != pty.StateRunning {
 		t.Fatalf("state after short Wait = %s, want running", got.State)
 	}
 
@@ -265,9 +265,9 @@ func TestWriteInput(t *testing.T) {
 		t.Skip("unix-only test")
 	}
 	mgr := NewManager()
-	var completed Info
+	var completed pty.Info
 	ch := make(chan struct{})
-	mgr.SetOnDone(func(info Info) {
+	mgr.SetOnDone(func(info pty.Info) {
 		completed = info
 		close(ch)
 	})
@@ -289,7 +289,7 @@ func TestWriteInput(t *testing.T) {
 		t.Fatal("OnDone not called")
 	}
 
-	if completed.State != StateCompleted {
+	if completed.State != pty.StateCompleted {
 		t.Fatalf("state = %s, want completed", completed.State)
 	}
 	output := mgr.PeekOrEmpty(info.ID, 30)
@@ -407,7 +407,7 @@ func TestObserverPanicDoesNotCrash(t *testing.T) {
 	}
 	mgr := NewManager()
 	called := make(chan struct{})
-	mgr.SetOnDone(func(_ Info) {
+	mgr.SetOnDone(func(_ pty.Info) {
 		close(called)
 		panic("boom")
 	})
@@ -428,8 +428,8 @@ func TestOnDoneReceivesEvents(t *testing.T) {
 	}
 	mgr := NewManager()
 	var mu sync.Mutex
-	var infos []Info
-	mgr.SetOnDone(func(info Info) {
+	var infos []pty.Info
+	mgr.SetOnDone(func(info pty.Info) {
 		mu.Lock()
 		infos = append(infos, info)
 		mu.Unlock()
@@ -444,7 +444,7 @@ func TestOnDoneReceivesEvents(t *testing.T) {
 	if len(infos) != 1 {
 		t.Fatalf("expected 1 OnDone call, got %d", len(infos))
 	}
-	if infos[0].State != StateCompleted {
+	if infos[0].State != pty.StateCompleted {
 		t.Fatalf("state = %s, want completed", infos[0].State)
 	}
 }
@@ -461,7 +461,7 @@ func TestNilOnDoneDoesNotPanic(t *testing.T) {
 	}
 	<-mgr.Done(info.ID)
 	final, _ := mgr.Get(info.ID)
-	if final.State != StateCompleted {
+	if final.State != pty.StateCompleted {
 		t.Fatalf("state = %s, want completed", final.State)
 	}
 }
@@ -758,10 +758,10 @@ func TestMultiRoundInteraction(t *testing.T) {
 	}
 	waitUntil(t, 5*time.Second, func() bool {
 		got, _ := mgr.Get(info2.ID)
-		return got.State != StateRunning
+		return got.State != pty.StateRunning
 	})
 	got, _ := mgr.Get(info2.ID)
-	if got.State != StateCompleted {
+	if got.State != pty.StateCompleted {
 		t.Fatalf("python state = %s, want completed", got.State)
 	}
 	t.Log("Round 5 passed: interactive python3 REPL (2+3=5, 10*20=200, exit)")
@@ -772,7 +772,7 @@ func TestMultiRoundInteraction(t *testing.T) {
 	}
 	waitUntil(t, 3*time.Second, func() bool {
 		got, _ := mgr.Get(info.ID)
-		return got.State != StateRunning
+		return got.State != pty.StateRunning
 	})
 	t.Log("Shell session exited cleanly")
 }

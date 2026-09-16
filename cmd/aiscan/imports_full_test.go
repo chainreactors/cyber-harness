@@ -1,18 +1,16 @@
-//go:build full && !record_ffmpeg
+//go:build full && !record
 
 package main
 
 import (
 	"slices"
 	"testing"
-
-	"github.com/chainreactors/cyber/pkg/edition"
 )
 
-func TestFullCapabilitySet(t *testing.T) {
-	want := []string{"arsenal", "browser", "core", "curl", "gogo", "katana", "neutron", "passive", "proton", "proxy", "scan", "search", "spray", "zombie"}
-	if got := edition.Catalog().IDsSorted(); !slices.Equal(got, want) {
-		t.Fatalf("full capabilities = %#v, want %#v", got, want)
+func TestFullScannerSet(t *testing.T) {
+	want := []string{"curl", "gogo", "katana", "neutron", "passive", "proton", "scan", "spray", "zombie"}
+	if got := scannerNames(); !slices.Equal(got, want) {
+		t.Fatalf("full scanners = %#v, want %#v", got, want)
 	}
 }
 

@@ -27,14 +27,14 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := toolset.NewRegistry(hookRegistry)
-	fileTools, err := fileext.New(registry, hookRegistry, files.Config{Directory: t.TempDir()})
+	fileTools, err := fileext.New(hookRegistry, files.Config{Directory: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	set, err := extension.New(
-		extension.Entry{ID: "observe", Extension: observer},
-		extension.Entry{ID: "files", DependsOn: []string{"observe"}, Extension: fileTools},
-		extension.Entry{ID: "tools", DependsOn: []string{"files"}, Extension: registry},
+		registry,
+		observer,
+		fileTools,
 	)
 	if err != nil {
 		t.Fatal(err)

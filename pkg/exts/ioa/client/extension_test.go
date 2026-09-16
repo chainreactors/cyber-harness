@@ -11,19 +11,8 @@ import (
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
-func TestCommandSelectionRequiresRegistry(t *testing.T) {
-	if _, err := New(service.Config{RegisterCommands: true}, Services{}); err == nil {
-		t.Fatal("accepted IOA command publication without a registry")
-	}
-	if _, err := New(service.Config{}, Services{}); err != nil {
-		t.Fatalf("dormant IOA service requires no registry: %v", err)
-	}
-}
 func TestRuntimeHandleDoesNotExposeLifecycle(t *testing.T) {
-	adapter, err := New(service.Config{}, Services{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := New(service.Config{}, Dependencies{})
 	runtime := adapter.Runtime()
 	if _, ok := any(runtime).(interface{ Close(context.Context) error }); ok {
 		t.Fatal("IOA runtime exposes Close")
@@ -37,13 +26,10 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	registry := commands.NewRegistry(nil)
-	ioa, err := New(service.Config{URL: server.URL, RegisterCommands: true}, Services{Commands: registry})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
 	set, err := extension.New(
-		extension.Entry{ID: "ioa", Extension: ioa},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"ioa"}, Extension: registry},
+		registry,
+		ioa,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -61,4 +47,3 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 		t.Fatal("closed composition still published IOA commands")
 	}
 }
-

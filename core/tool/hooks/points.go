@@ -46,24 +46,19 @@ type Completion struct {
 	Result *tool.Result
 }
 
-var Before = corehooks.Point[CallEvent, Admission]{
-	Kind:    "tool.before",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[CallEvent](func(a Admission) bool { return a.Deny != nil }),
-}
+var Before = corehooks.NewPoint[CallEvent, Admission]("tool.before").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[CallEvent](func(a Admission) bool { return a.Deny != nil }))
 
-var Started = corehooks.Point[CallEvent, struct{}]{Kind: "tool.started"}
+var Started = corehooks.NewPoint[CallEvent, struct{}]("tool.started")
 
 // After receives one private copy of the complete returned result. Handlers may
 // transform that value directly and in registration order. If a handler fails,
 // Execute discards the copy and reports the failure; terminal error and stop
 // flags can only become stricter when the copy is committed.
-var After = corehooks.Point[ResultEvent, struct{}]{
-	Kind:    "tool.after",
-	OnError: corehooks.FailClosed,
-}
+var After = corehooks.NewPoint[ResultEvent, struct{}]("tool.after").WithErrorPolicy(corehooks.FailClosed)
 
-var Completed = corehooks.Point[Completion, struct{}]{Kind: "tool.completed"}
+var Completed = corehooks.NewPoint[Completion, struct{}]("tool.completed")
 
 type CommandEvent struct {
 	Operation *operationpb.Ref
@@ -77,14 +72,12 @@ type CommandCompletion struct {
 	Command CommandEvent
 }
 
-var BeforeCommand = corehooks.Point[CommandEvent, Admission]{
-	Kind:    "command.before",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[CommandEvent](func(a Admission) bool { return a.Deny != nil }),
-}
+var BeforeCommand = corehooks.NewPoint[CommandEvent, Admission]("command.before").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[CommandEvent](func(a Admission) bool { return a.Deny != nil }))
 
-var CommandStarted = corehooks.Point[CommandEvent, struct{}]{Kind: "command.started"}
-var CommandCompleted = corehooks.Point[CommandCompletion, struct{}]{Kind: "command.completed"}
+var CommandStarted = corehooks.NewPoint[CommandEvent, struct{}]("command.started")
+var CommandCompleted = corehooks.NewPoint[CommandCompletion, struct{}]("command.completed")
 
 type ProcessEvent struct {
 	Operation *operationpb.Ref
@@ -98,27 +91,23 @@ type ProcessCompletion struct {
 	Session *pty.Info
 }
 
-var BeforeProcess = corehooks.Point[ProcessEvent, Admission]{
-	Kind:    "process.before",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[ProcessEvent](func(a Admission) bool { return a.Deny != nil }),
-}
+var BeforeProcess = corehooks.NewPoint[ProcessEvent, Admission]("process.before").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[ProcessEvent](func(a Admission) bool { return a.Deny != nil }))
 
 // ProcessStarting runs after admission and before OS creation. Observers use it
 // for preparation such as filesystem snapshots. Completion pairs it even when
 // process creation fails.
-var ProcessStarting = corehooks.Point[ProcessEvent, struct{}]{Kind: "process.starting"}
+var ProcessStarting = corehooks.NewPoint[ProcessEvent, struct{}]("process.starting")
 
 // ProcessStartedControl is the synchronous cancellation boundary. A policy can
 // request cancellation, but cannot undo effects that happened before startup.
-var ProcessStartedControl = corehooks.Point[ProcessEvent, Cancellation]{
-	Kind:    "process.started.control",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[ProcessEvent](func(c Cancellation) bool { return c.Cause != nil }),
-}
+var ProcessStartedControl = corehooks.NewPoint[ProcessEvent, Cancellation]("process.started.control").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[ProcessEvent](func(c Cancellation) bool { return c.Cause != nil }))
 
-var ProcessStartedObserved = corehooks.Point[ProcessEvent, struct{}]{Kind: "process.started"}
-var ProcessCompleted = corehooks.Point[ProcessCompletion, struct{}]{Kind: "process.completed"}
+var ProcessStartedObserved = corehooks.NewPoint[ProcessEvent, struct{}]("process.started")
+var ProcessCompleted = corehooks.NewPoint[ProcessCompletion, struct{}]("process.completed")
 
 // FileEvent.Data is valid until synchronous dispatch returns. Consumers
 // retaining it must copy it. Expensive digesting only belongs in an installed
@@ -135,23 +124,19 @@ type FileEvent struct {
 	Err       error
 }
 
-var FileAccessControl = corehooks.Point[FileEvent, Cancellation]{
-	Kind:    "file.access.control",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[FileEvent](func(c Cancellation) bool { return c.Cause != nil }),
-}
+var FileAccessControl = corehooks.NewPoint[FileEvent, Cancellation]("file.access.control").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[FileEvent](func(c Cancellation) bool { return c.Cause != nil }))
 
-var FileAccessObserved = corehooks.Point[FileEvent, struct{}]{Kind: "file.access"}
+var FileAccessObserved = corehooks.NewPoint[FileEvent, struct{}]("file.access")
 
 type FlowEvent struct {
 	Operation *operationpb.Ref
 	Flow      *trafficpb.Flow
 }
 
-var FlowCompletedControl = corehooks.Point[FlowEvent, Cancellation]{
-	Kind:    "http.completed.control",
-	OnError: corehooks.FailClosed,
-	Reduce:  corehooks.StopWhen[FlowEvent](func(c Cancellation) bool { return c.Cause != nil }),
-}
+var FlowCompletedControl = corehooks.NewPoint[FlowEvent, Cancellation]("http.completed.control").
+	WithErrorPolicy(corehooks.FailClosed).
+	WithReducer(corehooks.StopWhen[FlowEvent](func(c Cancellation) bool { return c.Cause != nil }))
 
-var FlowCompletedObserved = corehooks.Point[FlowEvent, struct{}]{Kind: "http.completed"}
+var FlowCompletedObserved = corehooks.NewPoint[FlowEvent, struct{}]("http.completed")

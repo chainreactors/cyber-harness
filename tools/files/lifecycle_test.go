@@ -10,7 +10,7 @@ import (
 
 func filesystemSet(t *testing.T, f *Resource) *extension.Set {
 	t.Helper()
-	s, err := extension.New(extension.Entry{ID: "filesystem", Extension: fileLifecycle{f}})
+	s, err := extension.New(fileLifecycle{f})
 	if err != nil {
 		t.Fatal(err)
 	}

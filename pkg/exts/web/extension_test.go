@@ -1,0 +1,69 @@
+package web_test
+
+import (
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/chainreactors/cyber/core/extension"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
+	webpkg "github.com/chainreactors/cyber/pkg/web"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
+)
+
+type routeContributor struct {
+	route webpkg.Route
+}
+
+func (c routeContributor) Load(scope *extension.Scope) error {
+	return extension.Add(scope, c.route)
+}
+
+func TestExtensionsContributeTypedRoutes(t *testing.T) {
+	service := webservice.NewService(webservice.ServiceConfig{})
+	defer service.Close(context.Background())
+	routes := webext.New(service)
+	plugin := routeContributor{route: webpkg.Route{
+		Pattern: "GET /fixture", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+	}}
+	set, err := extension.New(routes, plugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+
+	found := false
+	for _, route := range routes.Routes() {
+		if route.Pattern == plugin.route.Pattern {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("plugin route is absent: %+v", routes.Routes())
+	}
+}
+
+func TestRouteContributionRemovalAndDuplicates(t *testing.T) {
+	service := webservice.NewService(webservice.ServiceConfig{})
+	defer service.Close(context.Background())
+	routes := webext.New(service)
+	route := webpkg.Route{
+		Pattern: "GET /fixture", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+	}
+	handle, err := routes.Add(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := routes.Add(route); err == nil {
+		t.Fatal("duplicate route contribution succeeded")
+	}
+	if err := handle.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes.Routes()) != 0 {
+		t.Fatalf("routes after handle close = %+v", routes.Routes())
+	}
+}

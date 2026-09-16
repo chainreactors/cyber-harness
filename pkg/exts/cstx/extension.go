@@ -1,4 +1,4 @@
-//go:build cstx && cgo
+//go:build full && cgo
 
 package cstx
 
@@ -36,8 +36,8 @@ type Importer interface {
 	ArtifactTypes() []string
 }
 
-// Extension owns the native CSTX runtime and the SCO import path. The runtime
-// carries cgo, so this whole package is gated on the cstx tag.
+// Extension owns the native CSTX runtime and the SCO import path. Product
+// composition decides whether to construct it; full is the product boundary.
 type Extension struct {
 	mu        sync.Mutex
 	store     ArtifactStore

@@ -3,22 +3,18 @@ package runner
 import (
 	"context"
 
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
-func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (profile.Application, *agentext.Runtime, error) {
+func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentsession.Config) (profile.Application, *agentsession.Runtime, error) {
 	product, err := factory.Build(profile.Request{
-		Option: option,
-		Features: apppkg.RuntimeFeatures{
-			ProviderEnabled: true,
-			ToolsEnabled:    true, AIEnabled: true,
-		},
-		Runtime: runtimeConfig,
-		Logger:  logger,
+		Option:       option,
+		ProviderMode: profile.ProviderRequired,
+		Runtime:      runtimeConfig,
+		Logger:       logger,
 	})
 	if err != nil {
 		return nil, nil, err

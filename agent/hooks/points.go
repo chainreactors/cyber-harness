@@ -44,9 +44,8 @@ type RunStartResult struct {
 	Prepend      []*Msg
 }
 
-var BeforeRun = corehooks.Point[RunStartEvent, RunStartResult]{
-	Kind: "before_run",
-	Reduce: corehooks.Fold(func(acc *RunStartResult, ev *RunStartEvent, out RunStartResult) {
+var BeforeRun = corehooks.NewPoint[RunStartEvent, RunStartResult]("before_run").WithReducer(
+	corehooks.Fold(func(acc *RunStartResult, ev *RunStartEvent, out RunStartResult) {
 		if out.SystemPrompt != nil {
 			// Fold into the event so the next handler edits the new prompt.
 			ev.SystemPrompt = *out.SystemPrompt
@@ -54,7 +53,7 @@ var BeforeRun = corehooks.Point[RunStartEvent, RunStartResult]{
 		}
 		acc.Prepend = append(acc.Prepend, out.Prepend...)
 	}),
-}
+)
 
 type ContextEvent struct {
 	SessionID string
@@ -67,16 +66,15 @@ type ContextResult struct {
 	Messages []*Msg
 }
 
-var Context = corehooks.Point[ContextEvent, ContextResult]{
-	Kind: "context",
-	Reduce: corehooks.Fold(func(acc *ContextResult, ev *ContextEvent, out ContextResult) {
+var Context = corehooks.NewPoint[ContextEvent, ContextResult]("context").WithReducer(
+	corehooks.Fold(func(acc *ContextResult, ev *ContextEvent, out ContextResult) {
 		if out.Messages == nil {
 			return
 		}
 		ev.Messages = out.Messages
 		acc.Messages = out.Messages
 	}),
-}
+)
 
 type RunEndEvent struct {
 	SessionID      string
@@ -89,7 +87,7 @@ type RunEndEvent struct {
 	Err            error
 }
 
-var RunEnd = corehooks.Point[RunEndEvent, struct{}]{Kind: "run_end"}
+var RunEnd = corehooks.NewPoint[RunEndEvent, struct{}]("run_end")
 
 type SessionEvent struct {
 	SessionID string
@@ -100,8 +98,8 @@ type SessionEvent struct {
 }
 
 var (
-	SessionStart = corehooks.Point[SessionEvent, struct{}]{Kind: "session_start"}
-	SessionEnd   = corehooks.Point[SessionEvent, struct{}]{Kind: "session_end"}
+	SessionStart = corehooks.NewPoint[SessionEvent, struct{}]("session_start")
+	SessionEnd   = corehooks.NewPoint[SessionEvent, struct{}]("session_end")
 )
 
 type CompactEvent struct {
@@ -116,7 +114,6 @@ type CancelResult struct {
 	Reason string
 }
 
-var BeforeCompact = corehooks.Point[CompactEvent, CancelResult]{
-	Kind:   "before_compact",
-	Reduce: corehooks.StopWhen[CompactEvent](func(r CancelResult) bool { return r.Cancel }),
-}
+var BeforeCompact = corehooks.NewPoint[CompactEvent, CancelResult]("before_compact").WithReducer(
+	corehooks.StopWhen[CompactEvent](func(r CancelResult) bool { return r.Cancel }),
+)

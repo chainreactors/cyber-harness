@@ -6,6 +6,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/namespaces"
 )
 
 func TestHubOwnsProxyLifecycle(t *testing.T) {
@@ -17,7 +18,7 @@ func TestHubOwnsProxyLifecycle(t *testing.T) {
 	if hub.ProxyURL() != "" {
 		t.Fatal("constructor started the proxy")
 	}
-	set, err := extension.New(extension.Entry{ID: "proxy", Extension: ext})
+	set, err := extension.New(namespaces.New(), ext)
 	if err != nil {
 		t.Fatal(err)
 	}

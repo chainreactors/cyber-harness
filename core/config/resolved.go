@@ -77,7 +77,7 @@ func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, 
 			var err error
 			overrides, fallbacks, err = section.Environment(Sources{File: cloneFields(file[key]), CLI: cloneFields(cli[key]), LookupEnv: lookup})
 			if err != nil {
-				return nil, fmt.Errorf("configuration %s (%s): %w", key, section.Source, err)
+				return nil, fmt.Errorf("configuration %s: %w", key, err)
 			}
 		}
 		fields := cloneFields(fallbacks)
