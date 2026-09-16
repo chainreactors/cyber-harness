@@ -81,7 +81,7 @@ func (t *tmuxCommand) run(ctx context.Context, execution *Execution) (any, error
 
 func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
 	cmdLine := strings.Join(args, " ")
-	info, err := t.createSession(ctx, cmdLine, "", tmux.DefaultTimeout)
+	info, err := t.createSession(ctx, cmdLine, "", tmux.DefaultTimeout, true)
 	if err != nil {
 		return "", err
 	}
@@ -128,7 +128,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		timeout = d
 	}
 
-	info, err := t.createSession(ctx, cmdLine, name, timeout)
+	info, err := t.createSession(ctx, cmdLine, name, timeout, detached)
 	if err != nil {
 		return "", err
 	}
@@ -149,10 +149,17 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	return output, nil
 }
 
-func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration) (tmux.Info, error) {
+// createSession starts the session's command. A detached session outlives the
+// tool call that created it, so it hands its lifetime to the process manager;
+// a foreground session stays bound to the call, so cancelling the call also
+// cancels the command.
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (tmux.Info, error) {
 	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
 	if err != nil {
 		return tmux.Info{}, err
+	}
+	if detached {
+		execution.DetachParent()
 	}
 	info, _ := t.manager.Get(execution.ID)
 	return info, nil
