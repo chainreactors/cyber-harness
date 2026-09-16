@@ -15,3 +15,10 @@ func TestDefaultCapabilitySet(t *testing.T) {
 		t.Fatalf("default capabilities = %#v, want %#v", got, want)
 	}
 }
+
+// CGO is deliberately not asserted here: the standard edition gates no cgo
+// file, so STANDARD_CGO only keeps the release binary free of a C toolchain,
+// while a test build may legitimately leave cgo at its default.
+func TestStandardEditionBuildTags(t *testing.T) {
+	assertEditionTags(t, "STANDARD")
+}

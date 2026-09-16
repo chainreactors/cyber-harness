@@ -45,10 +45,9 @@ FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
 RUNNER_BIN ?= $(BIN_DIR)/runner$(EXE)
 
-# Standard/full match release artifacts.
-STANDARD_TAGS := forceposix emptytemplates noembed osusergo netgo
-FULL_TAGS := forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static
-RECORD_TAGS := $(FULL_TAGS) record_ffmpeg
+# The edition tag sets live in editions.env, which the CI workflows read too.
+include editions.env
+
 BUILD_FLAGS := -trimpath -buildvcs=false
 GO_LDFLAGS ?= -s -w
 
@@ -162,7 +161,7 @@ frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
 standard: $(EMBED_PREREQ) prepare
-	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
+	CGO_ENABLED=$(STANDARD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 runner: prepare
@@ -189,7 +188,7 @@ endif
 # The full edition links the static RE2 SDK, so the fetch is part of the build
 # rather than a step the caller has to remember.
 full: $(EMBED_PREREQ) frontend re2-static prepare
-	CGO_ENABLED=1 CGO_LDFLAGS="$(RE2_LDFLAGS)" $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+	CGO_ENABLED=$(FULL_CGO) CGO_LDFLAGS="$(RE2_LDFLAGS)" $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
 ifeq ($(RECORD_PLATFORM),unsupported)
@@ -200,7 +199,7 @@ else
 # `record-native` and `re2-static` install both SDKs, so `make record` needs no
 # pre-step and links both static RE2 and the recorder backend.
 record: $(EMBED_PREREQ) frontend record-native re2-static prepare
-	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
+	$(RECORD_BUILD_ENV) CGO_ENABLED=$(RECORD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
 	@echo "Built record-enabled edition: $(RECORD_BIN)"
 endif
 

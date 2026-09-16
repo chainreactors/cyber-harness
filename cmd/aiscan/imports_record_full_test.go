@@ -20,6 +20,11 @@ func TestRecordFullCapabilitySet(t *testing.T) {
 	}
 }
 
+func TestRecordEditionBuildTags(t *testing.T) {
+	assertEditionTags(t, "RECORD")
+	assertEditionCGO(t, "RECORD")
+}
+
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	product, err := newCyberProfile(cyberProfileConfig{
 		Option: &cfg.Option{},

@@ -1,5 +1,7 @@
 *.sh text eol=lf
 *.go text eol=lf
+# A CR would land inside the tag values and produce tags that match nothing.
+editions.env text eol=lf
 *.golden text eol=lf
 go.mod text eol=lf
 go.sum text eol=lf

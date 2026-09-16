@@ -29,6 +29,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Install the static RE2 SDK
         run: |
           bash .github/native/sdk.sh fetch re2 linux amd64
@@ -88,7 +91,7 @@ jobs:
       - name: Ensure nothing depends on libcstx without the cstx tag
         run: |
           if CGO_ENABLED=0 go list -deps \
-            -tags "forceposix emptytemplates noembed osusergo netgo" ./... \
+            -tags "$STANDARD_TAGS" ./... \
             | grep -q '^github.com/chainreactors/libcstx/go$'; then
             echo "::error::a package reaches libcstx without the cstx tag; gate it behind 'cstx && cgo'"
             exit 1
@@ -98,9 +101,8 @@ jobs:
       # CGO_ENABLED=0 success would mean the cstx files stopped being gated.
       - name: Ensure the full edition requires cgo
         run: |
-          FULL="forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
-          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/aiscan
-          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/aiscan 2>/dev/null; then
+          CGO_ENABLED=1 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
+          if CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan 2>/dev/null; then
             echo "::error::the full edition built with CGO_ENABLED=0; full must imply cgo"
             exit 1
           fi
@@ -110,7 +112,7 @@ jobs:
 
       - name: Compile public scanner regressions
         run: |
-          go test -run '^$' -tags "full sqlite cstx integration re2_cgo re2_static" ./tools
+          go test -run '^$' -tags "$FULL_CAPS_TAGS integration" ./tools
 
       - name: Check whitespace and submodule pins
         run: |
@@ -122,7 +124,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
-          args: --timeout=8m --build-tags "re2_cgo re2_static"
+          args: --timeout=8m --build-tags "${{ env.RE2_CGO_TAGS }}"
           skip-cache: ${{ env.ACT == 'true' }}
 
   test:
@@ -139,6 +141,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Install the static RE2 SDK
         run: |
@@ -164,7 +169,7 @@ jobs:
           fi
           package_list="$(go list ./...)"
           mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/cyber/cmd/harness\(/\|$\)')
-          go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
+          go test -tags "$RE2_CGO_TAGS" -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
             "${packages[@]}"
@@ -335,6 +340,10 @@ jobs:
         shell: bash
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
+      - name: Load the build editions
+        shell: bash
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Install the static RE2 SDK
         shell: bash
         run: |
@@ -342,12 +351,12 @@ jobs:
           bash .github/native/sdk.sh env re2 windows amd64 >> "$GITHUB_ENV"
 
       - name: Run native Windows package tests
-        run: go test -count=1 -tags "re2_cgo re2_static" ./agent/... ./pkg/runner/... ./pkg/web/...
+        run: go test -count=1 -tags "$RE2_CGO_TAGS" ./agent/... ./pkg/runner/... ./pkg/web/...
         env:
           CGO_ENABLED: "1"
 
       - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/aiscan
+        run: go test -count=1 -tags "$FULL_TAGS" ./cmd/aiscan
         env:
           CGO_ENABLED: "1"
 
@@ -366,6 +375,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Install the static RE2 SDK
         run: |
           bash .github/native/sdk.sh fetch re2 linux amd64
@@ -373,31 +385,31 @@ jobs:
 
       - name: Run scanner functional regressions
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m -v \
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
             ./tools
 
       - name: Run remaining full-tag unit variants
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^Test(Parse|Execute_|ResolvePath_|NameAndUsage|WithDefaultSession|Format)' \
             ./tools/playwright
 
       - name: Compile browser-backed full-tag suites
         run: |
-          go test -c -tags "full sqlite cstx re2_cgo re2_static" \
+          go test -c -tags "$FULL_CAPS_TAGS" \
             -o "$RUNNER_TEMP/headless.test" ./pkg/headless
-          go test -c -tags "full sqlite cstx re2_cgo re2_static" \
+          go test -c -tags "$FULL_CAPS_TAGS" \
             -o "$RUNNER_TEMP/playwright.test" ./tools/playwright
 
       - name: Run full server CSTX integration
         run: |
-          CGO_ENABLED=1 go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          CGO_ENABLED=1 go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             ./cmd/aiscan ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
@@ -416,6 +428,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Install the static RE2 SDK
         run: |
           bash .github/native/sdk.sh fetch re2 linux amd64
@@ -431,13 +446,13 @@ jobs:
 
       - name: Run headless action E2E
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^(TestExecCyberExtendedActions|TestExecCyberHistoryActions)$' \
             ./pkg/headless
 
       - name: Run authenticated record and replay E2E
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^TestE2E_RecordReplayAuthenticatedDashboard$' \
             ./tools/playwright
 
@@ -446,7 +461,7 @@ jobs:
           go test -count=1 -timeout 2m -v \
             -run '^TestE2EHeadlessReusesDiscoveredBrowser$' \
             ./tools/katana
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^TestE2EKatanaDeepRendersAuthenticatedSPA$' \
             ./tools/scan
 
@@ -465,6 +480,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Install the static RE2 SDK
         run: |
@@ -533,7 +551,7 @@ jobs:
       - name: Run backend E2E tests
         run: |
           go test -race -count=1 -timeout 10m \
-            -tags "e2e re2_cgo re2_static" \
+            -tags "e2e $RE2_CGO_TAGS" \
             -v \
             ./pkg/web/...
 

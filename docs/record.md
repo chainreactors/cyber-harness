@@ -59,6 +59,12 @@ editions exist, and each one pins its CGO setting:
 | full | standard + `full sqlite cstx re2_cgo re2_static` | `1` |
 | record | full + `record_ffmpeg` | `1` |
 
+`editions.env` at the repository root is the source of truth for this table:
+the Makefile includes it, the workflows append it to `$GITHUB_ENV`, and
+`TestEditionsAreConsistent` / `TestBuildTagsMatchEdition` in `cmd/aiscan` fail
+when a set here drifts from the file. It is a data file, not a shell script —
+the values hold spaces, so sourcing it would truncate every one of them.
+
 - **`cstx`** gates the native SCO importer in `pkg/exts/cstx`, which is the only
   package that imports `libcstx`. Every file there requires both `cstx` and
   `cgo`, so the dependency cannot leak into a pure-Go build. It is registered as

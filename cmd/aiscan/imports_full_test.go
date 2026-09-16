@@ -15,3 +15,8 @@ func TestFullCapabilitySet(t *testing.T) {
 		t.Fatalf("full capabilities = %#v, want %#v", got, want)
 	}
 }
+
+func TestFullEditionBuildTags(t *testing.T) {
+	assertEditionTags(t, "FULL")
+	assertEditionCGO(t, "FULL")
+}
