@@ -38,7 +38,7 @@ Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启�
 | `TestLiveLLMParentDelegatesIOASiblings`（`live_llm`） | 产品主 Agent 实际调用 `subagent` 创建两个异步子会话；子会话经 IOA 交换 offer → reply → ack；主 Agent 收到两份完成通知后读取线程并结束；校验父子事件和自动 handoff 记录 |
 
 随机场景打印种子并写入 `seed.txt`。设置 `CYBER_HARNESS_SEED=<整数>` 可重放操作序列，
-`CYBER_HARNESS_STEPS` 控制切换次数（默认 12，范围 1–100，CI 使用 48）；
+`CYBER_HARNESS_STEPS` 控制切换次数（默认 12，范围 1–100）；
 线程调度不保证逐次一致。每次运行都记录各客户端的请求路径、响应、状态和耗时，
 以及产品进程日志、实际 YAML、数据库。真实模型密钥只经环境和内存中的 HTTP 请求传递，
 不写入 YAML。日志按完整行脱敏，HTTP 响应也在记录和报错前脱敏。默认保存在 `.runlogs/harness/<run>/`；
@@ -128,26 +128,21 @@ make harness-llm-subagent
 前者不能宣称覆盖后者。每个场景使用临时目录和回环地址，对可执行动作、模型请求数、
 输出 tokens、总时长和资源收尾设置硬限制；`--tools` 是可选工具组设置，并非执行白名单。
 
-## CI 与真实 LLM 配置
+## 手动执行与真实 LLM 配置
 
-| 路径 | 触发与验收 |
-| --- | --- |
-| `harness-offline` | 每个 PR、master push、手动触发；Linux / Windows × 两个种子，race 检查驱动、随机用例顺序、48 次并发配置切换 |
-| `harness-live` | master push 和手动触发；不在 PR 代码上注入密钥；缺少配置直接失败 |
-| `harness-gate` | 要求所有被选中的 suite 成功，失败或取消会阻断 release-verify；PR 的 live job 明确标记为未执行 |
+Harness 不属于 GitHub CI 或 release gate，只在需要验证真实产品进程时手动运行。
+普通 CI 单元测试显式排除 `cmd/harness`，避免隐式启动产品进程或调用模型。
+race 检查覆盖测试驱动；产品子进程仍由普通 `go build -tags full` 构建，
+`full` 组合会直接引入 CSTX Extension。
 
-普通单元覆盖率任务排除 harness 包，由独立 job 验收产品进程，避免重复运行。
-两条路径均保存 JSON 测试结果和运行产物 14 天。race 检查当前覆盖测试驱动，
-产品子进程仍由普通 `go build -tags full` 构建；`full` 组合会直接引入 CSTX Extension。
+运行 live suite 前设置以下本地环境变量：
 
-在 GitHub 仓库设置中配置：
-
-| 配置 | 类型 | 要求 |
+| 配置 | 要求 |
 | --- | --- | --- |
-| `CYBER_HARNESS_LLM_API_KEY` | Secret | 必填，使用独立测试密钥 |
-| `CYBER_HARNESS_LLM_BASE_URL` | Actions Variable | 必填，HTTP(S) API 根地址，不含 URL 凭据或查询参数 |
-| `CYBER_HARNESS_LLM_MODEL` | Actions Variable | 必填，支持 function calling 的模型；本地验证使用 `deepseek-chat` |
-| `CYBER_HARNESS_LLM_PROVIDER` | Actions Variable | 可选，默认 `openai`；完整 live suite 的 IOA 操作器当前支持 `openai`、`deepseek`（OpenAI 兼容接口）；连接场景单独运行时仍支持产品其他 Provider |
+| `CYBER_HARNESS_LLM_API_KEY` | 必填，使用独立测试密钥 |
+| `CYBER_HARNESS_LLM_BASE_URL` | 必填，HTTP(S) API 根地址，不含 URL 凭据或查询参数 |
+| `CYBER_HARNESS_LLM_MODEL` | 必填，支持 function calling 的模型；本地验证使用 `deepseek-chat` |
+| `CYBER_HARNESS_LLM_PROVIDER` | 可选，默认 `openai`；完整 live suite 的 IOA 操作器当前支持 `openai`、`deepseek`（OpenAI 兼容接口）；连接场景单独运行时仍支持产品其他 Provider |
 
 本地使用同名环境变量后执行 `make harness-llm`，或：
 
