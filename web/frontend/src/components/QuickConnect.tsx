@@ -59,8 +59,8 @@ function releaseTag(version?: string): string {
 
 function releaseURL(os: OS, arch: Arch, source: DownloadSource, tag: string): string {
   const base = tag !== 'latest'
-    ? `https://github.com/chainreactors/cyber/releases/download/${tag}`
-    : `https://github.com/chainreactors/cyber/releases/latest/download`
+    ? `https://github.com/chainreactors/cyber-harness/releases/download/${tag}`
+    : `https://github.com/chainreactors/cyber-harness/releases/latest/download`
   const url = `${base}/${binaryName(os, arch)}`
   return source === 'china' ? CHINA_MIRROR + url : url
 }

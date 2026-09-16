@@ -51,10 +51,11 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
 	}
 
-	runtime, err := session.NewManager(session.Config{Application: &apppkg.App{Commands: registry, Skills: store}})
+	resource, err := session.NewResource(session.Config{Application: &apppkg.App{Commands: registry, Skills: store}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime := resource.Runtime()
 	catalog := CommandCatalog(runtime)
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
 	for _, spec := range catalog {

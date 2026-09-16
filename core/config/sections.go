@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/core/resource"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 // Values is configuration data, never a registry of running services.
@@ -33,11 +34,16 @@ type Sections struct {
 	mu           sync.Mutex
 	declarations map[string]Section
 	aliases      map[string]string
+	connections  map[string]func(context.Context, *types.DistributeConfig, *types.DistributeConfig) []*types.ConnectionCheck
 	sealed       bool
 }
 
 func NewSections() *Sections {
-	return &Sections{declarations: map[string]Section{}, aliases: map[string]string{}}
+	return &Sections{
+		declarations: map[string]Section{},
+		aliases:      map[string]string{},
+		connections:  map[string]func(context.Context, *types.DistributeConfig, *types.DistributeConfig) []*types.ConnectionCheck{},
+	}
 }
 
 // Add installs one atomic declaration batch.
@@ -243,6 +249,16 @@ func (r *Sections) Keys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Aliases lists the root YAML keys this registry consumes on Normalize.
+func (r *Sections) Aliases() []string {
+	aliases := make([]string, 0, len(r.aliases))
+	for alias := range r.aliases {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	return aliases
 }
 func (r *Sections) Defaults() Values {
 	out := Values{}

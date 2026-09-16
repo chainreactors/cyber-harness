@@ -63,6 +63,11 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 		groupTag := field.Tag.Get("group")
 		descTag := field.Tag.Get("description")
 		defaultTag := field.Tag.Get("default")
+		if defaultTag == "" {
+			// go-flags rejects `default` on bool flags, so a pointer bool that
+			// resolves to true when unset spells its generated value here.
+			defaultTag = field.Tag.Get("init_default")
+		}
 		optionalTag := field.Tag.Get("config_optional") == "true"
 
 		fieldType := field.Type

@@ -94,7 +94,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Profile:     product,
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
-		ConfigStore: &webConfigStore{explicit: configFile},
+		ConfigStore: &webConfigStore{explicit: configFile, runtime: option},
 		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
@@ -105,10 +105,10 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
-			// The candidate app runs exactly the proto config being committed —
-			// no second parse of the staged YAML through cfg.Option.
-			appCfg := applicationConfigFromDistribute(prepared.Config, profile.ProviderOptional, logger)
-			appCfg = mergeApplicationOptionExtras(appCfg, &candidateOption)
+			// The staged YAML is resolved into the flags config, which stays the
+			// truth for the candidate runtime; the proto is only the settings
+			// payload that produced it.
+			appCfg := applicationConfigFromOption(&candidateOption, profile.ProviderOptional, logger)
 			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
 			if err != nil {
 				return candidateProfile, err
@@ -287,7 +287,11 @@ func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg ap
 
 type webConfigStore struct {
 	explicit string
-	mu       sync.Mutex
+	// runtime is the fully resolved startup option. It is the config truth when
+	// no cyber.yaml is loaded, so the settings page shows the flags the process
+	// actually runs with instead of an empty document.
+	runtime *cfg.Option
+	mu      sync.Mutex
 }
 
 func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
@@ -298,7 +302,8 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	defer s.mu.Unlock()
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, &types.DistributeConfig{}, nil
+		projected, err := projectRuntimeConfig(s.runtime)
+		return p, false, projected, err
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -306,19 +311,6 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	}
 	dc, err := parseProductConfig(data)
 	return p, true, dc, err
-}
-
-// parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
-func parseDistributeConfig(data []byte) *types.DistributeConfig {
-	dc, err := cfg.LoadDistributeConfigYAML(data)
-	if err != nil || dc == nil {
-		dc = &types.DistributeConfig{}
-	}
-	if dc.Llm == nil {
-		dc.Llm = &types.LLMConfig{}
-	}
-	cfg.NormalizeLLMConfig(dc.Llm)
-	return dc
 }
 
 func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*webservice.PreparedConfig, error) {
@@ -331,17 +323,24 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 
 	p, loaded := s.resolveConfigPath()
 	var current *types.DistributeConfig
+	var original []byte
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
+		original = data
 		current, err = parseProductConfig(data)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		current = &types.DistributeConfig{}
+		// Nothing on disk yet: the resolved flags config is what a settings save
+		// starts from, so blank secrets fall back to the running values.
+		current, err = projectRuntimeConfig(s.runtime)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if incoming == nil {
 		incoming = &types.DistributeConfig{}
@@ -376,7 +375,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		return nil, err
 	}
 
-	next, err := marshalProductConfig(incoming)
+	next, err := marshalProductConfig(incoming, original)
 	if err != nil {
 		return nil, err
 	}
@@ -496,15 +495,17 @@ func preserveLLMProfileSecrets(incoming *types.LLMConfig, existing *types.LLMCon
 	}
 }
 
+// resolveConfigPath returns where a settings save is written and whether the
+// process is already reading that file. An explicit --config path that does not
+// exist yet is still the write target, but until the first save the process runs
+// from startup flags, so the settings page must project those instead.
 func (s *webConfigStore) resolveConfigPath() (string, bool) {
 	p := findWebConfigFile(s.explicit)
-	if p != "" {
-		return p, true
+	if p == "" {
+		p = "cyber.yaml"
 	}
-	if s.explicit != "" {
-		return s.explicit, false
-	}
-	return "cyber.yaml", false
+	_, err := os.Stat(p)
+	return p, err == nil
 }
 
 func findWebConfigFile(explicit string) string {

@@ -5,11 +5,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/v/release/chainreactors/cyber?style=flat-square&color=00E59B" alt="Release"></a>
-  <a href="https://github.com/chainreactors/cyber/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/cyber/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/chainreactors/cyber/releases"><img src="https://img.shields.io/github/downloads/chainreactors/cyber/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
-  <a href="https://github.com/chainreactors/cyber/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
-  <a href="https://github.com/chainreactors/cyber/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/cyber?style=flat-square&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/releases"><img src="https://img.shields.io/github/v/release/chainreactors/cyber-harness?style=flat-square&color=00E59B" alt="Release"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/cyber-harness/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/releases"><img src="https://img.shields.io/github/downloads/chainreactors/cyber-harness/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/cyber-harness?style=flat-square&color=yellow" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -37,7 +37,7 @@ aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model de
 
 ### Download Binary
 
-From [GitHub Releases](https://github.com/chainreactors/cyber/releases/latest):
+From [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest):
 
 | Edition | Description |
 | --- | --- |
@@ -52,17 +52,17 @@ From [GitHub Releases](https://github.com/chainreactors/cyber/releases/latest):
 
 ```bash
 # Linux
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_linux_amd64.zip
+curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_linux_amd64.zip
 unzip aiscan_linux_amd64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_darwin_arm64.zip
+curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_darwin_arm64.zip
 unzip aiscan_darwin_arm64.zip
 chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
+Invoke-WebRequest "https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
 Expand-Archive .\aiscan.zip -DestinationPath .
 .\aiscan.exe --version
 ```
@@ -100,7 +100,7 @@ The Web console stores sessions, scans, assets, findings, and configuration in
 ### Build from Source
 
 ```bash
-git clone https://github.com/chainreactors/cyber.git && cd cyber
+git clone https://github.com/chainreactors/cyber-harness.git && cd cyber-harness
 
 make                                                       # standard edition
 make agent                                                 # minimal local agent
@@ -290,8 +290,8 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 ---
 
 <p align="center">
-  <a href="https://star-history.com/#chainreactors/cyber&Date">
-    <img src="https://api.star-history.com/svg?repos=chainreactors/cyber&type=Date" alt="Star History" width="600">
+  <a href="https://star-history.com/#chainreactors/cyber-harness&Date">
+    <img src="https://api.star-history.com/svg?repos=chainreactors/cyber-harness&type=Date" alt="Star History" width="600">
   </a>
 </p>
 

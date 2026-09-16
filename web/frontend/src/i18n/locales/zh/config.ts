@@ -3,7 +3,10 @@ export default {
   llmConfigured: 'LLM 已配置',
   llmNotConfigured: 'LLM 未配置',
   configLoaded: '配置已加载',
-  configMissing: '配置缺失',
+  // No settings file yet: the runtime is configured by startup flags, and a save
+  // writes one. "配置缺失" read as "nothing is configured", contradicting the
+  // ready LLM badge next to it.
+  configFromFlags: '来自启动参数',
   configured: '已配置',
   notConfigured: '未配置',
   loading: '加载中',

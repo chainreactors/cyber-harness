@@ -3,20 +3,12 @@ package cli
 import (
 	"context"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	presentation "github.com/chainreactors/cyber/pkg/exts/ioa/client/console"
 )
 
 type Execute func(context.Context, string, client.Options, presentation.Options, presentation.Args, hostcli.Environment) error
-
-func Declare(resources *resource.Registry, run Execute) error {
-	_, err := resource.Add[hostcli.Contribution](resources, func(registry *hostcli.Registry) error {
-		return Register(registry, run)
-	})
-	return err
-}
 
 func Register(reg *hostcli.Registry, run Execute) error {
 	jsonOption := &struct {

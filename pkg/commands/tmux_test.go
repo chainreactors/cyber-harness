@@ -115,6 +115,26 @@ func TestTmuxListSessionsEmpty(t *testing.T) {
 	}
 }
 
+// A built-in borrows the session manager for timeouts and output capture, but it
+// is not a terminal session: running `tmux ls` as a built-in must not list itself.
+func TestTmuxListSessionsHidesBuiltins(t *testing.T) {
+	bash := NewBashTool(t.TempDir(), 10, nil)
+	t.Cleanup(bash.Close)
+	tmux := NewTmuxCommand(bash)
+	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: "tmux", Usage: tmux.Usage, Run: tmux.Run}))
+	bash.SetCommandRegistry(registry)
+
+	var out bytes.Buffer
+	if _, err := bash.RunForeground(context.Background(), "tmux ls", BashExecOptions{
+		OnOutput: func(data []byte) { _, _ = out.Write(data) },
+	}); err != nil {
+		t.Fatalf("tmux ls: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "no server running") {
+		t.Fatalf("tmux ls output = %q, want no sessions", got)
+	}
+}
+
 func TestTmuxSendKeys(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only")

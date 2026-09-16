@@ -17,7 +17,9 @@ func defaultProviderConfig() agent.ProviderConfig {
 	}
 }
 
-func hasSingleProviderFields(option *cfg.Option) bool {
+// HasSingleProviderFields reports whether the flat single-provider flags win
+// over the profile list, which is how the runtime resolves the active provider.
+func HasSingleProviderFields(option *cfg.Option) bool {
 	return option.Provider != "" || option.BaseURL != "" || option.APIKey != "" || option.Model != ""
 }
 
@@ -68,7 +70,7 @@ func applyProviderLimits(providerConfig *agent.ProviderConfig, option *cfg.Optio
 }
 
 func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
-	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
+	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
 		applyProviderLimits(&cfg, option)
 		return cfg
@@ -98,7 +100,7 @@ func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
 }
 
 func FallbackProviderConfigs(option *cfg.Option) []agent.ProviderConfig {
-	if !hasSingleProviderFields(option) && len(option.Providers) > 0 {
+	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		active := activeProviderIndex(option)
 		var configs []agent.ProviderConfig
 		for i, entry := range option.Providers {

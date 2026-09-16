@@ -88,13 +88,15 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 
 ---
 
-## 6. 探活框架 (pkg/probe)
+## 6. 配置连接测试
 
-新包，为 Settings UI 的 "Test Connection" 按钮提供后端。
+Settings UI 的 "Test Connection" 是 `config.Connection` Resource，不再存在独立的
+`pkg/probe` 包、Probe Registry 或扩展 Catalog。拥有外部连接的扩展在 `Declare` 中直接向
+`Point[config.Connection]` 注册；`config.Sections` 按 section 分发。
 
-### 连接探活
+### 扩展连接测试
 
-`TestConn(ctx, section, config, storedConfig)` 按 section 路由:
+当前扩展按 section 提供以下测试：
 
 | section | 探活方式 |
 |---------|---------|
@@ -103,19 +105,25 @@ eval/compact 徽章仍可由 hub 从 AOP extension 派生为 Web 平台控制事
 | search | Tavily "ping" search |
 | ioa | Client.ListSpaces() |
 
-统一模式: probe 失败写入 protobuf `ConnectionCheck.error`，不返回传输 error。返回的 error 仅表示 section 不可测。
+连接失败写入 protobuf `ConnectionCheck.error`，不返回传输 error；返回的 Go error 只表示该
+section 没有注册连接测试。空凭据可从 stored config 回退，避免 Settings UI 回显密钥。
 
-### LLM 探活
+### LLM Provider 健康检查
 
 - `TestLLM`: 发 `maxTokens=16` 的 "ping" completion 验证连通性
 - `ListLLMModels`: 调用 provider 的 `GET /models` 返回 model picklist；404 作为“不支持目录”正常降级为手动输入
+
+LLM 的启动健康检查属于 `agent/provider` 自身。扩展连接测试属于对应配置声明，因此系统没有
+第三种通用 Probe 抽象。
 
 ### 安全
 
 - `redactURLError`: 从 `*url.Error` 中剥离 query string（FOFA/Hunter API key 在 query 中）
 - 空 APIKey 按请求携带的 `profile_id` 回退到对应 stored config；缺省 ID 才使用 active profile
 
-**文件**: `pkg/probe/conn.go`, `pkg/probe/llm.go`, `pkg/web/probe.go`, `pkg/web/handler.go`
+**文件**: `core/config/connections.go`, `pkg/exts/scanner/declaration.go`,
+`pkg/exts/search/declaration.go`, `pkg/exts/ioa/client/declare.go`,
+`agent/provider/probe.go`, `pkg/web/api/config.go`
 
 ---
 

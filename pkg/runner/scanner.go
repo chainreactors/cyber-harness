@@ -6,19 +6,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chainreactors/cyber/agent"
-	agentprompt "github.com/chainreactors/cyber/agent/prompt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/pidlock"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/skills"
 	"github.com/chainreactors/cyber/tools/scan"
@@ -190,9 +185,12 @@ func removeScannerFlag(args []string, flag string) []string {
 	return out
 }
 
-func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *apppkg.App, scannerArgs []string, logger telemetry.Logger) error {
+func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *apppkg.App, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
 	if provider, _ := application.ProviderState(); provider == nil {
 		return fmt.Errorf("--ai requires a configured LLM provider")
+	}
+	if runtime == nil {
+		return fmt.Errorf("scanner Agent runtime is unavailable")
 	}
 	lock, err := pidlock.Acquire(pidlock.AgentPIDFilePath(), logger)
 	if err != nil {
@@ -204,35 +202,6 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if err != nil {
 		return err
 	}
-	loopResource := loopext.New(agent.StandardLoop{})
-	runtimeResource, err := sessionext.New(agentsession.Config{
-		Application: application, Option: option, Logger: logger,
-		Loop: loopResource.Runtime(),
-		PromptConfig: &agentprompt.PromptConfig{
-			Tools:            application.Tools,
-			ScannerDocs:      application.Commands.UsageDocs(),
-			Skills:           application.Skills.All(),
-			ScannerAgentMode: true,
-			ScannerName:      scannerArgs[0],
-		},
-	})
-	if err != nil {
-		return err
-	}
-	runtime := runtimeResource.Runtime()
-	runtimeSet, err := extension.New(
-		loopResource,
-		runtimeResource,
-	)
-	if err != nil {
-		return err
-	}
-	if err := runtimeSet.Load(ctx); err != nil {
-		_ = runtimeSet.Close(context.Background())
-		return err
-	}
-	defer runtimeSet.Close(context.Background())
-
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
 	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
 }

@@ -3,7 +3,7 @@ export default {
   llmConfigured: 'LLM configured',
   llmNotConfigured: 'LLM not configured',
   configLoaded: 'Config Loaded',
-  configMissing: 'Config Missing',
+  configFromFlags: 'From Startup Flags',
   configured: 'Configured',
   notConfigured: 'Not configured',
   loading: 'Loading',

@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
-	scannerprobe "github.com/chainreactors/cyber/pkg/exts/scanner/probe"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	webext "github.com/chainreactors/cyber/pkg/exts/web"
-	"github.com/chainreactors/cyber/pkg/probe"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"net/http"
 	"net/http/httptest"
@@ -159,11 +160,16 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 }
 
 func TestHandlerTestConnRouting(t *testing.T) {
-	probes := probe.New()
-	if _, err := probes.Add(probe.Definition{Section: "cyberhub", Check: scannerprobe.Cyberhub}); err != nil {
+	sections := configpkg.NewSections()
+	resources := resource.New()
+	if _, err := resource.Define[configpkg.Connection](resources, sections.ConnectionPoint()); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Probes: probes}})
+	if err := scannerext.Declare(resources); err != nil {
+		t.Fatal(err)
+	}
+	resources.Freeze()
+	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Sections: sections}})
 	defer svc.Close(context.Background())
 	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
 	defer srv.Close()

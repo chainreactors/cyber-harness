@@ -19,7 +19,7 @@ func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.commands, runtime.commandIndex = owner.runtime.commands, owner.runtime.commandIndex
+	runtime.commands, runtime.commandIndex = owner.Runtime().commands, owner.Runtime().commandIndex
 	spec.Name, spec.Aliases[0] = "/mutated", "/changed"
 	session, err := runtime.EnsureSession(SessionOptions{ID: "declarations"})
 	if err != nil {

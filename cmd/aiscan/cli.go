@@ -15,11 +15,9 @@ import (
 
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/output"
-	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/core/telemetry"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	agentext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/runner"
 	transportpkg "github.com/chainreactors/cyber/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
@@ -212,6 +210,13 @@ func parseCLI(args []string) (parsedCLI, error) {
 	finalizeProductOptions(&option, action)
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
+	}
+	if option.Timeout <= 0 {
+		// Commands that own their options through the extension registry (the IOA
+		// queries, for one) never receive AgentOptions, so nothing else supplies
+		// this default. A zero deadline would cancel the context before the
+		// command runs.
+		option.Timeout = 3600
 	}
 	if err := validateOutputFlags(&option); err != nil {
 		return parsedCLI{}, err
@@ -406,17 +411,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	cli.registry = hostcli.New(parser)
-	resources := resource.New()
-	if _, err := resource.Define[hostcli.Contribution](resources, cli.registry); err != nil {
-		panic(err)
-	}
-	if err := declareProductCLI(resources); err != nil {
-		panic(err)
-	}
-	if err := agentext.Declare(resources, &cli.Agent.AgentOptions); err != nil {
-		panic(fmt.Sprintf("invalid session flag declaration: %v", err))
-	}
-	resources.Freeze()
+	declareProductResources(false, cli.registry, &cli.Agent.AgentOptions)
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}

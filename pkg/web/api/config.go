@@ -7,7 +7,6 @@ import (
 
 	agentprovider "github.com/chainreactors/cyber/agent/provider"
 	configpkg "github.com/chainreactors/cyber/core/config"
-	probe "github.com/chainreactors/cyber/pkg/probe"
 	types "github.com/chainreactors/cyber/pkg/types"
 )
 
@@ -20,7 +19,6 @@ type ConfigBackend interface {
 }
 
 type ConfigOptions struct {
-	Probes   *probe.Registry
 	Sections *configpkg.Sections
 	Project  func(*types.DistributeConfig, *types.ConfigView)
 }
@@ -34,10 +32,9 @@ func NewConfig(backend ConfigBackend, options ...ConfigOptions) *Config {
 	if len(options) > 0 {
 		selected = options[0]
 	}
-	if selected.Probes == nil {
-		selected.Probes = probe.New()
+	if selected.Sections != nil {
+		selected.Sections.Seal()
 	}
-	selected.Probes.Seal()
 	return &Config{backend: backend, options: selected}
 }
 
@@ -98,7 +95,7 @@ func (c *Config) TestConnection(ctx context.Context, request *types.TestConnecti
 		return nil, Errorf(CodeInvalidArgument, "request is required")
 	}
 	stored, _ := c.Distribute(ctx)
-	checks, err := c.options.Probes.Test(ctx, request.GetSection(), request.GetConfig(), stored)
+	checks, err := c.options.Sections.TestConnection(ctx, request.GetSection(), request.GetConfig(), stored)
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}

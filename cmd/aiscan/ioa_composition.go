@@ -9,61 +9,56 @@ import (
 	clientcli "github.com/chainreactors/cyber/pkg/exts/ioa/client/cli"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	servercli "github.com/chainreactors/cyber/pkg/exts/ioa/server/cli"
-	"github.com/chainreactors/cyber/pkg/exts/record"
+	recordext "github.com/chainreactors/cyber/pkg/exts/record"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"gopkg.in/yaml.v3"
 )
 
-func declareProductCLI(resources *resource.Registry) error {
-	if err := clientcli.Declare(resources, runIOAClientCommand); err != nil {
-		return err
-	}
-	if err := servercli.Declare(resources, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
-		return runIOAServe(ctx, option, env.Logger)
-	}); err != nil {
-		return err
-	}
-	_, err := resource.Add[hostcli.Contribution](resources,
-		func(registry *hostcli.Registry) error {
-			return registry.Group("agent", client.ConfigKey, client.FlagGroup())
-		},
-		func(registry *hostcli.Registry) error {
-			return registry.Group("web", client.ConfigKey, client.FlagGroup())
-		},
-	)
-	return err
-}
-
-func declareProductConfig(resources *resource.Registry, serving bool) error {
-	if !serving {
-		if err := client.Declare(resources); err != nil {
-			return err
-		}
-		if err := server.Declare(resources); err != nil {
-			return err
-		}
-	} else {
-		clientSection, serverSection := client.Section(), server.Section()
-		clientSection.Aliases = nil
-		serverSection.Aliases = []string{"ioa"}
-		if _, err := resource.Add[cfg.Section](resources, clientSection, serverSection); err != nil {
-			return err
-		}
-	}
-	return record.Declare(resources)
-}
-
-func productSections(serving bool) *cfg.Sections {
+func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
 	resources := resource.New()
 	sections := cfg.NewSections()
+	if cli == nil {
+		// Declarations remain identical for config-only consumers. CLI values are
+		// inert until Registry.Seal, so an unsealed sink is sufficient here.
+		cli = hostcli.New(nil)
+	}
+	if _, err := resource.Define[hostcli.Contribution](resources, cli); err != nil {
+		panic(err)
+	}
 	if _, err := resource.Define[cfg.Section](resources, sections); err != nil {
 		panic(err)
 	}
-	if err := declareProductConfig(resources, serving); err != nil {
+	if _, err := resource.Define[cfg.Connection](resources, sections.ConnectionPoint()); err != nil {
 		panic(err)
+	}
+	mustDeclare := func(err error) {
+		if err != nil {
+			panic(err)
+		}
+	}
+	mustDeclare(client.Declare(resources, func(registry *hostcli.Registry) error {
+		return clientcli.Register(registry, runIOAClientCommand)
+	}, !serving))
+	mustDeclare(server.Declare(resources, func(registry *hostcli.Registry) error {
+		return servercli.Register(registry, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
+			return runIOAServe(ctx, option, env.Logger)
+		})
+	}, serving))
+	mustDeclare(recordext.Declare(resources))
+	mustDeclare(scannerext.Declare(resources))
+	mustDeclare(searchext.Declare(resources))
+	if agentOptions != nil {
+		mustDeclare(sessionext.Declare(resources, agentOptions))
 	}
 	resources.Freeze()
 	sections.Seal()
 	return sections
+}
+
+func productSections(serving bool) *cfg.Sections {
+	return declareProductResources(serving, nil, nil)
 }
 func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent

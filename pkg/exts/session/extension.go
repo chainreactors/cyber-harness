@@ -1,4 +1,4 @@
-// Package session installs the harness-independent agent/session manager.
+// Package session installs the harness-independent session runtime.
 package session
 
 import (
@@ -10,33 +10,33 @@ import (
 )
 
 type Extension struct {
-	runtime *session.Runtime
+	resource *session.Resource
 }
 
 func New(config session.Config) (*Extension, error) {
-	runtime, err := session.NewManager(config)
+	resource, err := session.NewResource(config)
 	if err != nil {
 		return nil, err
 	}
-	return &Extension{runtime: runtime}, nil
+	return &Extension{resource: resource}, nil
 }
 func (e *Extension) Runtime() *session.Runtime {
-	if e == nil {
+	if e == nil || e.resource == nil {
 		return nil
 	}
-	return e.runtime
+	return e.resource.Runtime()
 }
 func (e *Extension) Load(scope *extension.Scope) error {
-	if e == nil || e.runtime == nil || scope == nil {
+	if e == nil || e.resource == nil || scope == nil {
 		return fmt.Errorf("session extension is unavailable")
 	}
-	return e.runtime.Start(scope.Init(), scope.Lifetime())
+	return e.resource.Start(scope.Init(), scope.Lifetime())
 }
 func (e *Extension) Close(ctx context.Context) error {
-	if e == nil || e.runtime == nil {
+	if e == nil || e.resource == nil {
 		return nil
 	}
-	return e.runtime.Close(ctx)
+	return e.resource.Close(ctx)
 }
 
 var _ extension.Extension = (*Extension)(nil)

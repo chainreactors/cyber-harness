@@ -1,3 +1,6 @@
+// Package provider adapts the LLM provider State to Extension lifecycle. It is
+// unrelated to declaration aggregation; CLI and Config register through typed
+// resource Points directly.
 package provider
 
 import (

@@ -184,6 +184,14 @@ export async function listAgents(): Promise<AgentView[]> {
   }
 }
 
+// The single "is the LLM usable" predicate: a provider client exists and it
+// targets a model. An API key is deliberately not required — self-hosted
+// endpoints (Ollama, vLLM) are keyless — and the server already merges the
+// runtime provider with the stored settings view before answering.
+export function llmConfigured(status: ServerStatus | null | undefined): boolean {
+  return !!(status?.llmAvailable && status.llmModel?.trim())
+}
+
 export async function getConfigStatus(): Promise<ConfigView> {
   try {
     const response = await cyberRPC.config.getConfig({})

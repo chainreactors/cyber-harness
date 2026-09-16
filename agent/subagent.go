@@ -152,8 +152,9 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 		}
 	}
 	if mode == "fork" {
-		sub.Cfg.Messages = truncateToLastCompleteBoundary(parentCfg.Messages)
-		sub.Cfg.SystemPrompt = parentCfg.SystemPrompt
+		// Run rebuilds cfg.Messages from the agent state, so seeding the state is
+		// what actually hands the parent conversation to the child.
+		sub.LoadMessages(truncateToLastCompleteBoundary(parentCfg.Messages))
 	}
 
 	switch mode {
@@ -231,7 +232,9 @@ func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, ty
 }
 
 func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
-	subCtx, cancel := context.WithCancel(ctx)
+	// Background work outlives the tool call that started it: the caller cancels
+	// the invocation context as soon as Execute returns.
+	subCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	t.track(name, typeName, "async", cancel, sub.Cfg.Inbox)
 	producer := parentInbox.RegisterProducer("subagent:" + name)
@@ -248,7 +251,7 @@ func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, t
 }
 
 func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
-	subCtx, cancel := context.WithCancel(ctx)
+	subCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	t.track(name, typeName, "fork", cancel, sub.Cfg.Inbox)
 	producer := parentInbox.RegisterProducer("subagent:" + name)

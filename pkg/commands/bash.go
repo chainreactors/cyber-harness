@@ -550,6 +550,11 @@ func (t *BashTool) resolve(name string) (*types.CommandSpec, bool) {
 	return t.registry.Get(name)
 }
 
+// Built-in commands run in-process and borrow the session manager for timeouts
+// and output capture. Tagging them keeps `tmux ls` to terminal sessions: without
+// it the listing command reports itself as a session.
+const builtinSessionKind = "builtin"
+
 func (t *BashTool) startBuiltin(
 	ctx context.Context,
 	command *types.CommandSpec,
@@ -575,6 +580,7 @@ func (t *BashTool) startBuiltin(
 	if err != nil {
 		return nil, err
 	}
+	t.tasks.SetKind(info.ID, builtinSessionKind)
 	execution.bindID(info.ID)
 	return execution, nil
 }
@@ -620,6 +626,7 @@ func (t *BashTool) startBuiltinToShell(
 	if err != nil {
 		return nil, err
 	}
+	t.tasks.SetKind(info.ID, builtinSessionKind)
 	execution.bindID(info.ID)
 	return execution, nil
 }
@@ -666,6 +673,7 @@ func (t *BashTool) startShellToBuiltin(
 	if err != nil {
 		return nil, err
 	}
+	t.tasks.SetKind(info.ID, builtinSessionKind)
 	execution.bindID(info.ID)
 	return execution, nil
 }

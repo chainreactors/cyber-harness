@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Check, Plus, Settings, Trash2, Zap } from 'lucide-react'
 import { create } from '@bufbuild/protobuf'
 import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../cyber-proto'
-import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
+import { getConfigStatus, llmConfigured, saveConfig, testLLM, testConn, listLLMModels } from '../api'
 import type { ConfigView, ConnectionCheck, DistributeConfig, LLMProbeResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, ResultLine } from '@cyber/ui'
 import { cn } from '@cyber/theme'
@@ -195,8 +195,8 @@ function sectionStatus(
   const tag = (name: string, ok: boolean) => ({ key: name, label: `${name} ${ok ? t('configured') : t('notConfigured')}`, ok })
   switch (tab) {
     case 'llm':
-      const configured = !!(status?.llmAvailable && status.llmModel?.trim())
-      return [{ key: 'llm', label: configured ? t('llmConfigured') : t('llmNotConfigured'), ok: configured }]
+      const ok = llmConfigured(status)
+      return [{ key: 'llm', label: ok ? t('llmConfigured') : t('llmNotConfigured'), ok }]
     case 'cyberhub':
       return [tag('Cyberhub', !!(cs?.cyberhub?.url && cs?.cyberhub?.keyConfigured))]
     case 'recon':
@@ -298,7 +298,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
                 {sectionStatus(activeTab, cs, status, t).map((b) => (
                   <Badge key={b.key} variant={b.ok ? 'success' : 'warning'} className="text-xs">{b.label}</Badge>
                 ))}
-                <Badge variant={cs?.loaded ? 'success' : 'warning'} className="text-xs">{cs?.loaded ? t('configLoaded') : t('configMissing')}</Badge>
+                <Badge variant={cs?.loaded ? 'success' : 'warning'} className="text-xs">{cs?.loaded ? t('configLoaded') : t('configFromFlags')}</Badge>
               </div>
               <div className="min-h-[12rem]">
                 {activeTab === 'llm' && (

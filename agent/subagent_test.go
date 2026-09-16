@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
@@ -121,6 +123,125 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		return
 	}
 	t.Fatal("missing child session.start event")
+}
+
+// The tool registry cancels the invocation context the moment Execute returns,
+// so a background subagent that inherited it died before its first model call.
+// The context is canceled up front here to keep the race out of the test.
+func TestSubAgentAsyncOutlivesInvocationContext(t *testing.T) {
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "background result")),
+	}}
+	tool := NewSubAgentTool(nil)
+
+	activeInbox := inbox.NewBuffered(DefaultInboxCapacity)
+	active := NewAgent(Config{Loop: StandardLoop{},
+		Provider:  llm,
+		Tools:     newTestTools(t),
+		Model:     "test-model",
+		SessionID: "active-session",
+		Inbox:     activeInbox,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = operation.ContextWithInvocation(withToolAgentConfig(ctx, active.Cfg), operation.Invocation{CallID: "spawn-bg"})
+	cancel()
+
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","name":"bg-worker","prompt":"work"}`); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for activeInbox.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	completed := activeInbox.Drain()
+	if len(completed) != 1 {
+		t.Fatalf("active inbox completion = %#v", completed)
+	}
+	if got := completed[0].Meta["status"]; got != "completed" {
+		t.Fatalf("subagent status = %v, want completed (%q)", got, provider.MessageText(completed[0].Message))
+	}
+}
+
+// fork promises the parent conversation, which only survives if it is seeded
+// into the child's state before Run rebuilds the request from it.
+func TestSubAgentForkInheritsParentConversation(t *testing.T) {
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "fork result")),
+	}}
+	tool := NewSubAgentTool(nil)
+
+	activeInbox := inbox.NewBuffered(DefaultInboxCapacity)
+	cfg := Config{Loop: StandardLoop{},
+		Provider:  llm,
+		Tools:     newTestTools(t),
+		Model:     "test-model",
+		SessionID: "active-session",
+		Inbox:     activeInbox,
+		Messages: []*aop.Message{
+			{Role: "user", Content: []*aop.Content{aop.Text("earlier question")}},
+			{Role: "assistant", Content: []*aop.Content{aop.Text("earlier answer")}},
+		},
+	}
+
+	ctx := operation.ContextWithInvocation(withToolAgentConfig(context.Background(), cfg), operation.Invocation{CallID: "spawn-fork"})
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"fork","name":"forker","prompt":"continue"}`); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for activeInbox.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := len(activeInbox.Drain()); n != 1 {
+		t.Fatalf("completion count = %d, want 1", n)
+	}
+
+	requests := llm.requestsSnapshot()
+	if len(requests) == 0 {
+		t.Fatal("subagent made no request")
+	}
+	var seen []string
+	for _, m := range requests[0].Messages {
+		seen = append(seen, provider.MessageText(m))
+	}
+	joined := strings.Join(seen, "\n")
+	if !strings.Contains(joined, "earlier question") || !strings.Contains(joined, "earlier answer") {
+		t.Fatalf("fork request did not inherit the parent conversation: %q", joined)
+	}
+}
+
+// Every mode runs the parent's system prompt: it carries the environment, tool
+// and skill guidance, and before this only fork saw it, through the copied
+// conversation. A sync child never inherits the conversation, so a missing prompt
+// left it with nothing but the bare task.
+func TestSubAgentInheritsParentSystemPrompt(t *testing.T) {
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(NewTextMessage("assistant", "child result")),
+	}}
+	parent := NewAgent(Config{Loop: StandardLoop{},
+		Provider:     llm,
+		Tools:        newTestTools(t),
+		Model:        "test-model",
+		SessionID:    "parent-session",
+		SystemPrompt: "PARENT-GUIDANCE",
+	})
+	tool := NewSubAgentTool(nil)
+
+	ctx := operation.ContextWithInvocation(withToolAgentConfig(context.Background(), parent.Cfg), operation.Invocation{CallID: "spawn-prompt"})
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"sync","name":"worker","prompt":"do the work"}`); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	requests := llm.requestsSnapshot()
+	if len(requests) == 0 {
+		t.Fatal("subagent made no request")
+	}
+	first := requests[0].Messages
+	if len(first) == 0 || first[0].Role != "system" || !strings.Contains(provider.MessageText(first[0]), "PARENT-GUIDANCE") {
+		t.Fatalf("child first message = %+v, want the parent system prompt", first)
+	}
 }
 
 func TestSubAgentToolCallCarriesDelegationExtension(t *testing.T) {

@@ -44,7 +44,7 @@ func TestCommandAdmissionRacesRuntimeClose(t *testing.T) {
 		}()
 	}
 	close(start)
-	_ = rt.Close(context.Background())
+	_ = rt.close(context.Background())
 	callers.Wait()
 	if len(replies) != 32 {
 		t.Fatalf("got %d replies, want 32", len(replies))

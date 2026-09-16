@@ -23,7 +23,7 @@ const tmuxUsage = `tmux - PTY session manager
       Create session. -d detached (background). -s session name.
 
   ls / list-sessions
-      List all sessions.
+      List all terminal sessions.
 
   send-keys -t <id> "text" [Enter]
       Send keystrokes. Append Enter/C-m to send newline.
@@ -168,7 +168,12 @@ func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, t
 
 // ls / list-sessions
 func (t *tmuxCommand) cmdListSessions() (string, error) {
-	items := t.manager.List()
+	var items []pty.Info
+	for _, it := range t.manager.List() {
+		if it.Kind != builtinSessionKind {
+			items = append(items, it)
+		}
+	}
 	if len(items) == 0 {
 		return "no server running on this host", nil
 	}

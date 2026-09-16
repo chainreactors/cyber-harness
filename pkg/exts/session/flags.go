@@ -13,7 +13,7 @@ func FlagGroups(options *cfg.AgentOptions) []cfg.FlagGroup {
 }
 
 // Declare contributes Session's inert flags before the runtime Session is
-// constructed. The host decides whether the CLI resource type exists.
+// constructed. It uses the CLI resource Point selected by the host.
 func Declare(resources *resource.Registry, options *cfg.AgentOptions) error {
 	_, err := resource.Add[hostcli.Contribution](resources, func(registry *hostcli.Registry) error {
 		return registry.Group("agent", "", cfg.FlagGroup{Name: "Agent Options", Options: options})

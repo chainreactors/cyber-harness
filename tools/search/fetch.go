@@ -25,7 +25,7 @@ const (
 	maxFetchBody   = truncate.MaxFetchBody
 	maxURLLength   = 2000
 	maxRedirects   = 10
-	fetchUserAgent = "Mozilla/5.0 (compatible; cyber/1.0; +https://github.com/chainreactors/cyber)"
+	fetchUserAgent = "Mozilla/5.0 (compatible; cyber/1.0; +https://github.com/chainreactors/cyber-harness)"
 
 	cacheTTL      = 15 * time.Minute
 	maxCacheBytes = 50 * 1024 * 1024

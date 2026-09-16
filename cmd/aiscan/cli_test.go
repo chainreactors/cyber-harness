@@ -222,6 +222,30 @@ func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 	}
 }
 
+// Extension commands take their options from the registry rather than from
+// AgentOptions, so the root --timeout is the only source of the overall
+// deadline. A zero value expires the context before the command can run.
+func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
+	parsed, err := parseCLI([]string{"ioa", "spaces"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Action == nil {
+		t.Fatal("ioa spaces did not select an action")
+	}
+	if parsed.Option.Timeout != 3600 {
+		t.Fatalf("timeout = %d, want default 3600", parsed.Option.Timeout)
+	}
+
+	parsed, err = parseCLI([]string{"--timeout", "45", "ioa", "spaces"})
+	if err != nil {
+		t.Fatalf("parseCLI() error = %v", err)
+	}
+	if parsed.Option.Timeout != 45 {
+		t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
+	}
+}
+
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})

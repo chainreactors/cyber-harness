@@ -239,10 +239,14 @@ func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.Delegat
 
 func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return NewAgent(Config{
-		Loop:                  cfg.Loop,
-		Provider:              cfg.Provider,
-		Tools:                 cfg.Tools,
-		Model:                 cfg.Model,
+		Loop:     cfg.Loop,
+		Provider: cfg.Provider,
+		Tools:    cfg.Tools,
+		Model:    cfg.Model,
+		// Children share the parent's system prompt: it carries the environment,
+		// tool and skill guidance every agent needs, and only fork used to get it
+		// (through the copied conversation).
+		SystemPrompt:          cfg.SystemPrompt,
 		MaxTokens:             cfg.MaxTokens,
 		ContextWindow:         cfg.ContextWindow,
 		Logger:                cfg.Logger,

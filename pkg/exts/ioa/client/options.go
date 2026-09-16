@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"
@@ -36,10 +35,6 @@ func Section() cfg.Section {
 	}}
 }
 
-func Declare(resources *resource.Registry) error {
-	_, err := resource.Add[cfg.Section](resources, Section())
-	return err
-}
 func ReadOptions(option *cfg.Option) (Options, error) {
 	value := Options{URL: DefaultURL, Space: DefaultSpace}
 	if option == nil {

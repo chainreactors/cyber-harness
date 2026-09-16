@@ -3,19 +3,11 @@ package cli
 import (
 	"context"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 )
 
 type Execute func(context.Context, server.Options, hostcli.Environment) error
-
-func Declare(resources *resource.Registry, run Execute) error {
-	_, err := resource.Add[hostcli.Contribution](resources, func(registry *hostcli.Registry) error {
-		return Register(registry, run)
-	})
-	return err
-}
 
 func Register(reg *hostcli.Registry, run Execute) error {
 	for _, command := range []string{"serve", "ioa serve"} {

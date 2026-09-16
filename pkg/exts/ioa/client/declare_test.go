@@ -1,4 +1,4 @@
-package probe
+package client
 
 import (
 	"context"
@@ -10,15 +10,15 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/pkg/types"
 )
 
-func TestIOAProbeUsesReadOnlyExtension(t *testing.T) {
+func TestConnectionUsesReadOnlyExtension(t *testing.T) {
 	var reads, writes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/spaces" {
 			writes.Add(1)
-			http.Error(w, "probe must not register", http.StatusMethodNotAllowed)
+			http.Error(w, "connection test must not register", http.StatusMethodNotAllowed)
 			return
 		}
 		reads.Add(1)
@@ -31,32 +31,27 @@ func TestIOAProbeUsesReadOnlyExtension(t *testing.T) {
 	defer server.Close()
 	stored := &types.DistributeConfig{Ioa: &types.IOAConfig{Url: server.URL, Token: "stored-token"}}
 	for range 2 {
-		checks := Check(t.Context(), &types.DistributeConfig{}, stored)
+		checks := testConnection(t.Context(), &types.DistributeConfig{}, stored)
 		if len(checks) != 1 || !checks[0].Ok {
-			t.Fatalf("probe = %v", checks)
+			t.Fatalf("connection test = %v", checks)
 		}
 	}
 	if reads.Load() != 2 || writes.Load() != 0 {
-		t.Fatalf("probe requests: reads=%d writes=%d", reads.Load(), writes.Load())
+		t.Fatalf("connection requests: reads=%d writes=%d", reads.Load(), writes.Load())
 	}
 }
 
-func TestProbeIOASuccess(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestConnectionSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/spaces" {
 			http.NotFound(w, r)
 			return
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "1", "name": "default", "nodes": []any{}}})
 	}))
-	defer srv.Close()
-
-	resp := Check(context.Background(), &types.DistributeConfig{Ioa: &types.IOAConfig{Url: srv.URL, Token: "t"}}, nil)
-	c := resp[0]
-	if !c.Ok {
-		t.Fatalf("expected ioa ok, got %+v", resp)
-	}
-	if !strings.Contains(c.Detail, "1 space") {
-		t.Fatalf("expected space count in detail, got %q", c.Detail)
+	defer server.Close()
+	checks := testConnection(context.Background(), &types.DistributeConfig{Ioa: &types.IOAConfig{Url: server.URL, Token: "t"}}, nil)
+	if !checks[0].Ok || !strings.Contains(checks[0].Detail, "1 space") {
+		t.Fatalf("connection test = %+v", checks)
 	}
 }

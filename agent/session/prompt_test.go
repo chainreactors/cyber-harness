@@ -137,7 +137,7 @@ func TestBuildSystemPromptLoadsSkillBody(t *testing.T) {
 	}
 }
 
-func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
+func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		skills []string

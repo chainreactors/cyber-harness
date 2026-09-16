@@ -3,7 +3,6 @@ package server
 import (
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
 	"net/url"
 )
 
@@ -31,9 +30,4 @@ func Section() cfg.Section {
 		}
 		return nil
 	}}
-}
-
-func Declare(resources *resource.Registry) error {
-	_, err := resource.Add[cfg.Section](resources, Section())
-	return err
 }

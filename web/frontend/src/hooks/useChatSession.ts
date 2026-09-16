@@ -24,7 +24,7 @@ import {
   parseRoute,
   setSessionRoute,
   type RouteMode,
-} from '../lib/scan-route'
+} from '../lib/route'
 
 // safeUUID() only exists in secure contexts (HTTPS or localhost).
 // When the UI is served over plain HTTP on a LAN/public IP it is undefined,
@@ -723,15 +723,17 @@ export function useChatSession() {
       const route = parseRoute(window.location.pathname)
       if (route.kind === 'session') {
         void activateSession(route.id, 'none')
-      } else if (route.kind === 'scan') {
-        // This hook owns session routes; the scan deck (and its routes) are gone.
         return
-      } else if (isRootPath(window.location.pathname)) {
-        activationRef.current++
-        closeSubscription()
-        resetSessionState()
-        setActiveSessionID(null)
       }
+      // Any other path is a retired route (for example a /scans/<id> bookmark).
+      // Nothing renders it, so show the session list and normalize the URL.
+      if (!isRootPath(window.location.pathname)) {
+        window.history.replaceState({}, '', '/')
+      }
+      activationRef.current++
+      closeSubscription()
+      resetSessionState()
+      setActiveSessionID(null)
     }
     applyRoute()
     window.addEventListener('popstate', applyRoute)

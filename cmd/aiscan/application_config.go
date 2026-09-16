@@ -10,7 +10,6 @@ import (
 	app "github.com/chainreactors/cyber/pkg/app"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
-	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
@@ -33,45 +32,6 @@ type applicationToolConfig struct {
 	OptionalTools     []string
 	MitmCapture       *bool
 	TrafficStorage    cfg.TrafficOptions
-}
-
-func applicationConfigFromDistribute(dc *types.DistributeConfig, providerMode profilepkg.ProviderMode, logger telemetry.Logger) applicationConfig {
-	return applicationConfig{
-		DataDir: cfg.ResolveDataDir(""),
-		Provider: provider.StartupConfig{
-			Mode: providerMode, Config: app.ProviderConfigFromProto(dc.GetLlm()),
-			Fallbacks: app.FallbackProviderConfigsFromProto(dc.GetLlm()),
-		},
-		Scanner: scannerext.Config{
-			Resources: resources.Options{
-				CyberhubURL: dc.GetCyberhub().GetUrl(), APIKey: dc.GetCyberhub().GetKey(),
-				Mode: dc.GetCyberhub().GetMode(), Proxy: dc.GetCyberhub().GetProxy(),
-			},
-			Recon: engine.ReconOptions{
-				FofaKey: dc.GetRecon().GetFofaKey(), HunterAPIKey: dc.GetRecon().GetHunterApiKey(),
-				IngressProxy: dc.GetRecon().GetProxy(), Limit: int(dc.GetRecon().GetLimit()),
-			},
-		},
-		Tools: applicationToolConfig{
-			TavilyKeys:    dc.GetSearch().GetTavilyKeys(),
-			OptionalTools: append([]string(nil), dc.GetAgent().GetTools()...),
-		},
-		Logger: logger,
-	}
-}
-
-func mergeApplicationOptionExtras(config applicationConfig, option *cfg.Option) applicationConfig {
-	if option == nil {
-		return config
-	}
-	config.DataDir = cfg.ResolveDataDir(option.DataDir)
-	config.Resolved = option.Resolved
-	config.Scanner.Recon.Credentials = cloneApplicationStrings(option.UncoverCredentials)
-	config.Tools.PlaywrightSession = option.PlaywrightSession
-	config.Tools.MitmCapture = cloneApplicationBool(option.Mitm)
-	config.Tools.TrafficStorage = option.TrafficOptions
-	config.CLISkillPaths = applicationSkillPaths(option)
-	return config
 }
 
 func applicationConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, logger telemetry.Logger) applicationConfig {

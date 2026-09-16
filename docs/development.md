@@ -28,21 +28,27 @@ flag、section key 等由各领域校验；不要再增加 Plugin ID、owner tok
 资源类型定义只在 Profile Load 阶段开放；完整 Load 后冻结。已有 Point 可继续接受运行时
 热增删。定义者必须排在贡献者前面，较早 Scope 无法反向使用较晚定义。
 
-## Config、Flag 与 Probe
+## Config、CLI 与连接测试
 
-这些是解析前资源，不需要 Extension 生命周期：
+这些是解析前 Resource，不需要 Extension 生命周期：
 
 ```go
 resources := resource.New()
 sections := config.NewSections()
+resource.Define[cli.Contribution](resources, cliRegistry)
 resource.Define[config.Section](resources, sections)
+resource.Define[config.Connection](resources, sections.ConnectionPoint())
 plugin.Declare(resources)
 resources.Freeze()
 sections.Seal()
+cliRegistry.Seal()
 ```
 
-CLI 使用 `cli.Contribution`，连接测试使用 `probe.Definition`。贡献在 Seal 前可撤销；CLI 按
-注册顺序物化，因此后面的插件可以扩展前面声明的命令。不要恢复 settings Declaration DTO。
+扩展在自己的包中提供 `Declare` 初始化入口，内部直接 `resource.Add` 自己拥有的
+`cli.Contribution`、`config.Section` 和可选 `config.Connection`。Declare 不调用 `Define`，不返回
+聚合 DTO，也不建立 declaration 子包或第二套插件接口；没有解析前资源的扩展不需要空 Declare。
+贡献在 Seal 前可撤销；CLI 按注册顺序物化，因此后面的扩展可以扩展前面声明的命令。连接测试
+属于对应配置扩展，不要恢复独立 Probe Registry、Catalog 或 settings Declaration DTO。
 
 ## 依赖与生命周期
 
