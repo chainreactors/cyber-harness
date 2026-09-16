@@ -567,8 +567,11 @@ jobs:
       - name: Repeat connection shutdown regressions
         run: go test -race -count=100 -timeout 2m ./pkg/web
 
+  # Deliberately not gated on harness-gate: harness-live is skipped on
+  # pull_request, and a skipped job skips every transitive dependent, which
+  # would make this build matrix unreachable.
   release-verify:
-    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e, harness-gate]
+    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
     uses: ./.github/workflows/release-build.yml
     with:
       tag: v0.0.0-ci.${{ github.run_id }}
