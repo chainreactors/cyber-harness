@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -106,9 +107,22 @@ if (frontendBuild.status !== 0) {
   process.exit(frontendBuild.status ?? 1)
 }
 
+// The full edition's tags come from editions.env: `full` gates web_full.go,
+// which imports the cstx extension, so a build tagged `full` alone cannot link.
+const editions = new Map()
+for (const line of readFileSync(join(root, 'editions.env'), 'utf8').split('\n')) {
+  const entry = line.trim()
+  if (!entry || entry.startsWith('#')) continue
+  const separator = entry.indexOf('=')
+  if (separator < 0) continue
+  editions.set(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim())
+}
+const buildTags = editions.get('FULL_CAPS_TAGS')
+if (!buildTags) throw new Error('editions.env does not declare FULL_CAPS_TAGS')
+
 const build = spawnSync('go', [
   'build',
-  '-tags', 'full',
+  '-tags', buildTags,
   '-ldflags', '-X github.com/chainreactors/cyber/core/config.Version=1.0.0-rc1',
   '-o', binary,
   './cmd/aiscan',
