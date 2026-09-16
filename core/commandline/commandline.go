@@ -1,7 +1,10 @@
 // Package commandline parses and formats command text without executing it.
 package commandline
 
-import ("fmt"; "strings")
+import (
+	"fmt"
+	"strings"
+)
 
 func SplitCommandLine(input string) ([]string, error) {
 	lines := strings.Split(input, "\n")
@@ -77,8 +80,8 @@ func JoinCommandLine(name string, args []string) string {
 }
 
 func quoteCommandArg(arg string) string {
-	if arg != "" && !strings.ContainsAny(arg, " \\t\\r\\n\\\"'\\\\|;&<>") {
+	if arg != "" && !strings.ContainsAny(arg, " \t\r\n\"'\\|;&<>") {
 		return arg
 	}
-	return "'" + strings.ReplaceAll(arg, "'", "'\\\\''") + "'"
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 }
