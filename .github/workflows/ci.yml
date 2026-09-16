@@ -88,7 +88,7 @@ jobs:
       - name: Build the minimal agent
         run: |
           CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
-          if go list -deps ./cmd/agent | grep -Eq '/(scanner|search|proxy|ioa|browser|record|web)(/|$)'; then
+          if go list -deps ./cmd/agent | grep -Eq '^github\.com/chainreactors/cyber/(.*/)?(scanner|search|proxy|ioa|browser|record|web)(/|$)'; then
             echo "::error::cmd/agent reaches a product feature outside the minimal agent graph"
             exit 1
           fi
