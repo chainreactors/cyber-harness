@@ -9,44 +9,82 @@ Capability Catalog、实例声明 DTO 或类型化 ID 层级。
 ```mermaid
 flowchart TB
     Root["Composition Root"]
+    Profile["Profile"]
     Set["Set"]
     Extension["Extension"]
-    Capability["Tool / Domain Capability"]
     Scope["Scope"]
-    Registry["Registry"]
-    Point["Point"]
-    Contribution["Contribution"]
+    ResourceRegistry["Resource Registry"]
+    Point["Point[T] / Domain Registry"]
+    Resource["Resource T<br/>Tool / Command / Skill / Binding"]
     Handle["Handle"]
+    Consumer["Consumer"]
 
-    Root -->|constructs dependencies| Extension
-    Root -->|creates with ordered Extensions| Set
+    Root -->|constructs| Profile
+    Root -->|constructs and injects dependencies| Extension
+    Profile -->|owns lifecycle| Set
+    Profile -->|publishes stable domain views| Consumer
     Set -->|owns ordered members| Extension
-    Set -->|owns| Registry
+    Set -->|owns one shared| ResourceRegistry
     Set -->|creates one per Extension| Scope
     Extension -->|uses during Load| Scope
-    Scope -->|holds a scoped view| Registry
+    Scope -->|holds a scoped view| ResourceRegistry
 
-    Extension -->|defines through Scope| Point
-    Extension -->|wraps and owns| Capability
-    Capability -->|published as| Contribution
-    Registry -->|indexes by Go type| Point
-    Contribution -->|routed by Registry| Point
-    Registry -->|returns| Handle
+    Extension -->|defines Point[T] through Scope| ResourceRegistry
+    Extension -->|owns or creates| Resource
+    Resource -->|Add[T] through Scope| ResourceRegistry
+    ResourceRegistry -->|routes by Go type| Point
+    Point -->|accepts and publishes| Resource
+    Point -->|returns| Handle
     Scope -->|owns| Handle
+    Consumer -->|uses domain API| Point
 ```
 
-`Tool / Domain Capability` 是领域概念，不是新的通用 `Capability` 接口。Tool、Command、Skill、
-Runtime 等业务对象保持独立、可直接使用，并构成真正对外的能力面。`pkg/exts` 中的 Extension
-只是 harness adapter：持有需要生命周期管理的对象，在 Load 时将能力发布为 Contribution，
-并在关闭时撤销注册、排空工作和释放所有权。业务代码不以 Extension 作为能力接口。
+这不是一条 Profile、Extension、Scope、Capability、Contribution、Registry 逐层包装的链。
+系统由产品边界、生命周期和 typed resource 三组关系组成：
 
-`Set` 按顺序 Load `Extension`；全部成功后冻结新的 `Point` 定义并发布 Active。关闭时按相反
-顺序处理 `Extension`：先停止对应 `Scope`，再逆序关闭它拥有的 `Handle`，最后关闭 Extension
-自身持有的后台工作和外部资源。构造参数表达直接业务依赖，`Registry` 只连接动态资源。
+- `Profile` 是宿主可加载、关闭和替换的完整产品实例。它拥有 `Set`，并只在整个 Set Active 后
+  向 runner、node、transport 和 Web 发布 App、Runtime、Namespace、Console 等稳定领域视图。
+- `Set` 是生命周期控制器。它拥有一个有序 Extension 列表、一个共享 Resource Registry，并为
+  每个 Extension 创建一个 Scope。
+- `Extension` 是业务对象到 harness 生命周期的 adapter。它通过构造参数接收直接依赖，在
+  `Load` 中初始化所拥有的对象、定义 Point 或注册 Resource，并在需要时负责关闭后台工作和
+  外部资源。业务消费者不以 Extension 作为能力接口。
+- `Scope` 是单个 Extension 的生命周期账本。它提供初始化和存活 context，并拥有该 Extension
+  产生的所有 Handle；它不是 Service Locator，也不向插件暴露任意服务查询。
+- `Resource Registry` 仅用 Go 类型把 Resource 路由到唯一的 `Point[T]`。Tool Registry、Command
+  Registry、Skill Store、Namespace Catalog 等 Domain Registry 才负责具体资源的校验、重复
+  规则、发布、调用准入和排空。
+- `Handle` 表示一次 Point 定义或一次原子资源注册，可由 Scope 在回滚和关闭时精确撤销。
+
+`Capability` 不是框架实体或通用接口，只是 Tool、Command、Skill、Runtime 等领域对象对外
+能力的描述。`Contribution` 也不是通用容器或 DTO；`Add[T]` 是贡献动作，传入的 `T` 就是
+Resource，返回的 Handle 表示这次注册。`cli.Contribution` 只是 CLI 领域自己的具体资源类型。
+
+某些对象可以同时承担多个角色，例如 Tool Registry 既是定义 `tool.Tool` Point 的 Extension，
+也是 `Point[tool.Tool]` 和 Tool Executor。这是同一对象实现多个必要角色，不代表框架增加了一层。
+
+`Set` 按顺序 Load `Extension`；全部成功后冻结新的 Point 定义并发布 Active。关闭时按相反顺序
+处理 Extension：先停止对应 Scope，再逆序关闭它拥有的 Handle，最后关闭 Extension 自身持有的
+后台工作和外部资源。构造参数表达直接业务依赖，Resource Registry 只连接动态资源。
 
 这张图只描述 runtime Extension model。Config、CLI 和 Probe 的 declaration registry 复用
 `core/resource`，但发生在参数解析前，不由 `Set`、`Scope` 或 runtime lifecycle 管理，因此不属于
 这张核心关系图。
+
+## Architecture Invariants
+
+- 一个 Profile 恰好拥有一个产品 Set。Profile 不把 Extension、Scope 或 Resource Registry 暴露给宿主。
+- 一个进程可以有多个互相独立的 Set，例如可热替换的 Profile、HTTP listener 附属资源和一次性
+  命令各自具有不同生命周期。它们必须由宿主或用例入口并列持有；Extension、App 和领域对象不得
+  在 Load 内创建或隐藏子 Set。
+- Extension 可以同时实现 Point，或者返回一个不含 Load/Close 的窄领域视图；消费者不得把
+  `extension.Extension` 当作业务能力接口，也不得取得资源所有权。
+- 稳定、必需的业务依赖通过构造参数注入。只有需要被其他插件动态增加、撤销或枚举的对象才进入
+  Resource Registry；Registry 不是通用依赖注入容器。
+- 所有 runtime Point 定义和资源注册都经由 Scope 的 `extension.Define/Add`，由 Scope 持有 Handle。
+  Extension 不自行维护另一套 owner ID、注销表或依赖图。
+- 每种 Resource 使用一个具体 Go 类型和一个 Point。领域名称和重复规则属于该 Point，不再建立
+  Resource ID、Capability Catalog 或声明 DTO 作为第二事实源。
 
 ## Typed Resource
 
@@ -61,14 +99,15 @@ resource.Define[tool.Tool](resources, tools)
 resource.Add[tool.Tool](resources, read, write, glob)
 ```
 
-`resource.Registry` 内部用 `reflect.TypeFor[T]()` 定位 Point，因此资源类型没有字符串名称，
+Resource Registry（`resource.Registry`）内部用 `reflect.TypeFor[T]()` 定位 Point，因此资源类型没有字符串名称，
 也不存在需要同步维护的 Resource ID。资源自身的领域标识仍由领域类型负责，例如 Tool 的
 名称、CLI flag、配置 section key 和 protobuf namespace full name；这些不是插件 ID。
 
 定义资源类型也是动态组合的一部分。只有已经定义的类型可以接收贡献，完整 Profile 加载后
-冻结新类型定义，但已有 Point 仍可接收和撤销运行时贡献。`Handle.Close` 撤销一个原子批次；
-Tool、Command、Skill、Console、Namespace Binding 和 Web Route 均遵循此语义。Point
-自己负责重复规则、快照、调用准入和排空，通用 Registry 不猜测领域行为。
+只冻结新的类型定义。已有 Point 是否继续接受 Add、Handle 关闭后如何撤销，以及消费者何时看到
+变化，全部属于领域语义：Tool 和 Command 是实时目录，Namespace Binding 对后续连接生效，
+Console Bindings 与 Web Route 由宿主物化为固定快照。通用 Resource Registry 不猜测重复规则、
+快照、调用准入或排空行为，也不承诺所有 Resource 都支持运行时热更新。
 
 资源定义顺序也是可见性边界：较早的 Extension 不能保留 Scope 后向较晚才定义的资源类型
 注册。这样无需依赖图，也能阻止隐式反向依赖。
@@ -82,11 +121,12 @@ Config 与进程 CLI 在解析前组合，仍使用同一套 typed resource 机�
 - `probe.Definition` 由 `probe.Registry` 接收。
 
 插件的 `Declare(*resource.Registry)` 直接贡献上述类型，不再汇总成 settings DTO，也不需要
-伪造一个生命周期 Extension。声明批次在 Seal 前可以撤销；Seal 后形成一次解析使用的不可变
-目录。CLI contribution 按注册顺序物化，因此一个插件可以扩展较早插件声明的命令。
+伪造一个生命周期 Extension。底层 Add 仍返回 Handle，但当前 Declare API 是一次性 builder：
+成功后 Seal，失败时丢弃整个 builder，不承诺逐插件卸载。CLI contribution 按注册顺序物化，
+因此一个插件可以扩展较早插件声明的命令。
 
-运行时资源与声明期资源的差异只在领域约束：参数解析完成后不能热加 flag/config schema，
-而 Tool、Command、Skill 等运行资源在 Point 存活期间允许热增删。
+运行时资源与声明期资源的差异只在生命周期和领域约束：参数解析完成后不能增加 flag/config
+schema；运行时 Point 可以按自己的协议选择实时增删、只影响新消费者，或在首次物化后拒绝贡献。
 
 ## Extension 生命周期
 
@@ -160,9 +200,11 @@ Command 等资源表达，避免展示标签与真实可用功能产生两个事
   Provider、Agent loop、Session 和 TUI；依赖测试禁止引入上述产品功能。
 - `pkg/runner`：保留共享的 aiscan 运行模式逻辑，不是可执行命令，也不改名。
 
-两种可执行产品都只有一个线性 Set。App 不选择插件、不创建子 Set，也不关闭借用的资源。
-新增插件时，在组合根中构造依赖并把 Extension 放到正确顺序；新增资源种类时先定义具体 Go
-类型和领域 Point，再由基础 Extension 定义、后续 Extension 贡献。
+每个 Profile 只有一个线性产品 Set。宿主可以为不同生命周期建立并列 Set，例如 Web listener
+附属资源、CSTX importer 或一次性 IOA client；这些 Set 不嵌套在 Profile 中，也不共享 Scope
+或 Resource Registry。App 和 Extension 不选择插件、不创建子 Set，也不关闭借用的资源。
+新增插件时，在组合根或明确的用例入口构造依赖并把 Extension 放到正确顺序；新增资源种类时
+先定义具体 Go 类型和领域 Point，再由基础 Extension 定义、后续 Extension 贡献。
 
 ## 事件与关闭
 
