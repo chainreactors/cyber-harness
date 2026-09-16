@@ -70,23 +70,38 @@ func buildSetting(t *testing.T, key string) string {
 // stays green. Comparing the whole set is the only thing that notices.
 //
 // Two spellings are legitimate — the edition's full tag set, and the
-// capability-only set the CI suites use, which omits the base policy tags.
+// capability-only set the CI suites use, which omits the base policy tags — and
+// either may carry the cgo RE2 bindings on top, because the suites switch that
+// backend on over every edition and it selects no edition-gating file.
 func assertEditionTags(t *testing.T, edition string) {
 	t.Helper()
 	values := readEditions(t)
 	got := sortedTags(strings.ReplaceAll(buildSetting(t, "-tags"), ",", " "))
+	re2 := sortedTags(editionValue(t, values, "RE2_CGO_TAGS"))
 
 	var declared []string
 	for _, suffix := range []string{"_TAGS", "_CAPS_TAGS"} {
 		key := edition + suffix
 		want := sortedTags(editionValue(t, values, key))
-		if slices.Equal(got, want) {
-			return
+		candidates := [][]string{want}
+		if merged := mergeTags(want, re2); !slices.Equal(merged, want) {
+			candidates = append(candidates, merged)
 		}
-		declared = append(declared, key+" = ["+strings.Join(want, " ")+"]")
+		for _, candidate := range candidates {
+			if slices.Equal(got, candidate) {
+				return
+			}
+			declared = append(declared, key+" = ["+strings.Join(candidate, " ")+"]")
+		}
 	}
 	t.Fatalf("built with tags [%s], which is not a declared %s set\n  %s",
 		strings.Join(got, " "), edition, strings.Join(declared, "\n  "))
+}
+
+func mergeTags(tags []string, extra []string) []string {
+	merged := slices.Concat(tags, extra)
+	slices.Sort(merged)
+	return slices.Compact(merged)
 }
 
 // assertEditionCGO checks the declared CGO_ENABLED for an edition that requires
