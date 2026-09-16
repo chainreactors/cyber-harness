@@ -2,16 +2,40 @@ version: 2
 
 project_name: aiscan
 
-before:
-  hooks:
-    - npm --prefix web/frontend ci
-    - npm --prefix web/frontend run build
-    - go generate ./core/resources
+# This file is the build definition for the release workflow, which drives it
+# one target at a time:
+#
+#     GOOS=<goos> GOARCH=<goarch> goreleaser build --id <id> --single-target
+#
+# `goreleaser build` exists for exactly that: ldflags, build tags and the CGO
+# switch get written down once here instead of being spelled out per profile in
+# release-build.yml. Every target keeps the toolchain it already had — an arm64
+# runner for linux/arm64, Zig plus a pinned macOS SDK for Darwin, MinGW for
+# Windows — because `--single-target` builds whatever GOOS/GOARCH say, on
+# whichever runner happens to have that toolchain.
+#
+# That also means the caller supplies the platform-specific link environment:
+# CGO_LDFLAGS pointing at the fetched RE2 SDK, and CC/CXX for Darwin. Both ride
+# in through the process environment, which GoReleaser inherits.
+#
+# Packaging and publishing are deliberately absent. release-build.yml still
+# zips README and docs together with UPX and a checksum, and go-release.yml
+# still creates the GitHub Release from the curated docs/changelog.md, so
+# `goreleaser release` is never run.
+#
+# The build tags come from editions.env, the same file the Makefile and the
+# workflows read; nothing here restates them.
+
+# Scratch space, not an output: every invocation copies the binary out with
+# `-o`. It sits under .cache/ so the `--clean` each invocation needs — a second
+# run refuses to start against a non-empty dist — cannot touch the dist/build
+# directory the workflow collects artifacts in.
+dist: .cache/goreleaser
 
 builds:
   - id: aiscan
     main: ./cmd/aiscan
-    binary: "{{ .ProjectName }}"
+    binary: aiscan
     env:
       - CGO_ENABLED=0
     goos:
@@ -23,25 +47,18 @@ builds:
       - arm64
     flags:
       - -trimpath
+      - -buildvcs=false
     tags:
-      - forceposix
-      - emptytemplates
-      - noembed
-      - osusergo
-      - netgo
+      - '{{ .Env.STANDARD_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}
 
   - id: aiscan-full
     main: ./cmd/aiscan
-    binary: "{{ .ProjectName }}-full"
+    binary: aiscan-full
     env:
-      # Full links the native libcstx runtime. The official release workflow
-      # cross-compiles Darwin with Zig and a pinned macOS SDK on Linux.
+      # The full edition links the native libcstx runtime and the static RE2
+      # SDK, both of which are cgo-only.
       - CGO_ENABLED=1
     goos:
       - linux
@@ -55,70 +72,32 @@ builds:
         goarch: arm64
     flags:
       - -trimpath
+      - -buildvcs=false
     tags:
-      - forceposix
-      - emptytemplates
-      - noembed
-      - osusergo
-      - netgo
-      - full
-      - sqlite
-      - cstx
-      - re2_cgo
-      - re2_static
+      - '{{ .Env.FULL_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
+      # External linking is what makes the Darwin cross-build able to use Zig's
+      # linker; on linux and windows cgo already links externally by default.
+      - -linkmode=external
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}
 
-upx:
-  - enabled: true
-    goos: [linux, windows]
+  # Never a release asset: built and smoke-tested so Cairn's runner keeps
+  # compiling on every platform this repository supports. It carries no tags,
+  # unlike the aiscan editions above.
+  - id: runner
+    main: ./cmd/runner
+    binary: runner
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
     goarch:
       - amd64
-
-archives:
-  - id: aiscan
-    ids: [aiscan]
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
-      - src: docs/*
-
-  - id: aiscan-full
-    ids: [aiscan-full]
-    name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
-      - src: docs/*
-
-checksum:
-  name_template: "{{ .ProjectName }}_checksums.txt"
-
-snapshot:
-  version_template: "{{ incpatch .Version }}-next"
-
-changelog:
-  sort: desc
-  filters:
-    exclude:
-      - '^MERGE'
-      - "{{ .Tag }}"
-      - "^docs"
-
-release:
-  github:
-    owner: chainreactors
-    name: cyber
-  draft: true
-  prerelease: auto
-  replace_existing_draft: true
-  replace_existing_artifacts: true
-  mode: replace
-  name_template: "{{ .Tag }}"
+      - arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}

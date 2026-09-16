@@ -68,54 +68,30 @@ jobs:
       matrix:
         include:
           - id: aiscan
-            profile: standard
+            build: aiscan
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan
-            tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
-            cgo: "0"
           - id: runner
-            profile: runner
+            build: runner
             runner: ubuntu-22.04
-            main: ./cmd/runner
-            binary: runner
-            tags: ""
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
-            cgo: "0"
           - id: aiscan-full-linux-amd64
-            profile: full
+            build: aiscan-full
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/amd64"
-            cgo: "1"
           - id: aiscan-full-linux-arm64
-            profile: full
+            build: aiscan-full
             runner: ubuntu-24.04-arm
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/arm64"
-            cgo: "1"
           - id: aiscan-full-darwin
-            profile: full
+            build: aiscan-full
             runner: ubuntu-22.04
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "darwin/amd64 darwin/arm64"
-            cgo: "1"
             cross: darwin
           - id: aiscan-full-windows-amd64
-            profile: full
+            build: aiscan-full
             runner: windows-2022
-            main: ./cmd/aiscan
-            binary: aiscan-full
-            tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "windows/amd64"
-            cgo: "1"
 
     env:
       GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
@@ -186,7 +162,7 @@ jobs:
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
       - name: Install the static RE2 SDK
-        if: matrix.cgo == '1'
+        if: matrix.build == 'aiscan-full'
         run: |
           set -euo pipefail
           # The Darwin entry cross-builds both architectures from one Linux
@@ -199,7 +175,7 @@ jobs:
           done
 
       - name: Download embedded frontend
-        if: matrix.profile == 'full'
+        if: matrix.build == 'aiscan-full'
         uses: actions/download-artifact@v7
         with:
           name: embedded-frontend
@@ -208,14 +184,24 @@ jobs:
       - name: Generate embedded resources
         run: go generate ./core/resources
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          install-only: true
+          version: v2.13.0
+
+      # .goreleaser.yml defines the compile — build tags, ldflags, the CGO
+      # switch. This loop only chooses a target and hands GoReleaser the
+      # toolchain that target needs.
       - name: Build binaries
         shell: bash
         run: |
           set -euo pipefail
+          BUILD="${{ matrix.build }}"
           TARGETS="${{ matrix.targets }}"
-          TAGS="${{ matrix.tags }}"
-          BINARY="${{ matrix.binary }}"
-          MAIN="${{ matrix.main }}"
           VERSION="${GORELEASER_CURRENT_TAG#v}"
           OUTDIR="dist/build"
           mkdir -p "${OUTDIR}"
@@ -223,39 +209,28 @@ jobs:
           for target in $TARGETS; do
             IFS='/' read -r goos goarch <<< "$target"
             suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
-            out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
+            out="${OUTDIR}/${BUILD}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
 
-            if [[ "${{ matrix.cgo }}" == "1" ]]; then
+            unset CC CXX CGO_LDFLAGS
+            if [[ "$BUILD" == "aiscan-full" ]]; then
               re2_ldflags="$(bash .github/native/sdk.sh env re2 "$goos" "$goarch")"
               export CGO_LDFLAGS="${re2_ldflags#CGO_LDFLAGS=}"
+              if [[ "$goos" == "darwin" ]]; then
+                test -n "${MACOS_SDKROOT:-}"
+                case "$goarch" in
+                  amd64) zig_target=x86_64-macos ;;
+                  arm64) zig_target=aarch64-macos ;;
+                  *) echo "unsupported Darwin architecture ${goarch}" >&2; exit 1 ;;
+                esac
+                cross_flags="-target ${zig_target} -isysroot ${MACOS_SDKROOT} -F${MACOS_SDKROOT}/System/Library/Frameworks -L${MACOS_SDKROOT}/usr/lib -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+                export CC="zig cc ${cross_flags}"
+                export CXX="zig c++ ${cross_flags}"
+              fi
             fi
 
-            link_flags="-s -w -X github.com/chainreactors/cyber/core/config.Version=${VERSION}"
-            if [[ "$goos" == "darwin" && "${{ matrix.cgo }}" == "1" ]]; then
-              test -n "${MACOS_SDKROOT:-}"
-              case "$goarch" in
-                amd64) zig_target=x86_64-macos ;;
-                arm64) zig_target=aarch64-macos ;;
-                *) echo "unsupported Darwin architecture ${goarch}" >&2; exit 1 ;;
-              esac
-              cross_flags="-target ${zig_target} -isysroot ${MACOS_SDKROOT} -F${MACOS_SDKROOT}/System/Library/Frameworks -L${MACOS_SDKROOT}/usr/lib -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-              export CC="zig cc ${cross_flags}"
-              export CXX="zig c++ ${cross_flags}"
-              link_flags="-linkmode external ${link_flags}"
-            else
-              unset CC CXX
-            fi
-
-            build_args=(-trimpath)
-            if [[ -n "$TAGS" ]]; then
-              build_args+=(-tags "$TAGS")
-            fi
-            CGO_ENABLED="${{ matrix.cgo }}" GOOS="$goos" GOARCH="$goarch" \
-              go build "${build_args[@]}" \
-              -ldflags "${link_flags}" \
-              -buildvcs=false \
-              -o "$out" "$MAIN"
+            GOOS="$goos" GOARCH="$goarch" \
+              goreleaser build --id "$BUILD" --single-target --clean --skip=validate -o "$out"
 
             if [[ "$goos" == "darwin" ]]; then
               file_info="$(file -b "$out")"
@@ -267,13 +242,12 @@ jobs:
             fi
           done
 
-          if [[ -x "${OUTDIR}/${BINARY}_linux_amd64" ]]; then
-            version_output="$("${OUTDIR}/${BINARY}_linux_amd64" --version)"
-            if [[ "${{ matrix.profile }}" == "runner" ]]; then
-              test "$version_output" = "runner v${VERSION}"
-            else
-              test "$version_output" = "aiscan v${VERSION}"
-            fi
+          if [[ -x "${OUTDIR}/${BUILD}_linux_amd64" ]]; then
+            # Only the runner names itself in --version; both aiscan editions
+            # report the product name.
+            expected="aiscan"
+            [[ "$BUILD" == "runner" ]] && expected="runner"
+            test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "${expected} v${VERSION}"
           fi
 
           echo "=== Binaries ==="
