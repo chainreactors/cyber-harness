@@ -26,10 +26,10 @@
 
 ```bash
 # 无需 LLM，一行启动扫描
-cyber scan -i 192.168.1.0/24
+aiscan scan -i 192.168.1.0/24
 
 # 有 LLM，一行启动 agent
-cyber agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
+aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
   -p "扫描目标并检查高风险漏洞" -i 192.168.1.0/24
 ```
 
@@ -41,45 +41,45 @@ cyber agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model dee
 
 | 版本 | 说明 |
 | --- | --- |
-| **cyber** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **cyber-full** | 完整版 — 额外包含 Web、playwright、passive 和 katana |
+| **aiscan** | 标准版 — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
+| **aiscan-full** | 完整版 — 额外包含 Web、playwright、passive 和 katana |
 
 | 系统 | 架构 | 标准版 | 完整版 |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `cyber_linux_<arch>.zip` | `cyber-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `cyber_darwin_<arch>.zip` | `cyber-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `cyber_windows_<arch>.zip` | `cyber-full_windows_amd64.zip` |
+| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_linux_amd64.zip
-unzip cyber_linux_amd64.zip
-chmod +x cyber && sudo mv cyber /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_linux_amd64.zip
+unzip aiscan_linux_amd64.zip
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_darwin_arm64.zip
-unzip cyber_darwin_arm64.zip
-chmod +x cyber && sudo mv cyber /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_darwin_arm64.zip
+unzip aiscan_darwin_arm64.zip
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/cyber_windows_amd64.zip" -OutFile cyber.zip
-Expand-Archive .\cyber.zip -DestinationPath .
-.\cyber.exe --version
+Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
+Expand-Archive .\aiscan.zip -DestinationPath .
+.\aiscan.exe --version
 ```
 
 ### Web 控制台（完整版）
 
-Web 控制台包含在 `cyber-full` 中，默认同时启动浏览器界面和一个内嵌本地
+Web 控制台包含在 `aiscan-full` 中，默认同时启动浏览器界面和一个内嵌本地
 Agent。启动后访问 `http://127.0.0.1:8080`，并输入终端中显示的 access key：
 
 ```bash
-cyber-full web
+aiscan-full web
 ```
 
 监听局域网地址并使用固定 access key：
 
 ```bash
-cyber-full web --addr 0.0.0.0:8080 --token change-me
+aiscan-full web --addr 0.0.0.0:8080 --token change-me
 ```
 
 也可以让 Web 只作为 Hub 运行，不启动内嵌 Agent，再从本机或其他主机接入
@@ -87,10 +87,10 @@ cyber-full web --addr 0.0.0.0:8080 --token change-me
 
 ```bash
 # Hub
-cyber-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
 
 # 远程执行节点
-cyber agent --server-url http://change-me@server.example:8080 --node-name worker-01
+aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
 ```
 
 Web 默认使用 `cyber-web.db` 保存会话、扫描、资产、发现和配置；可以通过
@@ -106,7 +106,7 @@ make full                                                  # 前端 + 完整版
 ```
 
 独立 agent 可执行文件不再作为维护或发布目标。参考 wiring 已迁移到
-唯一的 Cyber 产品入口是 `cmd/cyber`。执行
+唯一的 Cyber 产品入口是 `cmd/aiscan`。执行
 `make full` 需要 Node.js/npm 和可用的 CGO 工具链；它会先构建前端，再将最新的
 `web/static` 嵌入 full 二进制。默认 full 构建不包含原生 `record` 工具；SDK 和工具
 开发者可通过 `make record` 显式构建，详见 [record 文档](docs/record.md)。
@@ -182,33 +182,33 @@ libstdc++、libgcc 或 winpthread DLL。
 ### Scan 模式
 
 ```bash
-cyber scan -i 192.168.1.0/24                                    # 快速扫描
-cyber scan -i 192.168.1.0/24 --mode full                        # 完整扫描
-cyber scan -i http://target.example --verify=high --sniper       # AI 增强
-cyber scan -i http://target.example --mode full --deep --report  # 完整 + 深度 + 报告
+aiscan scan -i 192.168.1.0/24                                    # 快速扫描
+aiscan scan -i 192.168.1.0/24 --mode full                        # 完整扫描
+aiscan scan -i http://target.example --verify=high --sniper       # AI 增强
+aiscan scan -i http://target.example --mode full --deep --report  # 完整 + 深度 + 报告
 ```
 
 ### Agent 模式
 
 ```bash
 # 一次性任务
-cyber agent -p "扫描目标，发现所有 Web 服务并检查高风险漏洞" -i 192.168.1.0/24
+aiscan agent -p "扫描目标，发现所有 Web 服务并检查高风险漏洞" -i 192.168.1.0/24
 
 # 带 Goal Evaluation
-cyber agent -p "全面扫描目标" -i http://target.example -e "发现所有开放端口并输出服务指纹"
+aiscan agent -p "全面扫描目标" -i http://target.example -e "发现所有开放端口并输出服务指纹"
 
 # 交互式 REPL
-cyber agent
+aiscan agent
 ```
 
 ### IOA 模式
 
 ```bash
 # 启动 IOA Server
-cyber ioa serve --ioa-url http://0.0.0.0:8765
+aiscan ioa serve --ioa-url http://0.0.0.0:8765
 
 # 启动 IOA worker
-cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
+aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
   -p "scan assigned targets and report findings"
 ```
 
@@ -219,7 +219,7 @@ cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI 参数
-cyber agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
+aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
 ```
 
 配置文件 `cyber.yaml`：

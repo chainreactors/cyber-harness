@@ -47,4 +47,4 @@ and collaboration skill assets. The server owns its independent CLI/config and
 browser authentication bridge. Those adapters are inert contributions, not extra
 lifecycle extensions. Generic hosts accept config Sections, CLI Actions, Console
 Bindings, probe callbacks and HTTP Routes; none imports an IOA runtime. Product
-compatibility mapping stays in `cmd/cyber`. See [IOA composition](../../docs/ioa.md).
+compatibility mapping stays in `cmd/aiscan`. See [IOA composition](../../docs/ioa.md).

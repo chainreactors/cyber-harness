@@ -60,7 +60,7 @@ Settings UI 保存
 
 **并发模型**: hub 的 `saveMu` 防止多个配置事务交错；本地扫描通过 managed App 租约继续使用旧运行时，不会被保存设置中断。agent 侧 `Agent.SetProvider()` / `SetMaxTurns()` 在 `mu.Lock` 下修改 `Cfg`，`Run`/`Continue` 开始时 `configSnapshot()` 在锁下拷贝，已在飞的 run 不受影响。
 
-**文件**: `pkg/web/service/service.go`, `cmd/cyber/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
+**文件**: `pkg/web/service/service.go`, `cmd/aiscan/web_full.go`, `pkg/web/service/agents_mux.go`, `pkg/node/agent.go`, `pkg/exts/agent/runtime.go`, `agent/agent.go`
 
 ---
 
@@ -143,9 +143,9 @@ chat endpoint 返回 404 时包裹 actionable 建议（如"设置 `llm.provider=
 
 ## 8. 内嵌 Agent (Embedded Agent)
 
-`cyber web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `cyber agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`cyber web --no-agent` 只启动 web 控制台。
+`aiscan web` 默认在同一进程内同时启动 hub 和一个 agent：agent 通过 loopback WebSocket 以标准 node 身份注册进 AgentPool（hello → agent_accepted → 配置推送），与外部 `aiscan agent` 节点没有任何区别——pool 里不存在 "local"/"in-process" 特殊种类。`aiscan web --no-agent` 只启动 web 控制台。
 
-**文件**: `cmd/cyber/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
+**文件**: `cmd/aiscan/web_full.go`（内嵌 agent 启动）, `pkg/node/agent.go`（node 侧入口）
 
 ---
 

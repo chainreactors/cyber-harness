@@ -90,7 +90,7 @@ func cyber() {
 	option := parsed.Option
 	explicitOption := option
 	if option.Version {
-		fmt.Printf("cyber v%s\n", cfg.Version)
+		fmt.Printf("aiscan v%s\n", cfg.Version)
 		return
 	}
 	if option.InitConfig {
@@ -424,7 +424,7 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser.SubcommandsOptional = true
 	parser.Usage = fmt.Sprintf(`[OPTIONS] <command>
 
-cyber - AI-assisted security scanner
+aiscan - AI-assisted security scanner
 
 Commands:
   scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
@@ -436,11 +436,11 @@ Advanced scanners:
 %s
 
 Examples:
-  cyber scan -i 127.0.0.1
-  cyber scan -i http://target.com --verify=high --sniper --model gpt-4o
-  cyber agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
-  cyber web --addr 0.0.0.0:8080
-  cyber serve --token mykey --addr 0.0.0.0:8765`, strings.Join(edition.Catalog().UsageLines(), "\n"))
+  aiscan scan -i 127.0.0.1
+  aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
+  aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
+  aiscan web --addr 0.0.0.0:8080
+  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(edition.Catalog().UsageLines(), "\n"))
 	return parser
 }
 
@@ -776,8 +776,8 @@ func writeHelp(parser *goflags.Parser, writer io.Writer) {
 
 	// Parser.Usage contains the long root command catalog. go-flags reuses it
 	// verbatim when rendering subcommand help, which pushes the active command's
-	// flags below the fold. Keep the detailed catalog for `cyber -h`, but use a
-	// compact root prefix for `cyber <command> -h`.
+	// flags below the fold. Keep the detailed catalog for `aiscan -h`, but use a
+	// compact root prefix for `aiscan <command> -h`.
 	rootUsage := parser.Usage
 	parser.Usage = "[GLOBAL OPTIONS]"
 	defer func() { parser.Usage = rootUsage }()

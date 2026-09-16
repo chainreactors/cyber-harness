@@ -6,10 +6,10 @@ Profile。系统采用分层 Plugin/Extension 组合：Profile 选择 Provider�
 
 ## 组合与关闭
 
-`cmd/cyber` 与 `cmd/runner` 为每个独立运行时声明固定的 Extension 图和唯一的
+`cmd/aiscan` 与 `cmd/runner` 为每个独立运行时声明固定的 Extension 图和唯一的
 `core/extension.Set`。Web 的 IOA Server 属于宿主图，寿命独立于可替换的应用 Profile。可复用 host 通过 `pkg/profile.Application` 访问命令入口的具体组合；
 具体 Profile 直接持有 Set，不另设 Assembly 包装。
-`cyberProfile` 位于 `cmd/cyber`，显式发布 App、Runtime 与 Proxy 能力。Profile 先解析
+`cyberProfile` 位于 `cmd/aiscan`，显式发布 App、Runtime 与 Proxy 能力。Profile 先解析
 Service Provider/Consumer，再构造唯一的 `extension.Set`；`DependsOn` 只表达资源寿命。
 共享包不包含任何具体产品 Profile。
 
@@ -149,7 +149,7 @@ App/Profile 的资源。
 | `agent/` | Agent loop |
 | `pkg/app` | 产品状态与访问面 |
 | `pkg/profile` | 产品 Application/Factory/Request 契约 |
-| `cmd/cyber`、`cmd/runner` | 各可执行产品的具体 Profile 与唯一组合根 |
+| `cmd/aiscan`、`cmd/runner` | 各可执行产品的具体 Profile 与唯一组合根 |
 | `pkg/exts/agent` | Agent Loop 生命周期适配 |
 | `pkg/exts/session` | Session service 生命周期适配 |
 

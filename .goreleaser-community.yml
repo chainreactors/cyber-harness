@@ -1,14 +1,14 @@
 version: 2
 
-project_name: cyber-community
+project_name: aiscan-community
 
 before:
   hooks: []
 
 builds:
-  - id: cyber
-    main: ./cmd/cyber
-    binary: "cyber"
+  - id: aiscan
+    main: ./cmd/aiscan
+    binary: "aiscan"
     env:
       - CGO_ENABLED=0
     goos:
@@ -46,9 +46,9 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: cyber-agent
+  - id: aiscan-agent
     main: ./cmd/agent
-    binary: "cyber-agent"
+    binary: "aiscan-agent"
     env:
       - CGO_ENABLED=0
     goos:
@@ -93,16 +93,16 @@ upx:
       - amd64
 
 archives:
-  - id: cyber
-    builds: [cyber]
+  - id: aiscan
+    builds: [aiscan]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
     files:
       - none*
 
-  - id: cyber-agent
-    builds: [cyber-agent]
+  - id: aiscan-agent
+    builds: [aiscan-agent]
     name_template: "{{ .ProjectName }}-agent_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip

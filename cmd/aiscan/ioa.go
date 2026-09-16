@@ -86,7 +86,7 @@ func runIOAServe(ctx context.Context, option serverext.Options, logger telemetry
 		return err
 	}
 	defer listener.Close()
-	logger.Importantf("cyber server store=memory")
-	logger.Infof("  agent IOA connect: cyber agent --transport local --ioa-url http://%s@%s", server.Server().AccessKey(), listener.Addr())
+	logger.Importantf("aiscan server store=memory")
+	logger.Infof("  agent IOA connect: aiscan agent --transport local --ioa-url http://%s@%s", server.Server().AccessKey(), listener.Addr())
 	return serveManagedHTTP(ctx, &http.Server{Handler: server.Server().Handler()}, listener, set.Close)
 }

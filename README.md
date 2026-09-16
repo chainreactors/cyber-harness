@@ -26,10 +26,10 @@
 
 ```bash
 # No LLM needed — one-line scan
-cyber scan -i 192.168.1.0/24
+aiscan scan -i 192.168.1.0/24
 
 # With LLM — one-line agent
-cyber agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
+aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
   -p "scan targets and check for high-risk vulnerabilities" -i 192.168.1.0/24
 ```
 
@@ -41,46 +41,46 @@ From [GitHub Releases](https://github.com/chainreactors/cyber/releases/latest):
 
 | Edition | Description |
 | --- | --- |
-| **cyber** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **cyber-full** | Full — adds Web, playwright, passive recon, and katana |
+| **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
+| **aiscan-full** | Full — adds Web, playwright, passive recon, and katana |
 
 | OS | Arch | Standard | Full |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `cyber_linux_<arch>.zip` | `cyber-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `cyber_darwin_<arch>.zip` | `cyber-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `cyber_windows_<arch>.zip` | `cyber-full_windows_amd64.zip` |
+| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
+| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
+| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
 
 ```bash
 # Linux
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_linux_amd64.zip
-unzip cyber_linux_amd64.zip
-chmod +x cyber && sudo mv cyber /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_linux_amd64.zip
+unzip aiscan_linux_amd64.zip
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO https://github.com/chainreactors/cyber/releases/latest/download/cyber_darwin_arm64.zip
-unzip cyber_darwin_arm64.zip
-chmod +x cyber && sudo mv cyber /usr/local/bin/
+curl -LO https://github.com/chainreactors/cyber/releases/latest/download/aiscan_darwin_arm64.zip
+unzip aiscan_darwin_arm64.zip
+chmod +x aiscan && sudo mv aiscan /usr/local/bin/
 
 # Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/cyber_windows_amd64.zip" -OutFile cyber.zip
-Expand-Archive .\cyber.zip -DestinationPath .
-.\cyber.exe --version
+Invoke-WebRequest "https://github.com/chainreactors/cyber/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
+Expand-Archive .\aiscan.zip -DestinationPath .
+.\aiscan.exe --version
 ```
 
 ### Web Console (Full Edition)
 
-The Web console is included in `cyber-full`. It starts the browser UI and an
+The Web console is included in `aiscan-full`. It starts the browser UI and an
 embedded local agent by default. Open `http://127.0.0.1:8080` and enter the
 access key printed at startup:
 
 ```bash
-cyber-full web
+aiscan-full web
 ```
 
 To listen on the network with a fixed access key:
 
 ```bash
-cyber-full web --addr 0.0.0.0:8080 --token change-me
+aiscan-full web --addr 0.0.0.0:8080 --token change-me
 ```
 
 Run the Web console as a hub without an embedded agent, then connect agents
@@ -88,10 +88,10 @@ from this or other hosts:
 
 ```bash
 # Hub
-cyber-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
 
 # Remote node
-cyber agent --server-url http://change-me@server.example:8080 --node-name worker-01
+aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
 ```
 
 The Web console stores sessions, scans, assets, findings, and configuration in
@@ -108,7 +108,7 @@ make full                                                  # frontend + full edi
 ```
 
 The standalone agent executable is no longer a maintained build or release
-target. The single Cyber product entry is `cmd/cyber`. `make full` requires Node.js/npm and a
+target. The single Cyber product entry is `cmd/aiscan`. `make full` requires Node.js/npm and a
 working CGO toolchain; it builds the frontend first so the latest `web/static`
 assets are embedded into the binary. The native `record` tool is not included
 in the default full build; SDK and tool developers can build it explicitly with
@@ -185,33 +185,33 @@ RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
 ### Scan Mode
 
 ```bash
-cyber scan -i 192.168.1.0/24                                    # quick scan
-cyber scan -i 192.168.1.0/24 --mode full                        # full scan
-cyber scan -i http://target.example --verify=high --sniper       # AI-enhanced
-cyber scan -i http://target.example --mode full --deep --report  # full + deep + report
+aiscan scan -i 192.168.1.0/24                                    # quick scan
+aiscan scan -i 192.168.1.0/24 --mode full                        # full scan
+aiscan scan -i http://target.example --verify=high --sniper       # AI-enhanced
+aiscan scan -i http://target.example --mode full --deep --report  # full + deep + report
 ```
 
 ### Agent Mode
 
 ```bash
 # One-shot task
-cyber agent -p "scan and find web vulnerabilities" -i 192.168.1.0/24
+aiscan agent -p "scan and find web vulnerabilities" -i 192.168.1.0/24
 
 # With goal evaluation
-cyber agent -p "full scan" -i http://target.example -e "find all open ports with service fingerprints"
+aiscan agent -p "full scan" -i http://target.example -e "find all open ports with service fingerprints"
 
 # Interactive REPL
-cyber agent
+aiscan agent
 ```
 
 ### IOA Mode
 
 ```bash
 # Start IOA server
-cyber ioa serve --ioa-url http://0.0.0.0:8765
+aiscan ioa serve --ioa-url http://0.0.0.0:8765
 
 # Start IOA worker
-cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
+aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
   -p "scan assigned targets and report findings"
 ```
 
@@ -222,7 +222,7 @@ cyber agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
 export OPENAI_API_KEY="sk-..."
 
 # CLI arguments
-cyber agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
+aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
 ```
 
 Config file `cyber.yaml`:

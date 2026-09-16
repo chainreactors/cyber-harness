@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# cyber 构建脚本
+# aiscan 构建脚本
 # 用法:
 #   ./build.sh                                  # standard: 编译全部纯 Go 平台
 #   ./build.sh -g                               # 仅打印生成的 ldflags，不编译
@@ -24,7 +24,7 @@ EMBED_RESOURCES=false
 BUILD_IOA=false
 QUICK_TARGET=""
 PROFILE="mini"
-CYBER_BIN="cyber"
+AISCAN_BIN="aiscan"
 
 # CLI 覆盖（优先级高于 cyber.yaml）
 OPT_PROVIDER=""
@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
         --tavily-keys)      OPT_TAVILY_KEYS="$2"; shift 2 ;;
         -h|--help)
             cat <<'HELP'
-cyber 构建脚本
+aiscan 构建脚本
 
 用法: ./build.sh [选项]
 
@@ -105,7 +105,7 @@ cyber 构建脚本
   --tags TAGS           额外 build tags，逗号分隔
   --output DIR          输出目录 (默认: dist)
   --embed               嵌入扫描资源（不加 emptytemplates/noembed tag）
-  --ioa                 (已废弃, ioa serve 已集成到 cyber 主二进制)
+  --ioa                 (已废弃, ioa serve 已集成到 aiscan 主二进制)
   --profile PROFILE     构建配置: mini (默认), full
 
 LLM 覆盖（优先级高于 cyber.yaml）:
@@ -234,7 +234,7 @@ fi
 
 # ─── 打印配置摘要 ────────────────────────────────────────────────
 
-echo "=== cyber build ==="
+echo "=== aiscan build ==="
 echo "profile:  $PROFILE"
 [ -f "$CONFIG_FILE" ] && echo "config:   $CONFIG_FILE" || echo "config:   (none)"
 [ -n "$CFG_PROVIDER" ]     && echo "provider: $CFG_PROVIDER"
@@ -246,7 +246,7 @@ echo "profile:  $PROFILE"
 
 # ─── Profile ────────────────────────────────────────────────────
 
-CYBER_MAIN="./cmd/cyber"
+AISCAN_MAIN="./cmd/aiscan"
 CGO_MODE=0
 
 case "$PROFILE" in
@@ -255,7 +255,7 @@ case "$PROFILE" in
         # full 隐含 cstx，cstx 只在 cgo 下编译，所以 full 必须 CGO_ENABLED=1。
         EXTRA_TAGS="full,re2_cgo,re2_static,cstx${EXTRA_TAGS:+,$EXTRA_TAGS}"
         BUILD_IOA=true
-        CYBER_BIN="cyber-full"
+        AISCAN_BIN="aiscan-full"
         CGO_MODE=1
         ;;
 esac
@@ -300,6 +300,18 @@ fi
 echo "targets:  $OSARCH"
 echo "cgo:      $CGO_MODE"
 echo "output:   $OUTPUT_DIR"
+
+# ─── native SDK ──────────────────────────────────────────────────
+
+# full 链接的静态 RE2 是 native release 里的预编译产物，不在模块树内；
+# 链接器需要显式搜索路径，否则 re2_static 找不到 libre2_cre2.a。
+if [ "$CGO_MODE" = "1" ]; then
+    echo "安装静态 RE2 SDK..."
+    bash .github/native/sdk.sh fetch re2 "$HOST_OS" "$HOST_ARCH"
+    CGO_LDFLAGS="$(bash .github/native/sdk.sh env re2 "$HOST_OS" "$HOST_ARCH" | sed -n 's/^CGO_LDFLAGS=//p')"
+    export CGO_LDFLAGS
+    echo "cgo_ldflags: $CGO_LDFLAGS"
+fi
 echo ""
 
 # ─── 编译 ────────────────────────────────────────────────────────
@@ -327,10 +339,10 @@ build_one() {
 OSARCH_NORMALIZED=$(echo "$OSARCH" | tr ',' ' ')
 read -ra TARGETS <<< "$OSARCH_NORMALIZED"
 
-echo "编译 cyber..."
+echo "编译 aiscan..."
 for target in "${TARGETS[@]}"; do
     IFS='/' read -ra PARTS <<< "$target"
-    build_one "${PARTS[0]}" "${PARTS[1]}" "$CYBER_MAIN" "$CYBER_BIN"
+    build_one "${PARTS[0]}" "${PARTS[1]}" "$AISCAN_MAIN" "$AISCAN_BIN"
 done
 
 # ─── 完成 ────────────────────────────────────────────────────────

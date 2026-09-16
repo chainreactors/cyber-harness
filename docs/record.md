@@ -68,34 +68,70 @@ editions exist, and each one pins its CGO setting:
   gated and the edition silently lost the native importer.
 - **`re2_cgo`/`re2_static`** select the cgo RE2 backend. Without them the RE2
   binding stays on its pure-Go engine, which is slower but still builds with
-  `CGO_ENABLED=0`.
+  `CGO_ENABLED=0`. `re2_static` links a prebuilt `libre2_cre2.a` that does not
+  live in the module tree, so it only links when the SDK is installed and its
+  `lib` directory is on the linker's search path — see below.
 - `sqlite` is a dependency-supplied tag; the sqlite driver itself is pure Go.
 
 CI enforces both halves: `go list -deps` over the whole module must not reach
 `libcstx` under the standard tags, and the full edition must build with
 `CGO_ENABLED=1` and fail with `CGO_ENABLED=0`.
 
-## Two-stage native build
+## Native SDKs
 
-Build the record-enabled edition with the dedicated target:
+Both cgo features — the cgo RE2 backend and the recorder's FFmpeg/x264 backend —
+link prebuilt static SDKs that this repository downloads and verifies but never
+builds. The archives are release assets of `chainreactors/native`:
+
+| SDK | Target | Release tag | Asset |
+| --- | --- | --- | --- |
+| RE2 | `re2` | `RE2_STATIC_RELEASE` | `native-re2-static-<re2ver>-<platform>.tar.gz` |
+| Recorder | `record` | `RECORD_NATIVE_RELEASE` | `aiscan-record-native-<ver>-<platform>-<arch>.tar.gz` |
+
+`.github/native/versions.env` pins the tags, and `.github/native/sdk.sh fetch
+<family> [os] [arch]` downloads the archive, checks its SHA-256 sidecar and
+`.versions` manifest, and unpacks it into `.cache/`. `sdk.sh env <family>` then
+prints the link environment for that prefix.
+
+The RE2 archive carries only `lib/libre2_cre2.a` and licences: the `cre2.h` its
+cgo directives include lives in the Go module, so cgo supplies that include path
+itself. The recorder archive also carries FFmpeg headers and pkg-config files,
+because its linking is driven through `pkg-config`. Either way, installing the
+SDK and pointing the linker at its `lib` directory is all a build needs. Install
+them through the Makefile, which wires the prefixes in:
 
 ```bash
-make record
+make re2-static      # .cache/re2-static/<os>_<arch>, for `full`
+make record-native   # .cache/record-native/<os>-<arch>, for `record`
+make record          # fetches both, then builds bin/aiscan-record
 ```
 
-`make record` builds the frontend, downloads a versioned SDK into `.cache/record-native/<platform>-<arch>`, verifies its SHA-256 sidecar and manifest, applies the native link environment, and compiles `bin/cyber-record` with the `full` and `record_ffmpeg` tags. Supported SDK targets are Linux amd64/arm64 and Windows amd64. Linux source builds still need a C compiler, `pkg-config`, and XCB development packages; Windows source builds need MinGW-w64 and `pkgconf`.
+`make full` and `make record` depend on the matching fetch target, so neither
+needs a manual pre-step. Building `full` or `record` by hand means exporting
+`CGO_LDFLAGS="-L<cache>/lib"` yourself, because a cgo directive can only expand
+`${SRCDIR}` and the archive is no longer inside the module.
 
-Maintainers build the SDK from the pinned commits separately:
+Supported SDK targets: RE2 on Linux, macOS, and Windows (amd64/arm64 as
+published); recorder on Linux amd64/arm64 and Windows amd64. `make record`
+therefore fails on macOS, and on Windows it needs MinGW-w64 so that `gcc` can
+link the MSVC-incompatible static archives.
 
-```bash
-make record-native-source record-native-package
-```
+`RECORD_ARCH`/`RE2_ARCH` pick the SDK architecture, `CYBER_RECORD_PREFIX` and
+`CYBER_RE2_PREFIX` override the cache directories, and `CYBER_NATIVE_URL` points
+downloads at a mirror.
 
-Set `RECORD_ARCH=arm64` or `RECORD_NATIVE_OUTPUT=<directory>` when the defaults do not match the target. The Makefile is the supported build interface; `.github/native/sdk.sh` is the underlying maintainer/CI implementation.
+### Publishing
 
-The `recorder-native-sdk` GitHub Actions workflow performs that source-build/package phase for every supported target and publishes the archives under the release tag declared in `.github/native/versions.env`. It is independent of the normal CI and release build paths. Set `CYBER_RECORD_BUILD_FROM_SOURCE=1` when invoking `make record` or `make record-native` to opt into the slow source-build path locally. `CYBER_RECORD_PREFIX` changes the SDK cache/install directory, and `CYBER_RECORD_NATIVE_URL` can point downloads at an internal mirror.
+The SDKs are built and published by `chainreactors/native`'s own workflows
+(`record-native-sdk.yml`, and the static-archive rebuild workflow for RE2). Each
+runs on a matching native runner and publishes with that repository's own
+`GITHUB_TOKEN`, so no cross-repository credential is involved on this side.
 
-The source build verifies an exact FFmpeg component allowlist, and packaging rejects static libraries above a 16 MiB budget unless `CYBER_RECORD_MAX_LIB_BYTES` explicitly overrides it. This prevents an FFmpeg upgrade or configure change from silently restoring all default codecs and adding tens of megabytes to record-enabled binaries.
+The recorder build verifies an exact FFmpeg component allowlist, and packaging
+rejects static libraries above a 16 MiB budget unless `CYBER_RECORD_MAX_LIB_BYTES`
+explicitly overrides it. This prevents an FFmpeg upgrade or configure change from
+silently restoring all default codecs and adding tens of megabytes to
+record-enabled binaries.
 
 Native smoke tests are opt-in because they require an interactive desktop/X11 session:
 

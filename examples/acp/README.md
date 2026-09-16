@@ -12,7 +12,7 @@
 ## 1. 启动服务
 
 ```bash
-cyber web --addr 127.0.0.1:8080 --token demo
+aiscan web --addr 127.0.0.1:8080 --token demo
 ```
 
 确保已经配置可用的 LLM，并且存在在线 agent。默认内嵌 agent 的 `node_id` 是 `local`。

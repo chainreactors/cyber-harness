@@ -7,7 +7,7 @@
 ## 命令结构
 
 ```text
-cyber [全局参数] <subcommand> [子命令参数]
+aiscan [全局参数] <subcommand> [子命令参数]
 ```
 
 | 命令 | 类型 | 功能 |
@@ -26,7 +26,7 @@ cyber [全局参数] <subcommand> [子命令参数]
 | `ioa serve` | service | 启动 IOA HTTP server |
 | `ioa spaces/messages/context/nodes` | query | IOA 查询 |
 
-查看帮助：`cyber -h`、`cyber scan -h`、`cyber neutron -h`
+查看帮助：`aiscan -h`、`aiscan scan -h`、`aiscan neutron -h`
 
 ---
 
@@ -43,8 +43,8 @@ CLI 参数 > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 编�
 ### 配置文件
 
 ```bash
-cyber --init          # 生成默认 cyber.yaml 到当前目录
-cyber -c /path/to/cyber.yaml scan -i 192.168.1.0/24   # 指定配置文件
+aiscan --init          # 生成默认 cyber.yaml 到当前目录
+aiscan -c /path/to/cyber.yaml scan -i 192.168.1.0/24   # 指定配置文件
 ```
 
 自动搜索路径：`./cyber.yaml` → `<二进制所在目录>/cyber.yaml`
@@ -204,7 +204,7 @@ misc:
 | `--no-color` | 禁用 ANSI 颜色 |
 | `--version` | 输出版本号并退出 |
 
-> **参数名冲突说明**：顶层参数和 scanner 子命令参数可能同名。例如 `cyber agent -p` 中 `-p` 是自然语言 prompt，`cyber gogo -p` 中 `-p` 是端口参数，`cyber zombie -p` 中 `-p` 是密码参数。cyber 会根据子命令自动区分。
+> **参数名冲突说明**：顶层参数和 scanner 子命令参数可能同名。例如 `aiscan agent -p` 中 `-p` 是自然语言 prompt，`aiscan gogo -p` 中 `-p` 是端口参数，`aiscan zombie -p` 中 `-p` 是密码参数。cyber 会根据子命令自动区分。
 
 ---
 
@@ -232,19 +232,19 @@ Agent 只会重试当前 provider。重试耗尽后直接返回错误，不会�
 ```bash
 # 环境变量
 export OPENAI_API_KEY="sk-..."
-cyber agent -p "检查目标" -i http://target.example
+aiscan agent -p "检查目标" -i http://target.example
 
 # DeepSeek（OpenAI-compatible）
-cyber agent --provider openai --base-url https://api.deepseek.com/v1 --api-key "sk-..." --model deepseek-chat
+aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key "sk-..." --model deepseek-chat
 
 # Ollama（OpenAI-compatible；部分部署可使用任意非空 API key）
-cyber agent --provider openai --model llama3 --base-url http://localhost:11434/v1 --api-key local
+aiscan agent --provider openai --model llama3 --base-url http://localhost:11434/v1 --api-key local
 
 # 任意 OpenAI 兼容 API
-cyber agent --base-url https://my-proxy.example/v1 --api-key "$MY_KEY" --model my-model
+aiscan agent --base-url https://my-proxy.example/v1 --api-key "$MY_KEY" --model my-model
 
 # 通过代理访问 LLM API
-cyber agent --llm-proxy http://127.0.0.1:7890
+aiscan agent --llm-proxy http://127.0.0.1:7890
 ```
 
 ---
@@ -256,10 +256,10 @@ cyber agent --llm-proxy http://127.0.0.1:7890
 `--proxy` 参数为扫描器设置代理：
 
 ```bash
-cyber scan -i http://target.example --proxy socks5://127.0.0.1:1080
-cyber scan -i http://target.example --proxy trojan://password@server:443
-cyber scan -i http://target.example --proxy vless://uuid@server:443?security=tls
-cyber scan -i http://target.example --proxy clash://https://subscribe.example/link
+aiscan scan -i http://target.example --proxy socks5://127.0.0.1:1080
+aiscan scan -i http://target.example --proxy trojan://password@server:443
+aiscan scan -i http://target.example --proxy vless://uuid@server:443?security=tls
+aiscan scan -i http://target.example --proxy clash://https://subscribe.example/link
 ```
 
 Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详见 [Agent 模式详解](agent.md)。
@@ -285,7 +285,7 @@ Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详�
 `--llm-proxy` 单独为 LLM API 请求设置 HTTP 代理：
 
 ```bash
-cyber agent --llm-proxy http://127.0.0.1:7890 -p "检查目标" -i http://target.example
+aiscan agent --llm-proxy http://127.0.0.1:7890 -p "检查目标" -i http://target.example
 ```
 
 ---
@@ -295,24 +295,24 @@ cyber agent --llm-proxy http://127.0.0.1:7890 -p "检查目标" -i http://target
 ### gogo：服务发现
 
 ```bash
-cyber gogo -i 192.168.1.0/24 -p top2
-cyber gogo -i 10.0.0.10 -p 80,443,8080
-cyber gogo -i targets.txt -p all
+aiscan gogo -i 192.168.1.0/24 -p top2
+aiscan gogo -i 10.0.0.10 -p 80,443,8080
+aiscan gogo -i targets.txt -p all
 ```
 
 ### spray：Web 探测和指纹
 
 ```bash
-cyber spray -u http://target.example
-cyber spray -u http://target.example --finger
-cyber spray -l urls.txt --finger
+aiscan spray -u http://target.example
+aiscan spray -u http://target.example --finger
+aiscan spray -l urls.txt --finger
 ```
 
 ### zombie：弱口令检测
 
 ```bash
-cyber zombie -i ssh://127.0.0.1:22 --top 3
-cyber zombie -i ssh://admin@127.0.0.1:22 -p admin123
+aiscan zombie -i ssh://127.0.0.1:22 --top 3
+aiscan zombie -i ssh://admin@127.0.0.1:22 -p admin123
 ```
 
 > 注意：`zombie -p` 是密码参数，不是 agent 的 prompt 参数。
@@ -334,10 +334,10 @@ cyber zombie -i ssh://admin@127.0.0.1:22 -p admin123
 | `--template-list` | 列出匹配模板（不执行） |
 
 ```bash
-cyber neutron -u http://target.example -s critical,high
-cyber neutron -u http://target.example --finger nginx
-cyber neutron -l targets.txt --tags cve,rce -c 10 --rate-limit 20
-cyber neutron -u http://target.example -t ./pocs --id shiro-detect -j
+aiscan neutron -u http://target.example -s critical,high
+aiscan neutron -u http://target.example --finger nginx
+aiscan neutron -l targets.txt --tags cve,rce -c 10 --rate-limit 20
+aiscan neutron -u http://target.example -t ./pocs --id shiro-detect -j
 ```
 
 ### proton：敏感信息扫描
@@ -357,21 +357,21 @@ cyber neutron -u http://target.example -t ./pocs --id shiro-detect -j
 | `--template-list` | 列出匹配规则（不执行） |
 
 ```bash
-cyber proton -i /path/to/project
-cyber proton -i . --tags cloud --severity high
-cyber proton -i . -e "AKIA[0-9A-Z]{16}" -e "password\s*[:=]"
-cyber proton --template-list -c keys
+aiscan proton -i /path/to/project
+aiscan proton -i . --tags cloud --severity high
+aiscan proton -i . -e "AKIA[0-9A-Z]{16}" -e "password\s*[:=]"
+aiscan proton --template-list -c keys
 # 管道输入
-curl -s http://target/api | cyber proton
-cat .env | cyber proton -c keys
+curl -s http://target/api | aiscan proton
+cat .env | aiscan proton -c keys
 ```
 
 ### katana：Web 爬虫（仅 full 版）
 
 ```bash
-cyber katana -u https://target.example -d 3 -jc
-cyber katana -u https://target.example -hl -d 3 -jc       # headless
-cyber katana -u https://target.example -hh -d 2            # hybrid
+aiscan katana -u https://target.example -d 3 -jc
+aiscan katana -u https://target.example -hl -d 3 -jc       # headless
+aiscan katana -u https://target.example -hh -d 2            # hybrid
 ```
 
 | 参数 | 说明 |
@@ -383,8 +383,8 @@ cyber katana -u https://target.example -hh -d 2            # hybrid
 ### passive：网络空间搜索（仅 full 版）
 
 ```bash
-cyber passive -s fofa 'domain="example.com"'
-cyber passive -s hunter 'domain.suffix="example.com"'
+aiscan passive -s fofa 'domain="example.com"'
+aiscan passive -s hunter 'domain.suffix="example.com"'
 ```
 
 | 数据源 | 凭据参数 | 环境变量 |
@@ -400,7 +400,7 @@ cyber passive -s hunter 'domain.suffix="example.com"'
 Cyberhub 提供外部指纹库和 POC 模板，可以扩充或替换内置资源。
 
 ```bash
-cyber scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cyberhub-key "$CYBER_CYBERHUB_KEY"
+aiscan scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cyberhub-key "$CYBER_CYBERHUB_KEY"
 ```
 
 资源模式：`merge`（默认，合并内置和远程）或 `override`（远程覆盖内置）。
@@ -408,11 +408,11 @@ cyber scan -i http://target.example --cyberhub-url http://127.0.0.1:9000 --cyber
 ### cyberhub 查询命令
 
 ```bash
-cyber cyberhub search --finger tomcat
-cyber cyberhub search --cve CVE-2021-44228
-cyber cyberhub search --vendor apache --product tomcat
-cyber cyberhub list poc --severity critical --limit 10
-cyber cyberhub id tomcat
+aiscan cyberhub search --finger tomcat
+aiscan cyberhub search --cve CVE-2021-44228
+aiscan cyberhub search --vendor apache --product tomcat
+aiscan cyberhub list poc --severity critical --limit 10
+aiscan cyberhub id tomcat
 ```
 
 结构化查询标志：`--finger`、`--cve`、`--vendor`、`--product`、`--poc`、`--tag`、`-s`、`--limit`、`-j`。
@@ -479,20 +479,20 @@ scan:
 
 | 场景 | 推荐命令 |
 | --- | --- |
-| 快速资产发现和风险初筛 | `cyber scan -i <target>` |
-| 完整扫描（含路径爆破） | `cyber scan -i <target> --mode full` |
-| 搜索已知漏洞情报 | `cyber scan -i <target> --sniper` |
-| 深度动态测试 | `cyber scan -i <target> --deep` |
-| AI 主动验证 + 漏洞搜索 | `cyber scan -i <target> --verify=high --sniper` |
-| 自动解释结果和生成结论 | `cyber agent -p "<任务>" -i <target>` |
-| 目标驱动 + 自动评估 | `cyber agent -e "<标准>" -p "<任务>" -i <target>` |
-| 对 scanner 输出做 AI 摘要 | `cyber --ai -p "<意图>" <scanner> ...` |
-| 查询指纹和 POC | `cyber cyberhub search --finger <name>` |
-| 机器可读输出 | `cyber scan -i <target> -j` |
-| 人可读报告 | `cyber scan -i <target> --report` |
-| 回看历史扫描记录 | `cyber -F result.jsonl` |
-| 多 worker 协作 | `cyber ioa serve` + `cyber agent --ioa-url http://127.0.0.1:8765 --space case-1` |
-| 交互式探索 | `cyber agent` |
+| 快速资产发现和风险初筛 | `aiscan scan -i <target>` |
+| 完整扫描（含路径爆破） | `aiscan scan -i <target> --mode full` |
+| 搜索已知漏洞情报 | `aiscan scan -i <target> --sniper` |
+| 深度动态测试 | `aiscan scan -i <target> --deep` |
+| AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=high --sniper` |
+| 自动解释结果和生成结论 | `aiscan agent -p "<任务>" -i <target>` |
+| 目标驱动 + 自动评估 | `aiscan agent -e "<标准>" -p "<任务>" -i <target>` |
+| 对 scanner 输出做 AI 摘要 | `aiscan --ai -p "<意图>" <scanner> ...` |
+| 查询指纹和 POC | `aiscan cyberhub search --finger <name>` |
+| 机器可读输出 | `aiscan scan -i <target> -j` |
+| 人可读报告 | `aiscan scan -i <target> --report` |
+| 回看历史扫描记录 | `aiscan -F result.jsonl` |
+| 多 worker 协作 | `aiscan ioa serve` + `aiscan agent --ioa-url http://127.0.0.1:8765 --space case-1` |
+| 交互式探索 | `aiscan agent` |
 
 ---
 
@@ -504,7 +504,7 @@ scan:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-cyber agent -p "检查目标" -i http://target.example
+aiscan agent -p "检查目标" -i http://target.example
 ```
 
 ### scan --verify 没有产生 AI 验证
@@ -516,15 +516,15 @@ cyber agent -p "检查目标" -i http://target.example
 ### 输出太多或包含颜色
 
 ```bash
-cyber scan -i 127.0.0.1 -f result.txt          # 文件输出（自动去除 ANSI）
-cyber scan -i 127.0.0.1 --no-color              # 禁用颜色
+aiscan scan -i 127.0.0.1 -f result.txt          # 文件输出（自动去除 ANSI）
+aiscan scan -i 127.0.0.1 --no-color              # 禁用颜色
 ```
 
 ### 扫描太慢
 
 ```bash
-cyber scan -i 192.168.1.0/24 --ports top3       # 缩小端口范围
-cyber scan -i 192.168.1.0/24 --thread 500        # 降低并发
+aiscan scan -i 192.168.1.0/24 --ports top3       # 缩小端口范围
+aiscan scan -i 192.168.1.0/24 --thread 500        # 降低并发
 ```
 
 ### --ai 需要 LLM 但 scan 不需要

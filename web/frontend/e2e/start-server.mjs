@@ -111,7 +111,7 @@ const build = spawnSync('go', [
   '-tags', 'full',
   '-ldflags', '-X github.com/chainreactors/cyber/core/config.Version=1.0.0-rc1',
   '-o', binary,
-  './cmd/cyber',
+  './cmd/aiscan',
 ], {
   cwd: root,
   stdio: 'inherit',

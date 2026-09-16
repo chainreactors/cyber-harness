@@ -50,10 +50,10 @@ Cyber Web 可以同时作为 Hub 使用。除了内嵌本地 Agent，还可以�
 
 ```bash
 # Hub：只启动 Web 与调度服务
-cyber-full web --addr 0.0.0.0:8080 --token change-me --no-agent
+aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
 
 # Worker：从任意授权主机接入
-cyber agent --server-url http://change-me@server.example:8080 \
+aiscan agent --server-url http://change-me@server.example:8080 \
   --node-name worker-01
 ```
 

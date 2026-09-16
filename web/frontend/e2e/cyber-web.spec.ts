@@ -164,17 +164,17 @@ test.describe('single AOP WebSocket browser plane', () => {
 
     await quickConnect.getByRole('button', { name: 'Windows' }).click()
     const installCommand = quickConnect.locator('pre').first()
-    await expect(installCommand).toContainText('https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/cyber-full_windows_amd64.zip')
+    await expect(installCommand).toContainText('https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
     await expect(installCommand).not.toContainText('ghfast.top')
 
     await quickConnect.getByRole('button', { name: 'China' }).click()
-    await expect(installCommand).toContainText('https://ghfast.top/https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/cyber-full_windows_amd64.zip')
+    await expect(installCommand).toContainText('https://ghfast.top/https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
     const chinaCommand = await installCommand.innerText()
     await installCommand.locator('..').getByRole('button').click()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(chinaCommand)
 
     await quickConnect.getByRole('button', { name: 'Global' }).click()
-    await expect(installCommand).toContainText('https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/cyber-full_windows_amd64.zip')
+    await expect(installCommand).toContainText('https://github.com/chainreactors/cyber/releases/download/v1.0.0-rc1/aiscan-full_windows_amd64.zip')
     await expect(installCommand).not.toContainText('ghfast.top')
 
     const commands = quickConnect.locator('pre')

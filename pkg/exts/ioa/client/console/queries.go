@@ -125,7 +125,7 @@ func RunIOANodes(ctx context.Context, client ioatools.Reader, option *Options, a
 // ---------------------------------------------------------------------------
 // REPL-boxed listings
 //
-// The CLI (cmd/cyber) keeps the plain tabwriter tables above for scriptable,
+// The CLI (cmd/aiscan) keeps the plain tabwriter tables above for scriptable,
 // pipeable --json output. The interactive REPL renders the same data as boxed
 // panels so /spaces, /nodes and /messages match /status and /provider.
 // ---------------------------------------------------------------------------

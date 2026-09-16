@@ -120,7 +120,7 @@ Non-findings without impact chain: fingerprints, CORS/security headers, GraphQL 
 
 ## Tool Invocation Rules
 
-1. Keep top-level cyber flags separate from scanner flags (`cyber -p` is the prompt; scanner `-p` keeps its native meaning).
+1. Keep top-level cyber flags separate from scanner flags (`aiscan -p` is the prompt; scanner `-p` keeps its native meaning).
 2. Prefer pseudo-commands over raw binaries — output is captured and bounded.
 3. Non-interactive output only. No progress bars or unbounded streaming.
 4. Conservative threads/timeouts for localhost or fragile services.

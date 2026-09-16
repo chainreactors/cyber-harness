@@ -97,7 +97,7 @@ func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentex
 	}
 
 	isTerminal := t.Control != nil && t.Control.IsTerminal()
-	c := console.NewWithTerminal("cyber", t)
+	c := console.NewWithTerminal("aiscan", t)
 	c.NewlineAfter = true
 	configureAgentReadline(c)
 	c.EnablePasteReferences(console.PasteReferenceConfig{Enabled: true})
@@ -392,10 +392,10 @@ func (r *AgentConsole) promptString() string {
 
 func agentPromptString(output *AgentOutput) string {
 	if output != nil && output.color.Enabled {
-		return output.color.Code(outputpkg.ANSIBold+outputpkg.ANSICyan) + "cyber" +
+		return output.color.Code(outputpkg.ANSIBold+outputpkg.ANSICyan) + "aiscan" +
 			output.color.Code(outputpkg.ANSIReset) + " " + output.color.Dim("❯") + " "
 	}
-	return "cyber> "
+	return "aiscan> "
 }
 
 func agentComposerPrompt(output *AgentOutput, bridge *readlineConsoleBridge) string {
@@ -441,7 +441,7 @@ func (r *AgentConsole) executeArgs(ctx context.Context, args []string) error {
 
 func (r *AgentConsole) rootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use: "agent", Short: "cyber interactive agent",
+		Use: "agent", Short: "aiscan interactive agent",
 		SilenceUsage: true, SilenceErrors: true,
 	}
 	root.CompletionOptions.HiddenDefaultCmd = true

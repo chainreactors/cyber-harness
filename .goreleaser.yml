@@ -1,6 +1,6 @@
 version: 2
 
-project_name: cyber
+project_name: aiscan
 
 before:
   hooks:
@@ -9,8 +9,8 @@ before:
     - go generate ./core/resources
 
 builds:
-  - id: cyber
-    main: ./cmd/cyber
+  - id: aiscan
+    main: ./cmd/aiscan
     binary: "{{ .ProjectName }}"
     env:
       - CGO_ENABLED=0
@@ -36,8 +36,8 @@ builds:
     gcflags:
       - all=-trimpath={{.Env.GOPATH}}
 
-  - id: cyber-full
-    main: ./cmd/cyber
+  - id: aiscan-full
+    main: ./cmd/aiscan
     binary: "{{ .ProjectName }}-full"
     env:
       # Full links the native libcstx runtime. The official release workflow
@@ -80,8 +80,8 @@ upx:
       - amd64
 
 archives:
-  - id: cyber
-    ids: [cyber]
+  - id: aiscan
+    ids: [aiscan]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip
@@ -89,8 +89,8 @@ archives:
       - src: README.md
       - src: docs/*
 
-  - id: cyber-full
-    ids: [cyber-full]
+  - id: aiscan-full
+    ids: [aiscan-full]
     name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
     formats:
       - zip

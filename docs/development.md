@@ -48,7 +48,7 @@ if err != nil { return err }
 // profile.Close 的结果，遇到 ErrCloseIncomplete 时保留实例并重试。
 ```
 
-完整 Cyber 产品图和具体 `cyberProfile` 都声明在 `cmd/cyber`。`pkg/profile.Application`
+完整 Cyber 产品图和具体 `cyberProfile` 都声明在 `cmd/aiscan`。`pkg/profile.Application`
 是 host 契约，具体 Profile 直接持有 Set；命令入口在唯一 Set 中组合 App 能力和可选
 Agent Runtime。Runtime 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
 类型化事件观察；事件发布统一经 `App.Publish`。需要 Agent 时入口显式选择

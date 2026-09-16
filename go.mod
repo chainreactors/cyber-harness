@@ -292,7 +292,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.0 // indirect
-	github.com/tetratelabs/wazero v1.11.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tidwall/btree v1.6.0 // indirect
 	github.com/tidwall/buntdb v1.3.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -349,7 +349,7 @@ require (
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
-replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
+replace github.com/wasilibs/go-re2 => github.com/chainreactors/native v1.11.1-native.1
 
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.7.0-aiscan.1
 

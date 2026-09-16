@@ -1,6 +1,6 @@
 # Repository harness
 
-`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/cyber` 的 `full`
+`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/aiscan` 的 `full`
 版本，启动真实产品子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
 进程重启与资源释放。场景测试不导入业务实现包，不注入 fake store、Provider 或 Host。
 
@@ -21,7 +21,7 @@ make harness
 
 需要 Go 与完整产品构建、运行所需的原生依赖；缺失时直接失败，不跳过或替换实现。
 Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启动两个独立的
-`cyber agent --transport stdio` 进程。每个场景有独立的配置、数据库与
+`aiscan agent --transport stdio` 进程。每个场景有独立的配置、数据库与
 数据目录。无 LLM 场景仅继承操作系统及动态库加载所需环境变量。真实 LLM 场景
 只额外注入明确配置的 `CYBER_HARNESS_LLM_*`，不读取个人默认模型设置。
 

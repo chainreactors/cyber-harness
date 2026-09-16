@@ -1,7 +1,7 @@
 # App：内置 Agent 产品访问面
 
 `app.New(config, dependencies)` 无副作用，返回生命周期 `Resource`；Profile 仅发布其中不含
-Load/Close 的 `App`。`cmd/cyber` 构造 App、能力贡献者、
+Load/Close 的 `App`。`cmd/aiscan` 构造 App、能力贡献者、
 Command Registry 和 Tool Registry，并将它们直接加入 Profile 拥有的唯一
 `core/extension.Set`。App 不生成 Entry、不选择插件、不创建子 Set，也不维护资源关闭链。
 

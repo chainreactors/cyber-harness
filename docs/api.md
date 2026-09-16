@@ -47,7 +47,7 @@ Upgrade: websocket
 - 外部 client 使用 Bearer token。
 - 浏览器登录后也可以使用 `cyber_session` cookie。
 - 鉴权失败时 upgrade 返回 HTTP 401。
-- `cyber web` 未指定 `--token` 时会自动生成 access key，而不是关闭鉴权。
+- `aiscan web` 未指定 `--token` 时会自动生成 access key，而不是关闭鉴权。
 - Application Endpoint 不需要握手消息。首个 envelope 如果包含 `AgentHello`，会返回 `WRONG_ENDPOINT`。
 
 每个 WebSocket message 必须是 BinaryMessage，内容为一个序列化的 `aop.Envelope`。文本 JSON frame 不属于 cyber Application WebSocket wire format。

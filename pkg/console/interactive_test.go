@@ -44,7 +44,7 @@ func TestAgentComposerPromptPlacesStatusAboveInput(t *testing.T) {
 	bridge := &readlineConsoleBridge{}
 	bridge.UpdateStatus("thinking")
 
-	if got, want := agentComposerPrompt(nil, bridge), "thinking\ncyber> "; got != want {
+	if got, want := agentComposerPrompt(nil, bridge), "thinking\naiscan> "; got != want {
 		t.Fatalf("composer prompt = %q, want %q", got, want)
 	}
 }
@@ -245,7 +245,7 @@ func TestAgentConsoleCtrlCWarnsAndClearsInput(t *testing.T) {
 	if !strings.Contains(out, "Press Ctrl+C again to exit") {
 		t.Fatalf("missing Ctrl+C hint:\n%s", out)
 	}
-	if strings.Contains(stripANSI(out), "cyber> exit") {
+	if strings.Contains(stripANSI(out), "aiscan> exit") {
 		t.Fatalf("Ctrl+C leaked input as output:\n%s", out)
 	}
 }

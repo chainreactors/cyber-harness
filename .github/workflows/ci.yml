@@ -29,6 +29,11 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
+
       - name: Check go mod tidy
         run: |
           cp go.mod "$RUNNER_TEMP/go.mod.before"
@@ -94,8 +99,8 @@ jobs:
       - name: Ensure the full edition requires cgo
         run: |
           FULL="forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
-          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/cyber
-          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/cyber 2>/dev/null; then
+          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/aiscan
+          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/aiscan 2>/dev/null; then
             echo "::error::the full edition built with CGO_ENABLED=0; full must imply cgo"
             exit 1
           fi
@@ -134,6 +139,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Generate embedded resources
         run: go generate ./core/resources/...
@@ -325,13 +335,19 @@ jobs:
         shell: bash
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
+      - name: Install the static RE2 SDK
+        shell: bash
+        run: |
+          bash .github/native/sdk.sh fetch re2 windows amd64
+          bash .github/native/sdk.sh env re2 windows amd64 >> "$GITHUB_ENV"
+
       - name: Run native Windows package tests
         run: go test -count=1 -tags "re2_cgo re2_static" ./agent/... ./pkg/runner/... ./pkg/web/...
         env:
           CGO_ENABLED: "1"
 
       - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/cyber
+        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/aiscan
         env:
           CGO_ENABLED: "1"
 
@@ -350,6 +366,11 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
+
       - name: Run scanner functional regressions
         run: |
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m -v \
@@ -359,7 +380,7 @@ jobs:
       - name: Run remaining full-tag unit variants
         run: |
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
-            ./cmd/cyber ./skills ./tools/passive ./tools/scan/engine
+            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
           go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan
@@ -377,7 +398,7 @@ jobs:
       - name: Run full server CSTX integration
         run: |
           CGO_ENABLED=1 go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
-            ./cmd/cyber ./pkg/web/api ./pkg/web/service
+            ./cmd/aiscan ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
     runs-on: ubuntu-22.04
@@ -394,6 +415,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Set up Chrome
         uses: browser-actions/setup-chrome@v2
@@ -439,6 +465,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

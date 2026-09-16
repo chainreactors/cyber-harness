@@ -71,7 +71,7 @@ func runHarness(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	productBinary = filepath.Join(artifactRoot, "cyber")
+	productBinary = filepath.Join(artifactRoot, "aiscan")
 	if runtime.GOOS == "windows" {
 		productBinary += ".exe"
 	}
@@ -109,7 +109,7 @@ func buildProduct(t *testing.T) string {
 		defer cancel()
 		// The full edition implies cstx, which only compiles with cgo. The
 		// harness runner's default CGO_ENABLED=1 covers that.
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full cstx", "-o", productBinary, "./cmd/cyber")
+		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full cstx", "-o", productBinary, "./cmd/aiscan")
 		cmd.Dir = root
 		data, err := cmd.CombinedOutput()
 		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {
@@ -292,7 +292,7 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *product {
 	return p
 }
 
-var listening = regexp.MustCompile(`cyber server listening on http://(127\.0\.0\.1:\d+)`)
+var listening = regexp.MustCompile(`aiscan server listening on http://(127\.0\.0\.1:\d+)`)
 
 func (w *workspace) start(t *testing.T) *product {
 	t.Helper()

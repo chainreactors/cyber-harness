@@ -68,7 +68,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		if product != nil {
 			err = errors.Join(err, product.Close(context.Background()))
 		}
-		return fmt.Errorf("init cyber: %w", err)
+		return fmt.Errorf("init aiscan: %w", err)
 	}
 	defer func() {
 		if product != nil {
@@ -172,15 +172,15 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		Handler: httpHandler,
 	}
 
-	logger.Infof("cyber server listening on http://%s", listenAddr)
+	logger.Infof("aiscan server listening on http://%s", listenAddr)
 	logger.Infof("  web access token: %s", accessKey)
-	logger.Infof("  agent connect: cyber agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
+	logger.Infof("  agent connect: aiscan agent --server-url http://%s@%s --node-name <name>", accessKey, listenAddr)
 	embeddedCtx, stopEmbedded := context.WithCancel(ctx)
 	defer stopEmbedded()
 	embeddedDone := make(chan struct{})
 	if !opts.NoAgent {
 		// The hub's own agent comes online exactly like any node: an
-		// `cyber agent` dialed into this server over loopback WebSocket,
+		// `aiscan agent` dialed into this server over loopback WebSocket,
 		// just in-process. The pool never sees a special "local" kind.
 		agentOption, err := embeddedAgentOption(option, accessKey, listenAddr)
 		if err != nil {

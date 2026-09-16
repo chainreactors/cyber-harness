@@ -67,11 +67,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: cyber
+          - id: aiscan
             profile: standard
             runner: ubuntu-22.04
-            main: ./cmd/cyber
-            binary: cyber
+            main: ./cmd/aiscan
+            binary: aiscan
             tags: "forceposix emptytemplates noembed osusergo netgo"
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
@@ -83,36 +83,36 @@ jobs:
             tags: ""
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
             cgo: "0"
-          - id: cyber-full-linux-amd64
+          - id: aiscan-full-linux-amd64
             profile: full
             runner: ubuntu-22.04
-            main: ./cmd/cyber
-            binary: cyber-full
+            main: ./cmd/aiscan
+            binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/amd64"
             cgo: "1"
-          - id: cyber-full-linux-arm64
+          - id: aiscan-full-linux-arm64
             profile: full
             runner: ubuntu-24.04-arm
-            main: ./cmd/cyber
-            binary: cyber-full
+            main: ./cmd/aiscan
+            binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "linux/arm64"
             cgo: "1"
-          - id: cyber-full-darwin
+          - id: aiscan-full-darwin
             profile: full
             runner: ubuntu-22.04
-            main: ./cmd/cyber
-            binary: cyber-full
+            main: ./cmd/aiscan
+            binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "darwin/amd64 darwin/arm64"
             cgo: "1"
             cross: darwin
-          - id: cyber-full-windows-amd64
+          - id: aiscan-full-windows-amd64
             profile: full
             runner: windows-2022
-            main: ./cmd/cyber
-            binary: cyber-full
+            main: ./cmd/aiscan
+            binary: aiscan-full
             tags: "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
             targets: "windows/amd64"
             cgo: "1"
@@ -185,6 +185,19 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
 
+      - name: Install the static RE2 SDK
+        if: matrix.cgo == '1'
+        run: |
+          set -euo pipefail
+          # The Darwin entry cross-builds both architectures from one Linux
+          # runner, so every target's SDK has to be present. CGO_LDFLAGS is set
+          # per target in the build loop instead of here: a linker takes the
+          # first libre2_cre2.a it finds on the search path, so two prefixes in
+          # one CGO_LDFLAGS would hand the wrong architecture to one of them.
+          for target in ${{ matrix.targets }}; do
+            bash .github/native/sdk.sh fetch re2 "${target%%/*}" "${target#*/}"
+          done
+
       - name: Download embedded frontend
         if: matrix.profile == 'full'
         uses: actions/download-artifact@v7
@@ -212,6 +225,11 @@ jobs:
             suffix=""; [[ "$goos" == "windows" ]] && suffix=".exe"
             out="${OUTDIR}/${BINARY}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
+
+            if [[ "${{ matrix.cgo }}" == "1" ]]; then
+              re2_ldflags="$(bash .github/native/sdk.sh env re2 "$goos" "$goarch")"
+              export CGO_LDFLAGS="${re2_ldflags#CGO_LDFLAGS=}"
+            fi
 
             link_flags="-s -w -X github.com/chainreactors/cyber/core/config.Version=${VERSION}"
             if [[ "$goos" == "darwin" && "${{ matrix.cgo }}" == "1" ]]; then
@@ -254,7 +272,7 @@ jobs:
             if [[ "${{ matrix.profile }}" == "runner" ]]; then
               test "$version_output" = "runner v${VERSION}"
             else
-              test "$version_output" = "cyber v${VERSION}"
+              test "$version_output" = "aiscan v${VERSION}"
             fi
           fi
 
@@ -344,8 +362,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist/release
-          sha256sum *.zip > cyber_checksums.txt
-          cat cyber_checksums.txt
+          sha256sum *.zip > aiscan_checksums.txt
+          cat aiscan_checksums.txt
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v7
@@ -378,14 +396,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          (cd dist/release && sha256sum -c cyber_checksums.txt)
+          (cd dist/release && sha256sum -c aiscan_checksums.txt)
           test "$(find dist/release -name '*.zip' | wc -l)" -eq 11
-          for binary in cyber cyber-full; do
+          for binary in aiscan aiscan-full; do
             destination="${RUNNER_TEMP}/${binary}"
             unzip -q "dist/release/${binary}_linux_${ARCH}.zip" -d "$destination"
             test -x "${destination}/${binary}"
-            test "$("${destination}/${binary}" --version)" = "cyber ${TAG}"
-            if [[ "$binary" == "cyber-full" ]]; then
+            test "$("${destination}/${binary}" --version)" = "aiscan ${TAG}"
+            if [[ "$binary" == "aiscan-full" ]]; then
               "${destination}/${binary}" web --help >/dev/null
             fi
           done
@@ -408,10 +426,10 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $expectedVersion = "cyber $env:TAG"
+          $expectedVersion = "aiscan $env:TAG"
           $cases = @(
-            @{ Archive = 'cyber_windows_amd64.zip'; Binary = 'cyber.exe'; Full = $false },
-            @{ Archive = 'cyber-full_windows_amd64.zip'; Binary = 'cyber-full.exe'; Full = $true }
+            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
           )
 
           foreach ($case in $cases) {

@@ -48,7 +48,7 @@ function archOptionsForOS(os: OS) {
 }
 
 function binaryName(os: OS, arch: Arch): string {
-  return `cyber-full_${os}_${arch}.zip`
+  return `aiscan-full_${os}_${arch}.zip`
 }
 
 function releaseTag(version?: string): string {
@@ -79,19 +79,19 @@ function agentArgs(serverURL: string, accessToken: string): string {
 function connectCmd(os: OS, serverURL: string, accessToken: string): string {
   const args = agentArgs(serverURL, accessToken)
   if (os === 'windows') {
-    return `.\\cyber-full.exe agent ${args}`
+    return `.\\aiscan-full.exe agent ${args}`
   }
-  return `./cyber-full agent ${args}`
+  return `./aiscan-full agent ${args}`
 }
 
 function installCmd(os: OS, arch: Arch, serverURL: string, accessToken: string, source: DownloadSource, tag: string): string {
   const dlURL = releaseURL(os, arch, source, tag)
   const args = agentArgs(serverURL, accessToken)
   if (os === 'windows') {
-    return `powershell -c "Invoke-WebRequest '${dlURL}' -OutFile cyber.zip; Expand-Archive cyber.zip -DestinationPath .; .\\cyber-full.exe agent ${args}"`
+    return `powershell -c "Invoke-WebRequest '${dlURL}' -OutFile aiscan.zip; Expand-Archive aiscan.zip -DestinationPath .; .\\aiscan-full.exe agent ${args}"`
   }
-  const bin = 'cyber-full'
-  return `curl -sL '${dlURL}' -o cyber.zip && unzip -o cyber.zip ${bin} && chmod +x ${bin} && ./${bin} agent ${args}`
+  const bin = 'aiscan-full'
+  return `curl -sL '${dlURL}' -o aiscan.zip && unzip -o aiscan.zip ${bin} && chmod +x ${bin} && ./${bin} agent ${args}`
 }
 
 type CopiedKey = string | null

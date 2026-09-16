@@ -16,9 +16,9 @@
 
 ### 发布产物
 
-- `cyber`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
-- `cyber-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
-- `cyber_checksums.txt` 包含 11 个 ZIP 的 SHA-256；`runner` 仅用于构建验证，不作为 Release 附件。
+- `aiscan`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
+- `aiscan-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
+- `aiscan_checksums.txt` 包含 11 个 ZIP 的 SHA-256；`runner` 仅用于构建验证，不作为 Release 附件。
 ## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
 v1.0.0-rc2 重点重构了 Cyber 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
@@ -97,11 +97,11 @@ Web 会自动取得 Agent token，并根据远程执行节点的系统、架构�
 
 | 产物 | Linux | macOS | Windows | 数量 |
 | --- | --- | --- | --- | ---: |
-| `cyber` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
-| `cyber-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64 | 5 |
 | `checksums.txt` | — | — | — | 1 |
 
-Release 只包含 `cyber`、`cyber-full` 和 checksum。
+Release 只包含 `aiscan`、`aiscan-full` 和 checksum。
 
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
@@ -193,8 +193,8 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 | 产物 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| `cyber` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
-| `cyber-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64（Linux 交叉编译） | amd64 |
 | 可选原生 `record` SDK 构建 | X11 amd64/arm64 | 不支持 | amd64 |
 
 迁移细节、兼容承诺和发布门禁见 [v1.0.0 发布与迁移](v1.0.0.md)。
@@ -215,7 +215,7 @@ v0.4.0 是 Web 工作台的首个正式版本。它不是单独的扫描结果�
 Full 版默认同时启动 Web 服务和一个本地 Agent，并自动生成 access key。最小启动命令只有一条：
 
 ```bash
-cyber-full web
+aiscan-full web
 ```
 
 **远程 Node 接入**
@@ -231,10 +231,10 @@ cyber-full web
 
 ```bash
 # Web 所在主机
-cyber-full web --addr 0.0.0.0:8080 --token demo
+aiscan-full web --addr 0.0.0.0:8080 --token demo
 
 # Node 所在主机
-cyber-full agent --server-url http://demo@server.example:8080 --node-name worker-01
+aiscan-full agent --server-url http://demo@server.example:8080 --node-name worker-01
 ```
 
 **Agent 会话与执行过程**
@@ -262,7 +262,7 @@ Web 会把 Agent 的回答、thinking、工具参数、工具结果、Goal Evalu
 
 **配置与协作**
 
-Web 配置中心用于管理多个 LLM profile，并显式选择当前模型。Provider、Base URL、API key、模型、代理、上下文窗口和最大输出可以在页面中修改和探活，更新后热重载到已连接的 Agent。Web 同时提供 IOA Console，用于查看协作空间、在线节点、消息和线程；如果只需要轻量 IOA 服务，也可以使用顶层 `cyber serve` 启动。
+Web 配置中心用于管理多个 LLM profile，并显式选择当前模型。Provider、Base URL、API key、模型、代理、上下文窗口和最大输出可以在页面中修改和探活，更新后热重载到已连接的 Agent。Web 同时提供 IOA Console，用于查看协作空间、在线节点、消息和线程；如果只需要轻量 IOA 服务，也可以使用顶层 `aiscan serve` 启动。
 
 - 创建和管理多个 LLM profile，并显式切换当前 profile
 - 提供常用 Provider 预设及自定义 OpenAI/Anthropic 兼容端点
@@ -282,7 +282,7 @@ Web 配置中心用于管理多个 LLM profile，并显式选择当前模型。P
 
 ```bash
 # 从文件读取任务描述
-cyber agent -p ./assessment.md -i https://target.example
+aiscan agent -p ./assessment.md -i https://target.example
 
 # 交互模式中压缩上下文，并指定摘要重点
 /compact 保留已确认漏洞、凭据和待验证目标
@@ -357,7 +357,7 @@ report/
 
 ```bash
 # 启动带内嵌 Agent 的服务
-cyber-full web --addr 127.0.0.1:8080 --token demo
+aiscan-full web --addr 127.0.0.1:8080 --token demo
 
 # Application WebSocket：创建会话、发送消息并消费流式事件
 go run ./examples/acp/client --server http://127.0.0.1:8080 --token demo --node local -p "检查当前可用工具"
@@ -401,7 +401,7 @@ go run ./examples/acp/connectrpc --server http://127.0.0.1:8080 --token demo
 
 - `llm.providers` 现在是可手动切换的 profile 列表，不再在请求失败后自动切换 Provider；使用 `llm.active_profile`、Web 设置页或 `/provider set` 显式选择
 - Agent 连接 Cyber Web/AOP 统一使用 `--server-url`；IOA 通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
-- 官方 Release 不再单独发布 `cyber-agent`，请统一使用 `cyber agent`
+- 官方 Release 不再单独发布 `aiscan-agent`，请统一使用 `aiscan agent`
 - 独立的 gogo、spray、neutron、proton 等顶层 tool skill 已收敛到 `cyber` skill；工具细节改为调用时加载 `okf/easm` 或 `okf/runtime` concept
 - 报告输出由单一 Markdown 内容调整为 `index.md` + `findings/<id>.md` 的 OKF 风格 bundle
 - 外部 Web/Agent 接入迁移到 protobuf Application WebSocket 与 ConnectRPC；依赖旧 JSON WebSocket、管理 REST 或旧 endpoint 的客户端需要迁移
@@ -422,7 +422,7 @@ go run ./examples/acp/connectrpc --server http://127.0.0.1:8080 --token demo
 - Tavily web search 现在可通过 CLI flag 配置，不再仅限 config 文件和环境变量
 
 ```bash
-cyber agent --tavily-key tvly-xxx -p "search CVE-2024-1234"
+aiscan agent --tavily-key tvly-xxx -p "search CVE-2024-1234"
 ```
 
 ### Improvements
@@ -627,7 +627,7 @@ llm:
 
 ## v0.2.6 — Session 持久化 + 多模型容错 + 输出格式统一 + 命令架构重组
 
-Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片容错（三层防御：静态模型注册表 + 请求清洗 + 运行时自动恢复）；统一输出记录格式；命令架构重组为 cyber/cyber-agent/web 三入口。
+Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片容错（三层防御：静态模型注册表 + 请求清洗 + 运行时自动恢复）；统一输出记录格式；命令架构重组为 aiscan/aiscan-agent/web 三入口。
 
 ### New Features
 
@@ -640,13 +640,13 @@ Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片
 
 ```bash
 # 自动保存对话
-cyber agent -p "scan target" --save-session
+aiscan agent -p "scan target" --save-session
 
 # 恢复最近 session 继续
-cyber agent --resume -p "now check the results"
+aiscan agent --resume -p "now check the results"
 
 # 从指定文件恢复
-cyber agent --resume .cyber/sessions/2026-06-22_scan.json
+aiscan agent --resume .cyber/sessions/2026-06-22_scan.json
 ```
 
 **Config 路径 Fallback 链**
@@ -672,7 +672,7 @@ cyber agent --resume .cyber/sessions/2026-06-22_scan.json
 
 **命令架构重组**
 
-- 拆分为 `cyber`（全功能）、`cyber-agent`（最小 agent）、`web`（子命令）三入口
+- 拆分为 `aiscan`（全功能）、`aiscan-agent`（最小 agent）、`web`（子命令）三入口
 - Arsenal 工具始终加载，无需额外 flag
 - 解决 passive scanner 循环导入问题
 
@@ -789,7 +789,7 @@ playwright -s=s1 goto
 
 ### Breaking Changes
 
-- **`--loop` 移除**: 设置 `--ioa-url` 即自动启用 IOA worker 模式，不再需要单独的 `--loop` flag。迁移：`cyber agent --loop --ioa-url http://... --space s1` → `cyber agent --ioa-url http://... --space s1`
+- **`--loop` 移除**: 设置 `--ioa-url` 即自动启用 IOA worker 模式，不再需要单独的 `--loop` flag。迁移：`aiscan agent --loop --ioa-url http://... --space s1` → `aiscan agent --ioa-url http://... --space s1`
 - **`checkpoint`/`loop` tool 移除**: `checkpoint` 已迁移到 IOA protocol（`ioa_send checkpoint`），verify/sniper 子 agent 改用 `finish` tool + 结构化 status header；`loop` 不再作为 LLM custom tool 暴露，LoopScheduler 内部机制（`--heartbeat`）保留
 - **Provider 简化为双协议**: 移除 deepseek/groq/moonshot/ollama/openrouter 等独立 provider type，统一为 openai（OpenAI-compatible）和 anthropic 两种协议，通过 `--base-url` 指定实际端点
 - **`-q` 静默模式移除**: 被 `-v`/`-vv` 分级详细度替代
@@ -884,7 +884,7 @@ playwright -s=s1 goto
 
 ### Bug Fixes
 
-- **scanner CLI**: `cyber scan` / `cyber gogo` 等直接命令模式因引擎异步加载导致 "unknown subcommand" 失败。新增 `WaitEngines(ctx)` 同步等待引擎就绪
+- **scanner CLI**: `aiscan scan` / `aiscan gogo` 等直接命令模式因引擎异步加载导致 "unknown subcommand" 失败。新增 `WaitEngines(ctx)` 同步等待引擎就绪
 
 ### Refactoring
 
@@ -937,8 +937,8 @@ playwright -s=s1 goto
 ### Breaking Changes
 
 - `browser` 和 `recon` build tag 合并为单一 `full` tag
-- `ioa` 独立二进制移除，通过 `cyber ioa` 子命令访问
-- 每个平台仅产出 `cyber`（基础版）和 `cyber-full`
+- `ioa` 独立二进制移除，通过 `aiscan ioa` 子命令访问
+- 每个平台仅产出 `aiscan`（基础版）和 `aiscan-full`
 
 ### Tool 更新
 

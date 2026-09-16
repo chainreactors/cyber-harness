@@ -30,6 +30,11 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Install the static RE2 SDK
+        run: |
+          bash .github/native/sdk.sh fetch re2 linux amd64
+          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
+
       - name: Run bounded public scanner regressions
         run: |
           go test -tags "full sqlite cstx integration re2_cgo re2_static" -count=1 -timeout 8m -v \
