@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	agentprompt "github.com/chainreactors/cyber/agent/prompt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/commandline"
@@ -124,7 +125,19 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 		defer restoreLogs()
 	}
 
-	product, err := factory.Build(profile.Request{Option: option, ProviderMode: mode.Provider, Logger: scannerLogger})
+	var sessionConfig *agentsession.Config
+	if option.AI && scannerArgs[0] != "scan" {
+		sessionConfig = &agentsession.Config{
+			Loop: agent.StandardLoop{},
+			PromptConfig: &agentprompt.PromptConfig{
+				ScannerAgentMode: true,
+				ScannerName:      scannerArgs[0],
+			},
+		}
+	}
+	product, err := factory.Build(profile.Request{
+		Option: option, ProviderMode: mode.Provider, Session: sessionConfig, Logger: scannerLogger,
+	})
 	if err != nil {
 		return fmt.Errorf("construct scanner profile: %w", err)
 	}
@@ -147,7 +160,11 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}
 
 	if option.AI && scannerArgs[0] != "scan" {
-		return runScannerWithAgent(ctx, option, application, scannerArgs, logger)
+		runtime, runtimeErr := product.Runtime()
+		if runtimeErr != nil {
+			return runtimeErr
+		}
+		return runScannerWithAgent(ctx, option, application, runtime, scannerArgs, logger)
 	}
 
 	if option.NoColor && scannerArgs[0] == "scan" && !HasScannerFlag(scannerArgs[1:], "--no-color") {

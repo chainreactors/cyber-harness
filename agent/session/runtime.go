@@ -19,7 +19,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Runtime exposes session operations. Extension alone owns activation and drain.
+// Runtime exposes session operations. Resource owns activation and drain.
 // ---------------------------------------------------------------------------
 
 type Runtime struct {
@@ -29,13 +29,13 @@ type Runtime struct {
 	commandMu        sync.RWMutex
 	option           *cfg.Option
 	logger           telemetry.Logger
-	runtimeConfig    Config
+	config           Config
 	primarySessionID string
 	app              *apppkg.App
 	nodeName         string
 	systemPrompt     string
 	heartbeat        time.Duration
-	config           agent.Config
+	agentConfig      agent.Config
 	resumeMessages   []*aop.Message
 	resumeSessionID  string
 	ctx              context.Context
@@ -82,9 +82,16 @@ func (rt *Runtime) NodeName() string {
 	return rt.nodeName
 }
 
-// Load activates session work under scope.Lifetime. Init bounds initialization
-// only; caller contexts cannot extend the owning extension's lifetime.
-func (rt *Runtime) Start(ctx, lifetime context.Context) error {
+// Start activates session work under the owner's lifetime. The initialization
+// context cannot extend that lifetime.
+func (r *Resource) Start(ctx, lifetime context.Context) error {
+	if r == nil || r.runtime == nil {
+		return ErrUnavailable
+	}
+	return r.runtime.start(ctx, lifetime)
+}
+
+func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -100,7 +107,7 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 		return err
 	}
 	application, option := rt.app, rt.option
-	logger, rc := rt.logger, rt.runtimeConfig
+	logger, rc := rt.logger, rt.config
 	runtimeCtx, runtimeCancel := context.WithCancel(lifetime)
 	rt.ctx, rt.cancel = runtimeCtx, runtimeCancel
 	rt.primarySessionID = rc.PrimarySessionID
@@ -151,6 +158,19 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 	}
 	if rc.PromptConfig != nil {
 		promptConfig := *rc.PromptConfig
+		if promptConfig.Tools == nil {
+			promptConfig.Tools = pc.Tools
+		}
+		if promptConfig.ScannerDocs == "" {
+			promptConfig.ScannerDocs = pc.ScannerDocs
+		}
+		if promptConfig.Skills == nil {
+			promptConfig.Skills = pc.Skills
+		}
+		if promptConfig.NodeName == "" {
+			promptConfig.NodeName = pc.NodeName
+		}
+		promptConfig.Skills = append([]skills.Skill(nil), promptConfig.Skills...)
 		promptConfig.LoadedSkills = append([]prompt.LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
 		pc = &promptConfig
 	}
@@ -177,7 +197,7 @@ func (rt *Runtime) Start(ctx, lifetime context.Context) error {
 	rt.systemPrompt = prompt.BuildSystemPrompt(pc, nil)
 	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
-	rt.config = agent.Config{
+	rt.agentConfig = agent.Config{
 		Loop:                  rc.Loop,
 		Provider:              provider,
 		Tools:                 executor,
@@ -224,7 +244,14 @@ func promptHasLoadedSkill(pc *prompt.PromptConfig, name string) bool {
 	return false
 }
 
-func (rt *Runtime) Close(ctx context.Context) error {
+func (r *Resource) Close(ctx context.Context) error {
+	if r == nil || r.runtime == nil {
+		return nil
+	}
+	return r.runtime.close(ctx)
+}
+
+func (rt *Runtime) close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -287,7 +314,7 @@ func (rt *Runtime) SetLogger(logger telemetry.Logger) {
 	rt.app.SetLogger(logger)
 	logger = rt.app.Logger()
 	rt.mu.Lock()
-	rt.config.Logger = logger
+	rt.agentConfig.Logger = logger
 	for _, sess := range rt.sessions {
 		sess.agent.SetLogger(logger)
 	}
@@ -338,12 +365,12 @@ func (rt *Runtime) SetProvider(provider agent.Provider, providerConfig agent.Pro
 
 func (rt *Runtime) applyProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
 	rt.mu.Lock()
-	rt.config.Provider = provider
+	rt.agentConfig.Provider = provider
 	if providerConfig.Model != "" {
-		rt.config.Model = providerConfig.Model
+		rt.agentConfig.Model = providerConfig.Model
 	}
-	rt.config.MaxTokens = providerConfig.MaxTokens
-	rt.config.ContextWindow = providerConfig.ContextWindow
+	rt.agentConfig.MaxTokens = providerConfig.MaxTokens
+	rt.agentConfig.ContextWindow = providerConfig.ContextWindow
 	for _, sess := range rt.sessions {
 		sess.agent.SetProviderConfig(provider, providerConfig)
 	}

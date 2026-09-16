@@ -48,11 +48,11 @@ func New(config service.Config, deps Dependencies) *Extension {
 	return &Extension{resource: service.New(config, deps.Logger), config: config, deps: deps}
 }
 
-func (e *Extension) Runtime() *service.Runtime {
+func (e *Extension) Service() *service.Service {
 	if e == nil || e.resource == nil {
 		return nil
 	}
-	return e.resource.Runtime
+	return e.resource.Service
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
@@ -71,7 +71,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			}
 		}
 	}
-	rt := e.Runtime()
+	rt := e.Service()
 	client := e.resource.Client()
 	if client == nil {
 		return nil
@@ -154,7 +154,7 @@ func (e *Extension) Close(ctx context.Context) error {
 			}
 			return err
 		}
-		e.Runtime().ReportDropped(e.sub.Dropped())
+		e.Service().ReportDropped(e.sub.Dropped())
 		outputErr = e.sub.Err()
 		if dropped := e.sub.Dropped(); dropped > 0 {
 			outputErr = errors.Join(outputErr, fmt.Errorf("IOA output incomplete: %d events dropped", dropped))

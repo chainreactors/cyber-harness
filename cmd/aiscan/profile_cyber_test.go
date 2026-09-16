@@ -34,18 +34,18 @@ func (inertProvider) ChatCompletion(context.Context, *provider.ChatCompletionReq
 
 func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	runtimes := make(chan *loopext.Runtime, 2)
+	loops := make(chan *loopext.Loop, 2)
 	var unblock sync.Once
 	config := minimalConfig(&agentsession.Config{})
-	config.Runtime.Loop = profileLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
-		managed, ok := config.Loop.(*loopext.Runtime)
+	config.Session.Loop = profileLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+		managed, ok := config.Loop.(*loopext.Loop)
 		if !ok {
 			return nil, errors.New("run bypassed Agent extension")
 		}
 		if config.Inbox != nil {
 			config.Inbox.Drain()
 		}
-		runtimes <- managed
+		loops <- managed
 		if config.SessionID == "second" {
 			return &agent.Result{Stop: agent.StopReasonCompleted}, nil
 		}
@@ -87,8 +87,8 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	if _, err := secondRun.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	managed := <-runtimes
-	if _, ok := config.Runtime.Loop.(profileLoop); !ok {
+	managed := <-loops
+	if _, ok := config.Session.Loop.(profileLoop); !ok {
 		t.Fatal("profile mutated caller-owned loop selection")
 	}
 	run, err := first.Run(t.Context(), agentsession.RunInput{Message: agent.TextInput("local lifecycle test")})
@@ -100,7 +100,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("selected loop did not start")
 	}
-	if <-runtimes != managed {
+	if <-loops != managed {
 		t.Fatal("sessions do not use the same installed Agent runtime")
 	}
 	deadline, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
@@ -133,7 +133,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 
 func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	config := minimalConfig(nil)
-	config.Runtime = &agentsession.Config{} // Sessions are selected, reasoning is not.
+	config.Session = &agentsession.Config{} // Sessions are selected, reasoning is not.
 	p, err := newCyberProfile(config)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func minimalConfig(runtime *agentsession.Config) cyberProfileConfig {
 		runtime.Loop = agent.StandardLoop{}
 	}
 	return cyberProfileConfig{
-		Option: &cfg.Option{}, Runtime: runtime,
+		Option: &cfg.Option{}, Session: runtime,
 		Application: applicationConfig{SkipEngines: true, Logger: telemetry.NopLogger()},
 	}
 }

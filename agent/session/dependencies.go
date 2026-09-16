@@ -11,7 +11,7 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
-// HistoryStore supplies recovery without coupling the manager to a filesystem.
+// HistoryStore supplies recovery without coupling the runtime to a filesystem.
 // Event persistence uses the same canonical event stream as live publication.
 type HistoryStore interface {
 	Load(context.Context, string) (*History, error)
@@ -27,9 +27,22 @@ func (JSONLHistory) Load(ctx context.Context, path string) (*History, error) {
 }
 func (JSONLHistory) Validate(path string) error { return output.ValidateJSONLTarget(path) }
 
-// NewManager is inert. Start and Close are explicit resource operations and do
+// Resource owns one Runtime installation. Consumers borrow Runtime while the
+// owning extension alone starts and closes Resource.
+type Resource struct {
+	runtime *Runtime
+}
+
+func (r *Resource) Runtime() *Runtime {
+	if r == nil {
+		return nil
+	}
+	return r.runtime
+}
+
+// NewResource is inert. Start and Close are explicit owner operations and do
 // not require an extension.Scope.
-func NewManager(config Config) (*Runtime, error) {
+func NewResource(config Config) (*Resource, error) {
 	declared, index, err := commandDeclarations(config.Commands)
 	if err != nil {
 		return nil, err
@@ -47,26 +60,26 @@ func NewManager(config Config) (*Runtime, error) {
 	if application == nil {
 		application = &apppkg.App{Tools: tool.EmptyExecutor()}
 	}
-	return &Runtime{
+	return &Resource{runtime: &Runtime{
 		commands: declared, commandIndex: index, history: config.History,
-		app: application, option: config.Option, logger: config.Logger, runtimeConfig: config,
+		app: application, option: config.Option, logger: config.Logger, config: config,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		closeDone: make(chan struct{}),
-	}, nil
+	}}, nil
 }
 
-var ErrUnavailable = errors.New("session manager is unavailable")
+var ErrUnavailable = errors.New("session runtime is unavailable")
 
 // RegisterCommand atomically appends a declaration and all aliases. Existing
 // commands are immutable; execution never holds the registration lock.
 func (rt *Runtime) RegisterCommand(command Command) error {
 	if rt == nil {
-		return fmt.Errorf("session manager is required")
+		return fmt.Errorf("session runtime is required")
 	}
 	rt.lifecycle.Lock()
 	defer rt.lifecycle.Unlock()
 	if rt.closing {
-		return fmt.Errorf("session manager is closing")
+		return fmt.Errorf("session runtime is closing")
 	}
 	rt.commandMu.Lock()
 	defer rt.commandMu.Unlock()

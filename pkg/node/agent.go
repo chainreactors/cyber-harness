@@ -36,7 +36,7 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 
 	product, err := factory.Build(profile.Request{
 		Option: option, ProviderMode: profile.ProviderOptional, Logger: logger,
-		Runtime: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
+		Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
 	})
 	if err != nil {
 		return err

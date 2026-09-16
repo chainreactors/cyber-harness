@@ -27,15 +27,15 @@ func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	runtime := value.Runtime()
-	result, err := runtime.Run(t.Context(), agent.Config{SessionID: "standalone"})
+	loop := value.Loop()
+	result, err := loop.Run(t.Context(), agent.Config{SessionID: "standalone"})
 	if err != nil || result.Output != "standalone" {
 		t.Fatalf("standalone loop: %v, %v", result, err)
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
+	if _, err := loop.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
 		t.Fatalf("closed loop: %v", err)
 	}
 }
@@ -44,7 +44,7 @@ func (f loopFunc) Run(ctx context.Context, config agent.Config) (*agent.Result, 
 	return f(ctx, config)
 }
 
-func load(t *testing.T, loop agent.Loop) (*agentext.Runtime, *extension.Set) {
+func load(t *testing.T, loop agent.Loop) (*agentext.Loop, *extension.Set) {
 	t.Helper()
 	value := newLoopExtension(loop)
 	set, err := extension.New(value)
@@ -61,21 +61,21 @@ func load(t *testing.T, loop agent.Loop) (*agentext.Runtime, *extension.Set) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return value.Runtime(), set
+	return value.Loop(), set
 }
 
 func TestAdmissionAndInitializationLifetime(t *testing.T) {
 	var calls int
-	var runtime *agentext.Runtime
+	var loop *agentext.Loop
 	value := newLoopExtension(loopFunc(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		calls++
-		if config.Loop != runtime {
+		if config.Loop != loop {
 			t.Fatal("derived configs bypass the installed lifecycle")
 		}
 		return &agent.Result{Output: config.SessionID}, ctx.Err()
 	}))
-	runtime = value.Runtime()
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
+	loop = value.Loop()
+	if _, err := loop.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
 		t.Fatalf("run before Load: %v", err)
 	}
 	set, err := extension.New(value)
@@ -88,14 +88,14 @@ func TestAdmissionAndInitializationLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	result, err := runtime.Run(t.Context(), agent.Config{SessionID: "first"})
+	result, err := loop.Run(t.Context(), agent.Config{SessionID: "first"})
 	if err != nil || result.Output != "first" || calls != 1 {
 		t.Fatalf("run after init cancellation: %v, %v, calls=%d", result, err, calls)
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) || calls != 1 {
+	if _, err := loop.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) || calls != 1 {
 		t.Fatalf("run after Close: %v, calls=%d", err, calls)
 	}
 }
@@ -111,7 +111,7 @@ func TestCloseCancelsAndRetainsDependenciesUntilDrain(t *testing.T) {
 		<-release // Cancellation acknowledgement is not resource completion.
 		return nil, ctx.Err()
 	}))
-	runtime := value.Runtime()
+	loop := value.Loop()
 	set, err := extension.New(
 		extension.Func{CloseFunc: func(context.Context) error {
 			dependencyClosed.Store(true)
@@ -130,7 +130,7 @@ func TestCloseCancelsAndRetainsDependenciesUntilDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	runDone := make(chan error, 1)
-	go func() { _, err := runtime.Run(t.Context(), agent.Config{}); runDone <- err }()
+	go func() { _, err := loop.Run(t.Context(), agent.Config{}); runDone <- err }()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
@@ -149,7 +149,7 @@ func TestCloseCancelsAndRetainsDependenciesUntilDrain(t *testing.T) {
 	if dependencyClosed.Load() {
 		t.Fatal("released a dependency before its loop drained")
 	}
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
+	if _, err := loop.Run(t.Context(), agent.Config{}); !errors.Is(err, agentext.ErrUnavailable) {
 		t.Fatalf("accepted work while draining: %v", err)
 	}
 	unblock.Do(func() { close(release) })

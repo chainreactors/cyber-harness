@@ -36,7 +36,7 @@ type Application interface {
 type Request struct {
 	Option       *cfg.Option
 	ProviderMode ProviderMode
-	Runtime      *agentsession.Config
+	Session      *agentsession.Config
 	Logger       telemetry.Logger
 }
 

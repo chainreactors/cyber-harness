@@ -129,7 +129,7 @@ func TestStdioAcceptRejectsUnsupportedFrame(t *testing.T) {
 func TestStdioRunRequiresOpenSession(t *testing.T) {
 	var output bytes.Buffer
 	h := newRuntimeStdioHost(t, &output, nil)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 	h.accept(runLine(t, "s1", "turn-1", "hello"))
 	envelopes := decodeEnvelopes(t, &output)
 	if len(envelopes) != 1 || unwrapCore(t, envelopes[0]).GetRunTurnResponse().GetRejected() == nil {
@@ -140,7 +140,7 @@ func TestStdioRunRequiresOpenSession(t *testing.T) {
 func TestStdioRunRejectsEmptyPrompt(t *testing.T) {
 	var output bytes.Buffer
 	h := newRuntimeStdioHost(t, &output, nil)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 	h.accept(openSessionLine(t, "s1"))
 	h.accept(runLine(t, "s1", "turn-1", "   "))
 	h.drain()
@@ -162,7 +162,7 @@ func TestStdioRunRejectsEmptyPrompt(t *testing.T) {
 func TestStdioCommandUsesIndependentCorrelationID(t *testing.T) {
 	var output bytes.Buffer
 	h := newRuntimeStdioHost(t, &output, nil)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 	h.accept(openSessionLine(t, "s1"))
 	h.accept(protocolLine(t, "command-correlation", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Request{Request: &types.CommandRequest{
 		SessionId: "s1", Line: "/help",
@@ -317,12 +317,12 @@ func initRuntimeStdioHost(t *testing.T, h *stdioHost, prov agent.Provider) {
 	}
 	h.host = host.New(mux)
 	t.Cleanup(h.host.Close)
-	h.rt.config.Model = "test"
-	h.rt.config.MaxTurns = 4
+	h.rt.agentConfig.Model = "test"
+	h.rt.agentConfig.MaxTurns = 4
 	unsubscribe := h.rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		_ = h.emit(aop.MustWrap(aop.EnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
 	}))
-	t.Cleanup(func() { _ = h.rt.Close(context.Background()); unsubscribe.Cancel() })
+	t.Cleanup(func() { _ = h.rt.close(context.Background()); unsubscribe.Cancel() })
 }
 
 func waitForCalls(t *testing.T, prov *stdioGateProvider, n int, what string) {
@@ -342,7 +342,7 @@ func TestStdioSameSessionFIFOOrder(t *testing.T) {
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
 	newStdioTestSession(t, h, &output, "s1", prov)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 
 	for _, text := range []string{"first", "second", "third"} {
 		h.accept(runLine(t, "s1", "turn-"+text, text))
@@ -361,7 +361,7 @@ func TestStdioSessionsRunConcurrently(t *testing.T) {
 	var output bytes.Buffer
 	prov := newStdioGateProvider()
 	h := newRuntimeStdioHost(t, &output, prov)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 
 	h.accept(openSessionLine(t, "s1"))
 	h.accept(openSessionLine(t, "s2"))
@@ -402,7 +402,7 @@ func TestStdioDrainWaitsForInFlightAndQueued(t *testing.T) {
 	h := newTestStdioHost(&output)
 	prov := newStdioGateProvider()
 	newStdioTestSession(t, h, &output, "s1", prov)
-	defer h.rt.Close(context.Background())
+	defer h.rt.close(context.Background())
 
 	h.accept(runLine(t, "s1", "turn-first", "first"))
 	h.accept(runLine(t, "s1", "turn-second", "second"))

@@ -55,7 +55,7 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	bindings := Bind(client.Runtime(), "", "")
+	bindings := Bind(client.Service(), "", "")
 	view := consoleapi.View{Out: &output, Err: &output, Table: func(title string, rows [][]string) { fmt.Fprintln(&output, title, rows) }}
 	arguments := map[string][]string{
 		"/spaces": {}, "/nodes": {}, "/messages": {"team"}, "/context": {"team", "message"},

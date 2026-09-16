@@ -233,7 +233,7 @@ func TestSessionAdmissionAndCancellationDrainEveryAcceptedOperation(t *testing.T
 
 func TestSessionWithoutLoopDoesNotQueueInput(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
-	rt.config.Loop = nil
+	rt.agentConfig.Loop = nil
 	session, err := rt.EnsureSession(SessionOptions{ID: "history-only"})
 	if err != nil {
 		t.Fatal(err)
@@ -433,7 +433,7 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rt.config.Model = "gpt-test"
+	rt.agentConfig.Model = "gpt-test"
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-status", AgentName: "node-test"})
 	if err != nil {
@@ -650,8 +650,8 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	rt := &Runtime{
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		config:    agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
-		closeDone: make(chan struct{}), loaded: true,
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
+		closeDone:   make(chan struct{}), loaded: true,
 	}
 	rt.commands, rt.commandIndex, err = commandDeclarations(nil)
 	if err != nil {
@@ -660,7 +660,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	t.Cleanup(func() {
 		_ = terminalSet.Close(context.Background())
 	})
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	t.Cleanup(func() { _ = rt.close(context.Background()) })
 	return rt
 }
 

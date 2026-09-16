@@ -67,9 +67,9 @@ Resource，返回的 Handle 表示这次注册。`cli.Contribution` 只是 CLI �
 处理 Extension：先停止对应 Scope，再逆序关闭它拥有的 Handle，最后关闭 Extension 自身持有的
 后台工作和外部资源。构造参数表达直接业务依赖，Resource Registry 只连接动态资源。
 
-这张图只描述 runtime Extension model。Config、CLI 和 Probe 的 declaration registry 复用
-`core/resource`，但发生在参数解析前，不由 `Set`、`Scope` 或 runtime lifecycle 管理，因此不属于
-这张核心关系图。
+这张图只描述 runtime Extension model。Config、CLI 和连接测试也使用 `core/resource` 的 typed
+Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、`Scope` 或 runtime lifecycle 管理，
+因此不属于这张核心关系图。
 
 ## Architecture Invariants
 
@@ -99,6 +99,20 @@ resource.Define[tool.Tool](resources, tools)
 resource.Add[tool.Tool](resources, read, write, glob)
 ```
 
+这里几个词只描述同一个注册动作的不同角色，不是多层框架：
+
+- **Point** 是某种 Go 类型的接收端，例如 `cli.Registry` 接收 `cli.Contribution`。
+- **Resource** 是传给 `resource.Add[T]` 的 `T` 值，例如一个 Tool、一个 CLI contribution 或一个
+  Config section。
+- **Contribution** 只是“被贡献的 Resource”的领域命名；框架没有通用 Contribution 接口。
+- **Declare** 是扩展包的初始化入口，在构建期调用若干次 `resource.Add`；它不是 Resource、Point、
+  生命周期接口或另一套注册机制。Declare 只贡献资源，不定义 Point，也不需要 declaration 子包。
+
+因此系统只有一套连接机制：`resource.Define[T]` 建立 typed Point，`resource.Add[T]` 向它提交
+Resource。不同的 `T` 需要不同 Point，是因为 CLI、Config、Tool 的重复和 Seal 规则不同；这不等于
+存在多套 Point 机制。`config.Sections.ConnectionPoint()` 只是 Go 方法不能重载所需的窄适配器：
+同一个 `Sections` 类型不能同时声明 `Add(...Section)` 和 `Add(...Connection)`。
+
 Resource Registry（`resource.Registry`）内部用 `reflect.TypeFor[T]()` 定位 Point，因此资源类型没有字符串名称，
 也不存在需要同步维护的 Resource ID。资源自身的领域标识仍由领域类型负责，例如 Tool 的
 名称、CLI flag、配置 section key 和 protobuf namespace full name；这些不是插件 ID。
@@ -116,14 +130,17 @@ Console Bindings 与 Web Route 由宿主物化为固定快照。通用 Resource 
 
 Config 与进程 CLI 在解析前组合，仍使用同一套 typed resource 机制：
 
-- `config.Section` 由 `config.Sections` 接收。
-- `cli.Contribution` 由 `cli.Registry` 接收。
-- `probe.Definition` 由 `probe.Registry` 接收。
+- `cli.Registry` 是 `Point[cli.Contribution]`。
+- `config.Sections` 是 `Point[config.Section]`；它的 `ConnectionPoint()` 接收可选的
+  `config.Connection`，并由同一个配置目录按 section 分发。
+- 拥有外部连接的扩展直接贡献 `config.Connection`。没有聚合 Provider DTO、Catalog、Probe
+  Registry 或额外生命周期。
 
-插件的 `Declare(*resource.Registry)` 直接贡献上述类型，不再汇总成 settings DTO，也不需要
-伪造一个生命周期 Extension。底层 Add 仍返回 Handle，但当前 Declare API 是一次性 builder：
-成功后 Seal，失败时丢弃整个 builder，不承诺逐插件卸载。CLI contribution 按注册顺序物化，
-因此一个插件可以扩展较早插件声明的命令。
+需要参与解析前组合的扩展在自己的包中提供 `Declare(*resource.Registry, ...)`，直接向这些 Point
+添加自己拥有的资源；没有这类资源的扩展不需要空 Declare，也不需要伪造生命周期 Extension。
+底层 Add 仍返回 Handle，但当前声明流程是一次性 builder：成功后 Seal，
+失败时丢弃整个 builder，不承诺逐插件卸载。CLI contribution 按注册顺序物化，因此一个扩展可以
+扩展较早扩展声明的命令。
 
 运行时资源与声明期资源的差异只在生命周期和领域约束：参数解析完成后不能增加 flag/config
 schema；运行时 Point 可以按自己的协议选择实时增删、只影响新消费者，或在首次物化后拒绝贡献。
@@ -163,13 +180,14 @@ Profile 只有全部 Extension 成功加载后才 Active。Close 开始即停止
 | `*console/api.Bindings` | TUI | Session、IOA presentation |
 | `aop.NamespaceBinding` | Namespace Catalog | Session、Proxy 等协议插件 |
 | `web.Route` | Web route catalog | Management API、IOA server |
-| `config.Section` | Config builder | IOA client/server、record |
-| `cli.Contribution` | CLI builder | IOA commands、Session flags |
-| `probe.Definition` | Config API builder | scanner、search、IOA probes |
+| `cli.Contribution` | CLI Registry | IOA commands、Session flags |
+| `config.Section` | Config Sections | IOA client/server、record |
+| `config.Connection` | Config Sections connection point | scanner、search、IOA client |
 
 Command 和 Tool 是不同执行协议，但共同使用 `core/registry.Store[T]` 管理批次、运行时准入、
-取消和 drain。Skill 是知识资源，不并入执行 Registry。Console、Probe 和 Namespace Binding
-也保留自己的领域类型，不通过字符串形式的万能资源表。
+取消和 drain。Skill 是知识资源，不并入执行 Registry。Console 和 Namespace Binding 也保留
+自己的领域类型，不通过字符串形式的万能资源表。CLI 与 Config 由各自 Point 校验，不经过聚合
+Catalog。
 
 每个连接从 Namespace Catalog 绑定一次当前快照。关闭 contribution handle 会移除后续连接的
 绑定，已建立连接仍由自己的 `aop.NamespaceMux` 和连接 context 管理，这避免运行期跨连接共享
@@ -180,6 +198,11 @@ Session Extension 只拥有 Runtime 的启动和关闭，不探测 Namespace Poi
 Session 协议的组合根显式贡献 `Runtime.NamespaceBindings()`；Node 连接也不再硬编码同一组
 core/command handler。连接私有的调用取消在 Namespace 分发前处理，因为它依赖单个连接的
 运行中调用表，不是可跨传输复用的资源。
+
+Agent Loop 与 Session Runtime 在每个 Profile 的组合根就地组装：先安装 Agent Loop
+Extension，再把 `Loop()` 交回的句柄放回 `agentsession.Config.Loop`，最后安装 Session
+Extension。`cmd/aiscan`、`cmd/agent` 和 Scanner AI 都使用 Profile 返回的同一 Session
+Runtime；runner 不再创建隐藏的子 Set 或第二套 Runtime。
 
 ## Service 与 Capability
 

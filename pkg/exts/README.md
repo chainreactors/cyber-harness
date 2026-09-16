@@ -10,13 +10,15 @@ Tool、Command、Skill 和 Runtime 才是调用者使用的 domain capabilities�
 Extension 通过构造参数接收依赖，通过 `extension.Define/Add` 使用 typed resources。Extension
 的 Load、App 和领域对象不得创建或隐藏子 Set，也不得创建 Service Locator、通用 DTO 聚合器
 或字符串资源表。宿主和用例入口可以为互不相同的生命周期建立并列 Set。业务消费者只拿不含
-Load/Close 的窄接口或借用对象，例如 Files、ProxyHub、Importer、IOA Runtime 或 Agent Runtime；
+Load/Close 的窄接口或借用对象，例如 Files、ProxyHub、Importer、IOA Service 或 Agent Loop；
 拥有者 Extension 负责停止准入、排空并关闭底层资源。App 只是这些对象的借用视图，本身没有
 空生命周期包装。
 
 Tool Registry 与 Command Registry 直接定义各自 Point，Skill Library 定义 Bundle Point，
-TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CLI 和 Probe 是解析前的
-声明资源，插件以 `Declare(*resource.Registry)` 直接贡献，不需要生命周期 Extension。
+TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CLI 和连接测试
+是解析前 Resource；需要参与这段组合的扩展在自己的包中提供 `Declare`，直接向
+`cli.Contribution`、`config.Section` 和 `config.Connection` Point 注册。Declare 不定义 Point，
+也不引入 declaration 子包、生命周期 Extension、聚合 Provider DTO 或独立 Probe Registry。
 
 依赖顺序由 Profile 组合根或明确用例入口中的线性列表表达。可选功能由是否构造对应 Extension
 决定，不使用 Descriptor、Provides/Requires 或 capability gating。IOA client/server 相互独立；

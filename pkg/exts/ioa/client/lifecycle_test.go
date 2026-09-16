@@ -149,7 +149,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.GetMessages(adapter.Runtime().ReceiveSpace(), "", 10)
+	messages, err := store.GetMessages(adapter.Service().ReceiveSpace(), "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	if err := set.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
 		t.Fatalf("close = %v", err)
 	}
-	if err := adapter.Runtime().WaitReady(t.Context()); err != nil {
+	if err := adapter.Service().WaitReady(t.Context()); err != nil {
 		t.Fatalf("resource was released prematurely: %v", err)
 	}
 	// Cancellation can be reported as an ordinary completed-output error.

@@ -12,7 +12,7 @@ import (
 // Legacy integration scenarios exercise both resources through a test fixture.
 // Production profiles install separate Agent and Session nodes.
 type Extension struct {
-	runtime  *Runtime
+	resource *Resource
 	loop     *loopext.Extension
 	sessions bool
 }
@@ -22,15 +22,15 @@ func New(c Config) (*Extension, error) {
 	var loop *loopext.Extension
 	if c.Loop != nil || !sessions {
 		loop = loopext.New(c.Loop)
-		c.Loop = loop.Runtime()
+		c.Loop = loop.Loop()
 	}
-	r, err := NewManager(c)
+	resource, err := NewResource(c)
 	if err != nil {
 		return nil, err
 	}
-	return &Extension{runtime: r, loop: loop, sessions: sessions}, nil
+	return &Extension{resource: resource, loop: loop, sessions: sessions}, nil
 }
-func (e *Extension) Runtime() *Runtime { return e.runtime }
+func (e *Extension) Runtime() *Runtime { return e.resource.Runtime() }
 func (e *Extension) Load(s *extension.Scope) error {
 	if e.loop != nil {
 		if err := e.loop.Load(s); err != nil {
@@ -38,7 +38,7 @@ func (e *Extension) Load(s *extension.Scope) error {
 		}
 	}
 	if e.sessions {
-		return e.runtime.Start(s.Init(), s.Lifetime())
+		return e.resource.Start(s.Init(), s.Lifetime())
 	}
 	return nil
 }
@@ -48,15 +48,15 @@ func (e *Extension) Close(ctx context.Context) error {
 		err = e.loop.Close(ctx)
 	}
 	if e.sessions {
-		err = errors.Join(err, e.runtime.Close(ctx))
+		err = errors.Join(err, e.resource.Close(ctx))
 	}
 	return err
 }
 func (r *Runtime) Run(ctx context.Context, c agent.Config) (*agent.Result, error) {
-	if r.runtimeConfig.Loop == nil {
+	if r.config.Loop == nil {
 		return nil, ErrUnavailable
 	}
-	result, err := r.runtimeConfig.Loop.Run(ctx, c)
+	result, err := r.config.Loop.Run(ctx, c)
 	if errors.Is(err, loopext.ErrUnavailable) {
 		err = errors.Join(err, ErrUnavailable)
 	}

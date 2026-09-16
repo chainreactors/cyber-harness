@@ -9,11 +9,11 @@ import (
 	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
-func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentsession.Config) (profile.Application, *agentsession.Runtime, error) {
+func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, sessionConfig *agentsession.Config) (profile.Application, *agentsession.Runtime, error) {
 	product, err := factory.Build(profile.Request{
 		Option:       option,
 		ProviderMode: profile.ProviderRequired,
-		Runtime:      runtimeConfig,
+		Session:      sessionConfig,
 		Logger:       logger,
 	})
 	if err != nil {

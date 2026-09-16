@@ -40,14 +40,14 @@ type cyberProfileConfig struct {
 	Option      *cfg.Option
 	Application applicationConfig
 	IOA         *ioatools.Config
-	// Runtime nil creates the application-only profile used by the Web service.
-	Runtime   *agentsession.Config
+	// Session nil creates the application-only profile used by the Web service.
+	Session   *agentsession.Config
 	Observe   []observeext.Kind
 	Output    string
 	Artifacts managementapi.ArtifactImporter
 }
 
-func profileConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, runtimeConfig *agentsession.Config, logger telemetry.Logger) (cyberProfileConfig, error) {
+func profileConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (cyberProfileConfig, error) {
 	ioaConfig, err := ioaext.ConfigFromOption(option)
 	if err != nil {
 		return cyberProfileConfig{}, err
@@ -55,7 +55,7 @@ func profileConfigFromOption(option *cfg.Option, providerMode profilepkg.Provide
 	application := applicationConfigFromOption(option, providerMode, logger)
 	return cyberProfileConfig{
 		Option: option, Application: application,
-		IOA: ioaConfig, Runtime: cloneConfig(runtimeConfig),
+		IOA: ioaConfig, Session: cloneConfig(sessionConfig),
 		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
 	}, nil
 }
@@ -81,7 +81,7 @@ type cyberProfile struct {
 	extensions *extension.Set
 	app        *apppkg.App
 	runtime    *agentsession.Runtime
-	ioa        *ioatools.Runtime
+	ioa        *ioatools.Service
 	tui        *tuiext.Extension
 	namespaces *namespaces.Catalog
 }
@@ -102,7 +102,7 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 		option.Extensions = resolved.Values()
 		request.Option = &option
 	}
-	config, err := profileConfigFromOption(request.Option, request.ProviderMode, request.Runtime, request.Logger)
+	config, err := profileConfigFromOption(request.Option, request.ProviderMode, request.Session, request.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -111,9 +111,9 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 
 func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	product := &cyberProfile{}
-	if config.Runtime != nil {
-		config.Runtime = cloneConfig(config.Runtime)
-		config.Runtime.BaseSkills = append([]string{"cyber"}, config.Runtime.BaseSkills...)
+	if config.Session != nil {
+		config.Session = cloneConfig(config.Session)
+		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
 	}
 	if config.Option == nil {
 		return nil, fmt.Errorf("cyber profile option is required")
@@ -122,7 +122,7 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		config.Application.Logger = telemetry.NopLogger()
 	}
 	logger := config.Application.Logger
-	config.Runtime = cloneConfig(config.Runtime)
+	config.Session = cloneConfig(config.Session)
 	nodeName := config.Option.NodeName
 	if config.IOA != nil && config.IOA.NodeName != "" {
 		nodeName = config.IOA.NodeName
@@ -147,8 +147,8 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	proxyHub := proxyExtension.Hub()
 	eventStream := events.New()
 	var runtimeLoop agent.Loop
-	if config.Runtime != nil {
-		runtimeLoop = config.Runtime.Loop
+	if config.Session != nil {
+		runtimeLoop = config.Session.Loop
 	}
 	scannerLoop := runtimeLoop
 	if scannerLoop == nil && config.Application.Provider.Mode != provider.StartupDisabled {
@@ -194,7 +194,7 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 			return nil, fmt.Errorf("load IOA skills: %v", diagnostics)
 		}
 		deps := ioaext.Dependencies{Events: eventStream, Logger: logger, Skills: []skills.Bundle{bundle}}
-		if config.Runtime != nil {
+		if config.Session != nil {
 			deps.Deliver = func(ctx context.Context, message inbox.Message) error {
 				if product.extensions == nil || !product.extensions.Active() {
 					return agentsession.ErrUnavailable
@@ -206,21 +206,21 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		values = append(values, ioa)
 	}
 	var run *agentsession.Runtime
-	var ioaRuntime *ioatools.Runtime
-	if config.Runtime != nil || ioa != nil {
+	var ioaService *ioatools.Service
+	if config.Session != nil || ioa != nil {
 		product.tui = tuiext.New()
 		values = append(values, product.tui)
 	}
 	if ioa != nil {
-		ioaRuntime = ioa.Runtime()
-		presentation, err := ioaconsole.New(ioaRuntime, config.IOA.Space, config.IOA.URL)
+		ioaService = ioa.Service()
+		presentation, err := ioaconsole.New(ioaService, config.IOA.Space, config.IOA.URL)
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, presentation)
 	}
-	if config.Runtime != nil {
-		agentConfig := *config.Runtime
+	if config.Session != nil {
+		agentConfig := *config.Session
 		agentConfig.Application = application
 		agentConfig.NodeName = nodeName
 		if config.IOA != nil && config.IOA.Space != "" {
@@ -228,19 +228,17 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		}
 
 		agentConfig.Option, agentConfig.Logger = config.Option, logger
-		if runtimeLoop != nil {
-			loopExtension := loopext.New(runtimeLoop)
-			agentConfig.Loop = loopExtension.Runtime()
-			values = append(values, loopExtension)
-		} else {
-			agentConfig.Loop = nil
+		if agentConfig.Loop != nil {
+			loop := loopext.New(agentConfig.Loop)
+			agentConfig.Loop = loop.Loop()
+			values = append(values, loop)
 		}
-		agentExtension, err := sessionext.New(agentConfig)
+		sessions, err := sessionext.New(agentConfig)
 		if err != nil {
 			return nil, fmt.Errorf("construct Cyber runtime: %w", err)
 		}
-		run = agentExtension.Runtime()
-		values = append(values, agentExtension)
+		run = sessions.Runtime()
+		values = append(values, sessions)
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Add(scope, run.NamespaceBindings()...)
 		}})
@@ -254,7 +252,7 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	product.extensions, product.app, product.runtime, product.ioa = extensions, application, run, ioaRuntime
+	product.extensions, product.app, product.runtime, product.ioa = extensions, application, run, ioaService
 	product.namespaces = namespaceCatalog
 	return product, nil
 }

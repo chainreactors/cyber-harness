@@ -10,7 +10,7 @@ import (
 
 func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 	for _, capability := range []reflect.Type{
-		reflect.TypeFor[*agentext.Runtime](),
+		reflect.TypeFor[*agentext.Loop](),
 	} {
 		for _, method := range []string{"Load", "Close"} {
 			if _, exists := capability.MethodByName(method); exists {
@@ -19,7 +19,7 @@ func TestBusinessCapabilitiesCannotOwnExtensionLifetimes(t *testing.T) {
 		}
 	}
 	if _, exists := reflect.TypeFor[*agentext.Extension]().MethodByName("Run"); exists {
-		t.Fatal("Agent Extension duplicates its Runtime execution API")
+		t.Fatal("Agent Extension duplicates its Loop execution API")
 	}
 	for _, method := range []string{"OpenSession", "EnsureSession", "Observe", "RunSession"} {
 		if _, exists := reflect.TypeFor[*agentext.Extension]().MethodByName(method); exists {

@@ -70,27 +70,29 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	if err != nil {
 		return nil, err
 	}
-	loop := loopext.New(agent.StandardLoop{})
 	tui := tuiext.New()
-	session, err := sessionext.New(agentsession.Config{
+	sessionConfig := agentsession.Config{
 		Application: application, NodeName: cfg.ResolveNodeName(option.NodeName),
-		Option: &option, Logger: logger, PrimarySessionID: "main", Loop: loop.Runtime(),
-	})
+		Option: &option, Logger: logger, PrimarySessionID: "main", Loop: agent.StandardLoop{},
+	}
+	loop := loopext.New(sessionConfig.Loop)
+	sessionConfig.Loop = loop.Loop()
+	sessions, err := sessionext.New(sessionConfig)
 	if err != nil {
 		return nil, err
 	}
-	presentation, err := sessionconsole.New(session.Runtime())
+	runtime := sessions.Runtime()
+	presentation, err := sessionconsole.New(runtime)
 	if err != nil {
 		return nil, err
 	}
-	set, err := extension.New(
-		commandRegistry, toolRegistry, library, provider, workspace, terminal,
-		loop, tui, session, presentation,
-	)
+	values := []extension.Extension{commandRegistry, toolRegistry, library, provider, workspace, terminal}
+	values = append(values, loop, sessions, tui, presentation)
+	set, err := extension.New(values...)
 	if err != nil {
 		return nil, err
 	}
-	return &agentProfile{extensions: set, app: application, runtime: session.Runtime(), tui: tui}, nil
+	return &agentProfile{extensions: set, app: application, runtime: runtime, tui: tui}, nil
 }
 
 func agentSkillPaths(values []string) []string {

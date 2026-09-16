@@ -14,7 +14,7 @@ import (
 
 var ErrUnavailable = errors.New("agent extension is not active")
 
-type Runtime struct {
+type Loop struct {
 	loop     agent.Loop
 	mu       sync.Mutex
 	lifetime context.Context
@@ -25,119 +25,119 @@ type Runtime struct {
 }
 
 // Extension owns one loop installation.
-type Extension struct{ runtime *Runtime }
+type Extension struct{ loop *Loop }
 
 func New(loop agent.Loop) *Extension {
-	return &Extension{runtime: &Runtime{loop: loop, done: make(chan struct{})}}
+	return &Extension{loop: &Loop{loop: loop, done: make(chan struct{})}}
 }
 
-// Runtime lends business operations, never ownership of this installation.
-func (e *Extension) Runtime() *Runtime {
+// Loop lends business operations, never ownership of this installation.
+func (e *Extension) Loop() *Loop {
 	if e == nil {
 		return nil
 	}
-	return e.runtime
+	return e.loop
 }
 func (e *Extension) Load(scope *extension.Scope) error {
-	if e == nil || e.runtime == nil || scope == nil {
+	if e == nil || e.loop == nil || scope == nil {
 		return ErrUnavailable
 	}
-	return e.runtime.load(scope)
+	return e.loop.load(scope)
 }
 
-func (r *Runtime) load(scope *extension.Scope) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stopping {
+func (l *Loop) load(scope *extension.Scope) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopping {
 		return ErrUnavailable
 	}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if r.loop == nil {
+	if l.loop == nil {
 		return errors.New("agent extension requires a loop")
 	}
-	value := reflect.ValueOf(r.loop)
+	value := reflect.ValueOf(l.loop)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		if value.IsNil() {
 			return errors.New("agent extension requires a non-nil loop")
 		}
 	}
-	if r.lifetime == nil {
-		r.lifetime, r.cancel = context.WithCancel(scope.Lifetime())
+	if l.lifetime == nil {
+		l.lifetime, l.cancel = context.WithCancel(scope.Lifetime())
 	}
 	return nil
 }
 
-func (rt *Runtime) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
-	if rt == nil {
+func (l *Loop) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	if l == nil {
 		return nil, ErrUnavailable
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rt.mu.Lock()
-	if rt.lifetime == nil || rt.stopping || rt.lifetime.Err() != nil {
-		rt.mu.Unlock()
+	l.mu.Lock()
+	if l.lifetime == nil || l.stopping || l.lifetime.Err() != nil {
+		l.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
-		rt.mu.Unlock()
+		l.mu.Unlock()
 		return nil, err
 	}
-	rt.active++
+	l.active++
 	call, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(rt.lifetime, cancel)
-	rt.mu.Unlock()
+	stop := context.AfterFunc(l.lifetime, cancel)
+	l.mu.Unlock()
 	defer func() {
 		stop()
 		cancel()
-		rt.mu.Lock()
-		rt.active--
-		if rt.stopping && rt.active == 0 {
-			close(rt.done)
+		l.mu.Lock()
+		l.active--
+		if l.stopping && l.active == 0 {
+			close(l.done)
 		}
-		rt.mu.Unlock()
+		l.mu.Unlock()
 	}()
 	// Derived agent configs must retain the same lifecycle admission boundary.
-	config.Loop = rt
-	return rt.loop.Run(call, config)
+	config.Loop = l
+	return l.loop.Run(call, config)
 }
 
 func (e *Extension) Close(ctx context.Context) error {
-	if e == nil || e.runtime == nil {
+	if e == nil || e.loop == nil {
 		return nil
 	}
-	return e.runtime.close(ctx)
+	return e.loop.close(ctx)
 }
 
-func (r *Runtime) stop() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.stopping {
+func (l *Loop) stop() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopping {
 		return
 	}
-	r.stopping = true
-	if r.cancel != nil {
-		r.cancel()
+	l.stopping = true
+	if l.cancel != nil {
+		l.cancel()
 	}
-	if r.active == 0 {
-		close(r.done)
+	if l.active == 0 {
+		close(l.done)
 	}
 }
-func (r *Runtime) close(ctx context.Context) error {
+func (l *Loop) close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	r.stop()
+	l.stop()
 	select {
-	case <-r.done:
+	case <-l.done:
 		return nil
 	default:
 	}
 	select {
-	case <-r.done:
+	case <-l.done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -145,4 +145,4 @@ func (r *Runtime) close(ctx context.Context) error {
 }
 
 var _ extension.Extension = (*Extension)(nil)
-var _ agent.Loop = (*Runtime)(nil)
+var _ agent.Loop = (*Loop)(nil)

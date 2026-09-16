@@ -11,14 +11,14 @@ import (
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
-func TestRuntimeHandleDoesNotExposeLifecycle(t *testing.T) {
+func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
 	adapter := New(service.Config{}, Dependencies{})
-	runtime := adapter.Runtime()
-	if _, ok := any(runtime).(interface{ Close(context.Context) error }); ok {
-		t.Fatal("IOA runtime exposes Close")
+	svc := adapter.Service()
+	if _, ok := any(svc).(interface{ Close(context.Context) error }); ok {
+		t.Fatal("IOA service exposes Close")
 	}
-	if _, ok := any(runtime).(interface{ Start(context.Context) error }); ok {
-		t.Fatal("IOA runtime exposes Start")
+	if _, ok := any(svc).(interface{ Start(context.Context) error }); ok {
+		t.Fatal("IOA service exposes Start")
 	}
 }
 

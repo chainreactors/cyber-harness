@@ -201,8 +201,8 @@ func (s *commandSession) statusText() string {
 	rt := s.state.runtime
 	rt.mu.RLock()
 	app := rt.app
-	provider := rt.config.Provider
-	model := rt.config.Model
+	provider := rt.agentConfig.Provider
+	model := rt.agentConfig.Model
 	providerConfig := agent.ProviderConfig{}
 	if app != nil {
 		_, providerConfig = app.ProviderState()
@@ -523,8 +523,8 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	cancel := func() { stopLifetime(); cancelSession() }
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 	mailbox := &sessionMailbox{base: baseInbox}
-	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.config.Logger)
-	agentCfg := rt.config.
+	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.agentConfig.Logger)
+	agentCfg := rt.agentConfig.
 		WithSystemPrompt(rt.systemPrompt).
 		WithStream(true).
 		WithInbox(mailbox).
@@ -567,7 +567,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		historyMode = types.SessionHistory_MODE_SNAPSHOT
 	}
 	emitSessionStarted(rt.app, id, agentName, &aop.SessionStarted{
-		Model: rt.config.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
+		Model: rt.agentConfig.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	}, historyMode)
 	if options.HistorySnapshot && len(options.Messages) > 0 {
 		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
@@ -1393,5 +1393,5 @@ func (rt *Runtime) unregisterRun(run *Run) {
 func (rt *Runtime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.config.Provider, rt.config.Model, rt.config.Logger
+	return rt.agentConfig.Provider, rt.agentConfig.Model, rt.agentConfig.Logger
 }

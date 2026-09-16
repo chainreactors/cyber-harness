@@ -40,7 +40,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	runtime.config.Loop = owner.Runtime()
+	runtime.agentConfig.Loop = owner.Runtime()
 	session, err := runtime.EnsureSession(SessionOptions{ID: "panic"})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	}
 	cancelInit()
 	runtime := owner.Runtime()
-	runtime.config.Provider = &runtimeSemanticProvider{}
+	runtime.agentConfig.Provider = &runtimeSemanticProvider{}
 	session, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "owned"})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.config.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Runtime()
 	var ended atomic.Int32
 	sub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event.SessionId == "closing" && event.GetSessionEnded() != nil {
@@ -301,13 +301,13 @@ func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 		}
 	}))
 	defer healthy.Cancel()
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatalf("runtime close = %v", err)
 	}
 	if session.currentState() != nil || !state.inbox.Closed() {
 		t.Fatal("observer failure prevented resource cleanup")
 	}
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatalf("repeated runtime close = %v", err)
 	}
 	if completions.Load() != 1 {
@@ -315,11 +315,12 @@ func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 	}
 }
 
-func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testing.T) {
+func TestResourceCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testing.T) {
 	started, canceled := make(chan string, 2), make(chan string, 2)
 	release := make(chan struct{})
 	var unblock sync.Once
 	runtime := newBareRuntime(t, nil, &runtimeSemanticProvider{})
+	resource := &Resource{runtime: runtime}
 	managed := newLoopExtension(lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- config.SessionID
 		<-ctx.Done()
@@ -332,7 +333,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.config.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Runtime()
 	var runs []*Run
 	for _, id := range []string{"first", "second"} {
 		session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: id})
@@ -354,7 +355,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 	}
 	deadline, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	if err := runtime.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
+	if err := resource.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close while loops are still draining: %v", err)
 	}
 	for range 2 {
@@ -370,7 +371,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 			t.Fatalf("run result: %v", err)
 		}
 	}
-	if err := runtime.Close(t.Context()); err != nil {
+	if err := resource.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -413,7 +414,7 @@ func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
 	rt.wg.Add(1)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := rt.Close(ctx); !errors.Is(err, context.Canceled) {
+	if err := rt.close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close error = %v, want context cancellation", err)
 	}
 	select {
@@ -422,7 +423,7 @@ func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
 	default:
 	}
 	rt.wg.Done()
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -742,7 +743,7 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	option := &cfg.Option{MiscOptions: cfg.MiscOptions{OutputFile: path}}
 	provider := new(persistenceProvider)
 	_, runtime, output := newPersistenceRuntimeWithMode(t, option, provider, true)
-	runtime.config.Compaction = agent.CompactionSettings{KeepRecentTokens: 20, ReserveTokens: 64}
+	runtime.agentConfig.Compaction = agent.CompactionSettings{KeepRecentTokens: 20, ReserveTokens: 64}
 	long := strings.Repeat("history ", 120)
 	messages := []*aop.Message{
 		agent.TextMessage("user", long+"one"),

@@ -43,19 +43,19 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 	}
 	switch mode {
 	case "spaces":
-		return presentation.RunIOASpaces(ctx, client.Runtime(), &output, env.Out, env.Err)
+		return presentation.RunIOASpaces(ctx, client.Service(), &output, env.Out, env.Err)
 	case "nodes":
-		return presentation.RunIOANodes(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOANodes(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "messages":
 		if args.Space == "" {
 			return fmt.Errorf("space is required")
 		}
-		return presentation.RunIOAMessages(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOAMessages(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "context":
 		if args.Space == "" || args.MessageID == "" {
 			return fmt.Errorf("space and message ID are required")
 		}
-		return presentation.RunIOAContext(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOAContext(ctx, client.Service(), &output, args, env.Out, env.Err)
 	}
 	return fmt.Errorf("unknown query %s", mode)
 }
