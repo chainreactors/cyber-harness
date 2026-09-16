@@ -21,8 +21,8 @@ type Kind string
 
 // identity is the in-process identity of a Point. Kind remains a diagnostic
 // name only, so two packages cannot accidentally share handlers by reusing a
-// string.
-type identity struct{ value byte }
+// string. The blank byte keeps separate allocations at distinct addresses.
+type identity struct{ _ byte }
 
 type ErrorPolicy uint8
 

@@ -140,7 +140,7 @@ func parseProductConfig(data []byte) (*types.DistributeConfig, error) {
 // payload. Startup flags and environment are the config truth, so a run with no
 // cyber.yaml on disk must still report what the agent actually uses instead of
 // an empty document.
-func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
+func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) { //nolint:unused // used by the full-tag web build
 	if option == nil {
 		return &types.DistributeConfig{}, nil
 	}
@@ -171,7 +171,7 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 // runtimeLLMConfig mirrors how the runtime picks the active provider: the flat
 // single-provider flags win over the profile list, so they are projected as the
 // leading profile instead of being dropped.
-func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig {
+func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig { //nolint:unused // used by projectRuntimeConfig in the full-tag web build
 	llm := &types.LLMConfig{}
 	flat := app.HasSingleProviderFields(option)
 	if flat {

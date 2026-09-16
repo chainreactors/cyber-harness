@@ -558,15 +558,6 @@ func (s *Store) ReadVirtualBody(location string) (string, bool, error) {
 	return strings.TrimSpace(body), true, nil
 }
 
-func skillNameFromEmbedPath(embedPath string) string {
-	embedPath = path.Clean(strings.TrimSpace(embedPath))
-	if embedPath == "." || strings.HasPrefix(embedPath, "..") {
-		return ""
-	}
-	name, _, _ := strings.Cut(embedPath, "/")
-	return name
-}
-
 func FormatForPrompt(skills []Skill) string {
 	visible := make([]Skill, 0, len(skills))
 	for _, skill := range skills {
