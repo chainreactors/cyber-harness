@@ -83,15 +83,18 @@ Both cgo features — the cgo RE2 backend and the recorder's FFmpeg/x264 backend
 link prebuilt static SDKs that this repository downloads and verifies but never
 builds. The archives are release assets of `chainreactors/native`:
 
-| SDK | Target | Release tag | Asset |
+Both families follow one shape — release tag `native-<family>-<version>`, asset
+`native-<family>-<version>-<os>_<arch>.tar.gz` plus a `.sha256` sidecar:
+
+| SDK | Target | Version pin | Release tag |
 | --- | --- | --- | --- |
-| RE2 | `re2` | `RE2_STATIC_RELEASE` | `native-re2-static-<re2ver>-<platform>.tar.gz` |
-| Recorder | `record` | `RECORD_NATIVE_RELEASE` | `aiscan-record-native-<ver>-<platform>-<arch>.tar.gz` |
+| RE2 | `re2` | `RE2_STATIC_VERSION` | `RE2_STATIC_RELEASE` |
+| Recorder | `record` | `RECORD_NATIVE_VERSION` | `RECORD_NATIVE_RELEASE` |
 
 `.github/native/versions.env` pins the tags, and `.github/native/sdk.sh fetch
 <family> [os] [arch]` downloads the archive, checks its SHA-256 sidecar and
-`.versions` manifest, and unpacks it into `.cache/`. `sdk.sh env <family>` then
-prints the link environment for that prefix.
+`.versions` manifest, and unpacks it into `.cache/native/<family>/<os>_<arch>`.
+`sdk.sh env <family>` then prints the link environment for that prefix.
 
 The RE2 archive carries only `lib/libre2_cre2.a` and licences: the `cre2.h` its
 cgo directives include lives in the Go module, so cgo supplies that include path
@@ -101,8 +104,8 @@ SDK and pointing the linker at its `lib` directory is all a build needs. Install
 them through the Makefile, which wires the prefixes in:
 
 ```bash
-make re2-static      # .cache/re2-static/<os>_<arch>, for `full`
-make record-native   # .cache/record-native/<os>-<arch>, for `record`
+make re2-static      # .cache/native/re2/<os>_<arch>, for `full`
+make record-native   # .cache/native/record/<os>_<arch>, for `record`
 make record          # fetches both, then builds bin/aiscan-record
 ```
 

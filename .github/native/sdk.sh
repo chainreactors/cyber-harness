@@ -50,37 +50,64 @@ manifest_field() {
   printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"
 }
 
-# Sets: SDK_OS SDK_ARCH SDK_ARCHIVE SDK_RELEASE SDK_REPOSITORY SDK_PREFIX SDK_EXPECTED
-describe_sdk() {
-  local family="$1" os="$2" arch="$3"
-  case "${family}/${os}/${arch}" in
-    record/linux/amd64|record/linux/arm64|record/windows/amd64)
-      SDK_OS="${os}"
-      SDK_ARCH="${arch}"
-      SDK_ARCHIVE="aiscan-record-native-${RECORD_NATIVE_VERSION}-${os}-${arch}.tar.gz"
-      SDK_RELEASE="${RECORD_NATIVE_RELEASE}"
-      SDK_REPOSITORY="${RECORD_NATIVE_REPOSITORY}"
-      SDK_PREFIX="${CYBER_RECORD_PREFIX:-${ROOT}/.cache/record-native/${os}-${arch}}"
-      SDK_EXPECTED="bundle=${RECORD_NATIVE_VERSION} platform=${os} arch=${arch}"
-      ;;
-    re2/linux/amd64|re2/linux/arm64|re2/windows/amd64|re2/darwin/amd64|re2/darwin/arm64)
-      SDK_OS="${os}"
-      SDK_ARCH="${arch}"
-      SDK_ARCHIVE="native-re2-static-${RE2_STATIC_VERSION}-${os}_${arch}.tar.gz"
-      SDK_RELEASE="${RE2_STATIC_RELEASE}"
-      SDK_REPOSITORY="${RE2_NATIVE_REPOSITORY}"
-      SDK_PREFIX="${CYBER_RE2_PREFIX:-${ROOT}/.cache/re2-static/${os}_${arch}}"
-      SDK_EXPECTED="bundle=${RE2_STATIC_VERSION} platform=${os}_${arch} re2=${RE2_VERSION}"
-      ;;
+# Per-family coordinates. Everything derived from them — archive name, release
+# URL, cache path, manifest expectation — is shared, so a family only has to
+# declare which targets it publishes and where its version is pinned.
+validate_target() {
+  case "$1/$2/$3" in
+    record/linux/amd64|record/linux/arm64|record/windows/amd64) ;;
+    re2/linux/amd64|re2/linux/arm64|re2/windows/amd64|re2/darwin/amd64|re2/darwin/arm64) ;;
     record/darwin/*)
       echo "the record native backend is not supported on darwin" >&2
       exit 1
       ;;
     *)
-      echo "unsupported ${family} SDK target ${os}/${arch}" >&2
+      echo "unsupported $1 SDK target $2/$3" >&2
       exit 1
       ;;
   esac
+}
+
+family_version() {
+  case "$1" in
+    record) echo "${RECORD_NATIVE_VERSION}" ;;
+    re2) echo "${RE2_STATIC_VERSION}" ;;
+    *) return 1 ;;
+  esac
+}
+
+family_release() {
+  case "$1" in
+    record) echo "${RECORD_NATIVE_RELEASE}" ;;
+    re2) echo "${RE2_STATIC_RELEASE}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# `${VAR-}` rather than `${VAR}`: the overrides are normally unset, and a bare
+# reference aborts the script under `set -u`.
+family_prefix() {
+  case "$1" in
+    record) echo "${CYBER_RECORD_PREFIX-}" ;;
+    re2) echo "${CYBER_RE2_PREFIX-}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Sets: SDK_FAMILY SDK_OS SDK_ARCH SDK_VERSION SDK_RELEASE SDK_ARCHIVE
+#       SDK_PREFIX SDK_EXPECTED
+describe_sdk() {
+  local family="$1" os="$2" arch="$3" override
+  validate_target "${family}" "${os}" "${arch}"
+  SDK_FAMILY="${family}"
+  SDK_OS="${os}"
+  SDK_ARCH="${arch}"
+  SDK_VERSION="$(family_version "${family}")"
+  SDK_RELEASE="$(family_release "${family}")"
+  SDK_ARCHIVE="native-${family}-${SDK_VERSION}-${os}_${arch}.tar.gz"
+  SDK_EXPECTED="family=${family} version=${SDK_VERSION} platform=${os}_${arch}"
+  override="$(family_prefix "${family}")"
+  SDK_PREFIX="${override:-${ROOT}/.cache/native/${family}/${os}_${arch}}"
 }
 
 # The release manifest is a superset of what this repository pins, so compare
@@ -103,7 +130,6 @@ verify_manifest() {
 }
 
 configure_link_env() {
-  local family="$1"
   if [[ "${SDK_OS}" == windows ]] && command -v cygpath >/dev/null 2>&1; then
     SDK_PREFIX_UNIX="$(cygpath -m "${SDK_PREFIX}")"
     SDK_ROOT_UNIX="$(cygpath -m "${ROOT}")"
@@ -111,7 +137,7 @@ configure_link_env() {
     SDK_PREFIX_UNIX="${SDK_PREFIX}"
     SDK_ROOT_UNIX="${ROOT}"
   fi
-  case "${family}" in
+  case "${SDK_FAMILY}" in
     record)
       export PKG_CONFIG_PATH="${SDK_PREFIX_UNIX}/lib/pkgconfig"
       export CGO_CFLAGS="-I${SDK_PREFIX_UNIX}/include"
@@ -132,8 +158,7 @@ configure_link_env() {
 }
 
 emit_link_env() {
-  local family="$1"
-  if [[ "${family}" == record ]]; then
+  if [[ "${SDK_FAMILY}" == record ]]; then
     printf '%s\n' \
       "PKG_CONFIG=${PKG_CONFIG}" \
       "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" \
@@ -145,7 +170,7 @@ emit_link_env() {
 }
 
 fetch_sdk() {
-  local family="$1" prefix stamp tmp stage backup cleanup_cmd
+  local prefix stamp tmp stage backup cleanup_cmd
   prefix="${SDK_PREFIX}"
   stamp="${prefix}/.versions"
 
@@ -165,7 +190,7 @@ fetch_sdk() {
   esac
 
   local base_url
-  base_url="${CYBER_NATIVE_URL:-https://github.com/${SDK_REPOSITORY}/releases/download/${SDK_RELEASE}}"
+  base_url="${CYBER_NATIVE_URL:-https://github.com/${NATIVE_REPOSITORY}/releases/download/${SDK_RELEASE}}"
 
   tmp="$(mktemp -d)"
   stage="${prefix}.tmp.$$"
@@ -173,7 +198,7 @@ fetch_sdk() {
   printf -v cleanup_cmd 'rm -rf -- %q %q' "${tmp}" "${stage}"
   trap "${cleanup_cmd}" EXIT
 
-  echo "downloading ${family} native SDK ${SDK_ARCHIVE}"
+  echo "downloading ${SDK_FAMILY} native SDK ${SDK_ARCHIVE}"
   curl --fail --location --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
     --retry 5 --retry-delay 2 --retry-all-errors "${base_url}/${SDK_ARCHIVE}" -o "${tmp}/${SDK_ARCHIVE}"
   curl --fail --location --connect-timeout 20 --speed-time 30 --speed-limit 1024 \
@@ -212,8 +237,8 @@ case "${command_name}" in
     arch="${4:-$(detect_arch)}"
     describe_sdk "${family}" "${os}" "${arch}"
     case "${command_name}" in
-      fetch) fetch_sdk "${family}" ;;
-      env) configure_link_env "${family}"; emit_link_env "${family}" ;;
+      fetch) fetch_sdk ;;
+      env) configure_link_env; emit_link_env ;;
     esac
     ;;
   *) usage ;;

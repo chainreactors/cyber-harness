@@ -63,10 +63,12 @@ NATIVE_OS := unsupported
 endif
 
 # The native SDKs below are prebuilt and published by chainreactors/native;
-# these targets only download, verify, and unpack them.
+# these targets only download, verify, and unpack them. The cache layout
+# `.cache/native/<family>/<os>_<arch>` is shared with `.github/native/sdk.sh`,
+# which is what actually performs the install.
 RECORD_ARCH ?= $(shell $(GO) env GOARCH)
 RE2_ARCH ?= $(shell $(GO) env GOARCH)
-RE2_PREFIX := $(if $(CYBER_RE2_PREFIX),$(CYBER_RE2_PREFIX),$(PROJECT_ROOT)/.cache/re2-static/$(NATIVE_OS)_$(RE2_ARCH))
+RE2_PREFIX := $(if $(CYBER_RE2_PREFIX),$(CYBER_RE2_PREFIX),$(PROJECT_ROOT)/.cache/native/re2/$(NATIVE_OS)_$(RE2_ARCH))
 RE2_LDFLAGS := -L$(RE2_PREFIX)/lib
 
 ifeq ($(NATIVE_OS),windows)
@@ -80,7 +82,7 @@ RECORD_EXTRA_LDFLAGS :=
 else
 RECORD_PLATFORM := unsupported
 endif
-RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/record-native/$(RECORD_PLATFORM)-$(RECORD_ARCH))
+RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/native/record/$(RECORD_PLATFORM)_$(RECORD_ARCH))
 # A single CGO_LDFLAGS must carry both prefixes: setting it twice in one recipe
 # line would silently drop the first.
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS) $(RE2_LDFLAGS)"
