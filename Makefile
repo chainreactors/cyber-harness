@@ -52,6 +52,21 @@ RECORD_TAGS := $(FULL_TAGS) record_ffmpeg
 BUILD_FLAGS := -trimpath -buildvcs=false
 GO_LDFLAGS ?= -s -w
 
+# `emptytemplates`/`noembed` keep the resource templates outside the binary.
+# EMBED=1 drops both and generates them into the tree first, which is the only
+# difference between an embedded and a non-embedded build.
+RESOURCE_TAGS := emptytemplates noembed
+EMBED ?= 0
+
+ifeq ($(EMBED),1)
+EMBED_PREREQ := embed-resources
+STANDARD_TAGS := $(filter-out $(RESOURCE_TAGS),$(STANDARD_TAGS))
+FULL_TAGS := $(filter-out $(RESOURCE_TAGS),$(FULL_TAGS))
+RECORD_TAGS := $(filter-out $(RESOURCE_TAGS),$(RECORD_TAGS))
+else
+EMBED_PREREQ :=
+endif
+
 ifeq ($(WINDOWS),1)
 NATIVE_OS := windows
 else ifeq ($(UNAME_S),Linux)
@@ -87,7 +102,7 @@ RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_RO
 # line would silently drop the first.
 RECORD_BUILD_ENV := PKG_CONFIG="$(RECORD_PKG_CONFIG)" PKG_CONFIG_PATH="$(RECORD_PREFIX)/lib/pkgconfig" CGO_CFLAGS="-I$(RECORD_PREFIX)/include" CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS) $(RE2_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard runner full record record-native re2-static web-build web-run web all clean harness harness-llm check-architecture
+.PHONY: help prepare frontend proto-gen standard runner full record record-native re2-static web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
 
 help:
 	@echo "aiscan build targets:"
@@ -103,9 +118,11 @@ help:
 	@echo "  make harness          Run user scenarios against the real product process"
 	@echo "  make harness-llm      Run real LLM scenarios (requires explicit credentials)"
 	@echo "  make check-architecture  Run static repository and dependency guards"
+	@echo "  make ldflags          Print the -ldflags the build targets use"
 	@echo "  make all              Build the standard and full editions"
 	@echo ""
 	@echo "Variables:"
+	@echo "  EMBED=1               Generate and embed resources instead of loading them"
 	@echo "  BIN_DIR=path          Binary output directory (default: $(BIN_DIR))"
 	@echo "  WEB_ADDR=host:port    Web listen address (default: $(WEB_ADDR))"
 	@echo "  WEB_TOKEN=token       Optional fixed Web access token"
@@ -130,13 +147,21 @@ check-architecture:
 prepare:
 	mkdir -p "$(BIN_DIR)"
 
+# Only reachable through EMBED=1, which also strips the tags that would
+# otherwise keep these resources external.
+embed-resources:
+	$(GO) generate ./core/resources
+
+ldflags:
+	@echo "$(GO_LDFLAGS)"
+
 proto-gen:
 	$(GO) run ./cmd/gen
 
 frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
-standard: prepare
+standard: $(EMBED_PREREQ) prepare
 	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
@@ -163,7 +188,7 @@ endif
 
 # The full edition links the static RE2 SDK, so the fetch is part of the build
 # rather than a step the caller has to remember.
-full: frontend re2-static prepare
+full: $(EMBED_PREREQ) frontend re2-static prepare
 	CGO_ENABLED=1 CGO_LDFLAGS="$(RE2_LDFLAGS)" $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
@@ -174,7 +199,7 @@ record:
 else
 # `record-native` and `re2-static` install both SDKs, so `make record` needs no
 # pre-step and links both static RE2 and the recorder backend.
-record: frontend record-native re2-static prepare
+record: $(EMBED_PREREQ) frontend record-native re2-static prepare
 	$(RECORD_BUILD_ENV) CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
 	@echo "Built record-enabled edition: $(RECORD_BIN)"
 endif

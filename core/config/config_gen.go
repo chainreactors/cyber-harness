@@ -40,19 +40,11 @@ const configFileHeader = `# cyber 配置文件
 
 `
 
-const configFileTail = `# 以下仅 build.sh 使用
-build:
-  osarch: ""
-  tags: ""
-  output: dist
-`
-
 func generateDefaultConfig() string {
 	var b strings.Builder
 	b.WriteString(configFileHeader)
 	b.WriteString(generateFromStruct(reflect.TypeOf(Option{}), reflect.ValueOf(Option{}), 0))
 	b.WriteString("\n")
-	b.WriteString(configFileTail)
 	return b.String()
 }
 
