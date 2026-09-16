@@ -10,8 +10,8 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/resource"
+	types "github.com/chainreactors/cyber/core/types"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
-	types "github.com/chainreactors/cyber/pkg/types"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 

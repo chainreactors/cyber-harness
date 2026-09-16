@@ -14,7 +14,7 @@ import (
 
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 )
 

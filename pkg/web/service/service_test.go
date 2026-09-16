@@ -14,11 +14,11 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
-	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {

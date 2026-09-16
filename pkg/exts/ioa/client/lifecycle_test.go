@@ -17,7 +17,7 @@ import (
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"

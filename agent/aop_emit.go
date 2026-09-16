@@ -8,7 +8,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 

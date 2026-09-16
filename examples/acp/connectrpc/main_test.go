@@ -10,8 +10,8 @@ import (
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
-	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type exampleSessionService struct {

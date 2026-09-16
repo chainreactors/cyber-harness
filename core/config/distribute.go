@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )

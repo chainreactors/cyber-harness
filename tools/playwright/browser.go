@@ -17,7 +17,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/headless"
+	"github.com/chainreactors/cyber/tools/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"

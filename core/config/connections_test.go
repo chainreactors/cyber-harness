@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/resource"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func TestConnectionUsesTypedResourcePoint(t *testing.T) {

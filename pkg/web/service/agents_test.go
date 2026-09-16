@@ -8,7 +8,7 @@ import (
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	webstatic "github.com/chainreactors/cyber/web"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"

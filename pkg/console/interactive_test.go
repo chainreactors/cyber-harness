@@ -20,7 +20,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/output"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"google.golang.org/protobuf/encoding/protojson"

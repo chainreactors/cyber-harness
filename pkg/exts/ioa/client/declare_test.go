@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func TestConnectionUsesReadOnlyExtension(t *testing.T) {

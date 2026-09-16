@@ -14,18 +14,18 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	"github.com/chainreactors/cyber/pkg/terminal"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/utils/pty"
 )
 
-func newPTYRouter(bash *commands.BashTool) (*terminal.Router, error) {
+func newPTYRouter(bash *terminaltool.BashTool) (*ptyext.Router, error) {
 	manager := bashManager(bash)
 	if manager == nil || manager.Manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
-	return terminal.NewRuntimeRouter(manager.Manager), nil
+	return ptyext.NewRuntimeRouter(manager.Manager), nil
 }
 
 func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {

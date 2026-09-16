@@ -9,7 +9,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )

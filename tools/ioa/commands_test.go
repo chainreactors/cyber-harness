@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -518,7 +519,7 @@ func TestLLMIOAToolUsage(t *testing.T) {
 
 	registry := harness.Commands(t, cmds...)
 	dir := t.TempDir()
-	bash := commands.NewBashTool(dir, 30, nil)
+	bash := terminaltool.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)
 	tools := harness.Tools(t, bash)
 	t.Cleanup(bash.Close)

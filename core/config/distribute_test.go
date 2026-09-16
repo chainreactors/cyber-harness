@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func TestNormalizeLLMConfigCanonicalizesProviderProtocol(t *testing.T) {

@@ -52,7 +52,7 @@ flowchart TB
 - `Scope` 是单个 Extension 的生命周期账本。它提供初始化和存活 context，并拥有该 Extension
   产生的所有 Handle；它不是 Service Locator，也不向插件暴露任意服务查询。
 - `Resource Registry` 仅用 Go 类型把 Resource 路由到唯一的 `Point[T]`。Tool Registry、Command
-  Registry、Skill Store、Namespace Catalog 等 Domain Registry 才负责具体资源的校验、重复
+  Registry、Skill Store、Namespace Registry 等 Domain Registry 才负责具体资源的校验、重复
   规则、发布、调用准入和排空。
 - `Handle` 表示一次 Point 定义或一次原子资源注册，可由 Scope 在回滚和关闭时精确撤销。
 
@@ -85,6 +85,15 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
   Extension 不自行维护另一套 owner ID、注销表或依赖图。
 - 每种 Resource 使用一个具体 Go 类型和一个 Point。领域名称和重复规则属于该 Point，不再建立
   Resource ID、Capability Catalog 或声明 DTO 作为第二事实源。
+- `core/` 只向下依赖 `aop/`（wire 层），不依赖 `pkg/`、`agent/` 或 `tools/`。因此 core 使用的
+  基础类型与机制（例如 `core/types`）必须住在 core 内部；core 需要的产品行为从 core 上移出去，
+  而不是把产品包下沉进 core。
+- `pkg/exts/` 是唯一把功能挂到 harness core 的包装层：每个 Extension 包装一个 `tools/*`、
+  `agent/*` 或 `pkg/*` 机制，自身不写业务实现。机制住在 `pkg/` 或 `tools/`，生命周期住在
+  `pkg/exts/`。
+- `tools/` 是工具与命令的实现层，`pkg/commands` 只保留 Command Point、Registry 和 Execution
+  记录，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的产品对象直接借用具体
+  `terminal.BashTool`，不为分层外观增加转发 DTO 或只有一个实现的接口。
 
 ## Typed Resource
 
@@ -178,8 +187,8 @@ Profile 只有全部 Extension 成功加载后才 Active。Close 开始即停止
 | `commands.Command` | Command Registry | terminal、scanner、native |
 | `skills.Bundle` | Skill Library | IOA 及未来知识插件 |
 | `*console/api.Bindings` | TUI | Session、IOA presentation |
-| `aop.NamespaceBinding` | Namespace Catalog | Session、Proxy 等协议插件 |
-| `web.Route` | Web route catalog | Management API、IOA server |
+| `aop.NamespaceBinding` | Namespace Registry | Session、Proxy 等协议插件 |
+| `web.Route` | Web route Registry | Management API、IOA server |
 | `cli.Contribution` | CLI Registry | IOA commands、Session flags |
 | `config.Section` | Config Sections | IOA client/server、record |
 | `config.Connection` | Config Sections connection point | scanner、search、IOA client |
@@ -189,7 +198,7 @@ Command 和 Tool 是不同执行协议，但共同使用 `core/registry.Store[T]
 自己的领域类型，不通过字符串形式的万能资源表。CLI 与 Config 由各自 Point 校验，不经过聚合
 Catalog。
 
-每个连接从 Namespace Catalog 绑定一次当前快照。关闭 contribution handle 会移除后续连接的
+每个连接从 Namespace Registry 绑定一次当前快照。关闭 contribution handle 会移除后续连接的
 绑定，已建立连接仍由自己的 `aop.NamespaceMux` 和连接 context 管理，这避免运行期跨连接共享
 可变路由状态。Namespace 的唯一身份是 protobuf full name；Mux 不再维护字符串 owner 或按
 owner 注销的第二套生命周期，连接关闭时统一停止准入并排空已接受的 dispatch。
@@ -210,7 +219,7 @@ Runtime；runner 不再创建隐藏的子 Set 或第二套 Runtime。
 不暴露 Load/Close，拥有者 Extension 保留资源生命周期。可选依赖使用普通 nil/interface
 字段表达，而不是服务查询或 capability gating。
 
-旧产品 Capability Catalog 和 `pkg/edition` 已删除。Scanner CLI 元数据由 scanner 包自己维护；
+旧产品 Capability Catalog 和 `pkg/edition` 已删除。Scanner CLI 的可用命令与帮助由 scanner 包直接提供；
 Browser、Record 等功能是否存在由 build tag 和实际 Extension 组合决定。远端节点需要通告的
 核心线协议能力仍保留在 `AgentHello.capabilities`，但由连接实现根据它实际支持的协议直接
 生成，不再通过插件贡献 `node.Capability` 后二次投影。插件功能由实际注册的 Namespace、Tool、

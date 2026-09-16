@@ -21,10 +21,10 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	coreoutput "github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
-	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/chainreactors/utils/pty"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

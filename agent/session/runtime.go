@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 )
 
 // ---------------------------------------------------------------------------

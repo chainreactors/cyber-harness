@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"io"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,8 +28,8 @@ func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := newExecution(manager, "parent", nil, t.TempDir(), nil)
-	parent.bindID(info.ID)
+	parent := NewExecution(manager, "parent", nil, t.TempDir(), nil)
+	parent.BindID(info.ID)
 	var child *Execution
 	registry, _ := loadTestRegistry(t, commandBatch(Command{Name: "child", Run: func(_ context.Context, execution *Execution) (any, error) {
 		child = execution
@@ -69,7 +68,7 @@ func TestInvocationIDDoesNotImplyTerminalSession(t *testing.T) {
 }
 
 func TestCommandCorrelationWaitsForManagedSessionIdentity(t *testing.T) {
-	execution := newExecution(nil, "probe", nil, "", nil)
+	execution := NewExecution(nil, "probe", nil, "", nil)
 	result := make(chan string, 1)
 	go func() {
 		id, err := execution.waitID(t.Context())
@@ -84,7 +83,7 @@ func TestCommandCorrelationWaitsForManagedSessionIdentity(t *testing.T) {
 		t.Fatalf("session identity returned before bind: %q", id)
 	case <-time.After(20 * time.Millisecond):
 	}
-	execution.bindID("session-1")
+	execution.BindID("session-1")
 	select {
 	case id := <-result:
 		if id != "session-1" {
@@ -92,23 +91,5 @@ func TestCommandCorrelationWaitsForManagedSessionIdentity(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("session identity did not unblock after bind")
-	}
-}
-
-func TestCommentOnlyForegroundHasOutputWithoutTerminalState(t *testing.T) {
-	bash := NewBashTool(t.TempDir(), 5, nil)
-	defer bash.Close()
-	var output strings.Builder
-	execution, err := bash.RunForeground(t.Context(), "# local comment", BashExecOptions{
-		OnOutput: func(data []byte) { _, _ = output.Write(data) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if output.String() != "ok" {
-		t.Fatalf("output = %q", output.String())
-	}
-	if _, ok := execution.Session(); ok {
-		t.Fatal("comment-only invocation invented a terminal session")
 	}
 }

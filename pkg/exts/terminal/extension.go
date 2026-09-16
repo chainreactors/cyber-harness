@@ -12,6 +12,7 @@ import (
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type Config struct {
@@ -21,12 +22,12 @@ type Config struct {
 	Proxy          string
 	ProxyCA        string
 	Egress         func(context.Context) (string, string, func())
-	Containment    commands.ProcessContainment
+	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
 	// Tmux constructs the terminal command published by this extension. Nil
 	// selects the native command; product profiles may supply their own session
 	// ownership policy without replacing an already published registration.
-	Tmux func(*commands.BashTool) commands.Command
+	Tmux func(*terminaltool.BashTool) commands.Command
 	// HiddenCommands are control-only registry commands omitted from the Bash
 	// description and shell aliases.
 	HiddenCommands []string
@@ -34,7 +35,7 @@ type Config struct {
 type Extension struct {
 	mu                 sync.Mutex
 	commands           commands.Executor
-	bash               *commands.BashTool
+	bash               *terminaltool.BashTool
 	tmux               commands.Command
 	registered, closed bool
 	done               chan struct{}
@@ -44,7 +45,7 @@ func New(registry *hooks.Registry, c commands.Executor, config Config) (*Extensi
 	if c == nil || config.Directory == "" {
 		return nil, fmt.Errorf("terminal requires commands and a working directory")
 	}
-	bash := commands.NewBashTool(config.Directory, config.Timeout, registry).
+	bash := terminaltool.NewBashTool(config.Directory, config.Timeout, registry).
 		WithEnvironment(config.Environment).
 		WithScannerProxy(config.Proxy).
 		WithScannerProxyCA(config.ProxyCA).
@@ -53,7 +54,7 @@ func New(registry *hooks.Registry, c commands.Executor, config Config) (*Extensi
 	bash.SetEgressResolver(config.Egress)
 	bash.EnableShellCommands(c)
 	bash.HideCommands(config.HiddenCommands...)
-	tmux := commands.NewTmuxCommand(bash)
+	tmux := terminaltool.NewTmuxCommand(bash)
 	if config.Tmux != nil {
 		tmux = config.Tmux(bash)
 	}
@@ -62,7 +63,7 @@ func New(registry *hooks.Registry, c commands.Executor, config Config) (*Extensi
 	}
 	return &Extension{commands: c, bash: bash, tmux: tmux}, nil
 }
-func (m *Extension) Bash() *commands.BashTool { return m.bash }
+func (m *Extension) Bash() *terminaltool.BashTool { return m.bash }
 func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()

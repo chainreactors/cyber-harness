@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
-	"sync"
 	"sync/atomic"
 
 	"github.com/chainreactors/cyber/core/resource"
@@ -34,7 +33,7 @@ type item struct {
 // Set loads a fixed list in declaration order and closes it in reverse order.
 // It deliberately has no IDs, graph, service table, or instance ownership.
 type Set struct {
-	gate      sync.Mutex
+	gate      chan struct{}
 	items     []item
 	resources *resource.Registry
 	closing   atomic.Bool
@@ -51,7 +50,9 @@ func New(extensions ...Extension) (*Set, error) {
 		}
 		items[i].extension = value
 	}
-	return &Set{items: items, resources: resource.New(), nextClose: -1}, nil
+	gate := make(chan struct{}, 1)
+	gate <- struct{}{}
+	return &Set{items: items, resources: resource.New(), gate: gate, nextClose: -1}, nil
 }
 
 func (s *Set) Load(ctx context.Context) error {
@@ -61,8 +62,10 @@ func (s *Set) Load(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	s.gate.Lock()
-	defer s.gate.Unlock()
+	if err := s.enter(ctx); err != nil {
+		return err
+	}
+	defer s.leave()
 	if s.closing.Load() || s.sealed {
 		return fmt.Errorf("extension set is closing, closed, or already loaded")
 	}
@@ -78,6 +81,9 @@ func (s *Set) Load(ctx context.Context) error {
 		if err := invokeLoad(it.extension, it.scope); err != nil {
 			s.closing.Store(true)
 			return errors.Join(fmt.Errorf("load extension %d (%T): %w", i, it.extension, err), s.closeFrom(context.WithoutCancel(ctx), i))
+		}
+		if s.closing.Load() {
+			return errors.Join(fmt.Errorf("extension set closed during load"), s.closeFrom(context.WithoutCancel(ctx), i))
 		}
 	}
 	s.resources.Freeze()
@@ -101,10 +107,23 @@ func (s *Set) Close(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return errors.Join(ErrCloseIncomplete, err)
 	}
-	s.gate.Lock()
-	defer s.gate.Unlock()
+	if err := s.enter(ctx); err != nil {
+		return errors.Join(ErrCloseIncomplete, err)
+	}
+	defer s.leave()
 	return s.closeFrom(ctx, s.nextClose)
 }
+
+func (s *Set) enter(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.gate:
+		return nil
+	}
+}
+
+func (s *Set) leave() { s.gate <- struct{}{} }
 
 func (s *Set) closeFrom(ctx context.Context, start int) error {
 	var errs []error

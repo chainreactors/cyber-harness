@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -86,7 +86,7 @@ func (rt *Runtime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionReq
 }
 
 // NamespaceBindings publishes the protocols implemented by this runtime. The
-// profile's typed namespace catalog installs them on each connection.
+// profile's typed namespace registry installs them on each connection.
 func (rt *Runtime) NamespaceBindings() []aop.NamespaceBinding {
 	if rt == nil {
 		return nil

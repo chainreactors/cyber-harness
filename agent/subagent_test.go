@@ -13,7 +13,7 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func TestSubAgentSyncReturnsResult(t *testing.T) {

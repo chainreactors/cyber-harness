@@ -17,7 +17,7 @@ import (
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/pkg/runner"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -344,11 +344,10 @@ func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 	for _, name := range []string{"scan", "gogo", "spray", "zombie", "neutron"} {
 		t.Run(name, func(t *testing.T) {
-			metadata, ok := scannerext.Lookup(name)
+			help, ok := scannerext.Usage(name)
 			if !ok {
 				t.Fatalf("StaticScannerUsage(%q) was not registered", name)
 			}
-			help := metadata.Usage()
 			if !strings.Contains(help, "Usage:") || !strings.Contains(help, name+" [OPTIONS]") {
 				t.Fatalf("%s help was not rendered by its go-flags parser:\n%s", name, help)
 			}
@@ -363,11 +362,10 @@ func TestScannerHelpRegistryUsesGeneratedFlagHelp(t *testing.T) {
 }
 
 func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
-	metadata, ok := scannerext.Lookup("proton")
+	help, ok := scannerext.Usage("proton")
 	if !ok {
 		t.Fatal("proton scanner help was not registered")
 	}
-	help := metadata.Usage()
 	for _, want := range []string{"Usage: proton", "--template-list", "--severity"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("proton help missing %q:\n%s", want, help)
@@ -625,9 +623,9 @@ func TestScannerAIIntentInjectsCommandSkill(t *testing.T) {
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
 	}
-	intent, err := cfg.ApplySelectedSkills("focus on risky exposed services", nil, store)
+	intent, err := store.ApplySelected("focus on risky exposed services", nil)
 	if err != nil {
-		t.Fatalf("ApplySelectedSkills() error = %v", err)
+		t.Fatalf("ApplySelected() error = %v", err)
 	}
 	if !strings.Contains(intent, "focus on risky exposed services") {
 		t.Fatalf("intent missing user text:\n%s", intent)

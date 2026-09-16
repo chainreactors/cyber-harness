@@ -4,7 +4,7 @@ package main
 
 import (
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 	"os"
 	"path/filepath"
 	"strings"

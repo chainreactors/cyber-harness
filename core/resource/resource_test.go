@@ -79,3 +79,26 @@ func TestFreezeOnlyFreezesTypes(t *testing.T) {
 		t.Fatalf("hot add = %v", err)
 	}
 }
+
+type panicPoint struct{}
+
+func (*panicPoint) Add(...string) (resource.Handle, error) { panic("boom") }
+
+func TestPanickingPointDoesNotRetainContribution(t *testing.T) {
+	registry := resource.New()
+	definition, err := resource.Define[string](registry, &panicPoint{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panicked := false
+	func() {
+		defer func() { panicked = recover() != nil }()
+		_, _ = resource.Add(registry, "value")
+	}()
+	if !panicked {
+		t.Fatal("point panic was not propagated")
+	}
+	if err := definition.Close(t.Context()); err != nil {
+		t.Fatalf("panicking contribution remained owned: %v", err)
+	}
+}

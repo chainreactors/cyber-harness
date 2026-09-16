@@ -15,7 +15,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 	"github.com/chainreactors/cyber/tools/scan"
 )
 
@@ -227,7 +227,7 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 	if intent == "" {
 		intent = "Process the scanner output according to the user's intent. If no specific intent is provided, briefly explain the important evidence in the output."
 	}
-	intent, err = cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
+	intent, err = store.ApplySelected(intent, scan.FilterAutoSkill(option.Skills, command))
 	if err != nil {
 		return "", err
 	}

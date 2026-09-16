@@ -170,7 +170,7 @@ ConnectRPC 示例还需要：
 ```text
 connectrpc.com/connect
 github.com/chainreactors/cyber/pkg/rpc
-github.com/chainreactors/cyber/pkg/types
+github.com/chainreactors/cyber/core/types
 ```
 
 ## 5. 测试

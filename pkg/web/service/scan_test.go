@@ -4,7 +4,7 @@ import (
 	"context"
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"

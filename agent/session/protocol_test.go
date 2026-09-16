@@ -9,8 +9,8 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/host"
-	types "github.com/chainreactors/cyber/pkg/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 

@@ -21,11 +21,11 @@ import (
 	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
 	"github.com/chainreactors/cyber/pkg/toolset"
-	types "github.com/chainreactors/cyber/pkg/types"
 	looptool "github.com/chainreactors/cyber/tools/loop"
 	"google.golang.org/protobuf/proto"
 )

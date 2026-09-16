@@ -10,8 +10,8 @@ import (
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/output"
-	"github.com/chainreactors/cyber/pkg/terminal"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/exts/pty"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -304,7 +304,7 @@ func (p *AgentPool) handleToolProgress(operationID string, value *toolpb.Progres
 }
 
 func (p *AgentPool) forwardPTYMessage(message *ptypb.ProtocolMessage) {
-	streamID := terminal.StreamID(message)
+	streamID := pty.StreamID(message)
 	if streamID == "" {
 		return
 	}

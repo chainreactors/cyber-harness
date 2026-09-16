@@ -21,7 +21,8 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 func TestRunWithoutToolsReturnsFinalText(t *testing.T) {
@@ -347,8 +348,8 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	dir := t.TempDir()
 
 	stub := &stubPseudoCommand{name: "scan", output: scanOutput}
-	bash := commands.NewBashTool(dir, 5, nil)
-	tmuxCmd := commands.NewTmuxCommand(bash)
+	bash := terminaltool.NewBashTool(dir, 5, nil)
+	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := testCommands(t,
 		commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
 		tmuxCmd,
@@ -448,8 +449,8 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	bash := commands.NewBashTool(dir, 30, nil)
-	tmuxCmd := commands.NewTmuxCommand(bash)
+	bash := terminaltool.NewBashTool(dir, 30, nil)
+	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
@@ -602,8 +603,8 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	bash := commands.NewBashTool(dir, 30, nil)
-	tmuxCmd := commands.NewTmuxCommand(bash)
+	bash := terminaltool.NewBashTool(dir, 30, nil)
+	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
@@ -706,8 +707,8 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	bash := commands.NewBashTool(dir, 30, nil)
-	tmuxCmd := commands.NewTmuxCommand(bash)
+	bash := terminaltool.NewBashTool(dir, 30, nil)
+	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)
@@ -837,8 +838,8 @@ func TestLiveLLMTmuxInteraction(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	bash := commands.NewBashTool(dir, 60, nil)
-	tmuxCmd := commands.NewTmuxCommand(bash)
+	bash := terminaltool.NewBashTool(dir, 60, nil)
+	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := testCommands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
 	tools := newTestTools(t, bash)

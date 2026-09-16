@@ -255,7 +255,7 @@ Cyber 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通�
 
 Session 持久化只有一条路径：所有需要持久化的 agent、scan 和 tool artifact 都先成为 `aop.Event`，由 `telemetry` Extension 经同一个 EventBus 写入 ProtoJSONL。`-o/--output` 显式选择新的事件输出文件；`-r/--resume` 与 `/resume` 只读取历史并创建 continuation，不修改源文件，也不隐式启用或切换输出。`/clear` 和 `/compact` 只改变会话状态。Progress 只用于实时传输，不持久化，也不存在 checkpoint、snapshot 或 timeline replay 文件机制。
 
-**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `pkg/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/telemetry`, `pkg/exts/agent/session_jsonl.go`
+**文件**: `pkg/console/banner.go`, `pkg/console/commands.go`, `core/types/extensions.go`, `core/output/jsonl.go`, `core/output/render.go`, `pkg/exts/telemetry`, `pkg/exts/agent/session_jsonl.go`
 
 ---
 

@@ -232,3 +232,49 @@ func TestCloseWaitsForConcurrentRegistrationOwnership(t *testing.T) {
 		t.Fatalf("values after close = %v", point.values)
 	}
 }
+
+type blockingLoad struct {
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func (e *blockingLoad) Load(*extension.Scope) error {
+	close(e.entered)
+	<-e.proceed
+	return nil
+}
+
+func TestCloseDeadlineInterruptsWaitForLoad(t *testing.T) {
+	value := &blockingLoad{entered: make(chan struct{}), proceed: make(chan struct{})}
+	set, err := extension.New(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadDone := make(chan error, 1)
+	go func() { loadDone <- set.Load(context.Background()) }()
+	<-value.entered
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- set.Close(closeCtx) }()
+	select {
+	case err := <-closeDone:
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, extension.ErrCloseIncomplete) {
+			t.Fatalf("close = %v", err)
+		}
+	case <-time.After(time.Second):
+		close(value.proceed)
+		<-loadDone
+		<-closeDone
+		t.Fatal("close ignored its deadline while load held the gate")
+	}
+
+	close(value.proceed)
+	if err := <-loadDone; err == nil {
+		t.Fatal("load published after close started")
+	}
+	if err := set.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

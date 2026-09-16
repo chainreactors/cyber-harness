@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/cyber/cmd/harness"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 )
 
 func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
@@ -35,7 +35,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 	}
 }
 
-func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
+func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 	registry := harness.Commands(t,
 		commands.Command{
 			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
@@ -56,7 +56,7 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := resource.Runtime()
-	catalog := CommandCatalog(runtime)
+	catalog := CommandSpecs(runtime)
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
 	for _, spec := range catalog {
 		got[spec.GetName()] = &struct{ usage, description string }{spec.GetUsage(), spec.GetDescription()}
@@ -75,9 +75,9 @@ func TestCommandCatalogIncludesNodeRegistryCommands(t *testing.T) {
 	}
 }
 
-func TestCommandCatalogMissingDescriptionPathStaysVisible(t *testing.T) {
+func TestCommandSpecsMissingDescriptionPathStayVisible(t *testing.T) {
 	registry := harness.Commands(t, commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
-	catalog := RegistryCommandCatalog(registry, nil)
+	catalog := RegistryCommandSpecs(registry, nil)
 	for _, spec := range catalog {
 		if spec.GetName() == "!custom" && spec.GetDescription() != "" {
 			t.Fatalf("custom description = %q, want empty so the UI exposes the missing OKF declaration", spec.GetDescription())

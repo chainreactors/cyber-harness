@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	aop "github.com/chainreactors/cyber/aop"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	proto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"

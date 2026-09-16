@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	commands "github.com/chainreactors/cyber/core/commandline"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -56,7 +56,7 @@ func validateCommands(values []Command) ([]Command, map[string]Command, error) {
 }
 
 // CommandSpecs projects the same declarations used for dispatch. Returned
-// protobufs are owned copies; callers cannot mutate the installed catalog.
+// protobufs are owned copies; callers cannot mutate the installed commands.
 func (rt *Runtime) CommandSpecs(remote bool) []*types.CommandSpec {
 	if rt == nil {
 		return nil

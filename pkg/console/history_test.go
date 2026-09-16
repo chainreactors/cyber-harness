@@ -15,10 +15,10 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
-	"github.com/chainreactors/cyber/pkg/types"
 )
 
 func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {

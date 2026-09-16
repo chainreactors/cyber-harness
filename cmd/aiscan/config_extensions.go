@@ -2,10 +2,10 @@ package main
 
 import (
 	cfg "github.com/chainreactors/cyber/core/config"
+	types "github.com/chainreactors/cyber/core/types"
 	app "github.com/chainreactors/cyber/pkg/app"
 	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
-	types "github.com/chainreactors/cyber/pkg/types"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"

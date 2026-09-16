@@ -8,7 +8,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	aopsco "github.com/chainreactors/cyber/aop/sco"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 type SCOStore interface {

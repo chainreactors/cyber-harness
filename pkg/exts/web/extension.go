@@ -1,4 +1,4 @@
-// Package web owns the typed HTTP route catalog used by the Web host.
+// Package web owns the typed HTTP route registry used by the Web host.
 package web
 
 import (

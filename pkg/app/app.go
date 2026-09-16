@@ -12,14 +12,15 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type App struct {
 	Providers provider.State
 	Commands  commands.Executor
 	Tools     tool.Executor
-	Bash      *commands.BashTool
+	Bash      *terminaltool.BashTool
 	Hooks     *hooks.Registry
 	Skills    *skills.Store
 	events    *coreevents.Stream
@@ -36,7 +37,7 @@ type Dependencies struct {
 	Events   *coreevents.Stream
 	Commands commands.Executor
 	Tools    tool.Executor
-	Bash     *commands.BashTool
+	Bash     *terminaltool.BashTool
 }
 
 // New constructs an inert application around extensions selected by its profile.

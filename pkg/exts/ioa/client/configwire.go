@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 	"net/url"
 	"reflect"

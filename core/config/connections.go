@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/cyber/core/resource"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // Connection is an optional connectivity check contributed by the extension

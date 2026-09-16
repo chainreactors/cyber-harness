@@ -107,7 +107,7 @@ Context 由调用者显式传入，Stream 不拥有 Session、Turn 或 operation
 ## 8. 类型与管理服务
 
 - `aop/`：AOP core 与官方 `aop.*` 生成类型；
-- `pkg/types/`：Agent、Runner、TUI、Web 共用的 Cyber protobuf message 与 typed extension helper，单一 Go 包且不依赖 Connect；
+- `core/types/`：Agent、Runner、TUI、Web 共用的 Cyber protobuf message 与 typed extension helper，单一 Go 包且不依赖 Connect；
 - `pkg/rpc/`：Cyber ConnectRPC service descriptor、client 和 handler，`.pb.go` 与 `.connect.go` 位于同一 Go 包；
 - `pkg/web/api/`：协议无关的管理 API；直接接收/返回 protobuf message，不依赖 Connect、HTTP 或 WebSocket；
 - `pkg/web/connect.go`：唯一生成 RPC 暴露适配器，注册管理服务与 `AOPService`，并映射认证和传输错误；
@@ -171,7 +171,7 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - AOP schema：`web/frontend/cyber-ui/packages/aop/proto/aop`
 - Cyber message schema：`proto/types`
 - Cyber RPC schema：`proto/rpc`
-- Cyber Go message：`pkg/types`
+- Cyber Go message：`core/types`
 - Cyber Go RPC：`pkg/rpc`
 - 生成入口：`cmd/gen`
 - AOP endpoint 装配：`pkg/web/endpoints.go`

@@ -10,7 +10,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"

@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -28,11 +29,10 @@ import (
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
-	"github.com/chainreactors/cyber/pkg/namespaces"
 	nodepkg "github.com/chainreactors/cyber/pkg/node"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/pkg/skills"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
-	"github.com/chainreactors/cyber/skills"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -83,7 +83,7 @@ type cyberProfile struct {
 	runtime    *agentsession.Runtime
 	ioa        *ioatools.Service
 	tui        *tuiext.Extension
-	namespaces *namespaces.Catalog
+	namespaces *namespaces.Registry
 }
 
 var _ profilepkg.Application = (*cyberProfile)(nil)
@@ -160,8 +160,8 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	}
 	application := applicationGraph.application
 
-	namespaceCatalog := namespaces.New()
-	values := []extension.Extension{namespaceCatalog}
+	namespaceRegistry := namespaces.New()
+	values := []extension.Extension{namespaceRegistry}
 	if strings.TrimSpace(config.Output) != "" {
 		output, outputErr := telemetryext.New(eventStream, telemetryext.Options{Path: config.Output})
 		if outputErr != nil {
@@ -253,7 +253,7 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		return nil, err
 	}
 	product.extensions, product.app, product.runtime, product.ioa = extensions, application, run, ioaService
-	product.namespaces = namespaceCatalog
+	product.namespaces = namespaceRegistry
 	return product, nil
 }
 

@@ -25,7 +25,7 @@ type Bindings struct {
 	Status   func() []Row
 }
 
-// Registry is a collecting presentation catalog. Registration is allowed only
+// Registry collects presentation bindings. Registration is allowed only
 // before the host publishes Bindings to a running TUI.
 type Registry struct {
 	mu       sync.Mutex

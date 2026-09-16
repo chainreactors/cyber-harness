@@ -8,7 +8,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 )
 
 func TestStandaloneResourceAndLiveCommandRegistration(t *testing.T) {

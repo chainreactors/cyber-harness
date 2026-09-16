@@ -5,7 +5,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"io"
 	"net/http"
 	"net/http/httptest"

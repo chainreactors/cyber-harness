@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/pkg/commands"
-	browserutil "github.com/chainreactors/cyber/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	"github.com/projectdiscovery/katana/pkg/navigation"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"

@@ -6,7 +6,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/namespaces"
+	"github.com/chainreactors/cyber/core/namespaces"
 )
 
 func TestHubOwnsProxyLifecycle(t *testing.T) {

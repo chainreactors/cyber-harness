@@ -21,9 +21,9 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	toolpkg "github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	types "github.com/chainreactors/cyber/pkg/types"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 	"google.golang.org/protobuf/proto"
 )
 

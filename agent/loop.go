@@ -17,7 +17,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func requireProvider(cfg Config) error {

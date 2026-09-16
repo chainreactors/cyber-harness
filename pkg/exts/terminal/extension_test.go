@@ -9,6 +9,7 @@ import (
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/toolset"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
@@ -57,7 +58,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
-		Tmux:           func(*commands.BashTool) commands.Command { return custom },
+		Tmux:           func(*terminaltool.BashTool) commands.Command { return custom },
 	})
 	if err != nil {
 		t.Fatal(err)

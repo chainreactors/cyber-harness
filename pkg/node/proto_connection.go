@@ -31,10 +31,10 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/exts/pty"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
-	"github.com/chainreactors/cyber/pkg/terminal"
 	toolset "github.com/chainreactors/cyber/pkg/toolset"
-	types "github.com/chainreactors/cyber/pkg/types"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
@@ -379,7 +379,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}(cloneAgentStatus(initial))
 	}
 
-	var router *terminal.Router
+	var router *pty.Router
 	if cc.PTYRouter != nil {
 		router, err = cc.PTYRouter()
 	} else if cc.Bash != nil {
@@ -462,7 +462,7 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 func newAgentConnectionNamespaceMux(
 	connectionCtx context.Context,
 	cc connectionConfig,
-	router *terminal.Router,
+	router *pty.Router,
 	send func(string, protobuf.Message),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
@@ -599,7 +599,7 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	// plane. Everything emitted before the seal is already queued ahead of the
 	// terminal on the FIFO send channel. This narrows the tail to nothing rather
 	// than closing it absolutely: an artifact that passed the seal check may
-	// still be queued just after the terminal. Forwarding the whole tail is what
+	// still be queued just after the pty. Forwarding the whole tail is what
 	// floods the control plane; a stray record is what it counts and drops.
 	seal := func() { sealCall(operationsMu, sealed, operationID) }
 	go func() {
@@ -729,7 +729,7 @@ func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value
 	send(replyTo, &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: result}})
 }
 
-func handleAgentPTYMessage(ctx context.Context, router *terminal.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
+func handleAgentPTYMessage(ctx context.Context, router *pty.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
 	if router == nil {
 		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "PTY router is unavailable"))
 		return

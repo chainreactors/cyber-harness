@@ -1,13 +1,13 @@
 package node
 
 import (
-	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"os"
 	"testing"
 )
 
 func TestMain(m *testing.M) {
-	if code, handled := commands.RunShellCommandProxy(); handled {
+	if code, handled := terminaltool.RunShellCommandProxy(); handled {
 		os.Exit(code)
 	}
 	os.Exit(m.Run())

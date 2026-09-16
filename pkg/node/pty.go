@@ -7,24 +7,24 @@ import (
 
 	"github.com/chainreactors/cyber/agent/tmux"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/terminal"
+	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/utils/pty"
 )
 
 // NewPTYRouter creates the tool-node fallback router. Agent transports receive
 // their router directly from Manager and do not inspect the bash tool.
-func NewPTYRouter(bash *commands.BashTool) *terminal.Router {
+func NewPTYRouter(bash *terminaltool.BashTool) *ptyext.Router {
 	mgr := RegistryPTYManager(bash)
 	if mgr == nil {
-		return terminal.NewRuntimeRouter(nil)
+		return ptyext.NewRuntimeRouter(nil)
 	}
-	return terminal.NewRuntimeRouter(mgr.Manager)
+	return ptyext.NewRuntimeRouter(mgr.Manager)
 }
 
 // RegistryPTYManager extracts the tmux Manager from the "bash" tool in the
 // command registry, if available.
-func RegistryPTYManager(bash *commands.BashTool) *tmux.Manager {
+func RegistryPTYManager(bash *terminaltool.BashTool) *tmux.Manager {
 	if bash == nil {
 		return nil
 	}
@@ -33,7 +33,7 @@ func RegistryPTYManager(bash *commands.BashTool) *tmux.Manager {
 
 // SubscribePTYSessions subscribes to PTY session changes and broadcasts
 // session state to all active PTY streams.
-func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *terminal.Router, send func(*ptypb.ProtocolMessage)) func() {
+func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *ptyext.Router, send func(*ptypb.ProtocolMessage)) func() {
 	if mgr == nil || router == nil || send == nil {
 		return func() {}
 	}
@@ -83,6 +83,6 @@ func SubscribePTYSessions(ctx context.Context, mgr *tmux.Manager, router *termin
 }
 
 // BroadcastPTYSessions sends the current PTY session list to all active streams.
-func BroadcastPTYSessions(router *terminal.Router, send func(*ptypb.ProtocolMessage)) {
+func BroadcastPTYSessions(router *ptyext.Router, send func(*ptypb.ProtocolMessage)) {
 	router.BroadcastSessions(send)
 }

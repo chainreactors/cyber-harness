@@ -10,11 +10,11 @@ import (
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
-	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 type scannerProvider struct{}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

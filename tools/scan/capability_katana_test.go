@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	browserutil "github.com/chainreactors/cyber/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 )
 

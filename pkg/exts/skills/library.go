@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/resource"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 	"path/filepath"
 )
 

@@ -25,7 +25,8 @@ type Command struct {
 	Run             func(context.Context, *Execution) (any, error)
 }
 
-func stripShellSyntax(tokens []string) ([]string, error) {
+// StripShellSyntax rejects shell constructs a pseudo-command cannot honor.
+func StripShellSyntax(tokens []string) ([]string, error) {
 	clean := make([]string, 0, len(tokens))
 	for _, token := range tokens {
 		if token == "|" || token == "||" {
@@ -67,7 +68,8 @@ func isFileRedirection(token string) bool {
 	return false
 }
 
-func normalizeNoColor(name string, args []string) []string {
+// NormalizeNoColor appends --no-color to scanner invocations that paint a terminal.
+func NormalizeNoColor(name string, args []string) []string {
 	if name != "scan" {
 		return args
 	}

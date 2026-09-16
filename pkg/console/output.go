@@ -15,8 +15,8 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/truncate"
+	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/core/util"
-	types "github.com/chainreactors/cyber/pkg/types"
 	"golang.org/x/term"
 )
 

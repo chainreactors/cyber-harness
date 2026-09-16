@@ -1,12 +1,12 @@
 package main
 
 import (
-	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"os"
 )
 
 func main() {
-	if code, handled := commands.RunShellCommandProxy(); handled {
+	if code, handled := terminaltool.RunShellCommandProxy(); handled {
 		os.Exit(code)
 	}
 	cyber()

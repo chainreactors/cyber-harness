@@ -5,7 +5,7 @@ import (
 	"errors"
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"

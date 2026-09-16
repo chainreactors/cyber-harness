@@ -6,8 +6,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/chainreactors/cyber/skills"
 )
 
 var Version = "dev"
@@ -272,42 +270,4 @@ func FormatInputs(inputs []string) string {
 		sb.WriteString("\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-func ApplySelectedSkills(text string, selected []string, store *skills.Store) (string, error) {
-	if len(selected) == 0 {
-		return text, nil
-	}
-	var sb strings.Builder
-	for _, name := range selected {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if skill, ok := store.ByName(name); ok {
-			if sb.Len() > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(store.FormatInvocation(skill, ""))
-			continue
-		}
-		body := skills.ReadFile("skills/" + name + ".md")
-		if body == "" {
-			body = skills.ReadFile(name)
-		}
-		if body == "" {
-			return "", fmt.Errorf("unknown skill %q", name)
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(body)
-	}
-	if strings.TrimSpace(text) != "" {
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(strings.TrimSpace(text))
-	}
-	return sb.String(), nil
 }

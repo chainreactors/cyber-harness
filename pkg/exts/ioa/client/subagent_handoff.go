@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/ioa/protocols"
 	"google.golang.org/protobuf/proto"
 )

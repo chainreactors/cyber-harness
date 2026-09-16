@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 )
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {

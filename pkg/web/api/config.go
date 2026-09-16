@@ -7,7 +7,7 @@ import (
 
 	agentprovider "github.com/chainreactors/cyber/agent/provider"
 	configpkg "github.com/chainreactors/cyber/core/config"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API

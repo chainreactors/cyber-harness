@@ -124,17 +124,24 @@ func Add[T any](r *Registry, values ...T) (Handle, error) {
 	}
 	d.contributions++
 	r.shared.mu.Unlock()
-
-	handle, err := point.Add(values...)
-	if err != nil || handle == nil {
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
 		r.shared.mu.Lock()
 		d.contributions--
 		r.shared.mu.Unlock()
+	}()
+
+	handle, err := point.Add(values...)
+	if err != nil || handle == nil {
 		if err != nil {
 			return nil, err
 		}
 		return nil, ErrInvalid
 	}
+	committed = true
 	return &contributionHandle{registry: r.shared, definition: d, inner: handle}, nil
 }
 

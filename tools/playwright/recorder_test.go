@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/headless"
+	"github.com/chainreactors/cyber/tools/headless"
 	"github.com/go-rod/rod/lib/launcher"
 	"gopkg.in/yaml.v3"
 )

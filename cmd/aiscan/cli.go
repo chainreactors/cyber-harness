@@ -19,7 +19,6 @@ import (
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/runner"
-	transportpkg "github.com/chainreactors/cyber/pkg/transport"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -27,7 +26,7 @@ const runModeWeb cfg.RunMode = "web"
 
 func cliCommandSummary() string {
 	base := "agent, web, serve"
-	summaries := scannerext.Summaries()
+	summaries := scannerext.Names()
 	if len(summaries) == 0 {
 		return base
 	}
@@ -154,7 +153,7 @@ func cyber() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := transportpkg.Run(ctx, cyberProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := runAgentTransport(ctx, cyberProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)

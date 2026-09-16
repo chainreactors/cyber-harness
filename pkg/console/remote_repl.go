@@ -8,8 +8,8 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/pty"
 )
@@ -74,7 +74,7 @@ func (r *REPL) Close() {
 	<-r.done
 }
 
-func bashManager(bash *commands.BashTool) *tmuxpkg.Manager {
+func bashManager(bash *terminaltool.BashTool) *tmuxpkg.Manager {
 	if bash == nil {
 		return nil
 	}

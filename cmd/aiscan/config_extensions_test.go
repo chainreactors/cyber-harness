@@ -2,8 +2,8 @@ package main
 
 import (
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/types"
 	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-	"github.com/chainreactors/cyber/pkg/types"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 	"reflect"

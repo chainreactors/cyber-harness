@@ -26,7 +26,7 @@ type Config struct {
 	TavilyKeys string
 	Proxy      ProxyEndpoint
 	// ResolveIndex is evaluated during Load, after any engine dependency has
-	// published its association index. Nil installs the command with no catalog.
+	// published its association index. Nil installs the command with no index.
 	ResolveIndex func() *association.Index
 }
 

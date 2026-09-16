@@ -17,7 +17,7 @@ import (
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/commands"
-	browserutil "github.com/chainreactors/cyber/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/projectdiscovery/goflags"
 	"github.com/projectdiscovery/katana/pkg/engine"

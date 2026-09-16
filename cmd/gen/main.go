@@ -87,7 +87,7 @@ func main() {
 	productProto := filepath.Join(root, "proto")
 	aopTS := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "src", "gen", "aop")
 	productTS := filepath.Join(root, "web", "frontend", "src", "gen")
-	typesDir := filepath.Join(root, "pkg", "types")
+	typesDir := filepath.Join(root, "core", "types")
 
 	for _, path := range []string{
 		filepath.Join(root, "pkg", "rpc"),

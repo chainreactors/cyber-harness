@@ -14,11 +14,11 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console"
+	"github.com/chainreactors/cyber/pkg/exts/pty"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/terminal"
-	types "github.com/chainreactors/cyber/pkg/types"
 )
 
 func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
@@ -90,8 +90,8 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 			NodeID:             nodeID,
 			Runtime:            DefaultRuntimeInfo(),
 			Status:             product.AgentStatus,
-			Menu:               func() []*types.CommandSpec { return CommandCatalog(rt) },
-			PTYRouter:          func() (*terminal.Router, error) { return NewPTYRouter(application.Bash), nil },
+			Menu:               func() []*types.CommandSpec { return CommandSpecs(rt) },
+			PTYRouter:          func() (*pty.Router, error) { return NewPTYRouter(application.Bash), nil },
 			Bash:               application.Bash,
 			RegisterNamespaces: product.RegisterNamespaces,
 		}

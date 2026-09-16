@@ -16,9 +16,9 @@ import (
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -51,7 +51,7 @@ type options struct {
 }
 
 func main() {
-	if code, handled := commands.RunShellCommandProxy(); handled {
+	if code, handled := terminaltool.RunShellCommandProxy(); handled {
 		os.Exit(code)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -114,7 +114,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		defer cancel()
 	}
 	if !cfg.HasAgentOneShotInput(&option) {
-		if _, err := cfg.ApplySelectedSkills("", option.Skills, profile.app.Skills); err != nil {
+		if _, err := profile.app.Skills.ApplySelected("", option.Skills); err != nil {
 			return err
 		}
 		return console.AttachLocalREPL(runCtx, profile.runtime, &option, profile.tui.Bindings())
@@ -124,7 +124,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		return err
 	}
 	task = skills.ExpandCommand(task, profile.app.Skills)
-	task, err = cfg.ApplySelectedSkills(task, option.Skills, profile.app.Skills)
+	task, err = profile.app.Skills.ApplySelected(task, option.Skills)
 	if err != nil {
 		return err
 	}

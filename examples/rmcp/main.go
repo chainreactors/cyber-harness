@@ -11,14 +11,14 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
-func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
-	bash := commands.NewBashTool(workDir, 300, nil)
+func newRegistry(workDir string) (tool.Executor, *terminaltool.BashTool, *extension.Set) {
+	bash := terminaltool.NewBashTool(workDir, 300, nil)
 	registry := toolset.NewRegistry(nil)
 	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[tool.Tool](scope, bash) }}
 	set, err := extension.New(registry, contribution)
@@ -33,7 +33,7 @@ func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.
 }
 
 func main() {
-	if code, handled := commands.RunShellCommandProxy(); handled {
+	if code, handled := terminaltool.RunShellCommandProxy(); handled {
 		os.Exit(code)
 	}
 	var (

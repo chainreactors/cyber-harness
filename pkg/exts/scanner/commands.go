@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/truncate"
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	toolimpl "github.com/chainreactors/cyber/tools"
 	curltools "github.com/chainreactors/cyber/tools/curl"
 	gotools "github.com/chainreactors/cyber/tools/gogo"
 	neutrontools "github.com/chainreactors/cyber/tools/neutron"
@@ -20,6 +20,7 @@ import (
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	spraytools "github.com/chainreactors/cyber/tools/spray"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	zombietools "github.com/chainreactors/cyber/tools/zombie"
 )
 
@@ -86,7 +87,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 		values = append(values, command)
 	}
 	values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
-	if command, err := toolimpl.NewScanCommand(engineSet, options, proxyURL, application); err != nil {
+	if command, err := newScanCommand(engineSet, options, proxyURL, application); err != nil {
 		logger.Warnf("scan unavailable: %v", err)
 	} else {
 		values = append(values, command)
@@ -98,12 +99,12 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 	return append(values, editionCommands...), nil
 }
 
-func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
+func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
 	}
 	var output strings.Builder
-	execution, err := bash.RunForeground(ctx, commandLine, commands.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, commandLine, terminaltool.BashExecOptions{
 		Timeout: timeout,
 		OnOutput: func(data []byte) {
 			_, _ = output.Write(data)
@@ -157,7 +158,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
+func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}
@@ -224,4 +225,23 @@ func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor
 		"\n\n[deep browser truncated: showing %d/%d lines (%s of %s)]",
 		artifact.OutputLines, artifact.TotalLines, truncate.FormatSize(artifact.OutputBytes), truncate.FormatSize(artifact.TotalBytes),
 	), nil
+}
+
+func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (commands.Command, error) {
+	if engines == nil || engines.Gogo == nil || engines.Spray == nil {
+		return commands.Command{}, fmt.Errorf("scan engines are unavailable")
+	}
+	scanOptions := append([]scan.Option(nil), options...)
+	if proxy != "" {
+		scanOptions = append(scanOptions, scan.WithProxy(proxy))
+	}
+	if events != nil {
+		scanOptions = append(scanOptions, scan.WithEvents(events))
+	}
+	impl := scan.New(engines, scanOptions...)
+	return commands.Command{
+		Name: impl.Name(), Usage: impl.Usage(),
+		DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
+		Run:             impl.Run,
+	}, nil
 }

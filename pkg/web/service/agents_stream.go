@@ -6,7 +6,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )

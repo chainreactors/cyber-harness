@@ -9,7 +9,7 @@ import (
 	providerpkg "github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 

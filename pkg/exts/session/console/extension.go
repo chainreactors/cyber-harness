@@ -4,37 +4,34 @@ package console
 
 import (
 	"fmt"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/console/api"
-	"github.com/chainreactors/cyber/pkg/types"
 	"github.com/spf13/cobra"
 )
 
-type Catalog interface {
-	CommandSpecs(bool) []*types.CommandSpec
-}
 type Extension struct {
-	catalog Catalog
+	runtime *agentsession.Runtime
 }
 
-func New(catalog Catalog) (*Extension, error) {
-	if catalog == nil {
-		return nil, fmt.Errorf("session presentation requires session catalog")
+func New(runtime *agentsession.Runtime) (*Extension, error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("session presentation requires session runtime")
 	}
-	return &Extension{catalog: catalog}, nil
+	return &Extension{runtime: runtime}, nil
 }
 func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	return extension.Add(scope, Bind(e.catalog))
+	return extension.Add(scope, bindings(e.runtime))
 }
 
-// Bind snapshots the command catalog at installation. Runtime additions remain
+// bindings snapshots the runtime commands at installation. Runtime additions remain
 // available through the Session protocol; a TUI profile is a fixed installation.
-func Bind(catalog Catalog) *api.Bindings {
-	specs := catalog.CommandSpecs(false)
+func bindings(runtime *agentsession.Runtime) *api.Bindings {
+	specs := runtime.CommandSpecs(false)
 	return &api.Bindings{Commands: func(view api.View) []*cobra.Command {
 		var commands []*cobra.Command
 		for _, spec := range specs {

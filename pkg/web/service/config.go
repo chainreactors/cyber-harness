@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	types "github.com/chainreactors/cyber/pkg/types"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )

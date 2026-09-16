@@ -683,9 +683,9 @@ func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
 
 func TestApplyEnvironmentCentralizesRuntimeAndUncoverValues(t *testing.T) {
 	values := map[string]string{
-		"CYBER_DATA_DIR":        "env-data",
-		"CYBER_RENDER":          "static",
-		"CYBER_REPL":            "fast",
+		"CYBER_DATA_DIR":         "env-data",
+		"CYBER_RENDER":           "static",
+		"CYBER_REPL":             "fast",
 		"PLAYWRIGHT_CLI_SESSION": "browser-1",
 		"SHODAN_API_KEY":         "shodan-key",
 	}

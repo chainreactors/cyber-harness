@@ -5,7 +5,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	cfg "github.com/chainreactors/cyber/core/config"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 func defaultProviderConfig() agent.ProviderConfig {

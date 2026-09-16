@@ -13,16 +13,16 @@ import (
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	flags "github.com/jessevdk/go-flags"
 	"gopkg.in/yaml.v3"
 )
 
 func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
 	resources := resource.New()
 	sections := cfg.NewSections()
+	localCLI := cli == nil
 	if cli == nil {
-		// Declarations remain identical for config-only consumers. CLI values are
-		// inert until Registry.Seal, so an unsealed sink is sufficient here.
-		cli = hostcli.New(nil)
+		cli = hostcli.New(flags.NewParser(&cliOptions{}, flags.None))
 	}
 	if _, err := resource.Define[hostcli.Contribution](resources, cli); err != nil {
 		panic(err)
@@ -53,6 +53,9 @@ func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *
 		mustDeclare(sessionext.Declare(resources, agentOptions))
 	}
 	resources.Freeze()
+	if localCLI {
+		mustDeclare(cli.Seal())
+	}
 	sections.Seal()
 	return sections
 }

@@ -137,7 +137,7 @@ jobs:
 
       - name: Compile public scanner regressions
         run: |
-          go test -run '^$' -tags "$FULL_CAPS_TAGS integration" ./tools
+          go test -run '^$' -tags "$FULL_CAPS_TAGS integration" ./pkg/exts/scanner
 
       - name: Check whitespace and submodule pins
         run: |
@@ -317,12 +317,12 @@ jobs:
         run: |
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m -v \
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
-            ./tools
+            ./pkg/exts/scanner
 
       - name: Run remaining full-tag unit variants
         run: |
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
-            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
+            ./cmd/aiscan ./pkg/skills ./tools/passive ./tools/scan/engine
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan
@@ -333,7 +333,7 @@ jobs:
       - name: Compile browser-backed full-tag suites
         run: |
           go test -c -tags "$FULL_CAPS_TAGS" \
-            -o "$RUNNER_TEMP/headless.test" ./pkg/headless
+            -o "$RUNNER_TEMP/headless.test" ./tools/headless
           go test -c -tags "$FULL_CAPS_TAGS" \
             -o "$RUNNER_TEMP/playwright.test" ./tools/playwright
 
@@ -378,7 +378,7 @@ jobs:
         run: |
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^(TestExecCyberExtendedActions|TestExecCyberHistoryActions)$' \
-            ./pkg/headless
+            ./tools/headless
 
       - name: Run authenticated record and replay E2E
         run: |
@@ -442,7 +442,7 @@ jobs:
         run: |
           git diff --exit-code -- \
             pkg/rpc \
-            pkg/types \
+            core/types \
             web/frontend/src/gen \
             web/frontend/cyber-ui/packages/aop/src/gen/aop
 

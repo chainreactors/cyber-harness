@@ -9,8 +9,8 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
-	"github.com/chainreactors/cyber/pkg/terminal"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/exts/pty"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -24,7 +24,7 @@ type FileUploader interface {
 	Upload(ctx context.Context, sessionID, filename string, data []byte) (*filepb.Result, error)
 }
 
-// PTYRouter bridges application PTY messages to the agent owning the terminal.
+// PTYRouter bridges application PTY messages to the agent owning the pty.
 // It speaks generated protobuf only; frame conversion belongs to the
 // mechanism layer implementing this interface.
 type PTYRouter interface {
@@ -295,7 +295,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		if !ok {
 			return fmt.Errorf("unexpected application PTY message %T", message)
 		}
-		streamID := terminal.StreamID(value)
+		streamID := pty.StreamID(value)
 		if streamID == "" {
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 			return nil
@@ -304,7 +304,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("PTY is unavailable"))
 			return nil
 		}
-		nodeID := terminal.NodeID(value)
+		nodeID := pty.NodeID(value)
 		stateMu.Lock()
 		route, routed := ptyRoutes[streamID]
 		stateMu.Unlock()
@@ -334,7 +334,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				}
 			}(streamID, messages)
 			if !online {
-				_ = send(streamID, "", terminal.NewDetached(streamID))
+				_ = send(streamID, "", pty.NewDetached(streamID))
 			}
 		}
 		if forwardErr := backends.PTY.ForwardPTY(nodeID, value); forwardErr != nil {
@@ -342,7 +342,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			removePTY(streamID, false)
 			return nil
 		}
-		if terminal.IsDetach(value) {
+		if pty.IsDetach(value) {
 			removePTY(streamID, false)
 		}
 		return nil

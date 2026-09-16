@@ -16,13 +16,13 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	cmdpkg "github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	types "github.com/chainreactors/cyber/pkg/types"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/cyber/tools/toolargs"
 )
 
@@ -61,7 +61,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 	defer product.Close(context.Background())
 
 	task = skills.ExpandCommand(task, rt.App().Skills)
-	task, err = cfg.ApplySelectedSkills(task, option.Skills, rt.App().Skills)
+	task, err = rt.App().Skills.ApplySelected(task, option.Skills)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 	}
 	defer product.Close(context.Background())
 
-	if _, err := cfg.ApplySelectedSkills("", option.Skills, rt.App().Skills); err != nil {
+	if _, err := rt.App().Skills.ApplySelected("", option.Skills); err != nil {
 		return err
 	}
 
@@ -109,8 +109,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 		mode.Provider = profile.ProviderRequired
 	}
 	if cfg.IsScannerHelpRequest(scannerArgs) {
-		if metadata, ok := scannerext.Lookup(scannerArgs[0]); ok && metadata.Usage != nil {
-			usage := metadata.Usage()
+		if usage, ok := scannerext.Usage(scannerArgs[0]); ok {
 			fmt.Print(usage)
 			if !strings.HasSuffix(usage, "\n") {
 				fmt.Println()
@@ -224,7 +223,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}()
 	streaming := ShouldStreamScannerOutput(scannerArgs)
 	var captured strings.Builder
-	execution, err := bash.RunForeground(ctx, commandline.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), cmdpkg.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, commandline.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), terminaltool.BashExecOptions{
 		OnOutput: func(data []byte) {
 			if streaming {
 				_, _ = os.Stdout.Write(data)

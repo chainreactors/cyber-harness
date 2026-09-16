@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/cyber/pkg/headless"
+	"github.com/chainreactors/cyber/tools/headless"
 	"gopkg.in/yaml.v3"
 )
 

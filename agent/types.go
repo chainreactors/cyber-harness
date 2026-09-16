@@ -13,7 +13,7 @@ import (
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
-	types "github.com/chainreactors/cyber/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // The agent loop operates on AOP protos directly. Vendored JSON shapes live

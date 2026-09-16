@@ -13,10 +13,10 @@ import (
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	types "github.com/chainreactors/cyber/pkg/types"
-	"github.com/chainreactors/cyber/skills"
+	"github.com/chainreactors/cyber/pkg/skills"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -41,18 +41,18 @@ func DefaultRuntimeInfo() *aop.AgentRuntimeInfo {
 	return runtimeInfo
 }
 
-// CommandCatalog is a node's user-facing composer catalog: "/verb" runtime and
+// CommandSpecs returns a node's user-facing commands: "/verb" runtime and
 // skill commands plus every "!verb" registered in the node's command registry.
-func CommandCatalog(runtime *session.Runtime) []*types.CommandSpec {
+func CommandSpecs(runtime *session.Runtime) []*types.CommandSpec {
 	if runtime == nil {
 		return nil
 	}
-	return commandCatalog(runtime.App(), runtime.CommandSpecs(true))
+	return commandSpecs(runtime.App(), runtime.CommandSpecs(true))
 }
 
-func commandCatalog(app *apppkg.App, specs []*types.CommandSpec) []*types.CommandSpec {
+func commandSpecs(app *apppkg.App, specs []*types.CommandSpec) []*types.CommandSpec {
 	if app != nil {
-		specs = append(specs, RegistryCommandCatalog(app.Commands, app.Skills)...)
+		specs = append(specs, RegistryCommandSpecs(app.Commands, app.Skills)...)
 	}
 	if app == nil || app.Skills == nil {
 		return specs
@@ -69,9 +69,9 @@ func commandCatalog(app *apppkg.App, specs []*types.CommandSpec) []*types.Comman
 	return specs
 }
 
-// RegistryCommandCatalog projects the Bash-internal command registry without
-// adding chat runtime or skill commands. Tool-only nodes use this catalog too.
-func RegistryCommandCatalog(registry commands.Catalog, store *skills.Store) []*types.CommandSpec {
+// RegistryCommandSpecs projects the Bash-internal command registry without
+// adding chat runtime or skill commands. Tool-only nodes use these specs too.
+func RegistryCommandSpecs(registry commands.Executor, store *skills.Store) []*types.CommandSpec {
 	if registry == nil {
 		return nil
 	}

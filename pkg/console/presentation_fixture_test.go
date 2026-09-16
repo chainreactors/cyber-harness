@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
@@ -10,10 +11,10 @@ import (
 )
 
 // Tests install the same provider/contributor path as a product profile.
-func testSessionBindings(t *testing.T, catalog sessionconsole.Catalog) *api.Bindings {
+func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()
-	contribution, err := sessionconsole.New(catalog)
+	contribution, err := sessionconsole.New(runtime)
 	if err != nil {
 		t.Fatal(err)
 	}

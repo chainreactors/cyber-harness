@@ -16,7 +16,7 @@ import (
 	coreregistry "github.com/chainreactors/cyber/core/registry"
 	"github.com/chainreactors/cyber/core/resource"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
-	"github.com/chainreactors/cyber/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -183,12 +183,12 @@ func (r *Registry) Run(ctx context.Context, tokens []string, parent *Execution) 
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
-	args, err := stripShellSyntax(tokens[1:])
+	args, err := StripShellSyntax(tokens[1:])
 	if err != nil {
 		return nil, err
 	}
 	name := tokens[0]
-	args = normalizeNoColor(name, args)
+	args = NormalizeNoColor(name, args)
 	if parent == nil {
 		return nil, fmt.Errorf("command %s requires an execution", name)
 	}
