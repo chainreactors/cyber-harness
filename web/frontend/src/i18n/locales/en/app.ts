@@ -4,6 +4,7 @@ export default {
   noAgents: 'No agents connected',
   llmReady: 'LLM Ready',
   llmOffline: 'LLM Offline',
+  closePanel: 'Close panel',
   confirmTitle: 'Please confirm',
   confirm: 'Confirm',
   cancel: 'Cancel',

@@ -4,6 +4,7 @@ export default {
   noAgents: '无 Agent 连接',
   llmReady: 'LLM 就绪',
   llmOffline: 'LLM 离线',
+  closePanel: '关闭面板',
   confirmTitle: '请确认',
   confirm: '确认',
   cancel: '取消',

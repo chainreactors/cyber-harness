@@ -57,6 +57,14 @@ export default function AgentPanel({ open, agents: rosterAgents, focusNodeID, on
           {agents.length}
         </Badge>
       )}
+      contentProps={{
+        // The console advertises "Esc 中断". Escape from inside the terminal must
+        // interrupt the running task only — otherwise the same keypress also
+        // dismisses the drawer and takes the output with it.
+        onEscapeKeyDown: (event: KeyboardEvent) => {
+          if (document.activeElement?.closest('.xterm')) event.preventDefault()
+        },
+      }}
     >
       {agents.length === 0 ? (
         <div className="flex h-full items-center justify-center">

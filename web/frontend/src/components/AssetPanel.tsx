@@ -15,6 +15,7 @@ import {
   TabsTrigger,
 } from '@cyber/ui'
 import { cn } from '@cyber/theme'
+import { useTableLabels } from '../i18n/useTableLabels'
 import { ToolDrawer } from './layout/ToolDrawer'
 
 interface AssetPanelProps {
@@ -74,10 +75,6 @@ function formatRowsForChat(rows: Record<string, unknown>[]): string {
   return lines.join('\n')
 }
 
-const BATCH_ACTIONS = [
-  { id: 'sendToChat', label: 'Send to Chat', icon: 'MessageSquare' },
-]
-
 const TYPE_ORDER = ['ip', 'cidr', 'domain', 'port', 'app', 'url', 'framework', 'endpoint', 'vuln']
 
 function compareAssetTypes(left: string, right: string) {
@@ -93,6 +90,7 @@ function compareAssetTypes(left: string, right: string) {
 
 export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: AssetPanelProps) {
   const { t } = useTranslation('assets')
+  const tableLabels = useTableLabels()
   const importLabels = useMemo(() => ({
     title: t('importDialog.title'),
     description: t('importDialog.description'),
@@ -191,6 +189,14 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
     if ((importOpen || dragOver) && artifactOptions.length === 0) void loadArtifacts()
   }, [importOpen, dragOver, artifactOptions.length, loadArtifacts])
 
+  // The table renders the selection count next to the button, so the button
+  // itself carries only the verb. It has to be rebuilt per locale, not a module
+  // constant, or the zh build shows an English label.
+  const batchActions = useMemo(
+    () => [{ id: 'sendToChat', label: t('sendToChat'), icon: 'MessageSquare' }],
+    [t],
+  )
+
   const rows = useMemo(() => nodes.map(flattenSCO), [nodes])
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -278,6 +284,10 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
           onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOver(true) },
           onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) },
           onDrop: handleDrop,
+          // The import dialog is modal, so its focus trap reads as an outside
+          // interaction to this non-modal Sheet and dismisses the panel out from
+          // under the dialog. While the dialog is up, the drawer stays put.
+          onInteractOutside: (e: Event) => { if (importOpen) e.preventDefault() },
         }}
         bodyClassName="flex flex-col"
       >
@@ -357,7 +367,8 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
                     sparseMinColumns: 8,
                     columnsExclude: EXCLUDE_COLUMNS,
                     paginationMode: 'client',
-                    batchActions: BATCH_ACTIONS,
+                    batchActions,
+                    i18n: tableLabels,
                   }}
                   onAction={handleAction}
                 />

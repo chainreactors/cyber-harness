@@ -87,16 +87,16 @@ func (s *Service) SessionMenu(sessionID string) []*types.CommandSpec {
 		// This is the web's offline menu, not an executable terminal console.
 		agentSpecs = []*types.CommandSpec{
 			{Name: "/help", Description: "查看命令面板"},
-			{Name: "/status", Description: "查看模型、渲染模式、Server 和 skills"},
-			{Name: "/clear", Description: "清空当前会话上下文"},
+			{Name: "/status", Description: "查看 Agent 的 LLM、工具、扫描器和会话健康状态"},
+			{Name: "/clear", Description: "清空当前 Agent 上下文"},
 			{Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)"},
-			{Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])"},
+			{Name: "/compact", Description: "压缩当前 Agent 上下文 (/compact [focus instructions])"},
 			{Name: "/provider", Description: "查看/管理 LLM provider 配置"},
 			{Name: "/model", Description: "查看/切换当前 provider 的模型"},
-			{Name: "/spaces", Description: "List all spaces"},
-			{Name: "/messages", Description: "List start messages in a space"},
-			{Name: "/context", Description: "View message thread/context"},
-			{Name: "/nodes", Description: "List nodes (optionally scoped to a space)"},
+			{Name: "/spaces", Description: "列出所有 space"},
+			{Name: "/messages", Description: "列出 space 中的起始消息"},
+			{Name: "/context", Description: "查看消息线程/上下文"},
+			{Name: "/nodes", Description: "列出节点（可限定 space）"},
 		}
 	}
 	return append(hubSpecs, agentSpecs...)

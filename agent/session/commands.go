@@ -81,7 +81,7 @@ func builtinCommands() []Command {
 		return commandText(line, style, body).result, nil
 	}
 	return []Command{
-		{Spec: &types.CommandSpec{Name: "/help", Description: "Show runtime commands"}, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/help", Description: "查看运行时命令"}, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
 			var help strings.Builder
 			help.WriteString("Runtime commands:\n")
 			for _, spec := range s.baseState().runtime.CommandSpecs(false) {
@@ -97,16 +97,16 @@ func builtinCommands() []Command {
 			help.WriteString("  !<command>")
 			return text("/help", CommandPresentationPreformatted, help.String())
 		}},
-		{Spec: &types.CommandSpec{Name: "/status", Description: "Show Agent LLM, tool, scanner, and session health"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/status", Description: "查看 Agent 的 LLM、工具、扫描器和会话健康状态"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
 			return text("/status", CommandPresentationPreformatted, s.baseState().commands.statusText())
 		}},
-		{Spec: &types.CommandSpec{Name: "/clear", Description: "Clear the current Agent context"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/clear", Description: "清空当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			return s.rotateCommand(ctx, commands.JoinCommandLine("/clear", args))
 		}},
-		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "压缩当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			return s.rotateCommand(ctx, commands.JoinCommandLine("/compact", args))
 		}},
-		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|rounds <spec>|off]", Description: "Runtime eval"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|rounds <spec>|off]", Description: "运行时目标评估"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			state := s.baseState().commands
 			criteria := strings.TrimSpace(strings.Join(args, " "))
 			line := commands.JoinCommandLine("/eval", args)
@@ -146,7 +146,7 @@ func builtinCommands() []Command {
 				return text(line, CommandPresentationPlain, "Goal evaluation enabled: "+criteria)
 			}
 		}},
-		{Spec: &types.CommandSpec{Name: "/loop", Usage: "/loop [interval prompt|list|stop name]", Description: "Runtime loop"}, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/loop", Usage: "/loop [interval prompt|list|stop name]", Description: "运行时定时循环"}, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			line := commands.JoinCommandLine("/loop", args)
 			if len(args) == 0 {
 				args = []string{"list"}

@@ -34,7 +34,7 @@ export function TerminalDetails({
   const closed = taskSessions.length - running
 
   return (
-    <DetailPanel title={t('tdDetails')} onClose={onClose}>
+    <DetailPanel title={t('tdDetails')} closeLabel={t('hideDetails')} onClose={onClose}>
       <DetailGroup title={t('tdAgent')}>
         <DetailRow label={t('tdName')} value={agent.hello?.name} />
         <DetailRow label="ID" value={agent.hello?.nodeId} mono />

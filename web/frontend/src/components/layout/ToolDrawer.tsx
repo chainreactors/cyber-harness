@@ -1,4 +1,5 @@
 import type { ComponentProps, ComponentType, ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 
@@ -33,11 +34,13 @@ export function ToolDrawer({
   contentProps,
 }: ToolDrawerProps) {
   const { onInteractOutside, ...restContentProps } = contentProps ?? {}
+  const { t } = useTranslation('app')
 
   return (
     <Sheet open={open} modal={false} onOpenChange={(next) => { if (!next) onClose() }}>
       <SheetContent
         side="right"
+        closeLabel={t('closePanel')}
         className={cn(
           'flex w-full flex-col gap-0 border-l border-border/70 bg-background p-0 sm:max-w-none',
           'md:w-[75vw] md:min-w-[760px] md:max-w-[96rem]',
