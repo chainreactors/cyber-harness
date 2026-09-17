@@ -18,6 +18,7 @@ import (
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+	tmuxext "github.com/chainreactors/cyber/pkg/exts/tmux"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
@@ -40,24 +41,15 @@ func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extens
 	library := skills.NewStore(nil)
 
 	return []extension.Extension{
-		extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			if err := extension.Provide[*hooks.Registry](scope, registry); err != nil {
-				return err
-			}
-			if err := extension.Provide[*coreevents.Stream](scope, stream); err != nil {
-				return err
-			}
-			if err := extension.Provide[*skills.Store](scope, library); err != nil {
-				return err
-			}
-			if err := extension.Provide[egress.Endpoint](scope, egress.Disabled()); err != nil {
-				return err
-			}
-			return extension.Provide[*app.App](scope, application)
-		}},
-		commands.NewRegistry(registry),
-		toolset.NewRegistry(registry),
+		extension.Provided[*hooks.Registry](registry),
+		extension.Provided[*coreevents.Stream](stream),
+		extension.Provided[*skills.Store](library),
+		extension.Provided[egress.Endpoint](egress.Disabled()),
+		extension.Provided[*app.App](application),
+		commands.NewRegistry(),
+		toolset.NewRegistry(),
 		terminalext.New(terminalext.Config{Directory: t.TempDir(), Timeout: 1}),
+		tmuxext.New(),
 	}
 }
 

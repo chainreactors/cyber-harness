@@ -26,6 +26,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	looptool "github.com/chainreactors/cyber/tools/loop"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -624,10 +625,16 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Runtime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	reg := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
+	reg := commands.NewRegistry()
+	tools := toolset.NewRegistry()
 	terminal := terminaltools.New(terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
-	entries := []extension.Extension{hosttest.Capabilities(), reg, tools, terminal}
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		bash, err = extension.Use[*terminaltool.BashTool](scope)
+		return err
+	}}
+	entries := []extension.Extension{hosttest.Capabilities(), reg, tools, terminal, borrow}
 	if len(values) > 0 {
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Add(scope, values...)
@@ -638,7 +645,6 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	bash := terminal.Bash()
 	application := newTestApp(t, nil, nil)
 	rt := &Runtime{
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,

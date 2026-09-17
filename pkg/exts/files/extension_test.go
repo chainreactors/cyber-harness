@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ import (
 
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 	t.Helper()
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	f := fileext.New(cfg)
 	set, err := extension.New(
 		hosttest.Capabilities(),
@@ -93,14 +94,14 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 	}
 }
 
+// The extension owns the lifetime; the file access it builds must not offer a
+// second one for a consumer to drive.
 func TestFilesDoesNotExposeLifecycle(t *testing.T) {
-	adapter := fileext.New(files.Config{Directory: t.TempDir()})
-	filesystem := adapter.Files()
-	if _, ok := any(filesystem).(interface{ Close(context.Context) error }); ok {
-		t.Fatal("file access exposes Close")
-	}
-	if _, ok := any(filesystem).(interface{ Open(context.Context) error }); ok {
-		t.Fatal("file access exposes Open")
+	filesystem := reflect.TypeFor[*files.Files]()
+	for _, method := range []string{"Open", "Close"} {
+		if _, exists := filesystem.MethodByName(method); exists {
+			t.Errorf("file access exposes lifecycle method %s", method)
+		}
 	}
 }
 

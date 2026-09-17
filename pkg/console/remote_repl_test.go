@@ -2,6 +2,7 @@ package console
 
 import (
 	"context"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	"strings"
 	"testing"
 	"time"
@@ -93,7 +94,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +218,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

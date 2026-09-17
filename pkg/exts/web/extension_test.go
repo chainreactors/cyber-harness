@@ -50,6 +50,18 @@ func TestRouteContributionRemovalAndDuplicates(t *testing.T) {
 	service := webservice.NewService(webservice.ServiceConfig{})
 	defer service.Close(context.Background())
 	routes := webext.New(service)
+	set, err := extension.New(routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+	// Routes stay hidden until the graph activates, so the snapshot is only
+	// meaningful after Load -- a half-built profile is never served.
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(routes.Routes())
+
 	route := webpkg.Route{
 		Pattern: "GET /fixture", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 	}
@@ -57,13 +69,16 @@ func TestRouteContributionRemovalAndDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(routes.Routes()) != before+1 {
+		t.Fatalf("route was not published: %+v", routes.Routes())
+	}
 	if _, err := routes.Add(route); err == nil {
 		t.Fatal("duplicate route contribution succeeded")
 	}
 	if err := handle.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(routes.Routes()) != 0 {
+	if len(routes.Routes()) != before {
 		t.Fatalf("routes after handle close = %+v", routes.Routes())
 	}
 }

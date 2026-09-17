@@ -101,7 +101,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
-			candidateOption.Sections = declareResources(false, nil, nil)
+			candidateOption.Sections = defaultSections()
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
@@ -361,7 +361,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
-	sections := declareResources(false, nil, nil)
+	sections := defaultSections()
 	nextValues, currentValues := cfg.ValuesFromProto(incoming.Extensions), cfg.ValuesFromProto(current.Extensions)
 	preserveURLCredentials(nextValues, currentValues)
 	incoming.Extensions, err = cfg.ValuesToProto(sections.Preserve(nextValues, currentValues))

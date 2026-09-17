@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	base "github.com/chainreactors/cyber/pkg/base"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
@@ -24,7 +25,7 @@ type agentProfile struct {
 	extensions *extension.Set
 	app        *apppkg.App
 	runtime    *agentsession.Runtime
-	tui        *tuiext.Extension
+	bindings   *consoleapi.Registry
 }
 
 func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string, bashTimeout int) (*agentProfile, error) {
@@ -33,7 +34,6 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 		Option:   &option, Logger: logger, PrimarySessionID: "main", Loop: agent.StandardLoop{},
 	}
 	loop := loopext.New(sessionConfig.Loop)
-	sessionConfig.Loop = loop.Loop()
 
 	// This build routes nothing, so it publishes the disabled endpoint and
 	// links no proxy at all.
@@ -52,11 +52,11 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 		return nil, err
 	}
 
-	p := &agentProfile{tui: tuiext.New()}
+	p := &agentProfile{}
 	values = append(values,
 		loop,
 		sessionext.New(sessionConfig),
-		p.tui,
+		tuiext.New(),
 		sessionconsole.New(),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			application, err := extension.Use[*apppkg.App](scope)
@@ -64,7 +64,10 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 				return err
 			}
 			p.app = application
-			p.runtime, err = extension.Use[*agentsession.Runtime](scope)
+			if p.runtime, err = extension.Use[*agentsession.Runtime](scope); err != nil {
+				return err
+			}
+			p.bindings, err = extension.Use[*consoleapi.Registry](scope)
 			return err
 		}},
 	)
@@ -98,4 +101,21 @@ func (p *agentProfile) Close(ctx context.Context) error {
 		return nil
 	}
 	return p.extensions.Close(ctx)
+}
+
+// ConsoleBindings publishes the presentation contributions this profile
+// assembled. It is nil until the graph is active.
+func (p *agentProfile) ConsoleBindings() *consoleapi.Bindings {
+	if p == nil || p.extensions == nil || !p.extensions.Active() || p.bindings == nil {
+		return nil
+	}
+	return p.bindings.Bindings()
+}
+
+// Runtime is the session runtime this profile assembled.
+func (p *agentProfile) Runtime() (*agentsession.Runtime, error) {
+	if p == nil || p.extensions == nil || !p.extensions.Active() || p.runtime == nil {
+		return nil, fmt.Errorf("agent profile is not active")
+	}
+	return p.runtime, nil
 }

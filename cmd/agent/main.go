@@ -117,7 +117,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		if _, err := profile.runtime.Skills().ApplySelected("", option.Skills); err != nil {
 			return err
 		}
-		return console.AttachLocalREPL(runCtx, profile.runtime, &option, profile.tui.Bindings())
+		return console.AttachLocalREPL(runCtx, profile.runtime, &option, profile.ConsoleBindings())
 	}
 	task, err := cfg.ResolveTask(&option)
 	if err != nil {

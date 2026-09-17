@@ -21,9 +21,11 @@ import (
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/scan/engine"
+	searchtools "github.com/chainreactors/cyber/tools/search"
 	spraytools "github.com/chainreactors/cyber/tools/spray"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	zombietools "github.com/chainreactors/cyber/tools/zombie"
+	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // borrowed is what the scanner reaches for that other extensions own. It is
@@ -101,6 +103,19 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 		values = append(values, command)
 	}
 	values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
+	// cyberhub searches the fingerprint and POC index this extension builds, so
+	// it is contributed by its owner. A nil index is not an empty one: the
+	// command says how to configure the resources instead of reporting no hits.
+	var index *association.Index
+	if engineSet != nil {
+		index = engineSet.Index
+	}
+	cyberhub := searchtools.NewCyberhubSearch(index)
+	values = append(values, commands.Command{
+		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
+		Run:             cyberhub.Run,
+	})
 	if command, err := newScanCommand(engineSet, options, proxyURL, application); err != nil {
 		logger.Warnf("scan unavailable: %v", err)
 	} else {

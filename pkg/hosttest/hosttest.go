@@ -51,8 +51,8 @@ func contribute[T any](values ...T) extension.Extension {
 // Commands returns a loaded registry holding the given commands.
 func Commands(t testing.TB, values ...commands.Command) *commands.Registry {
 	t.Helper()
-	registry := commands.NewRegistry(nil)
-	Load(t, context.Background(), registry, contribute(values...))
+	registry := commands.NewRegistry()
+	Load(t, context.Background(), extension.Provided[*hooks.Registry](hooks.New()), registry, contribute(values...))
 	return registry
 }
 
@@ -68,18 +68,12 @@ func ToolsWithHooks(t testing.TB, registry *hooks.Registry, values ...tool.Tool)
 	if len(values) == 0 {
 		return tool.EmptyExecutor()
 	}
-	tools := toolset.NewRegistry(registry)
-	Load(t, context.Background(), tools, contribute(values...))
+	if registry == nil {
+		registry = hooks.New()
+	}
+	tools := toolset.NewRegistry()
+	Load(t, context.Background(), extension.Provided[*hooks.Registry](registry), tools, contribute(values...))
 	return tools
-}
-
-// Provide returns an Extension publishing value as the capability keyed by T.
-// A test that exercises one extension uses it to stand in for whichever owner
-// would have published that capability in a real profile.
-func Provide[T any](value T) extension.Extension {
-	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Provide[T](scope, value)
-	}}
 }
 
 // Capabilities is the set every extension can expect from a profile: a hook

@@ -10,14 +10,14 @@ import (
 
 func TestSubscribeAgentOutputTracksRotatedRuntimeSession(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	c := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	c, application := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	oldID := c.session.ID()
 	if _, err := c.session.Command(context.Background(), "/clear"); err != nil {
 		t.Fatal(err)
 	}
 	stdout.Reset()
 	emit := func(id, text string) {
-		c.runtime.App().Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
+		application.Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
 	}
 	emit(oldID, "stale")
 	emit("sibling", "sibling")

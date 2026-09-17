@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"github.com/chainreactors/cyber/core/extension"
 	"strings"
 	"testing"
 
@@ -157,7 +158,7 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := hosttest.Set(t, hosttest.Provide[*apppkg.App](application), rt)
+			rtSet := hosttest.Set(t, extension.Provided[*apppkg.App](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

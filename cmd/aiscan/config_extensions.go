@@ -95,14 +95,14 @@ func ownConfig(data []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
 	}
 	_, own := splitDocument(document, configurationProtoKeys)
-	for _, alias := range declareResources(false, nil, nil).Aliases() {
+	for _, alias := range defaultSections().Aliases() {
 		delete(own, alias)
 	}
 	return own, nil
 }
 
 func validateConfig(config *types.DistributeConfig) error {
-	sections := declareResources(false, nil, nil)
+	sections := defaultSections()
 	for key, fields := range cfg.ValuesFromProto(config.GetExtensions()) {
 		if _, err := sections.Decode(key, fields); err != nil {
 			return err
@@ -129,7 +129,7 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	fields, err := declareResources(false, nil, nil).Normalize(document)
+	fields, err := defaultSections().Normalize(document)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func dropNullValues(section map[string]any) {
 	}
 }
 func configAPI() managementapi.ConfigOptions {
-	sections := declareResources(false, nil, nil)
+	sections := defaultSections()
 	return managementapi.ConfigOptions{Sections: sections, Project: func(config *types.DistributeConfig, view *types.ConfigView) {
 		client.RedactView(view)
 		if ext := view.Extensions[server.ConfigKey]; ext != nil && ext.Values != nil {

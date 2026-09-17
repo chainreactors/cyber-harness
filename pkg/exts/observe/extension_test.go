@@ -15,7 +15,6 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	observe "github.com/chainreactors/cyber/pkg/exts/observe"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
@@ -27,11 +26,11 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := toolset.NewRegistry(hookRegistry)
+	registry := toolset.NewRegistry()
 	fileTools := fileext.New(files.Config{Directory: t.TempDir()})
 	set, err := extension.New(
-		hosttest.Provide[*hooks.Registry](hookRegistry),
-		hosttest.Provide[*coreevents.Stream](stream),
+		extension.Provided[*hooks.Registry](hookRegistry),
+		extension.Provided[*coreevents.Stream](stream),
 		registry,
 		observer,
 		fileTools,

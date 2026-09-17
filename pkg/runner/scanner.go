@@ -187,7 +187,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agent
 	if runtime == nil {
 		return fmt.Errorf("scanner Agent runtime is unavailable")
 	}
-	if provider, _ := runtime.App().ProviderState(); provider == nil {
+	if provider, _ := runtime.ProviderState(); provider == nil {
 		return fmt.Errorf("--ai requires a configured LLM provider")
 	}
 	lock, err := acquirePIDLock(agentPIDFilePath(), logger)

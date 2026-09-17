@@ -32,8 +32,8 @@ type Registry struct {
 	store *coreregistry.Store[registeredTool]
 }
 
-func NewRegistry(hooks *hooks.Registry) *Registry {
-	return &Registry{hooks: hooks, store: coreregistry.New[registeredTool]()}
+func NewRegistry() *Registry {
+	return &Registry{store: coreregistry.New[registeredTool]()}
 }
 
 func (r *Registry) Add(tools ...tool.Tool) (resource.Handle, error) {
@@ -69,6 +69,14 @@ func (r *Registry) Load(scope *extension.Scope) error {
 	if r == nil || r.store == nil || scope == nil {
 		return ErrUnavailable
 	}
+	// The hook registry is a capability, so it is borrowed here rather than
+	// handed in at construction: a nil registry silences the whole execution
+	// hook chain without failing anything.
+	registry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	r.hooks = registry
 	// The point stores Tools; the capability offers the Executor behaviour.
 	if err := extension.Define[tool.Tool](scope, r); err != nil {
 		return err

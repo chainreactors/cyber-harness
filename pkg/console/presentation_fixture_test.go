@@ -7,7 +7,6 @@ import (
 	"github.com/chainreactors/cyber/pkg/console/api"
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	"testing"
 )
 
@@ -16,7 +15,13 @@ func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindi
 	t.Helper()
 	tui := tuiext.New()
 	contribution := sessionconsole.New()
-	set, err := extension.New(hosttest.Provide[*agentsession.Runtime](runtime), tui, contribution)
+	var registry *api.Registry
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		registry, err = extension.Use[*api.Registry](scope)
+		return err
+	}}
+	set, err := extension.New(extension.Provided[*agentsession.Runtime](runtime), tui, contribution, borrow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,5 +33,5 @@ func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindi
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return tui.Bindings()
+	return registry.Bindings()
 }

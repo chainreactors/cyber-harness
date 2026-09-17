@@ -23,31 +23,19 @@ type Config struct {
 	Timeout        int
 	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
-	// Tmux constructs the terminal command published by this extension. Nil
-	// selects the native command; Profiles may supply their own session
-	// ownership policy without replacing an already published registration.
-	Tmux func(*terminaltool.BashTool) commands.Command
 	// HiddenCommands are control-only registry commands omitted from the Bash
 	// description and shell aliases.
 	HiddenCommands []string
 }
 type Extension struct {
-	mu                 sync.Mutex
-	config             Config
-	bash               *terminaltool.BashTool
-	registered, closed bool
-	done               chan struct{}
+	mu     sync.Mutex
+	config Config
+	bash   *terminaltool.BashTool
+	closed bool
+	done   chan struct{}
 }
 
 func New(config Config) *Extension { return &Extension{config: config} }
-
-// Bash is the tool this extension owns. It is nil until the extension has
-// loaded; consumers borrow it as a capability rather than reading it here.
-func (m *Extension) Bash() *terminaltool.BashTool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.bash
-}
 
 // Load builds the tool here rather than in New because everything it needs --
 // the hook registry, the command executor, the egress endpoint -- is a
@@ -58,9 +46,6 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	defer m.mu.Unlock()
 	if m.closed {
 		return toolset.ErrUnavailable
-	}
-	if m.registered {
-		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -91,18 +76,8 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	bash.EnableShellCommands(executor)
 	bash.HideCommands(m.config.HiddenCommands...)
 
-	tmux := terminaltool.NewTmuxCommand(bash)
-	if m.config.Tmux != nil {
-		tmux = m.config.Tmux(bash)
-	}
-	if tmux.Name != "tmux" || tmux.Run == nil {
-		return fmt.Errorf("terminal tmux command must be named tmux and executable")
-	}
 	m.bash = bash
 
-	if err := extension.Add(scope, tmux); err != nil {
-		return err
-	}
 	if err := extension.Add[tool.Tool](scope, bash); err != nil {
 		return err
 	}
@@ -112,7 +87,6 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := extension.Provide[procbus.Sessions](scope, bash.Manager()); err != nil {
 		return err
 	}
-	m.registered = true
 	return nil
 }
 func (m *Extension) Close(ctx context.Context) error {

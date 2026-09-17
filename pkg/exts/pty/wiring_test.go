@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/pkg/commands"
@@ -21,9 +20,8 @@ import (
 // extension that contributes to it and provides the session registry.
 func terminal(t *testing.T) ([]extension.Extension, *terminalext.Extension) {
 	t.Helper()
-	shared := hooks.New()
-	commandPoint := commands.NewRegistry(shared)
-	toolPoint := toolset.NewRegistry(shared)
+	commandPoint := commands.NewRegistry()
+	toolPoint := toolset.NewRegistry()
 	value := terminalext.New(terminalext.Config{Directory: t.TempDir(), Timeout: 1})
 	return []extension.Extension{
 		namespaces.New(), hosttest.Capabilities(), commandPoint, toolPoint,

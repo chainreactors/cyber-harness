@@ -17,7 +17,7 @@ type testCommandBatch struct {
 
 func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 	hookRegistry := hooks.New()
-	registry := NewRegistry(hookRegistry)
+	registry := NewRegistry()
 	runs, decisions, completions := 0, 0, 0
 	before := toolhooks.BeforeCommand.On(hookRegistry, "policy", func(_ context.Context, event toolhooks.CommandEvent) (toolhooks.Admission, error) {
 		decisions++
@@ -43,6 +43,7 @@ func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 		return extension.Add(scope, command)
 	}}
 	set, err := extension.New(
+		extension.Provided[*hooks.Registry](hookRegistry),
 		registry,
 		contributor,
 	)
@@ -70,8 +71,8 @@ func commandBatch(commands ...Command) testCommandBatch {
 
 func loadTestRegistry(t *testing.T, batches ...testCommandBatch) (*Registry, *extension.Set) {
 	t.Helper()
-	registry := NewRegistry(nil)
-	entries := []extension.Extension{registry}
+	registry := NewRegistry()
+	entries := []extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}
 	for _, batch := range batches {
 		batch := batch
 		entries = append(entries,

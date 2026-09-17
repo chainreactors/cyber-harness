@@ -4,6 +4,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/agent"
 
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
@@ -61,7 +62,12 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	loop, err := extension.Use[agent.Loop](scope)
+	if err != nil {
+		return err
+	}
 	config := e.config
+	config.Loop = loop
 	config.Application = application
 	config.Hooks, config.Tools, config.CommandRegistry = hookRegistry, tools, commandRegistry
 	config.Skills, config.Bash = store, bash

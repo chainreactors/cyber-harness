@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/chainreactors/cyber/core/extension"
 
 	coreevents "github.com/chainreactors/cyber/core/events"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,7 +129,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	}
 	app := newTestApp(t, telemetry.NopLogger(), events)
 	appSet := testSet(t,
-		hosttest.Provide[*coreevents.Stream](events),
+		extension.Provided[*coreevents.Stream](events),
 		recorder,
 	)
 	if err := appSet.Load(t.Context()); err != nil {

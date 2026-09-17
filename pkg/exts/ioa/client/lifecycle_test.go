@@ -140,7 +140,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 		stream.Publish(&aop.Event{SessionId: "child", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
 		return nil
 	}}
-	set, err := extension.New(hosttest.Provide[*events.Stream](stream), adapter, agent)
+	set, err := extension.New(extension.Provided[*events.Stream](stream), adapter, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	defer server.Close()
 	stream := events.New()
 	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{})
-	set, err := extension.New(hosttest.Provide[*events.Stream](stream), adapter)
+	set, err := extension.New(extension.Provided[*events.Stream](stream), adapter)
 	if err != nil {
 		t.Fatal(err)
 	}

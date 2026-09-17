@@ -2,6 +2,7 @@ package console_test
 
 import (
 	"context"
+	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
@@ -10,6 +11,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console/api"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	contributor "github.com/chainreactors/cyber/pkg/exts/session/console"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
@@ -25,10 +27,17 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 		Handler: func(context.Context, *agentsession.Session, []string) (*types.CommandResult, error) { return nil, nil },
 	}}})
 	presentation := contributor.New()
-	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)),
+	var registry *api.Registry
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		registry, err = extension.Use[*api.Registry](scope)
+		return err
+	}}
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), loopext.New(agent.StandardLoop{}),
 		tui,
 		session,
 		presentation,
+		borrow,
 	)...)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +50,7 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bindings := tui.Bindings()
+	bindings := registry.Bindings()
 	for _, terminal := range []string{"first", "second"} {
 		var received string
 		root := &cobra.Command{Use: terminal}
@@ -58,14 +67,14 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if tui.Bindings() != nil {
+	if registry.Bindings() != nil {
 		t.Fatal("closed TUI published bindings")
 	}
 }
 
 func TestMissingProviderLoadFailsContribution(t *testing.T) {
 	presentation := contributor.New()
-	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), presentation)...)
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), loopext.New(agent.StandardLoop{}), presentation)...)
 	if err != nil {
 		t.Fatal(err)
 	}

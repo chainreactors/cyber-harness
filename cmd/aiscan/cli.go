@@ -410,7 +410,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	cli.registry = hostcli.New(parser)
-	declareResources(false, cli.registry, &cli.Agent.AgentOptions)
+	declareResources(cli.registry, &cli.Agent.AgentOptions)
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}

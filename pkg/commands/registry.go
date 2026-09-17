@@ -26,8 +26,8 @@ type Registry struct {
 	store *coreregistry.Store[Command]
 }
 
-func NewRegistry(registry *hooks.Registry) *Registry {
-	return &Registry{hooks: registry, store: coreregistry.New[Command]()}
+func NewRegistry() *Registry {
+	return &Registry{store: coreregistry.New[Command]()}
 }
 
 func (r *Registry) Add(commands ...Command) (resource.Handle, error) {
@@ -54,6 +54,14 @@ func (r *Registry) Load(scope *extension.Scope) error {
 	if r == nil || r.store == nil || scope == nil {
 		return ErrUnavailable
 	}
+	// The hook registry is a capability, so it is borrowed here rather than
+	// handed in at construction: a nil registry silences every admission and
+	// observation point below without failing anything.
+	registry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	r.hooks = registry
 	// A registry makes two statements about itself: it owns the point that
 	// stores Commands, and it offers the Executor behaviour. They are separate
 	// type keys, so neither shadows the other.

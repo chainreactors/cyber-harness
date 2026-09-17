@@ -19,15 +19,6 @@ func New(config files.Config) *Extension {
 	return &Extension{config: config}
 }
 
-// Files returns the filesystem behavior. Its concrete type has no lifecycle
-// methods; only this extension retains Resource.
-func (e *Extension) Files() *files.Files {
-	if e == nil || e.resource == nil {
-		return nil
-	}
-	return e.resource.Files
-}
-
 func (e *Extension) Load(scope *extension.Scope) error {
 	registry, err := extension.Use[*hooks.Registry](scope)
 	if err != nil {

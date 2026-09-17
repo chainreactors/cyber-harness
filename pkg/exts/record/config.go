@@ -3,7 +3,6 @@ package record
 import (
 	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/tools/record"
 	"strconv"
 	"strings"
@@ -61,10 +60,6 @@ func Section() cfg.Section {
 	}}
 }
 
-func Declare(resources *resource.Registry) error {
-	_, err := resource.Add[cfg.Section](resources, Section())
-	return err
-}
 func ReadOptions(resolved *cfg.Resolved) (Options, error) {
 	if resolved == nil {
 		return Options{MaxConcurrent: defaultMaxConcurrent}, nil

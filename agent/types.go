@@ -4,6 +4,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
@@ -74,6 +75,18 @@ type TransformContextFunc func([]*aop.Message) []*aop.Message
 // A nil Loop disables reasoning and never falls back to StandardLoop.
 type Loop interface {
 	Run(context.Context, Config) (*Result, error)
+}
+
+// NoLoop is the reasoning algorithm of a profile that selects sessions without
+// selecting reasoning. It exists so that "no loop" is a value a consumer can
+// borrow like any other, instead of a nil every consumer has to test for --
+// the same reason a host that routes nothing still publishes an endpoint.
+func NoLoop() Loop { return noLoop{} }
+
+type noLoop struct{}
+
+func (noLoop) Run(context.Context, Config) (*Result, error) {
+	return nil, fmt.Errorf("agent loop is not configured")
 }
 
 type ToolFlowDecision int

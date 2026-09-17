@@ -21,7 +21,6 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	ioaext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	ioaconsole "github.com/chainreactors/cyber/pkg/exts/ioa/client/console"
 	observeext "github.com/chainreactors/cyber/pkg/exts/observe"
@@ -78,7 +77,7 @@ type cyberProfile struct {
 	bash       *terminaltool.BashTool
 	runtime    *agentsession.Runtime
 	ioa        *ioatools.Service
-	tui        *tuiext.Extension
+	bindings   *consoleapi.Registry
 	namespaces *namespaces.Registry
 }
 
@@ -89,7 +88,7 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 		return nil, fmt.Errorf("cyber profile option is required")
 	}
 	if request.Option.Resolved == nil {
-		resolved, err := declareResources(false, nil, nil).ResolveValues(request.Option.Extensions, nil, nil)
+		resolved, err := defaultSections().ResolveValues(request.Option.Extensions, nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -138,14 +137,18 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		WorkDir: workDir, Proxy: config.Application.Scanner.Resources.Proxy,
 		Capture: capture, Storage: config.Application.Tools.TrafficStorage,
 	})
-	var scannerLoop agent.Loop
-	if config.Session != nil {
-		scannerLoop = config.Session.Loop
+	// One loop for the profile: the scanner and the session run against the
+	// same installation rather than each being handed its own. A profile that
+	// selects sessions without reasoning selects NoLoop, which declines every
+	// run -- absence is a value here, not a nil.
+	loop := agent.Loop(agent.NoLoop())
+	switch {
+	case config.Session != nil && config.Session.Loop != nil:
+		loop = config.Session.Loop
+	case config.Session == nil && config.Application.Provider.Mode != provider.StartupDisabled:
+		loop = agent.StandardLoop{}
 	}
-	if scannerLoop == nil && config.Application.Provider.Mode != provider.StartupDisabled {
-		scannerLoop = agent.StandardLoop{}
-	}
-	graph, err := newAppGraph(config.Application, scannerLoop, workDir, proxyExtension)
+	graph, err := newAppGraph(config.Application, loop, workDir, proxyExtension)
 	if err != nil {
 		return nil, fmt.Errorf("construct Cyber application: %w", err)
 	}
@@ -195,9 +198,9 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		ioa = ioaext.New(*config.IOA, deps)
 		values = append(values, ioa)
 	}
-	if config.Session != nil || ioa != nil {
-		p.tui = tuiext.New()
-		values = append(values, p.tui)
+	presents := config.Session != nil || ioa != nil
+	if presents {
+		values = append(values, tuiext.New())
 	}
 	if ioa != nil {
 		p.ioa = ioa.Service()
@@ -215,11 +218,6 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		}
 
 		agentConfig.Option, agentConfig.Logger = config.Option, logger
-		if agentConfig.Loop != nil {
-			loop := loopext.New(agentConfig.Loop)
-			agentConfig.Loop = loop.Loop()
-			values = append(values, loop)
-		}
 		values = append(values, sessionext.New(agentConfig))
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			runtime, err := extension.Use[*agentsession.Runtime](scope)
@@ -241,6 +239,14 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		p.app = application
 		if p.commands, err = extension.Use[commands.Executor](scope); err != nil {
 			return err
+		}
+		// Borrowed under the same condition that installed the owner: this is
+		// the root reading back its own membership decision, not a consumer
+		// tolerating a capability that may be missing.
+		if presents {
+			if p.bindings, err = extension.Use[*consoleapi.Registry](scope); err != nil {
+				return err
+			}
 		}
 		if p.bash, err = extension.Use[*terminaltool.BashTool](scope); err != nil {
 			return err
@@ -328,10 +334,10 @@ func (p *cyberProfile) ConsoleBindings() *consoleapi.Bindings {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil
 	}
-	if p.tui == nil {
+	if p.bindings == nil {
 		return nil
 	}
-	return p.tui.Bindings()
+	return p.bindings.Bindings()
 }
 
 // Shell is the command surface a host runs scanner subcommands through. It is

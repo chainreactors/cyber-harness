@@ -9,6 +9,7 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	base "github.com/chainreactors/cyber/pkg/base"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	arsenalext "github.com/chainreactors/cyber/pkg/exts/arsenal"
 	nativeext "github.com/chainreactors/cyber/pkg/exts/native"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
@@ -48,19 +49,15 @@ func newAppGraph(config appConfig, loop agent.Loop, workDir string, proxy extens
 	if err != nil {
 		return nil, err
 	}
-	extensions = append(extensions, arsenal, nativeext.New())
+	// The loop installation publishes agent.Loop, so it precedes every
+	// extension that runs against one.
+	extensions = append(extensions, loopext.New(loop), arsenal, nativeext.New())
 
-	var scanner *scannerext.Extension
 	if !config.SkipEngines {
-		scanner = scannerext.New(config.Scanner, loop, workDir, config.Logger)
-		extensions = append(extensions, scanner)
+		extensions = append(extensions, scannerext.New(config.Scanner, workDir, config.Logger))
 	}
 	if optionalToolEnabled(config.Tools.OptionalTools, "search") {
-		searchConfig := searchext.Config{TavilyKeys: config.Tools.TavilyKeys}
-		if scanner != nil {
-			searchConfig.ResolveIndex = scanner.Index
-		}
-		extensions = append(extensions, searchext.New(searchConfig))
+		extensions = append(extensions, searchext.New(searchext.Config{TavilyKeys: config.Tools.TavilyKeys}))
 	}
 	optional, err := appExtensions(config, workDir)
 	if err != nil {

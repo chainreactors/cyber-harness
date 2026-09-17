@@ -5,101 +5,73 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/chainreactors/cyber/core/extension"
+	coreregistry "github.com/chainreactors/cyber/core/registry"
 	"github.com/chainreactors/cyber/core/resource"
 	webpkg "github.com/chainreactors/cyber/pkg/web"
 )
 
 // Extension defines web.Route as a dynamic resource and contributes the routes
 // backed by the management service. Later extensions may add their own routes.
+//
+// Batching, ordering, duplicate rules and revocation are the same problem the
+// command and tool registries solve, so they use the same store rather than a
+// third copy of it. The route pattern is the name.
 type Extension struct {
 	service webpkg.Service
-
-	mu     sync.RWMutex
-	order  []string
-	routes map[string]webpkg.Route
+	store   *coreregistry.Store[webpkg.Route]
 }
 
 func New(service webpkg.Service) *Extension {
-	return &Extension{service: service, routes: make(map[string]webpkg.Route)}
+	return &Extension{service: service, store: coreregistry.New[webpkg.Route]()}
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
-	if e == nil || e.service == nil {
+	if e == nil || e.service == nil || e.store == nil {
 		return fmt.Errorf("web route service is required")
 	}
 	if err := extension.Define[webpkg.Route](scope, e); err != nil {
 		return err
 	}
-	return extension.Add(scope, webpkg.ManagementRoutes(e.service)...)
+	if err := extension.Add(scope, webpkg.ManagementRoutes(e.service)...); err != nil {
+		return err
+	}
+	return e.store.Activate(scope.Init())
 }
 
 func (e *Extension) Add(values ...webpkg.Route) (resource.Handle, error) {
-	if e == nil || len(values) == 0 {
+	if e == nil || e.store == nil || len(values) == 0 {
 		return nil, resource.ErrInvalid
 	}
-	pending := make(map[string]webpkg.Route, len(values))
-	patterns := make([]string, 0, len(values))
+	batch := make([]coreregistry.Value[webpkg.Route], 0, len(values))
 	for _, route := range values {
 		if strings.TrimSpace(route.Pattern) == "" || route.Handler == nil {
 			return nil, fmt.Errorf("HTTP route requires pattern and handler")
 		}
-		if _, exists := pending[route.Pattern]; exists {
-			return nil, fmt.Errorf("duplicate HTTP route %q", route.Pattern)
-		}
-		pending[route.Pattern] = route
-		patterns = append(patterns, route.Pattern)
+		batch = append(batch, coreregistry.Value[webpkg.Route]{Name: route.Pattern, Value: route})
 	}
+	return e.store.Add(batch...)
+}
 
-	e.mu.Lock()
-	for _, pattern := range patterns {
-		if _, exists := e.routes[pattern]; exists {
-			e.mu.Unlock()
-			return nil, fmt.Errorf("duplicate HTTP route %q", pattern)
-		}
-	}
-	for _, pattern := range patterns {
-		e.routes[pattern] = pending[pattern]
-		e.order = append(e.order, pattern)
-	}
-	e.mu.Unlock()
-
-	closed := false
-	return resource.HandleFunc(func(context.Context) error {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		if closed {
-			return nil
-		}
-		closed = true
-		for _, pattern := range patterns {
-			delete(e.routes, pattern)
-		}
-		kept := e.order[:0]
-		for _, pattern := range e.order {
-			if _, exists := e.routes[pattern]; exists {
-				kept = append(kept, pattern)
-			}
-		}
-		e.order = kept
+func (e *Extension) Close(ctx context.Context) error {
+	if e == nil || e.store == nil {
 		return nil
-	}), nil
+	}
+	return e.store.Close(ctx)
 }
 
 // Routes returns the current immutable route snapshot in contribution order.
+// It is empty until the graph activates, so a half-built profile cannot be
+// served.
 func (e *Extension) Routes() []webpkg.Route {
-	if e == nil {
+	if e == nil || e.store == nil {
 		return nil
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	routes := make([]webpkg.Route, 0, len(e.order))
-	for _, pattern := range e.order {
-		if route, exists := e.routes[pattern]; exists {
-			routes = append(routes, route)
-		}
+	entries := e.store.Entries()
+	routes := make([]webpkg.Route, 0, len(entries))
+	for _, entry := range entries {
+		routes = append(routes, entry.Value)
 	}
 	return routes
 }

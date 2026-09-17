@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"github.com/chainreactors/cyber/core/hooks"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
@@ -18,8 +19,8 @@ func commandBatch(cmds ...commands.Command) testCommandBatch {
 
 func loadTestRegistry(t *testing.T, batches ...testCommandBatch) (*commands.Registry, *extension.Set) {
 	t.Helper()
-	registry := commands.NewRegistry(nil)
-	entries := []extension.Extension{registry}
+	registry := commands.NewRegistry()
+	entries := []extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}
 	for _, batch := range batches {
 		batch := batch
 		entries = append(entries,

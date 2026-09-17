@@ -12,7 +12,7 @@ import (
 )
 
 func TestExtensionOwnsRecordTool(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	instance, err := New(t.TempDir(), filepath.Join(t.TempDir(), "record"), 3)
 	if err != nil {
 		t.Fatal(err)

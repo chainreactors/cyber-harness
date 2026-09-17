@@ -56,13 +56,13 @@ func (e *contributor) Close(ctx context.Context) error {
 
 func registrySet(t *testing.T, entries ...extension.Extension) (*toolset.Registry, *extension.Set) {
 	t.Helper()
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	for _, entry := range entries {
 		if value, ok := entry.(*contributor); ok {
 			value.registry = registry
 		}
 	}
-	entries = append([]extension.Extension{registry}, entries...)
+	entries = append([]extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}, entries...)
 	set, err := extension.New(entries...)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestRegistryPublishesOnlyAfterLoad(t *testing.T) {
 
 func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 	r := hooks.New()
-	registry := toolset.NewRegistry(r)
+	registry := toolset.NewRegistry()
 	runs, decisions, completions := 0, 0, 0
 	value := echoTool("echo")
 	value.run = func(_ context.Context, args string) (*tool.Result, error) { runs++; return tool.TextResult(args), nil }
@@ -125,6 +125,7 @@ func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 	})
 	defer completed.Cancel()
 	set, err := extension.New(
+		extension.Provided[*hooks.Registry](r),
 		registry,
 		&contributor{registry: registry, values: []tool.Tool{value}},
 	)
@@ -151,10 +152,11 @@ func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 }
 
 func TestRegistryRegistrationIsAtomic(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	first := &contributor{registry: registry, values: []tool.Tool{echoTool("echo")}}
 	second := &contributor{registry: registry, values: []tool.Tool{echoTool("new"), echoTool("echo")}}
 	set, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
 		registry,
 		first,
 		second,
@@ -171,7 +173,7 @@ func TestRegistryRegistrationIsAtomic(t *testing.T) {
 }
 
 func TestRegistryRejectsInvalidBatchWithoutPartialState(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	value := &contributor{registry: registry, load: func(scope *extension.Scope) error {
 		var nilTool *registryTool
 		if _, err := registry.Add(echoTool("partial"), nilTool); err == nil {
@@ -183,6 +185,7 @@ func TestRegistryRejectsInvalidBatchWithoutPartialState(t *testing.T) {
 		return extension.Add[tool.Tool](scope, echoTool("partial"))
 	}}
 	set, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
 		registry,
 		value,
 	)

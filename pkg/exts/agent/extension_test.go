@@ -19,7 +19,13 @@ func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
 	value := agentext.New(loopFunc(func(_ context.Context, config agent.Config) (*agent.Result, error) {
 		return &agent.Result{Output: config.SessionID}, nil
 	}))
-	set, err := extension.New(value)
+	var loop agent.Loop
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		loop, err = extension.Use[agent.Loop](scope)
+		return err
+	}}
+	set, err := extension.New(value, borrow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +33,6 @@ func TestLoopOnlyInstallationDoesNotRequireSessionHost(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	loop := value.Loop()
 	result, err := loop.Run(t.Context(), agent.Config{SessionID: "standalone"})
 	if err != nil || result.Output != "standalone" {
 		t.Fatalf("standalone loop: %v, %v", result, err)

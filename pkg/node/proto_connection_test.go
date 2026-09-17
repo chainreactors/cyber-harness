@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/core/extension"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	"io"
 	"net"
 	"net/http"
@@ -121,7 +123,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 	cc := connectionConfig{
 		Name:     "runner-1",
 		NodeID:   "runner-1",
-		Registry: commands.NewRegistry(nil),
+		Registry: commands.NewRegistry(),
 		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
@@ -158,7 +160,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(nil), Logger: logger, Agent: panicAgentEndpoint{}},
+		connectionConfig{Registry: commands.NewRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
 		send, &operationsMu, operations, make(map[string]time.Time),
@@ -217,7 +219,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	app := newTestApp(t, telemetry.NopLogger(), nil)
 
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +496,7 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 		done <- serveAgentConnection(context.Background(), connectionConfig{
 			Name:     "runner-1",
 			NodeID:   "runner-1",
-			Registry: commands.NewRegistry(nil),
+			Registry: commands.NewRegistry(),
 			Agent:    newSilentAgentEndpoint(),
 			Menu:     func() []*types.CommandSpec { return nil },
 		}, telemetry.NopLogger(), stream)
@@ -630,7 +632,7 @@ func loadNodeTestApplication(t *testing.T, ctx context.Context, application *app
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	app := newTestApp(t, telemetry.NopLogger(), nil)
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +718,7 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 	defer hub.Close(context.Background())
 	cc := connectionConfig{
 		Name: "runner-1", NodeID: "runner-1",
-		Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint(),
+		Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint(),
 		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
 			binding, err := proxytool.TrafficNamespace(hub.ProxyHub)
 			if err != nil {

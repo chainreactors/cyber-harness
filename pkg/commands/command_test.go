@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"github.com/chainreactors/cyber/core/hooks"
 	"testing"
 
 	aop "github.com/chainreactors/cyber/aop"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestRegistryRejectsDuplicateCommands(t *testing.T) {
-	registry := NewRegistry(nil)
+	registry := NewRegistry()
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		return extension.Add(scope, Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
@@ -22,6 +23,7 @@ func TestRegistryRejectsDuplicateCommands(t *testing.T) {
 		)
 	}}
 	set, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
 		registry,
 		first,
 		duplicate,

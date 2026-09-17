@@ -12,7 +12,6 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/output"
 	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
@@ -25,7 +24,7 @@ func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("constructor touched output: %v", err)
 	}
-	set, err := extension.New(hosttest.Provide[*coreevents.Stream](events), writer)
+	set, err := extension.New(extension.Provided[*coreevents.Stream](events), writer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +59,7 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		set, err := extension.New(hosttest.Provide[*coreevents.Stream](coreevents.New()), writer)
+		set, err := extension.New(extension.Provided[*coreevents.Stream](coreevents.New()), writer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +83,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(hosttest.Provide[*coreevents.Stream](events), writer)
+	set, err := extension.New(extension.Provided[*coreevents.Stream](events), writer)
 	if err != nil {
 		t.Fatal(err)
 	}

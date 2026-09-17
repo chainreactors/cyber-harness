@@ -14,8 +14,8 @@ import (
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
-	commands := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
+	commands := commands.NewRegistry()
+	tools := toolset.NewRegistry()
 	instance := New(Config{Directory: t.TempDir(), Timeout: 5})
 	set, err := extension.New(
 		hosttest.Capabilities(),
@@ -29,42 +29,57 @@ func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTool(tools, "bash") || !commands.Has("tmux") {
-		t.Fatal("terminal instance did not publish bash and tmux")
+	if !hasTool(tools, "bash") {
+		t.Fatal("terminal instance did not publish bash")
+	}
+	if commands.Has("tmux") {
+		t.Fatal("terminal published tmux; that belongs to the tmux extension")
 	}
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if hasTool(tools, "bash") || commands.Has("tmux") {
+	if hasTool(tools, "bash") {
 		t.Fatal("terminal instance left registrations published after close")
 	}
 }
 
-func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
-	commandRegistry := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
+func TestExtensionHidesControlCommandsAndLetsAHostOwnTmux(t *testing.T) {
+	commandRegistry := commands.NewRegistry()
+	tools := toolset.NewRegistry()
 	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		return extension.Add(scope, commands.Command{
 			Name: "proxy",
 			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
 		})
 	}}
-	custom := commands.Command{
-		Name: "tmux",
-		Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
-	}
+	// tmux is an ordinary contributed command now, so a host that wants its own
+	// session policy contributes one instead of handing this extension a
+	// callback. Nothing here has to know the name is special.
+	custom := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return extension.Add(scope, commands.Command{
+			Name: "tmux",
+			Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
+		})
+	}}
 	instance := New(Config{
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
-		Tmux:           func(*terminaltool.BashTool) commands.Command { return custom },
 	})
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		bash, err = extension.Use[*terminaltool.BashTool](scope)
+		return err
+	}}
 	set, err := extension.New(
 		hosttest.Capabilities(),
 		commandRegistry,
 		tools,
 		control,
 		instance,
+		custom,
+		borrow,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +90,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	if got := commandRegistry.Names(); len(got) != 2 || got[0] != "proxy" || got[1] != "tmux" {
 		t.Fatalf("published commands = %v", got)
 	}
-	description := instance.Bash().Description()
+	description := bash.Description()
 	if strings.Contains(description, "proxy") || !strings.Contains(description, "tmux") {
 		t.Fatalf("bash description did not apply visibility policy: %q", description)
 	}

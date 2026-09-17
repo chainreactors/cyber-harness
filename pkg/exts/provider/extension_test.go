@@ -6,7 +6,6 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/extension"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	"testing"
 )
 
@@ -20,7 +19,7 @@ func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
 	}
 	first := &application.Providers
 	failure := errors.New("later extension failed")
-	set, err := extension.New(hosttest.Provide[*apppkg.App](application), resource,
+	set, err := extension.New(extension.Provided[*apppkg.App](application), resource,
 		extension.Func{LoadFunc: func(*extension.Scope) error { return failure }})
 	if err != nil {
 		t.Fatal(err)

@@ -75,18 +75,22 @@ scope.release(borrows)    释放它借来的东西（Use）
 
 ## 当前的能力
 
-| 键 | 提供者 |
-|---|---|
-| `*hooks.Registry` | `base.Hooks()` |
-| `*events.Stream` | `base.Events()` |
-| `egress.Endpoint` | proxy ext，或 `base.NoEgress()` |
-| `commands.Executor` | 命令注册表 |
-| `tool.Executor` | 工具注册表 |
-| `*skills.Store` | 技能库 |
-| `*terminaltool.BashTool` | terminal ext |
-| `agent/proc.Sessions` | terminal ext |
-| `*app.App` | app ext |
-| `*agentsession.Runtime` | session ext |
+| 键 | 提供者 | 借用者 |
+|---|---|---|
+| `*hooks.Registry` | `base` | 命令/工具注册表、files、terminal、proxy、session、observe |
+| `*events.Stream` | `base` | telemetry、observe、IOA |
+| `egress.Endpoint` | proxy ext，或 `base.NoEgress()` | terminal、scanner、search |
+| `commands.Executor` | 命令注册表 | terminal、proxy、scanner |
+| `tool.Executor` | 工具注册表 | scanner、session |
+| `*skills.Store` | 技能库 | scanner、session |
+| `*terminaltool.BashTool` | terminal ext | tmux、scanner、session |
+| `agent/proc.Sessions` | terminal ext | pty |
+| `agent.Loop` | loop ext，profile 不选推理时是 `agent.NoLoop()` | scanner、session |
+| `*app.App` | app ext | provider、scanner、search、session |
+| `*console/api.Registry` | tui ext | 装配根（加载后封存并读取贡献） |
+| `*agentsession.Runtime` | session ext | 装配根 |
+
+借用者一列不是给运行时查的，它是加载顺序的说明书：提供者必须排在每一个借用者之前。
 
 ## 装配根
 
@@ -95,6 +99,12 @@ scope.release(borrows)    释放它借来的东西（Use）
 
 > **它的返回值只能是这两个。** 如果它需要回传一个 `*hooks.Registry`、一个 `*BashTool`
 > 或一个 `*app.App`，说明还有能力没迁完。这条签名是读侧是否真的生效的测试。
+
+同一条测试适用于每个装配根：构造一个扩展、再把它的内部读回来交给下一个扩展，说明那个值
+是能力而不是构造参数。`agent.Loop` 曾经这样穿过两个 profile，`*association.Index` 曾经这样
+从 scanner 穿到 search。前者成了能力；后者不是——`cyberhub` 搜的就是 scanner 自己的索引，
+命令搬回了索引的拥有者。空索引和没有索引在这里语义不同（后者要告诉用户怎么配置），所以
+它不能用空对象表达，也就不该是能力。
 
 组合仍然属于可执行文件：`base` 只交回一个切片，host 拥有 `Set`、决定追加什么、决定顺序。
 

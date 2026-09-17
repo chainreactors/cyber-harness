@@ -14,7 +14,6 @@ import (
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
-	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // Config contains only scanner inputs selected by the Profile.
@@ -26,17 +25,16 @@ type Config struct {
 type Extension struct {
 	application *app.App
 	config      Config
-	loop        agent.Loop
 	workDir     string
 	logger      telemetry.Logger
 	engines     *engine.Set
 }
 
-func New(config Config, loop agent.Loop, workDir string, logger telemetry.Logger) *Extension {
+func New(config Config, workDir string, logger telemetry.Logger) *Extension {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Extension{config: config, loop: loop, workDir: workDir, logger: logger}
+	return &Extension{config: config, workDir: workDir, logger: logger}
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
@@ -67,6 +65,10 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	loop, err := extension.Use[agent.Loop](scope)
+	if err != nil {
+		return err
+	}
 	e.application = application
 	proxyURL := endpoint.ProxyURL()
 	if proxyURL == "" {
@@ -75,7 +77,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	e.engines = initEngines(scope.Init(), e.config, e.logger)
 	values, err := buildScannerCommands(borrowed{
 		application: application, tools: tools, commands: commandRegistry, bash: bash, skills: store,
-	}, e.engines, e.config, e.loop, e.workDir, proxyURL, e.logger)
+	}, e.engines, e.config, loop, e.workDir, proxyURL, e.logger)
 	if err != nil || len(values) == 0 {
 		return err
 	}
@@ -104,12 +106,3 @@ func initEngines(ctx context.Context, config Config, logger telemetry.Logger) *e
 }
 
 var _ extension.Extension = (*Extension)(nil)
-
-// Index is borrowed by search after scanner initialization; its registry must
-// drain before this extension closes the owning engines.
-func (e *Extension) Index() *association.Index {
-	if e == nil || e.engines == nil {
-		return nil
-	}
-	return e.engines.Index
-}

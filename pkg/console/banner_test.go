@@ -133,7 +133,8 @@ func TestRenderBoxTableClipsWideIntermediateColumns(t *testing.T) {
 }
 
 func TestProviderModelDoesNotDependOnCommands(t *testing.T) {
-	r := &AgentConsole{runtime: newConsoleRuntime(t, nil)}
+	runtime, _ := newConsoleRuntime(t, nil)
+	r := &AgentConsole{runtime: runtime}
 	r.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "anthropic", Model: "claude-test"})
 	provider, model := r.providerModel()
 	if provider != "anthropic" || model != "claude-test" {

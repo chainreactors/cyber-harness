@@ -20,8 +20,8 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 	var previousTools *toolset.Registry
 	for _, fail := range []bool{true, false} {
 		hookRegistry := hooks.New()
-		tools := toolset.NewRegistry(hookRegistry)
-		cmds := commands.NewRegistry(hookRegistry)
+		tools := toolset.NewRegistry()
+		cmds := commands.NewRegistry()
 		if tools == previousTools {
 			t.Fatal("reused a failed registry")
 		}
@@ -67,6 +67,7 @@ func TestFailedCompositionDiscardsDeclarationsAndClosesOwnedResources(t *testing
 			},
 		}
 		set, err := extension.New(
+			extension.Provided[*hooks.Registry](hookRegistry),
 			cmds,
 			tools,
 			owner,

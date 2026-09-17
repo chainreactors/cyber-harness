@@ -33,15 +33,6 @@ type Extension struct {
 
 func New(config Config) *Extension { return &Extension{config: config} }
 
-// Hub is the routing resource this extension owns. It is nil until the
-// extension has loaded.
-func (e *Extension) Hub() *proxytool.ProxyHub {
-	if e == nil || e.resource == nil {
-		return nil
-	}
-	return e.resource.ProxyHub
-}
-
 func (e *Extension) Load(scope *extension.Scope) error {
 	registry, err := extension.Use[*hooks.Registry](scope)
 	if err != nil {

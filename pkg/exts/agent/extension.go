@@ -27,22 +27,30 @@ type Loop struct {
 // Extension owns one loop installation.
 type Extension struct{ loop *Loop }
 
-func New(loop agent.Loop) *Extension {
-	return &Extension{loop: &Loop{loop: loop, done: make(chan struct{})}}
-}
-
-// Loop lends business operations, never ownership of this installation.
+// Loop lends business operations, never ownership of this installation. The
+// graph reaches it as a capability; this is for a composition root that has to
+// hand it to something built before the set loads.
 func (e *Extension) Loop() *Loop {
 	if e == nil {
 		return nil
 	}
 	return e.loop
 }
+
+func New(loop agent.Loop) *Extension {
+	return &Extension{loop: &Loop{loop: loop, done: make(chan struct{})}}
+}
+
 func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || e.loop == nil || scope == nil {
 		return ErrUnavailable
 	}
-	return e.loop.load(scope)
+	if err := e.loop.load(scope); err != nil {
+		return err
+	}
+	// The installation is what consumers run against -- admission and drain
+	// belong to it, not to the bare loop the profile chose.
+	return extension.Provide[agent.Loop](scope, e.loop)
 }
 
 func (l *Loop) load(scope *extension.Scope) error {
@@ -146,3 +154,8 @@ func (l *Loop) close(ctx context.Context) error {
 
 var _ extension.Extension = (*Extension)(nil)
 var _ agent.Loop = (*Loop)(nil)
+
+var (
+	_ extension.Extension = (*Extension)(nil)
+	_ agent.Loop          = (*Loop)(nil)
+)

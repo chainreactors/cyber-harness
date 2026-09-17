@@ -60,7 +60,7 @@ func TestGeneratedDefaultsKeepSameOriginDerivation(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(defaultConfig()), &document); err != nil {
 		t.Fatal(err)
 	}
-	values, err := declareResources(false, nil, nil).Normalize(document)
+	values, err := defaultSections().Normalize(document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestConfigMasksAndRestoresURLCredentials(t *testing.T) {
 }
 
 func TestServingConfigDoesNotRequireClientFields(t *testing.T) {
-	r := declareResources(true, nil, nil)
+	r := defaultSections()
 	values, err := r.Normalize(map[string]any{"extensions": map[string]any{"ioa.server": map[string]any{"url": "http://localhost:9000", "token": "secret"}}})
 	if err != nil {
 		t.Fatal(err)

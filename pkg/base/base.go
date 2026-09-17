@@ -21,6 +21,7 @@ import (
 	providerext "github.com/chainreactors/cyber/pkg/exts/provider"
 	skillsext "github.com/chainreactors/cyber/pkg/exts/skills"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+	tmuxext "github.com/chainreactors/cyber/pkg/exts/tmux"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
@@ -60,39 +61,21 @@ func New(c Config) ([]extension.Extension, error) {
 	// the executors, the egress provider publishes the routing endpoint the
 	// terminal needs, and the application is assembled before anything reads it.
 	return []extension.Extension{
-		Hooks(),
-		Events(),
-		commands.NewRegistry(nil),
-		toolset.NewRegistry(nil),
+		extension.Provided[*hooks.Registry](hooks.New()),
+		extension.Provided[*events.Stream](events.New()),
+		commands.NewRegistry(),
+		toolset.NewRegistry(),
 		library,
 		egressProvider,
 		fileext.New(files.Config{Directory: c.Directory}),
 		terminalext.New(terminal),
+		tmuxext.New(),
 		appext.New(c.Logger),
 		providerext.New(c.Provider, c.Logger),
 	}, nil
 }
 
-// Hooks owns the process-wide hook registry. It is an Extension only because a
-// capability needs an owner whose lifetime bounds it.
-func Hooks() extension.Extension {
-	registry := hooks.New()
-	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Provide[*hooks.Registry](scope, registry)
-	}}
-}
-
-// Events owns the process-wide event stream.
-func Events() extension.Extension {
-	stream := events.New()
-	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Provide[*events.Stream](scope, stream)
-	}}
-}
-
 // NoEgress publishes the routing endpoint of a host that routes nothing.
 func NoEgress() extension.Extension {
-	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Provide[egress.Endpoint](scope, egress.Disabled())
-	}}
+	return extension.Provided[egress.Endpoint](egress.Disabled())
 }

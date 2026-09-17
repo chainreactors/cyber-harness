@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/apptest"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentsession.Runtime {
+func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apppkg.App) {
 	t.Helper()
 	a := newTestApp(t, telemetry.NopLogger(), nil)
 	// The runtime reads provider state while loading, so the provider is set
@@ -61,12 +62,12 @@ func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentsession.Runt
 	// profile publishes, so the test publishes them once and mounts it alongside.
 	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
-	set := hosttest.Set(t, append(apptest.Entries(t, a), rt)...)
+	set := hosttest.Set(t, append(apptest.Entries(t, a), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = set.Close(context.Background()) })
-	return rt.Runtime()
+	return rt.Runtime(), a
 }
 
 func sessionTestEvent(id string, event *aop.Event) *aop.Event {
@@ -97,7 +98,7 @@ func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 
 func TestConsoleRuntimeAdapterPreservesTotalContextTokens(t *testing.T) {
 	provider := &consoleProvider{usage: provider.TokenUsage(8192, 0, 8200, 0, 0)}
-	rt := newConsoleRuntime(t, provider)
+	rt, _ := newConsoleRuntime(t, provider)
 	session, err := rt.OpenSession(context.Background(), agentsession.SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)

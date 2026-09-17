@@ -7,8 +7,10 @@ import (
 	"slices"
 	"testing"
 
-	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 func TestRecordFullScannerSet(t *testing.T) {
@@ -23,29 +25,30 @@ func TestRecordManifestTags(t *testing.T) {
 	assertManifestCGO(t, "RECORD")
 }
 
+// The tool registry is a capability, so this borrows it the way an extension
+// would instead of reading it off the application.
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	p, err := newCyberProfile(cyberProfileConfig{
-		Option: &cfg.Option{},
-		Application: appConfig{
-			Logger: telemetry.NopLogger(), SkipEngines: true,
-		},
-	})
+	graph, err := newAppGraph(appConfig{Logger: telemetry.NopLogger(), SkipEngines: true}, agent.NoLoop(), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Load(t.Context()); err != nil {
+	var tools tool.Executor
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		tools, err = extension.Use[tool.Executor](scope)
+		return err
+	}}
+	set, err := extension.New(append(graph, borrow)...)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = p.Close(context.Background()) })
-	application, err := p.App()
-	if err != nil {
+	t.Cleanup(func() { _ = set.Close(context.Background()) })
+	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	found := false
-	if application.Tools != nil {
-		for _, definition := range application.Tools.ToolDefinitions() {
-			found = found || definition.Name == "record"
-		}
+	for _, definition := range tools.ToolDefinitions() {
+		found = found || definition.Name == "record"
 	}
 	if !found {
 		t.Fatal("record tool is linked but was not assembled by the runner")

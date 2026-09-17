@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
@@ -434,8 +435,25 @@ func (rt *Runtime) applyProvider(provider agent.Provider, providerConfig agent.P
 	rt.mu.Unlock()
 }
 
-// App returns the concrete application used by this runtime.
-func (rt *Runtime) App() *apppkg.App { return rt.app }
+// Configured reports whether this runtime has an application behind it. It is
+// the readiness a console entry point checks before binding a terminal to it.
+func (rt *Runtime) Configured() bool { return rt != nil && rt.app != nil }
+
+// ProviderState is the model this runtime reasons with, and its configuration.
+func (rt *Runtime) ProviderState() (agent.Provider, agent.ProviderConfig) {
+	if rt == nil || rt.app == nil {
+		return nil, agent.ProviderConfig{}
+	}
+	return rt.app.ProviderState()
+}
+
+// ProviderFallbacks are the configured alternatives to the active model.
+func (rt *Runtime) ProviderFallbacks() []provider.Entry {
+	if rt == nil || rt.app == nil {
+		return nil
+	}
+	return rt.app.Providers.Fallbacks()
+}
 
 // Context ends when the runtime shuts down. It is nil before Load.
 func (rt *Runtime) Context() context.Context { return rt.ctx }

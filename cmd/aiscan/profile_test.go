@@ -222,7 +222,11 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.App() != application {
+	// The runtime has no accessor handing the application out. What matters is
+	// that both read one provider state, so setting it on one is visible on the
+	// other.
+	application.SetProvider(inertProvider{}, agent.ProviderConfig{Model: "shared"})
+	if _, providerConfig := run.ProviderState(); providerConfig.Model != "shared" {
 		t.Fatal("Runtime did not use the profile application")
 	}
 	mux := aop.NewNamespaceMux(t.Context())

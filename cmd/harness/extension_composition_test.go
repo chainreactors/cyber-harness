@@ -117,11 +117,11 @@ func TestExtensionCompositionWithoutCentralFeatureChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hooks := hooks.New()
-	tools := toolset.NewRegistry(hooks)
-	commandRegistry := commands.NewRegistry(hooks)
-	feature := &compositionFeature{options: *options, path: filepath.Join(t.TempDir(), "owned.txt"), hooks: hooks, tools: tools, commands: commandRegistry}
-	set, err := extension.New(tools, commandRegistry, feature)
+	hookRegistry := hooks.New()
+	tools := toolset.NewRegistry()
+	commandRegistry := commands.NewRegistry()
+	feature := &compositionFeature{options: *options, path: filepath.Join(t.TempDir(), "owned.txt"), hooks: hookRegistry, tools: tools, commands: commandRegistry}
+	set, err := extension.New(extension.Provided[*hooks.Registry](hookRegistry), tools, commandRegistry, feature)
 	if err != nil {
 		t.Fatal(err)
 	}

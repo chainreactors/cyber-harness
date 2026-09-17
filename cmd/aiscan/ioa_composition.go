@@ -15,9 +15,16 @@ import (
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	flags "github.com/jessevdk/go-flags"
 	"gopkg.in/yaml.v3"
+	"sync"
 )
 
-func declareResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
+// defaultSections is the declaration graph of a host that contributes no CLI
+// parser of its own. It is identical on every call and sealed before it is
+// returned -- Add is refused and nothing else writes -- so the nine callers
+// that only read it share one instead of rebuilding six Declares apiece.
+var defaultSections = sync.OnceValue(func() *cfg.Sections { return declareResources(nil, nil) })
+
+func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
 	resources := resource.New()
 	sections := cfg.NewSections()
 	localCLI := cli == nil
@@ -62,7 +69,7 @@ func declareResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.Age
 
 func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent
-	option.Sections = declareResources(serving, nil, nil)
+	option.Sections = defaultSections()
 	if serving {
 		if fields := option.Extensions[client.ConfigKey]; fields != nil {
 			if option.Extensions[server.ConfigKey] == nil {
@@ -80,7 +87,7 @@ func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 }
 
 func defaultConfig() string {
-	defaults := declareResources(false, nil, nil).Defaults()
+	defaults := defaultSections().Defaults()
 	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
 	if defaults[client.ConfigKey]["url"] == "" {
 		delete(defaults[client.ConfigKey], "url")

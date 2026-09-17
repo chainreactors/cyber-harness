@@ -651,12 +651,12 @@ func (r *AgentConsole) forceExit() {
 }
 
 func (r *AgentConsole) renderProviders() string {
-	_, pc := r.runtime.App().ProviderState()
+	_, pc := r.runtime.ProviderState()
 	if pc.Provider == "" {
 		return "\n  No providers configured.\n\n"
 	}
 	rows := []helpRow{{Command: "#1  " + pc.Provider, Detail: pc.Model + "  ● active"}}
-	for i, p := range r.runtime.App().Providers.Fallbacks() {
+	for i, p := range r.runtime.ProviderFallbacks() {
 		rows = append(rows, helpRow{Command: fmt.Sprintf("#%d  %s", i+2, p.Provider.Name()), Detail: p.Model + "  ○ configured"})
 	}
 	return r.renderPanel("providers", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
@@ -1123,6 +1123,6 @@ func (r *AgentConsole) providerConfig() agent.ProviderConfig {
 	if r == nil || r.runtime == nil {
 		return agent.ProviderConfig{}
 	}
-	_, pc := r.runtime.App().ProviderState()
+	_, pc := r.runtime.ProviderState()
 	return pc
 }

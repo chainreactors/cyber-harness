@@ -26,7 +26,7 @@ func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
 func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
-	registry := commands.NewRegistry(nil)
+	registry := commands.NewRegistry()
 	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
 	set, err := extension.New(
 		hosttest.Capabilities(),

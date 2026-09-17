@@ -24,7 +24,7 @@ type REPL struct {
 }
 
 func StartPersistent(rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
-	if rt == nil || rt.App() == nil {
+	if !rt.Configured() {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
 	manager := bashManager(rt.Bash())

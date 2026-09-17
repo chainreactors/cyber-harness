@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"github.com/chainreactors/cyber/core/hooks"
 	"slices"
 	"strings"
 	"testing"
@@ -33,11 +34,12 @@ func TestCommandRegistrationsPreserveOrderAndMetadataSnapshots(t *testing.T) {
 }
 
 func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
-	r := NewRegistry(nil)
+	r := NewRegistry()
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		return extension.Add(scope, Command{Name: "one", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
 	registrySet, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
 		r,
 		first,
 	)
@@ -59,7 +61,7 @@ func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 		t.Fatalf("hot unregister = %v", err)
 	}
 
-	failed := NewRegistry(nil)
+	failed := NewRegistry()
 	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		return extension.Add(scope,
 			Command{Name: "same", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
@@ -67,6 +69,7 @@ func TestCommandRegistrationIsAtomicAndRegistrySeals(t *testing.T) {
 		)
 	}}
 	failedSet, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
 		failed,
 		duplicate,
 	)
@@ -132,11 +135,12 @@ func TestCommandPanicReleasesAdmission(t *testing.T) {
 func TestCommandRegistrationRejectsAmbiguousNames(t *testing.T) {
 	for _, name := range []string{"", " name", "name ", "two names", "tab\tname"} {
 		name := name
-		r := NewRegistry(nil)
+		r := NewRegistry()
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Add(scope, Command{Name: name, Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 		}}
 		set, err := extension.New(
+			extension.Provided[*hooks.Registry](hooks.New()),
 			r,
 			contributor,
 		)

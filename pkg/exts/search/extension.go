@@ -13,7 +13,6 @@ import (
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	searchtools "github.com/chainreactors/cyber/tools/search"
-	"github.com/chainreactors/sdk/pkg/association"
 )
 
 // Extension owns search tool declarations and command registrations.
@@ -23,9 +22,6 @@ type Extension struct {
 
 type Config struct {
 	TavilyKeys string
-	// ResolveIndex is evaluated during Load, after any engine dependency has
-	// published its association index. Nil installs the command with no index.
-	ResolveIndex func() *association.Index
 }
 
 func New(config Config) *Extension { return &Extension{config: config} }
@@ -54,18 +50,8 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		Run:             fetch.Run,
 	}
 
-	var index *association.Index
-	if e.config.ResolveIndex != nil {
-		index = e.config.ResolveIndex()
-	}
-	cyberhub := searchtools.NewCyberhubSearch(index)
-	cyberhubCommand := commands.Command{
-		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
-		Run:             cyberhub.Run,
-	}
 	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
-	entries := []commands.Command{fetchCommand, cyberhubCommand}
+	entries := []commands.Command{fetchCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}

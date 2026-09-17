@@ -2,21 +2,26 @@ package proxy
 
 import (
 	"context"
+	"github.com/chainreactors/cyber/core/egress"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestHubOwnsProxyLifecycle(t *testing.T) {
 	ext := New(Config{WorkDir: t.TempDir()})
-	if ext.Hub() != nil {
-		t.Fatal("the constructor started the proxy")
-	}
-	set, err := extension.New(namespaces.New(), hosttest.Provide[*hooks.Registry](hooks.New()), commands.NewRegistry(nil), ext)
+	// The routing endpoint is reached as a capability, so the borrow is what
+	// proves the proxy started -- there is no accessor to peek through.
+	var endpoint egress.Endpoint
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		endpoint, err = extension.Use[egress.Endpoint](scope)
+		return err
+	}}
+	set, err := extension.New(namespaces.New(), extension.Provided[*hooks.Registry](hooks.New()), commands.NewRegistry(), ext, borrow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +29,13 @@ func TestHubOwnsProxyLifecycle(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if ext.Hub() == nil || ext.Hub().ProxyURL() == "" {
+	if endpoint == nil || endpoint.ProxyURL() == "" {
 		t.Fatal("extension did not start the proxy")
 	}
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := any(ext.Hub()).(interface{ Close(context.Context) error }); ok {
+	if _, ok := any(endpoint).(interface{ Close(context.Context) error }); ok {
 		t.Fatal("proxy capability exposes lifecycle")
 	}
 }
