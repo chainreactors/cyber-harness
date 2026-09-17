@@ -87,13 +87,13 @@ func (rt *Runtime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionReq
 
 // NamespaceBindings publishes the protocols implemented by this runtime. The
 // profile's typed namespace registry installs them on each connection.
-func (rt *Runtime) NamespaceBindings() []aop.NamespaceBinding {
+func (rt *Runtime) NamespaceBindings() []aop.Binding {
 	if rt == nil {
 		return nil
 	}
-	return []aop.NamespaceBinding{
-		{Prototype: &aop.ProtocolMessage{}, Handler: rt.HandleCoreNamespace},
-		{Prototype: &types.CommandProtocolMessage{}, Handler: rt.HandleCommandNamespace},
+	return []aop.Binding{
+		aop.Shared(&aop.ProtocolMessage{}, rt.HandleCoreNamespace),
+		aop.Shared(&types.CommandProtocolMessage{}, rt.HandleCommandNamespace),
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
@@ -18,7 +19,6 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
-	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -49,7 +49,6 @@ type Extension struct {
 	file      FileOptions
 	subs      []*corehooks.Subscription
 	snapshots map[string]Snapshot
-	loaded    bool
 	closing   bool
 	closed    bool
 	logger    telemetry.Logger
@@ -90,9 +89,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e.closed || e.closing {
 		return fmt.Errorf("observe is closed")
 	}
-	if e.loaded {
-		return nil
-	}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
@@ -105,7 +101,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.hooks, e.events = registry, stream
-	e.loaded = true
 	const source = "observe"
 	if e.kinds[Tools] {
 		e.subs = append(e.subs,
@@ -214,7 +209,7 @@ func (e *Extension) processCompleted(ctx context.Context, event toolhooks.Proces
 	}
 	if e.kinds[Processes] {
 		if event.Session != nil {
-			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, ptyext.SessionToProto(event.Session))
+			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, procbus.SessionToProto(event.Session))
 		} else {
 			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle)
 		}

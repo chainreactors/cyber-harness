@@ -31,7 +31,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.sessions = sessions
-	return extension.Add(scope, aop.ConnectionBinding{
+	return extension.Add(scope, aop.Binding{
 		Prototype: &ptypb.ProtocolMessage{},
 		Open: func() aop.NamespaceHandler {
 			opts := append([]Option{WithOpeners(e.sessions.Openers())}, e.opts...)

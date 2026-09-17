@@ -24,18 +24,18 @@ type trafficHandler struct {
 
 // TrafficNamespace declares the proxy control surface for the profile's typed
 // namespace catalog.
-func TrafficNamespace(hub *ProxyHub) (aop.NamespaceBinding, error) {
+func TrafficNamespace(hub *ProxyHub) (aop.Binding, error) {
 	if hub == nil || hub.store == nil || hub.state == nil {
-		return aop.NamespaceBinding{}, fmt.Errorf("traffic namespace requires a proxy hub")
+		return aop.Binding{}, fmt.Errorf("traffic namespace requires a proxy hub")
 	}
 	h := &trafficHandler{hub: hub}
-	return aop.NamespaceBinding{Prototype: &traffic.ProtocolMessage{}, Handler: func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
+	return aop.Shared(&traffic.ProtocolMessage{}, func(ctx context.Context, env *aop.Envelope, msg protobuf.Message, send aop.SendFunc) error {
 		pm, ok := msg.(*traffic.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("traffic: unexpected message %T", msg)
 		}
 		return h.handle(ctx, env, pm, send)
-	}}, nil
+	}), nil
 }
 
 func (h *trafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traffic.ProtocolMessage, send aop.SendFunc) error {

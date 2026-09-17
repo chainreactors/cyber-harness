@@ -13,7 +13,7 @@ import (
 func TestRegistryBindsTypedContributions(t *testing.T) {
 	registry := New()
 	called := make(map[string]bool)
-	bindings := []aop.NamespaceBinding{
+	bindings := []aop.Binding{
 		binding(&filepb.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
 			called["file"] = true
 			return nil
@@ -42,17 +42,19 @@ func TestRegistryBindsTypedContributions(t *testing.T) {
 	}
 }
 
+// A shared binding and a connection-scoped one contend for the same namespace:
+// the opener is what differs between them, not the space they are registered in.
 func TestRegistryRejectsDuplicateNamespace(t *testing.T) {
 	registry := New()
 	if _, err := registry.Add(binding(&filepb.ProtocolMessage{}, noOpHandler)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.Add(binding(&filepb.ProtocolMessage{}, noOpHandler)); err == nil {
+	if _, err := registry.Add(connection(&filepb.ProtocolMessage{})); err == nil {
 		t.Fatal("duplicate protobuf namespace succeeded")
 	}
 	if _, err := New().Add(
 		binding(&filepb.ProtocolMessage{}, noOpHandler),
-		binding(&filepb.ProtocolMessage{}, noOpHandler),
+		connection(&filepb.ProtocolMessage{}),
 	); err == nil {
 		t.Fatal("duplicate protobuf namespace in one contribution succeeded")
 	}
@@ -92,7 +94,7 @@ func TestRegistryHandleRemovalAffectsFutureSnapshots(t *testing.T) {
 func TestRegistryOpensOneHandlerPerConnection(t *testing.T) {
 	registry := New()
 	fired := 0
-	if _, err := registry.ConnectionPoint().Add(aop.ConnectionBinding{
+	if _, err := registry.Add(aop.Binding{
 		Prototype: &execpb.ProtocolMessage{},
 		Open: func() aop.NamespaceHandler {
 			fired++
@@ -119,27 +121,11 @@ func TestRegistryOpensOneHandlerPerConnection(t *testing.T) {
 	}
 }
 
-func TestRegistrySharesOneNamespaceSpaceAcrossBindingForms(t *testing.T) {
+// Revoking before the first Bind leaves nothing to open, which is the case the
+// future-snapshot test above cannot reach.
+func TestRegistryRevokedBindingNeverReachesAConnection(t *testing.T) {
 	registry := New()
-	if _, err := registry.Add(binding(&filepb.ProtocolMessage{}, noOpHandler)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := registry.ConnectionPoint().Add(connection(&filepb.ProtocolMessage{})); err == nil {
-		t.Fatal("a namespace accepted as static was also accepted as connection-scoped")
-	}
-
-	reversed := New()
-	if _, err := reversed.ConnectionPoint().Add(connection(&filepb.ProtocolMessage{})); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reversed.Add(binding(&filepb.ProtocolMessage{}, noOpHandler)); err == nil {
-		t.Fatal("a namespace accepted as connection-scoped was also accepted as static")
-	}
-}
-
-func TestRegistryHandleRemovalRevokesBothForms(t *testing.T) {
-	registry := New()
-	handle, err := registry.ConnectionPoint().Add(connection(&filepb.ProtocolMessage{}))
+	handle, err := registry.Add(connection(&filepb.ProtocolMessage{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,12 +142,12 @@ func TestRegistryHandleRemovalRevokesBothForms(t *testing.T) {
 	}
 }
 
-func binding(prototype proto.Message, handler aop.NamespaceHandler) aop.NamespaceBinding {
-	return aop.NamespaceBinding{Prototype: prototype, Handler: handler}
+func binding(prototype proto.Message, handler aop.NamespaceHandler) aop.Binding {
+	return aop.Shared(prototype, handler)
 }
 
-func connection(prototype proto.Message) aop.ConnectionBinding {
-	return aop.ConnectionBinding{Prototype: prototype, Open: func() aop.NamespaceHandler { return noOpHandler }}
+func connection(prototype proto.Message) aop.Binding {
+	return aop.Binding{Prototype: prototype, Open: func() aop.NamespaceHandler { return noOpHandler }}
 }
 
 func noOpHandler(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error { return nil }

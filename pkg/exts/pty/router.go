@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	runtimeproc "github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -190,7 +190,7 @@ func (r *Router) open(ctx context.Context, request *ptypb.Open, send SendFunc) {
 		r.mu.Unlock()
 	}
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
-		StreamId: streamID, Session: SessionToProto(&info),
+		StreamId: streamID, Session: procbus.SessionToProto(&info),
 	}}})
 	r.monitor(ctx, streamID, info.ID, 0, send)
 	r.resizeSession(streamID, info.ID, int(request.GetCols()), int(request.GetRows()), send)
@@ -230,7 +230,7 @@ func (r *Router) attachExisting(ctx context.Context, streamID string, info runti
 	}
 	r.releaseStream(streamID)
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
-		StreamId: streamID, Session: SessionToProto(&info),
+		StreamId: streamID, Session: procbus.SessionToProto(&info),
 	}}})
 	if len(output) > 0 {
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
@@ -354,7 +354,7 @@ func (r *Router) monitor(ctx context.Context, streamID, sessionID string, offset
 		delete(r.resizers, sessionID)
 		r.mu.Unlock()
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Closed{Closed: &ptypb.Closed{
-			StreamId: streamID, Session: SessionToProto(&final),
+			StreamId: streamID, Session: procbus.SessionToProto(&final),
 		}}})
 	}()
 }
@@ -411,43 +411,9 @@ func (r *Router) sendError(send SendFunc, streamID, message string) {
 func newSessions(streamID string, sessions []runtimeproc.Info) *ptypb.ProtocolMessage {
 	value := &ptypb.Sessions{StreamId: streamID, Sessions: make([]*ptypb.Session, 0, len(sessions))}
 	for index := range sessions {
-		value.Sessions = append(value.Sessions, SessionToProto(&sessions[index]))
+		value.Sessions = append(value.Sessions, procbus.SessionToProto(&sessions[index]))
 	}
 	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: value}}
-}
-
-// SessionToProto is the single projection from a registry unit onto the wire.
-// It is exported because the observe extension reports the same units on the
-// same protocol: two copies of this mapping drift the moment a field is added.
-func SessionToProto(value *runtimeproc.Info) *ptypb.Session {
-	if value == nil {
-		return nil
-	}
-	info := &ptypb.Session{
-		Id: value.ID, Kind: value.Kind, Name: value.Name, Command: value.Command,
-		Shape: string(value.Shape), ActivitySeq: value.ActivitySeq, OutputBytes: value.OutputBytes,
-		State: string(value.State), KillCause: value.Reason,
-		// Pid and ExitCode stay populated for clients that predate Process.
-		Pid: int32(value.ProcessID()), ExitCode: int32(value.ExitStatus()),
-	}
-	if value.Proc != nil {
-		info.Process = &ptypb.Process{
-			Pid: int32(value.Proc.PID), ExitCode: int32(value.Proc.ExitCode), Signal: value.Proc.Signal,
-		}
-	}
-	if !value.ReadyAt.IsZero() {
-		info.ReadyAt = timestamppb.New(value.ReadyAt)
-	}
-	if !value.StartedAt.IsZero() {
-		info.StartedAt = timestamppb.New(value.StartedAt)
-	}
-	if !value.LastActivityAt.IsZero() {
-		info.LastActivityAt = timestamppb.New(value.LastActivityAt)
-	}
-	if !value.EndedAt.IsZero() {
-		info.EndedAt = timestamppb.New(value.EndedAt)
-	}
-	return info
 }
 
 func normalizeKind(kind, command string) string {

@@ -150,6 +150,8 @@ AOP 应用面只额外暴露一个双向流服务：
 - `pkg/web/api` 拥有 Web 原生管理语义；Agent/Session 执行通过能力接口委派给既有 AOP/AgentPool/Runner，不复制执行逻辑。
 - Connect handler 只做 request wrapper、服务注册与错误映射。
 
+namespace 贡献只有一个类型 `aop.Binding`（`Prototype` + `Open`）：`Open` 在每个连接建立时给出该连接的 handler，共享一个 handler 的贡献用 `aop.Shared` 构造。不再有第二个 binding 类型，`core/namespaces.Registry` 因此只有一个 Point 和一个 namespace 序。
+
 新增抽象必须证明至少有两个真实 owner、不能由 protobuf message + 普通函数表达，并在本文补充职责和生命周期。允许的 namespace 注册抽象只做 full-name → handler 路由；不得扩展成全局 schema registry、通用 pending manager、link、wire 或兼容 adapter。
 
 ## 11. 服务端 Go 分层与 client 世界
