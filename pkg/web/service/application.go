@@ -12,7 +12,6 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	web "github.com/chainreactors/cyber/pkg/web"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
 func (s *Service) aiAvailable() bool {
@@ -129,8 +128,8 @@ func (s *Service) closeApplication(ctx context.Context, p profile.Application) e
 	return nil
 }
 
-// ServeApplication performs the Application Endpoint initialization and then
-// hands the unified Connection to the api business dispatcher.
+// ServeApplication performs Application Endpoint initialization and dispatches
+// application business messages through the unified Connection.
 func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStream) error {
 	if s == nil || s.api == nil || stream == nil {
 		return fmt.Errorf("application AOP stream is unavailable")
@@ -157,22 +156,5 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 		}
 	}
 
-	backends := &managementapi.ApplicationBackends{
-		RegisterNamespaces: s.applicationNamespaces,
-		Sessions:           s.api.Sessions,
-		Scans:              s.api.Scans,
-		Commands:           s,
-		Files:              s,
-		NewID:              generateID,
-	}
-	if s.agents != nil {
-		backends.PTY = s.agents
-	}
-	return managementapi.ServeApplication(connection, first, backends)
+	return s.serveApplication(connection, first)
 }
-
-var (
-	_ managementapi.PTYRouter       = (*AgentPool)(nil)
-	_ managementapi.CommandExecutor = (*Service)(nil)
-	_ managementapi.FileUploader    = (*Service)(nil)
-)

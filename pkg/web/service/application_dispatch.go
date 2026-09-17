@@ -1,4 +1,4 @@
-package api
+package service
 
 import (
 	"context"
@@ -10,60 +10,17 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	types "github.com/chainreactors/cyber/core/types"
+	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
-
-// CommandExecutor runs "/" commands inside a chat session.
-type CommandExecutor interface {
-	ExecuteSessionCommand(sessionID, line string) (string, error)
-}
-
-// FileUploader stores an application-uploaded file through the owning agent.
-type FileUploader interface {
-	Upload(ctx context.Context, sessionID, filename string, data []byte) (*filepb.Result, error)
-}
-
-// PTYRouter bridges application PTY messages to the agent owning the pty.
-// It speaks generated protobuf only; frame conversion belongs to the
-// mechanism layer implementing this interface.
-type PTYRouter interface {
-	SubscribePTY(nodeID, streamID string) (<-chan *ptypb.ProtocolMessage, bool, func())
-	ForwardPTY(nodeID string, message *ptypb.ProtocolMessage) error
-	ClosePTY(nodeID, streamID string)
-}
-
-// ApplicationConnection is the minimal mechanism surface required by the
-// application business dispatcher. pkg/web owns the concrete Connection.
-type ApplicationConnection interface {
-	Context() context.Context
-	Send(*aop.Envelope) error
-	Run(*aop.Envelope, func(context.Context, *aop.Envelope, aop.SendFunc) error) error
-}
-
-// ApplicationBackends wires the application envelope business surface to its
-// owning mechanisms.
-type ApplicationBackends struct {
-	// RegisterNamespaces installs profile-selected bindings into each connection.
-	// Captured resources must outlive this application host.
-	RegisterNamespaces func(*aop.NamespaceMux) error
-	Sessions           *Sessions
-	Scans              *Scans
-	Commands           CommandExecutor
-	Files              FileUploader
-	PTY                PTYRouter
-	NewID              func() string
-}
 
 type applicationPTYRoute struct {
 	nodeID      string
 	unsubscribe func()
 }
 
-// ServeApplication serves one application connection over the AOP envelope
-// surface. Connection owns stream concurrency; this function owns only the
-// application business routes and connection-local subscriptions.
-func ServeApplication(connection ApplicationConnection, first *aop.Envelope, backends *ApplicationBackends) error {
-	if backends == nil || backends.Sessions == nil || backends.NewID == nil || connection == nil || first == nil {
+func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelope) error {
+	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil || first == nil {
 		return fmt.Errorf("application AOP connection is unavailable")
 	}
 	ctx := connection.Context()
@@ -73,9 +30,9 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	ptyRoutes := make(map[string]applicationPTYRoute)
 
 	send := func(replyTo, cursor string, message protobuf.Message) error {
-		envelope, wrapErr := aop.Wrap(backends.NewID(), replyTo, message)
-		if wrapErr != nil {
-			return wrapErr
+		envelope, err := aop.Wrap(generateID(), replyTo, message)
+		if err != nil {
+			return err
 		}
 		envelope.DeliveryCursor = cursor
 		return connection.Send(envelope)
@@ -86,10 +43,10 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		}
 		_ = send(replyTo, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{Code: code, Message: failure.Error()}}})
 	}
-	setSubscription := func(id string, subscriptionCancel context.CancelFunc) {
+	setSubscription := func(id string, cancel context.CancelFunc) {
 		stateMu.Lock()
 		previous := subscriptions[id]
-		subscriptions[id] = subscriptionCancel
+		subscriptions[id] = cancel
 		stateMu.Unlock()
 		if previous != nil {
 			previous()
@@ -97,11 +54,11 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 	}
 	cancelSubscription := func(id string) {
 		stateMu.Lock()
-		subscriptionCancel := subscriptions[id]
+		cancel := subscriptions[id]
 		delete(subscriptions, id)
 		stateMu.Unlock()
-		if subscriptionCancel != nil {
-			subscriptionCancel()
+		if cancel != nil {
+			cancel()
 		}
 	}
 	removePTY := func(streamID string, detach bool) {
@@ -115,16 +72,16 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return
 		}
 		route.unsubscribe()
-		if detach && backends.PTY != nil {
-			backends.PTY.ClosePTY(route.nodeID, streamID)
+		if detach && s.agents != nil {
+			s.agents.ClosePTY(route.nodeID, streamID)
 		}
 	}
 	defer func() {
 		stateMu.Lock()
 		cancels := make([]context.CancelFunc, 0, len(subscriptions))
 		routes := make(map[string]applicationPTYRoute, len(ptyRoutes))
-		for _, subscriptionCancel := range subscriptions {
-			cancels = append(cancels, subscriptionCancel)
+		for _, cancel := range subscriptions {
+			cancels = append(cancels, cancel)
 		}
 		for streamID, route := range ptyRoutes {
 			routes[streamID] = route
@@ -132,13 +89,13 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		subscriptions = make(map[string]context.CancelFunc)
 		ptyRoutes = make(map[string]applicationPTYRoute)
 		stateMu.Unlock()
-		for _, subscriptionCancel := range cancels {
-			subscriptionCancel()
+		for _, cancel := range cancels {
+			cancel()
 		}
 		for streamID, route := range routes {
 			route.unsubscribe()
-			if backends.PTY != nil {
-				backends.PTY.ClosePTY(route.nodeID, streamID)
+			if s.agents != nil {
+				s.agents.ClosePTY(route.nodeID, streamID)
 			}
 		}
 	}()
@@ -148,66 +105,66 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		if !ok {
 			return fmt.Errorf("unexpected application core message %T", message)
 		}
-		sessions := backends.Sessions
+		sessions := s.api.Sessions
 		switch payload := value.Message.(type) {
 		case *aop.ProtocolMessage_OpenSessionRequest:
 			go func() {
-				response, callErr := sessions.OpenSession(ctx, envelope.Id, payload.OpenSessionRequest)
-				if callErr != nil {
-					fail(envelope.Id, "OPEN_SESSION_FAILED", callErr)
+				response, err := sessions.OpenSession(ctx, envelope.Id, payload.OpenSessionRequest)
+				if err != nil {
+					fail(envelope.Id, "OPEN_SESSION_FAILED", err)
 					return
 				}
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: response}})
 			}()
 		case *aop.ProtocolMessage_RunTurnRequest:
 			go func() {
-				response, callErr := sessions.RunTurn(ctx, envelope.Id, payload.RunTurnRequest)
-				if callErr != nil {
-					fail(envelope.Id, "RUN_TURN_FAILED", callErr)
+				response, err := sessions.RunTurn(ctx, envelope.Id, payload.RunTurnRequest)
+				if err != nil {
+					fail(envelope.Id, "RUN_TURN_FAILED", err)
 					return
 				}
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: response}})
 			}()
 		case *aop.ProtocolMessage_CancelTurnRequest:
 			go func() {
-				response, callErr := sessions.CancelTurn(ctx, envelope.Id, payload.CancelTurnRequest)
-				if callErr != nil {
-					fail(envelope.Id, "CANCEL_TURN_FAILED", callErr)
+				response, err := sessions.CancelTurn(ctx, envelope.Id, payload.CancelTurnRequest)
+				if err != nil {
+					fail(envelope.Id, "CANCEL_TURN_FAILED", err)
 					return
 				}
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: response}})
 			}()
 		case *aop.ProtocolMessage_CloseSessionRequest:
 			go func() {
-				response, callErr := sessions.CloseSession(ctx, envelope.Id, payload.CloseSessionRequest)
-				if callErr != nil {
-					fail(envelope.Id, "CLOSE_SESSION_FAILED", callErr)
+				response, err := sessions.CloseSession(ctx, envelope.Id, payload.CloseSessionRequest)
+				if err != nil {
+					fail(envelope.Id, "CLOSE_SESSION_FAILED", err)
 					return
 				}
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: response}})
 			}()
 		case *aop.ProtocolMessage_ListEventsRequest:
 			go func() {
-				response, callErr := sessions.ListEvents(ctx, payload.ListEventsRequest)
-				if callErr != nil {
-					fail(envelope.Id, "LIST_EVENTS_FAILED", callErr)
+				response, err := sessions.ListEvents(ctx, payload.ListEventsRequest)
+				if err != nil {
+					fail(envelope.Id, "LIST_EVENTS_FAILED", err)
 					return
 				}
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ListEventsResponse{ListEventsResponse: response}})
 			}()
 		case *aop.ProtocolMessage_WatchEventsRequest:
-			subscriptionCtx, subscriptionCancel := context.WithCancel(ctx)
-			setSubscription(envelope.Id, subscriptionCancel)
+			subscriptionCtx, cancel := context.WithCancel(ctx)
+			setSubscription(envelope.Id, cancel)
 			go func(subscriptionID string) {
 				defer cancelSubscription(subscriptionID)
-				watchErr := sessions.WatchEvents(subscriptionCtx, payload.WatchEventsRequest, func(delivery *aop.EventDelivery) error {
+				err := sessions.WatchEvents(subscriptionCtx, payload.WatchEventsRequest, func(delivery *aop.EventDelivery) error {
 					if delivery.GetEvent() == nil {
 						return nil
 					}
 					return send(subscriptionID, delivery.GetCursor(), &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: delivery.Event}})
 				})
-				if watchErr != nil && subscriptionCtx.Err() == nil {
-					fail(subscriptionID, "WATCH_EVENTS_FAILED", watchErr)
+				if err != nil && subscriptionCtx.Err() == nil {
+					fail(subscriptionID, "WATCH_EVENTS_FAILED", err)
 				}
 			}(envelope.Id)
 		case *aop.ProtocolMessage_CancelOperation:
@@ -226,14 +183,14 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return fmt.Errorf("unexpected application command message %T", message)
 		}
 		request := value.GetRequest()
-		if request == nil || backends.Commands == nil {
+		if request == nil {
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported Cyber command message"))
 			return nil
 		}
 		go func() {
-			operationID, callErr := backends.Commands.ExecuteSessionCommand(request.SessionId, request.Line)
-			if callErr != nil {
-				fail(envelope.Id, "COMMAND_FAILED", callErr)
+			operationID, err := s.ExecuteSessionCommand(request.SessionId, request.Line)
+			if err != nil {
+				fail(envelope.Id, "COMMAND_FAILED", err)
 				return
 			}
 			_ = send(envelope.Id, "", &types.CommandProtocolMessage{Message: &types.CommandProtocolMessage_Receipt{Receipt: &types.CommandReceipt{OperationId: operationID, SessionId: request.SessionId, State: "running"}}})
@@ -247,14 +204,14 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return fmt.Errorf("unexpected application file message %T", message)
 		}
 		request := value.GetUploadRequest()
-		if request == nil || backends.Files == nil {
+		if request == nil {
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("only file upload is supported by the application endpoint"))
 			return nil
 		}
 		go func() {
-			result, callErr := backends.Files.Upload(ctx, request.SessionId, request.Filename, request.Data)
-			if callErr != nil {
-				fail(envelope.Id, "FILE_UPLOAD_FAILED", callErr)
+			result, err := s.Upload(ctx, request.SessionId, request.Filename, request.Data)
+			if err != nil {
+				fail(envelope.Id, "FILE_UPLOAD_FAILED", err)
 				return
 			}
 			_ = send(envelope.Id, "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_Result{Result: result}})
@@ -272,18 +229,18 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported Cyber scan message"))
 			return nil
 		}
-		subscriptionCtx, subscriptionCancel := context.WithCancel(ctx)
-		setSubscription(envelope.Id, subscriptionCancel)
+		subscriptionCtx, cancel := context.WithCancel(ctx)
+		setSubscription(envelope.Id, cancel)
 		go func(subscriptionID string) {
 			defer cancelSubscription(subscriptionID)
-			watchErr := backends.Scans.WatchScanEvents(request, subscriptionCtx, func(event *types.ScanEvent) error {
+			err := s.api.Scans.WatchScanEvents(request, subscriptionCtx, func(event *types.ScanEvent) error {
 				if event == nil {
 					return nil
 				}
 				return send(subscriptionID, strconv.FormatUint(event.Sequence, 10), &types.ScanProtocolMessage{Message: &types.ScanProtocolMessage_Event{Event: event}})
 			})
-			if watchErr != nil && subscriptionCtx.Err() == nil {
-				fail(subscriptionID, "WATCH_SCAN_FAILED", watchErr)
+			if err != nil && subscriptionCtx.Err() == nil {
+				fail(subscriptionID, "WATCH_SCAN_FAILED", err)
 			}
 		}(envelope.Id)
 		return nil
@@ -299,10 +256,6 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 			return nil
 		}
-		if backends.PTY == nil {
-			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("PTY is unavailable"))
-			return nil
-		}
 		nodeID := ptypb.NodeID(value)
 		stateMu.Lock()
 		route, routed := ptyRoutes[streamID]
@@ -315,7 +268,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return nil
 		}
 		if !routed {
-			messages, online, unsubscribe := backends.PTY.SubscribePTY(nodeID, streamID)
+			messages, online, unsubscribe := s.agents.SubscribePTY(nodeID, streamID)
 			stateMu.Lock()
 			ptyRoutes[streamID] = applicationPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
 			stateMu.Unlock()
@@ -336,8 +289,8 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				_ = send(streamID, "", ptypb.NewDetached(streamID))
 			}
 		}
-		if forwardErr := backends.PTY.ForwardPTY(nodeID, value); forwardErr != nil {
-			fail(envelope.Id, "PTY_FORWARD_FAILED", forwardErr)
+		if err := s.agents.ForwardPTY(nodeID, value); err != nil {
+			fail(envelope.Id, "PTY_FORWARD_FAILED", err)
 			removePTY(streamID, false)
 			return nil
 		}
@@ -355,10 +308,10 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		handler   aop.NamespaceHandler
 	}{
 		{enabled: true, prototype: &aop.ProtocolMessage{}, handler: handleCore},
-		{enabled: backends.Commands != nil, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
-		{enabled: backends.Files != nil, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
-		{enabled: backends.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
-		{enabled: backends.PTY != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
+		{enabled: true, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
+		{enabled: true, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
+		{enabled: s.api.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
+		{enabled: s.agents != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
 	}
 	for _, registration := range registrations {
 		if !registration.enabled {
@@ -368,15 +321,15 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			return fmt.Errorf("register application namespace: %w", err)
 		}
 	}
-	if backends.RegisterNamespaces != nil {
-		if err := backends.RegisterNamespaces(mux); err != nil {
+	if s.applicationNamespaces != nil {
+		if err := s.applicationNamespaces(mux); err != nil {
 			return fmt.Errorf("register application extension namespace: %w", err)
 		}
 	}
-	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, sendEnvelope aop.SendFunc) error {
-		handled, dispatchErr := mux.Dispatch(envelope, sendEnvelope)
-		if dispatchErr != nil {
-			fail(envelope.GetId(), "INVALID_PAYLOAD", dispatchErr)
+	dispatch := func(_ context.Context, envelope *aop.Envelope, sendEnvelope aop.SendFunc) error {
+		handled, err := mux.Dispatch(envelope, sendEnvelope)
+		if err != nil {
+			fail(envelope.GetId(), "INVALID_PAYLOAD", err)
 			return nil
 		}
 		if !handled {
