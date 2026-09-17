@@ -259,7 +259,7 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
+  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) => void
   onPause: () => void
   onClearError: () => void
 }
@@ -343,10 +343,12 @@ export default function ChatPanel({
   const [persist, setPersist] = useState(false)
   // Goal mode: describe done-when criteria in natural language and let an
   // independent evaluator judge completion each round, re-driving the agent
-  // until it passes or the round budget is spent. (evalMaxRounds is the whole
-  // budget — it subsumes the old standalone "fixed turns" mode.)
+  // until it passes or the evaluator itself says further rounds won't help.
+  // evalRounds is optional and free-form: a number is a hard ceiling, plain
+  // language ("dig deep, up to ten rounds") is handed to the evaluator to
+  // follow, and empty leaves the stop decision entirely to it.
   const [evalCriteria, setEvalCriteria] = useState('')
-  const [evalMaxRounds, setEvalMaxRounds] = useState(3)
+  const [evalRounds, setEvalRounds] = useState('')
   const evalRef = useRef<HTMLTextAreaElement>(null)
   // Screen-reader turn status. Streamed replies mutate the DOM silently, so
   // mirror the coarse turn phase into a polite live region below. It announces
@@ -372,7 +374,7 @@ export default function ChatPanel({
   function sendOpts() {
     if (!persist) return undefined
     const criteria = evalCriteria.trim()
-    if (criteria) return { persist: true, evalCriteria: criteria, evalMaxRounds }
+    if (criteria) return { persist: true, evalCriteria: criteria, evalRounds: evalRounds.trim() }
     // Goal toggled on but no criteria typed → nothing for the evaluator to
     // judge, so send as a plain one-off message rather than an open-ended run.
     return undefined
@@ -384,7 +386,7 @@ export default function ChatPanel({
   function resetGoal() {
     setPersist(false)
     setEvalCriteria('')
-    setEvalMaxRounds(3)
+    setEvalRounds('')
   }
 
   // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
@@ -460,7 +462,7 @@ export default function ChatPanel({
     // session B (an unexpected multi-round agentic run against stale criteria).
     setPersist(false)
     setEvalCriteria('')
-    setEvalMaxRounds(3)
+    setEvalRounds('')
   }, [activeSessionID])
 
   // Auto-grow the goal criteria textarea (min ~2 rows, capped) so long
@@ -685,12 +687,11 @@ export default function ChatPanel({
                         <label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
                           {t('evalRoundsLabel')}
                           <input
-                            type="number"
-                            min={1}
-                            max={10}
-                            value={evalMaxRounds}
-                            onChange={(e) => setEvalMaxRounds(Math.min(10, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                            className="w-12 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
+                            type="text"
+                            value={evalRounds}
+                            placeholder={t('evalRoundsAuto')}
+                            onChange={(e) => setEvalRounds(e.target.value)}
+                            className="w-36 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
                           />
                         </label>
                       </div>
@@ -703,7 +704,7 @@ export default function ChatPanel({
                         className="block max-h-36 min-h-[3.25rem] w-full resize-none overflow-y-auto rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
                       />
                       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                        {t('evalModeHint', { rounds: evalMaxRounds })}
+                        {evalRounds.trim() ? t('evalModeHintCapped', { rounds: evalRounds.trim() }) : t('evalModeHint')}
                       </p>
                     </div>
                   ) : undefined}

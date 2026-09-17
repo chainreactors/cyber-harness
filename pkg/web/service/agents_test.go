@@ -475,7 +475,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	options, err := anypb.New(&types.AgentRunOptions{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	options, err := anypb.New(&types.AgentRunOptions{EvalCriteria: "find at least one SQLi", EvalRounds: "dig deep, up to ten rounds"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Errorf("run = %+v", inbound)
 	}
 	gotOptions := new(types.AgentRunOptions)
-	if err := inbound.Extensions[0].UnmarshalTo(gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
+	if err := inbound.Extensions[0].UnmarshalTo(gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalRounds != "dig deep, up to ten rounds" {
 		t.Errorf("goal options = %+v, err=%v", gotOptions, err)
 	}
 	writeAgentEnvelope(t, conn, turnEndEnvelope(t, "task-goal", "sess-1", "completed"))

@@ -56,13 +56,13 @@ const (
 )
 
 type RunInput struct {
-	TurnID        string
-	Message       *aop.Message
-	Content       []*aop.Content
-	MaxTurns      int
-	EvalCriteria  string
-	EvalMaxRounds int
-	Continue      bool
+	TurnID       string
+	Message      *aop.Message
+	Content      []*aop.Content
+	MaxTurns     int
+	EvalCriteria string
+	EvalRounds   string
+	Continue     bool
 
 	automatic bool
 }
@@ -153,6 +153,7 @@ func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr
 type commandSession struct {
 	state        *sessionState
 	evalCriteria string
+	evalRounds   string
 }
 
 func (s *commandSession) execute(ctx context.Context, input string) commandOutcome {
@@ -1157,6 +1158,9 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	if input.EvalCriteria == "" {
 		input.EvalCriteria = s.commands.evalCriteria
 	}
+	if input.EvalRounds == "" {
+		input.EvalRounds = s.commands.evalRounds
+	}
 	message := input.Message
 	if message == nil {
 		message = &aop.Message{Role: "user", Content: input.Content}
@@ -1171,7 +1175,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	}
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalMaxRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))

@@ -24,7 +24,11 @@ message ListAgentsResponse { repeated AgentView agents = 1; }
 
 message AgentRunOptions {
   string eval_criteria = 1;
-  uint32 eval_max_rounds = 2;
+  reserved 2;  // was uint32 eval_max_rounds, a plain cap
+  reserved "eval_max_rounds";
+  // A number (hard ceiling), natural language the evaluator follows, or empty
+  // for the default ceiling.
+  string eval_rounds = 3;
 }
 
 message CommandDetail {

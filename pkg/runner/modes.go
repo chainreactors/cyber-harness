@@ -67,7 +67,7 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 	}
 
 	return console.RunTask(ctx, rt, option, "task", "task", task, agentsession.RunInput{
-		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
+		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalRounds: option.EvalRounds,
 	})
 }
 

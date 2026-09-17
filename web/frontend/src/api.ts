@@ -362,7 +362,7 @@ export async function sendChatMessage(
   opts?: {
     persist?: boolean
     evalCriteria?: string
-    evalMaxRounds?: number
+    evalRounds?: string
     messageID?: string
     turnID?: string
     requestID?: string
@@ -374,7 +374,7 @@ export async function sendChatMessage(
   const extensions = []
   const criteria = opts?.persist ? opts.evalCriteria?.trim() : ''
   if (criteria) {
-    const value = create(AgentRunOptionsSchema, { evalCriteria: criteria, evalMaxRounds: Math.max(opts?.evalMaxRounds || 0, 0) })
+    const value = create(AgentRunOptionsSchema, { evalCriteria: criteria, evalRounds: opts?.evalRounds?.trim() || '' })
     extensions.push(anyPack(AgentRunOptionsSchema, value))
   }
   try {

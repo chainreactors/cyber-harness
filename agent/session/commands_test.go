@@ -104,3 +104,50 @@ func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
 		}
 	}
 }
+
+// /eval rounds carries the pacing, in a number or in plain language, and the
+// session hands it to the next run.
+func TestEvalRoundsCommandSetsSessionPacing(t *testing.T) {
+	runtime := newBareRuntime(t, nil, nil)
+	owner, err := New(Config{Application: testEnvironment(runtime.app), Option: &cfg.Option{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.commands, runtime.commandIndex = owner.Runtime().commands, owner.Runtime().commandIndex
+	session, err := runtime.EnsureSession(SessionOptions{ID: "eval-rounds"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := session.baseState().commands
+
+	result, err := session.Command(t.Context(), "/eval rounds")
+	if err != nil || !strings.Contains(result.GetContent()[0].GetText().GetText(), "auto") {
+		t.Fatalf("default rounds = %v, %v, want auto", result, err)
+	}
+	if _, err := session.Command(t.Context(), "/eval rounds 尽量深入，最多十轮"); err != nil {
+		t.Fatal(err)
+	}
+	if state.evalRounds != "尽量深入，最多十轮" {
+		t.Fatalf("evalRounds = %q, want the plain-language spec", state.evalRounds)
+	}
+	// Setting the pacing must not be mistaken for setting the criteria.
+	if state.evalCriteria != "" {
+		t.Fatalf("evalCriteria = %q, want it untouched", state.evalCriteria)
+	}
+	if _, err := session.Command(t.Context(), "/eval 必须列出所有开放端口"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := session.Command(t.Context(), "/eval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := status.GetContent()[0].GetText().GetText(); !strings.Contains(text, "rounds: 尽量深入，最多十轮") {
+		t.Fatalf("/eval status = %q, want the pacing shown alongside the criteria", text)
+	}
+	if _, err := session.Command(t.Context(), "/eval rounds auto"); err != nil {
+		t.Fatal(err)
+	}
+	if state.evalRounds != "" {
+		t.Fatalf("evalRounds = %q, want it cleared by auto", state.evalRounds)
+	}
+}

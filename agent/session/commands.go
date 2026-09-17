@@ -106,16 +106,38 @@ func builtinCommands() []Command {
 		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			return s.rotateCommand(ctx, commands.JoinCommandLine("/compact", args))
 		}},
-		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|off]", Description: "Runtime eval"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|rounds <spec>|off]", Description: "Runtime eval"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			state := s.baseState().commands
 			criteria := strings.TrimSpace(strings.Join(args, " "))
 			line := commands.JoinCommandLine("/eval", args)
+			// "rounds" sets how long the loop may keep going: a number is a hard
+			// ceiling, anything else is plain language the evaluator follows.
+			if len(args) > 0 && strings.EqualFold(args[0], "rounds") {
+				rounds := strings.TrimSpace(strings.Join(args[1:], " "))
+				switch rounds {
+				case "":
+					if state.evalRounds == "" {
+						return text(line, CommandPresentationPlain, "Eval rounds: auto (the evaluator decides when to stop)")
+					}
+					return text(line, CommandPresentationPlain, "Eval rounds: "+state.evalRounds)
+				case "off", "auto":
+					state.evalRounds = ""
+					return text(line, CommandPresentationPlain, "Eval rounds: auto (the evaluator decides when to stop)")
+				default:
+					state.evalRounds = rounds
+					return text(line, CommandPresentationPlain, "Eval rounds: "+rounds)
+				}
+			}
 			switch criteria {
 			case "":
 				if state.evalCriteria == "" {
 					return text(line, CommandPresentationPlain, "Goal evaluation: off")
 				}
-				return text(line, CommandPresentationPlain, "Goal evaluation: on\n  criteria: "+state.evalCriteria)
+				status := "Goal evaluation: on\n  criteria: " + state.evalCriteria
+				if state.evalRounds != "" {
+					status += "\n  rounds: " + state.evalRounds
+				}
+				return text(line, CommandPresentationPlain, status)
 			case "off":
 				state.evalCriteria = ""
 				return text(line, CommandPresentationPlain, "Goal evaluation disabled.")

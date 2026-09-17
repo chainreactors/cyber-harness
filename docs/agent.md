@@ -95,7 +95,7 @@ echo "检查这个网段的暴露面" | aiscan agent -i 192.168.1.0/24
 
 ★ v0.2.2 新增。
 
-Goal Evaluation 让一个独立的评估 LLM 在 agent 完成任务后判定是否达成目标。如果未通过，评估反馈会被注入 agent 继续执行，直到通过或达到最大重试轮数。
+Goal Evaluation 让一个独立的评估 LLM 在 agent 完成任务后判定是否达成目标。如果未通过，评估反馈会被注入 agent 继续执行。是否继续由评估 LLM 自己判断：只要还有进展就继续下一轮，判定再跑也没有意义时主动收尾。节奏可以用自然语言交代（`--eval-rounds "尽量深入，最多十轮"`），这句话原样交给评估器，由它在每轮判定时遵守。轮数上限只是防跑飞的硬保险，默认 20 轮，通常不会触及。
 
 ### 启用方式
 
@@ -111,8 +111,10 @@ aiscan> 扫描 192.168.1.0/24
 | 参数 | 说明 |
 | --- | --- |
 | `-e, --eval` | 指定评估标准（自然语言） |
+| `--eval-rounds` | 轮数节奏：纯数字为硬上限；自然语言原样交给评估器遵守；留空使用默认上限 20 |
 | `/eval <criteria>` | REPL 中设置评估标准 |
 | `/eval` | REPL 中查看当前评估标准 |
+| `/eval rounds <spec>` | REPL 中设置轮数节奏（数字或自然语言），`/eval rounds auto` 恢复默认 |
 | `/eval off` | REPL 中关闭评估 |
 
 ### 机制
@@ -123,14 +125,16 @@ aiscan> 扫描 192.168.1.0/24
 ```json
 {
   "pass": false,
+  "continue": true,
   "reason": "报告中缺少请求和响应的原始数据",
   "feedback": "请补充漏洞验证的完整 HTTP 请求和响应内容"
 }
 ```
 
-3. 如果 `pass=false`，feedback 被注入为新 prompt，agent 继续执行
-4. 循环直到 `pass=true` 或达到最大 3 轮
-5. 所有轮次用尽仍未通过时，返回最后一次执行结果（不报错）
+3. 如果 `pass=false` 且 `continue=true`，feedback 被注入为新 prompt，agent 继续执行
+4. 下一轮的评估 prompt 会带上此前每一轮的 `reason` 和 feedback，以及 `--eval-rounds` 给出的自然语言节奏要求，评估器据此判断是在推进还是在原地打转
+5. `continue=false` 是未达标任务的正常结束方式（卡死、重复失败、缺凭据、目标不可达、标准本身无法满足），返回最后一次执行结果，不报错
+6. 只有评估器始终不收尾时才会撞到轮数上限，此时记一条 warning 并返回最后一次结果。自然语言里出现的数字只会抬高这个硬上限（"最多三十轮" → 上限 30），不会压低它——收紧是评估器读懂语义后自己做的事，正则分不清"至少三轮"和"最多三轮"
 
 ### 评估器容错
 
@@ -138,7 +142,7 @@ aiscan> 扫描 192.168.1.0/24
 
 > Goal evaluation could not determine if the task is complete. Original criteria: {criteria}. Please review your work and continue if the goal is not yet fully achieved.
 
-agent 收到此反馈后继续执行，不会因为评估器问题而停止。
+agent 收到此反馈后继续执行，不会因为评估器问题而停止。连续 3 轮评估调用都失败时循环终止并返回错误——评估器已经死掉，再跑 agent 也没有判定可依。
 
 ### 事件
 

@@ -92,7 +92,7 @@ type AgentOptions struct {
 	Timeout               int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
-	EvalMaxRetries        int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
+	EvalRounds            string   `long:"eval-rounds" config:"eval_rounds" description:"How long goal evaluation may keep going: a number (hard ceiling) or plain language the evaluator follows, e.g. \"dig deep, up to ten rounds\" (empty uses the default ceiling)"`
 	ServerURL             string   `long:"server-url" config:"server_url" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`

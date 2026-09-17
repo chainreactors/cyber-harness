@@ -189,9 +189,11 @@ func (x *ListAgentsResponse) GetAgents() []*AgentView {
 }
 
 type AgentRunOptions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EvalCriteria  string                 `protobuf:"bytes,1,opt,name=eval_criteria,json=evalCriteria,proto3" json:"eval_criteria,omitempty"`
-	EvalMaxRounds uint32                 `protobuf:"varint,2,opt,name=eval_max_rounds,json=evalMaxRounds,proto3" json:"eval_max_rounds,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	EvalCriteria string                 `protobuf:"bytes,1,opt,name=eval_criteria,json=evalCriteria,proto3" json:"eval_criteria,omitempty"`
+	// A number (hard ceiling), natural language the evaluator follows, or empty
+	// for the default ceiling.
+	EvalRounds    string `protobuf:"bytes,3,opt,name=eval_rounds,json=evalRounds,proto3" json:"eval_rounds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -233,11 +235,11 @@ func (x *AgentRunOptions) GetEvalCriteria() string {
 	return ""
 }
 
-func (x *AgentRunOptions) GetEvalMaxRounds() uint32 {
+func (x *AgentRunOptions) GetEvalRounds() string {
 	if x != nil {
-		return x.EvalMaxRounds
+		return x.EvalRounds
 	}
-	return 0
+	return ""
 }
 
 type CommandDetail struct {
@@ -894,10 +896,11 @@ const file_types_agent_proto_rawDesc = "" +
 	"\x04busy\x18\a \x01(\bR\x04busyJ\x04\b\x04\x10\x05\"\x13\n" +
 	"\x11ListAgentsRequest\"D\n" +
 	"\x12ListAgentsResponse\x12.\n" +
-	"\x06agents\x18\x01 \x03(\v2\x16.cyber.agent.AgentViewR\x06agents\"^\n" +
+	"\x06agents\x18\x01 \x03(\v2\x16.cyber.agent.AgentViewR\x06agents\"n\n" +
 	"\x0fAgentRunOptions\x12#\n" +
-	"\reval_criteria\x18\x01 \x01(\tR\fevalCriteria\x12&\n" +
-	"\x0feval_max_rounds\x18\x02 \x01(\rR\revalMaxRounds\"G\n" +
+	"\reval_criteria\x18\x01 \x01(\tR\fevalCriteria\x12\x1f\n" +
+	"\veval_rounds\x18\x03 \x01(\tR\n" +
+	"evalRoundsJ\x04\b\x02\x10\x03R\x0feval_max_rounds\"G\n" +
 	"\rCommandDetail\x12\x12\n" +
 	"\x04line\x18\x01 \x01(\tR\x04line\x12\"\n" +
 	"\fpresentation\x18\x02 \x01(\tR\fpresentation\"\x92\x01\n" +

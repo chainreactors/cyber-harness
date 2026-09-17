@@ -32,7 +32,7 @@ func TestFlagsAreInertTypedAndComposable(t *testing.T) {
 	if option.Resume != "history.jsonl" || option.EvalCriteria != "done" || extra.Label != "local" {
 		t.Fatalf("typed option binding: %+v %+v", option, extra)
 	}
-	if option.Timeout != 3600 || option.EvalMaxRetries != 3 || option.Transport != "auto" {
+	if option.Timeout != 3600 || option.EvalRounds != "" || option.Transport != "auto" {
 		t.Fatalf("defaults changed: %+v", option)
 	}
 }

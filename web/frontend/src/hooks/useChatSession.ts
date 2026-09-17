@@ -510,7 +510,7 @@ export function useChatSession() {
     }
   }
 
-  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) {
+  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) {
     const sessionID = activeSessionRef.current
     if (!sessionID) return
     const trimmed = content.trim()

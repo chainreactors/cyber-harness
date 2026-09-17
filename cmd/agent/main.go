@@ -32,7 +32,7 @@ type options struct {
 	Timeout        int      `long:"timeout" description:"Overall timeout in seconds (0 disables)" default:"3600"`
 	EvalCriteria   string   `short:"e" long:"eval" description:"Goal evaluation criteria"`
 	EvalModel      string   `long:"eval-model" description:"Goal evaluation model"`
-	EvalRetries    int      `long:"eval-retries" description:"Maximum goal evaluation retries" default:"3"`
+	EvalRounds     string   `long:"eval-rounds" description:"How long goal evaluation may keep going: a number (hard ceiling) or plain language the evaluator follows"`
 	Resume         string   `short:"r" long:"resume" description:"Resume from an AOP JSONL session file"`
 	CaptureFrames  bool     `long:"capture-provider-frames" description:"Emit exact provider frames as sensitive events"`
 
@@ -129,7 +129,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		return err
 	}
 	return console.RunTask(runCtx, profile.runtime, &option, "task", "task", task, agentsession.RunInput{
-		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalMaxRounds: option.EvalMaxRetries,
+		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalRounds: option.EvalRounds,
 	})
 }
 
@@ -150,7 +150,7 @@ func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) 
 		AgentOptions: cfg.AgentOptions{
 			Prompt: parsed.Prompt, Inputs: parsed.Inputs, Skills: parsed.Skills,
 			TaskFile: parsed.TaskFile, Heartbeat: parsed.Heartbeat, Timeout: parsed.Timeout,
-			EvalCriteria: parsed.EvalCriteria, EvalModel: parsed.EvalModel, EvalMaxRetries: parsed.EvalRetries,
+			EvalCriteria: parsed.EvalCriteria, EvalModel: parsed.EvalModel, EvalRounds: parsed.EvalRounds,
 			Resume: parsed.Resume, CaptureProviderFrames: parsed.CaptureFrames, Transport: string(cfg.AgentTransportLocal),
 		},
 		NodeOptions: cfg.NodeOptions{NodeName: parsed.NodeName},
