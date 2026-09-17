@@ -78,14 +78,6 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   }
 }
 
-// Scan-result markers are persisted as AOP `message` events (role=system with
-// ext metadata.event_type) so they survive reload — but the platform timeline
-// already renders them as scan cards. Drop them from the stream handed to the
-// AOP reducer so they don't also appear as bare "scan complete" bubbles.
-function isPlatformMarkerEvent(event: AOPEvent): boolean {
-  return false
-}
-
 // Agent and evaluator prompts also use role=user in AOP, but they are internal
 // execution inputs, not operator-authored chat messages. The hub is the sole
 // author of user messages on this surface, so keep only its canonical copy.
@@ -289,7 +281,7 @@ export default function ChatPanel({
 }: Props) {
   const { t, i18n } = useTranslation('chat')
   const agentEvents = useMemo(
-    () => aopEvents.filter((event) => !isPlatformMarkerEvent(event) && !isInternalUserEvent(event)),
+    () => aopEvents.filter((event) => !isInternalUserEvent(event)),
     [aopEvents],
   )
   const liveThinkingItem = useMemo<TimelineItem | null>(() => {
@@ -354,7 +346,7 @@ export default function ChatPanel({
   // mirror the coarse turn phase into a polite live region below. It announces
   // transitions (thinking → responding → done), never the token stream itself
   // (a live region on the growing text would restart the reader on every delta).
-  const [liveStatus, setLiveStatus] = useState('')
+  const [livePhase, setLivePhase] = useState<'thinking' | 'done' | null>(null)
   const wasActiveRef = useRef(false)
 
   // Composer seed — the mobile greeting's capability cards push a starter prompt
@@ -480,10 +472,10 @@ export default function ChatPanel({
   // every pause between tool calls.
   useEffect(() => {
     const active = isBusy || isThinking
-    if (active) setLiveStatus(t('a11yThinking'))
-    else if (wasActiveRef.current) setLiveStatus(t('a11yTurnDone'))
+    if (active) setLivePhase('thinking')
+    else if (wasActiveRef.current) setLivePhase('done')
     wasActiveRef.current = active
-  }, [isBusy, isThinking, t])
+  }, [isBusy, isThinking])
 
   const activeThinkingResponseID = useMemo(
     () => isThinking ? latestStreamingResponseID(viewerTimeline) : null,
@@ -612,7 +604,7 @@ export default function ChatPanel({
             eyebrow={t('readyEyebrow')}
             title={t('ready')}
             subtitle={
-              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
+              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan &lt;target&gt;</code>{t('readyHintAfter')}</>
             }
           />
         </div>
@@ -642,7 +634,9 @@ export default function ChatPanel({
           </div>
         </ViewerChatPanel.ErrorBar>
       )}
-      <div className="sr-only" role="status" aria-live="polite">{liveStatus}</div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {livePhase ? t(livePhase === 'thinking' ? 'a11yThinking' : 'a11yTurnDone') : ''}
+      </div>
       <ViewerChatPanel.Timeline
         className="overscroll-contain !px-0 !py-0"
         contentClassName={cn(workspaceClass, 'py-4')}
@@ -1205,12 +1199,12 @@ function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: stri
 // Phone-only greeting for a fresh, empty session: an Cyber hello + a 2×2 grid of
 // capability cards, each seeding the composer with a starter prompt (Doubao's
 // home pattern). Kept in Cyber's own skin — blue accent, warm reserved for
-// severity, no mascot. The scan card seeds the real "/scan " command; the others
+// severity, no mascot. The scan card seeds the real "!scan " command; the others
 // seed editable natural-language templates the operator completes.
 function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
   const { t } = useTranslation('chat')
   const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
-    { key: 'scan', Icon: Radar, seed: '/scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
+    { key: 'scan', Icon: Radar, seed: '!scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
     { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
     { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
     { key: 'swarm', Icon: Network, seedKey: 'cardSwarmSeed', titleKey: 'cardSwarmTitle', subKey: 'cardSwarmSub' },

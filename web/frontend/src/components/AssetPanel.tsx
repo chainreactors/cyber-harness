@@ -21,6 +21,8 @@ interface AssetPanelProps {
   open: boolean
   onClose: () => void
   onSendToChat?: (text: string) => void
+  /** Fired after the asset pool is mutated so app-level caches can refresh. */
+  onChanged?: () => void
 }
 
 const EXCLUDE_COLUMNS = [
@@ -89,7 +91,7 @@ function compareAssetTypes(left: string, right: string) {
   return left.localeCompare(right)
 }
 
-export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelProps) {
+export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: AssetPanelProps) {
   const { t } = useTranslation('assets')
   const importLabels = useMemo(() => ({
     title: t('importDialog.title'),
@@ -133,6 +135,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
     cancel: t('importDialog.cancel'),
     submit: t('importDialog.submit'),
     submitting: t('importDialog.submitting'),
+    submitFailed: t('importDialog.submitFailed', { message: '{{message}}' }),
   }), [t])
   const [nodes, setNodes] = useState<SCONode[]>([])
   const [loading, setLoading] = useState(false)
@@ -224,11 +227,17 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   }, [onSendToChat, onClose])
 
   const handleImportSubmit = useCallback(async (entries: ImportFileEntry[]) => {
+    let written = 0
     for (const entry of entries) {
-      await importSCOData(entry.file, entry.artifactType)
+      written += (await importSCOData(entry.file, entry.artifactType)).nodes
     }
     void load()
-  }, [load])
+    onChanged?.()
+    // The backend accepts the upload and reports zero nodes when the parser
+    // recognizes nothing. Closing the dialog then would look like a successful
+    // import of nothing, so keep it open with the reason.
+    if (written === 0) throw new Error(t('importDialog.importedNothing'))
+  }, [load, onChanged, t])
 
   return (
     <>

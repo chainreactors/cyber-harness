@@ -325,6 +325,7 @@ export default function App() {
         open={activeToolPanel === 'assets'}
         onClose={() => setActiveToolPanel(null)}
         onSendToChat={handleAssetSendToChat}
+        onChanged={refreshSCONodes}
       />
 
       {activeToolPanel === 'ioa' && (

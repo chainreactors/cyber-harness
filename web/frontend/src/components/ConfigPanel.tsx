@@ -629,7 +629,7 @@ function LLMTab({
         {result && (
           <ResultLine ok={result.ok} title={result.ok ? undefined : result.error}>
             {result.ok
-              ? <>{t('testOk')} · {t('testLatency')} {result.latencyMs}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
+              ? <>{t('testOk')} · {t('testLatency')} {String(result.latencyMs)}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
               : <>{t('testFailed')}: {result.error}</>}
           </ResultLine>
         )}
@@ -800,7 +800,7 @@ function ConnCheckRow({ check }: { check: ConnectionCheck }) {
   return (
     <ResultLine ok={check.ok} title={check.ok ? undefined : check.error}>
       {check.ok
-        ? <>{label} · {t('testOk')} · {t('testLatency')} {check.latencyMs}ms{check.detail ? ` · ${check.detail}` : ''}</>
+        ? <>{label} · {t('testOk')} · {t('testLatency')} {String(check.latencyMs)}ms{check.detail ? ` · ${check.detail}` : ''}</>
         : <>{label} · {t('testFailed')}: {check.error}</>}
     </ResultLine>
   )

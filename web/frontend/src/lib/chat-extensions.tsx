@@ -1,5 +1,6 @@
 import { Activity, Bot, CheckCircle2 } from 'lucide-react'
 import { registerTimelineRenderer } from '@/viewer'
+import i18n from '../i18n'
 import type { SCONode } from '../api'
 import ScanProgressInline from '../components/chat/ScanProgressInline'
 import ScanSummaryCard from '../components/chat/ScanSummaryCard'
@@ -17,7 +18,7 @@ export function registerChatExtensions() {
       )
     },
     mark: {
-      label: 'Scan',
+      label: () => i18n.t('chat:scan'),
       icon: Activity,
       dotClass: 'border-blue-400 bg-blue-400',
     },
@@ -43,7 +44,7 @@ export function registerChatExtensions() {
       )
     },
     mark: {
-      label: 'Complete',
+      label: () => i18n.t('chat:complete'),
       icon: CheckCircle2,
       dotClass: 'border-emerald-400 bg-emerald-400',
     },
@@ -55,13 +56,13 @@ export function registerChatExtensions() {
         <div className="h-px flex-1 bg-border" />
         <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <Bot className="h-3 w-3" />
-          {(item.data.agentName as string) || 'Agent'} joined
+          {i18n.t('chat:agentJoined', { name: (item.data.agentName as string) || i18n.t('chat:agent') })}
         </span>
         <div className="h-px flex-1 bg-border" />
       </div>
     ),
     mark: {
-      label: 'Agent',
+      label: () => i18n.t('chat:agent'),
       icon: Bot,
       dotClass: 'border-primary bg-primary',
     },
