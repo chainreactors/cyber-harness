@@ -13,7 +13,7 @@ Tool Registry 和 Command Registry 分别定义 `tool.Tool` 与 `commands.Comman
 
 `tools/*` 保存原始领域实现与 Tool/Command 声明，`pkg/exts/*` 适配 Profile 生命周期和
 Registry 贡献，`pkg/profile` 只提供 `Application`、`Factory` 与 `Request`。
-具体产品图由 `cmd/aiscan` 和 `cmd/agent` 声明，不能放回共享包。`pkg/runner` 仅保留
+具体 Profile 图由 `cmd/aiscan` 和 `cmd/agent` 声明，不能放回共享包。`pkg/runner` 仅保留
 aiscan 的共享运行模式逻辑。
 
 Flags、Configs、静态 Skill、协议声明和宿主绑定也可独立提供，不必实现 Extension。

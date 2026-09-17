@@ -24,7 +24,7 @@ func TestRecordEditionBuildTags(t *testing.T) {
 }
 
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	product, err := newCyberProfile(cyberProfileConfig{
+	p, err := newCyberProfile(cyberProfileConfig{
 		Option: &cfg.Option{},
 		Application: applicationConfig{
 			Logger: telemetry.NopLogger(), SkipEngines: true,
@@ -33,11 +33,11 @@ func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := product.Load(t.Context()); err != nil {
+	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = product.Close(context.Background()) })
-	application, err := product.App()
+	t.Cleanup(func() { _ = p.Close(context.Background()) })
+	application, err := p.App()
 	if err != nil {
 		t.Fatal(err)
 	}

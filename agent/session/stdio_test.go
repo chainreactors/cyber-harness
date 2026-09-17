@@ -23,7 +23,7 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-// stdioHost is only a fixture for the existing product behavior tests.
+// stdioHost is only a fixture for the existing protocol behavior tests.
 // Transport framing and dispatch run through pkg/host in every test.
 type stdioHost struct {
 	ctx    context.Context

@@ -12,7 +12,7 @@ import (
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
-// Config contains only scanner inputs selected by the product profile.
+// Config contains only scanner inputs selected by the Profile.
 type Config struct {
 	Resources resources.Options
 	Recon     engine.ReconOptions

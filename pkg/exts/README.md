@@ -1,6 +1,6 @@
 # Extensions
 
-`pkg/exts` 是行为实现与产品生命周期之间的适配层。`tools/` 和 `agent/` 保持普通业务类型，
+`pkg/exts` 是行为实现与 Profile 生命周期之间的适配层。`tools/` 和 `agent/` 保持普通业务类型，
 需要初始化、后台工作或清理时才由这里的 Extension 持有。
 
 Tool、Command、Skill 和 Runtime 才是调用者使用的 domain capabilities；Extension 本身不是
@@ -22,7 +22,7 @@ TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动�
 
 依赖顺序由 Profile 组合根或明确用例入口中的线性列表表达。可选功能由是否构造对应 Extension
 决定，不使用 Descriptor、Provides/Requires 或 capability gating。IOA client/server 相互独立；
-产品兼容映射留在 `cmd/aiscan`。完整约定见 [系统架构](../../docs/architecture.md)。
+兼容映射留在 `cmd/aiscan`。完整约定见 [系统架构](../../docs/architecture.md)。
 
 ## 规则
 

@@ -42,7 +42,7 @@ func (scannerCommands) Run(context.Context, []string, *commands.Execution) (any,
 	return nil, errors.New("unexpected command execution")
 }
 
-type scannerProduct struct {
+type scannerProfile struct {
 	app          *apppkg.App
 	runtimeErr   error
 	loaded       bool
@@ -50,29 +50,29 @@ type scannerProduct struct {
 	runtimeCalls int
 }
 
-func (p *scannerProduct) Load(context.Context) error { p.loaded = true; return nil }
-func (p *scannerProduct) Close(context.Context) error {
+func (p *scannerProfile) Load(context.Context) error { p.loaded = true; return nil }
+func (p *scannerProfile) Close(context.Context) error {
 	p.closed = true
 	return nil
 }
-func (p *scannerProduct) App() (*apppkg.App, error) { return p.app, nil }
-func (p *scannerProduct) Runtime() (*agentsession.Runtime, error) {
+func (p *scannerProfile) App() (*apppkg.App, error) { return p.app, nil }
+func (p *scannerProfile) Runtime() (*agentsession.Runtime, error) {
 	p.runtimeCalls++
 	return nil, p.runtimeErr
 }
-func (*scannerProduct) RegisterNamespaces(*aop.NamespaceMux) error { return nil }
-func (*scannerProduct) AgentStatus() *aop.AgentStatus              { return &aop.AgentStatus{} }
-func (*scannerProduct) ConsoleBindings() *consoleapi.Bindings      { return nil }
+func (*scannerProfile) RegisterNamespaces(*aop.NamespaceMux) error { return nil }
+func (*scannerProfile) AgentStatus() *aop.AgentStatus              { return &aop.AgentStatus{} }
+func (*scannerProfile) ConsoleBindings() *consoleapi.Bindings      { return nil }
 
 func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	runtimeErr := errors.New("profile runtime sentinel")
 	application := &apppkg.App{Commands: scannerCommands{}}
 	application.SetProvider(scannerProvider{}, provider.ProviderConfig{})
-	product := &scannerProduct{app: application, runtimeErr: runtimeErr}
+	p := &scannerProfile{app: application, runtimeErr: runtimeErr}
 	var request profilepkg.Request
 	factory := profilepkg.Factory(func(value profilepkg.Request) (profilepkg.Application, error) {
 		request = value
-		return product, nil
+		return p, nil
 	})
 	option := &cfg.Option{LLMOptions: cfg.LLMOptions{AI: true}}
 	err := RunDirectScannerMode(t.Context(), factory, option, []string{"gogo", "-i", "127.0.0.1"}, telemetry.NopLogger())
@@ -88,7 +88,7 @@ func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	if !request.Session.PromptConfig.ScannerAgentMode || request.Session.PromptConfig.ScannerName != "gogo" {
 		t.Fatalf("scanner prompt config = %#v", request.Session.PromptConfig)
 	}
-	if !product.loaded || !product.closed || product.runtimeCalls != 1 {
-		t.Fatalf("product lifecycle: loaded=%v closed=%v runtime calls=%d", product.loaded, product.closed, product.runtimeCalls)
+	if !p.loaded || !p.closed || p.runtimeCalls != 1 {
+		t.Fatalf("profile lifecycle: loaded=%v closed=%v runtime calls=%d", p.loaded, p.closed, p.runtimeCalls)
 	}
 }

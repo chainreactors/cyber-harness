@@ -134,14 +134,14 @@ func (t *BashTool) attachShellCommands(registry commands.Executor) {
 }
 
 // EnableShellCommands binds the pseudo-command registry used when a shell line
-// composes registered commands. Product profiles call this before publication.
+// composes registered commands. Profiles call this before publication.
 func (t *BashTool) EnableShellCommands(registry commands.Executor) {
 	t.attachShellCommands(registry)
 }
 
 // HideCommands removes control-only commands from Bash discovery and shell
 // aliases while leaving direct, policy-checked registry execution available.
-// Product profiles configure this before publishing the Bash tool.
+// Profiles configure this before publishing the Bash tool.
 func (t *BashTool) HideCommands(names ...string) {
 	if t.hiddenCommands == nil {
 		t.hiddenCommands = make(map[string]struct{}, len(names))

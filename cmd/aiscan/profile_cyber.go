@@ -111,7 +111,7 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 }
 
 func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
-	product := &cyberProfile{}
+	p := &cyberProfile{}
 	if config.Session != nil {
 		config.Session = cloneConfig(config.Session)
 		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
@@ -201,10 +201,10 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		deps := ioaext.Dependencies{Events: eventStream, Logger: logger, Skills: []skills.Bundle{bundle}}
 		if config.Session != nil {
 			deps.Deliver = func(ctx context.Context, message inbox.Message) error {
-				if product.extensions == nil || !product.extensions.Active() {
+				if p.extensions == nil || !p.extensions.Active() {
 					return agentsession.ErrUnavailable
 				}
-				return product.runtime.Deliver(ctx, message)
+				return p.runtime.Deliver(ctx, message)
 			}
 		}
 		ioa = ioaext.New(*config.IOA, deps)
@@ -213,8 +213,8 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	var run *agentsession.Runtime
 	var ioaService *ioatools.Service
 	if config.Session != nil || ioa != nil {
-		product.tui = tuiext.New()
-		values = append(values, product.tui)
+		p.tui = tuiext.New()
+		values = append(values, p.tui)
 	}
 	if ioa != nil {
 		ioaService = ioa.Service()
@@ -257,9 +257,9 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	product.extensions, product.app, product.runtime, product.ioa = extensions, application, run, ioaService
-	product.namespaces = namespaceRegistry
-	return product, nil
+	p.extensions, p.app, p.runtime, p.ioa = extensions, application, run, ioaService
+	p.namespaces = namespaceRegistry
+	return p, nil
 }
 
 func (p *cyberProfile) Load(ctx context.Context) error {

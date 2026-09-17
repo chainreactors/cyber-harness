@@ -21,7 +21,7 @@ func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 }
 
 // LoadDistributeConfigDocument maps an already decoded cyber.yaml document onto
-// the canonical proto representation. Products whose configuration is wider
+// the canonical proto representation. Applications whose configuration is wider
 // than the proto drop their own keys before calling this.
 func LoadDistributeConfigDocument(raw map[string]any) (*types.DistributeConfig, error) {
 	jsonData, err := json.Marshal(raw)

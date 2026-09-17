@@ -359,7 +359,7 @@ export function useChatSession() {
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
           }).catch(() => {})        } catch {
-          // Ignore malformed product extensions; the AOP stream remains usable.
+          // Ignore malformed application extensions; the AOP stream remains usable.
         }
         break
       }

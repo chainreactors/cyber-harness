@@ -112,7 +112,7 @@ help:
 	@echo "  make re2-static       Install the static RE2 SDK"
 	@echo "  make record-native    Install the recorder SDK"
 	@echo "  make proto-gen        Regenerate all AOP and Cyber protobuf bindings"
-	@echo "  make harness          Run user scenarios against the real product process"
+	@echo "  make harness          Run user scenarios against the real application process"
 	@echo "  make harness-llm      Run real LLM scenarios (requires explicit credentials)"
 	@echo "  make check-architecture  Run static repository and dependency guards"
 	@echo "  make ldflags          Print the -ldflags the build targets use"

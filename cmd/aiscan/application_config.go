@@ -13,8 +13,8 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-// applicationConfig is product composition input. It stays in cmd/aiscan so
-// the shared App contains runtime state rather than scanner/product settings.
+// applicationConfig is composition input. It stays in cmd/aiscan so the shared
+// App contains runtime state rather than scanner settings.
 type applicationConfig struct {
 	Resolved      *cfg.Resolved
 	DataDir       string

@@ -1,6 +1,6 @@
 // Package types contains Cyber-owned protobuf messages and typed AOP extension helpers.
 //
-// Stable AOP payloads live in the root aop package. Product-specific metadata
+// Stable AOP payloads live in the root aop package. Application-specific metadata
 // is carried as typed Any values owned by Cyber protobuf packages.
 package types
 

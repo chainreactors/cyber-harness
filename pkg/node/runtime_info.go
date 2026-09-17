@@ -142,7 +142,7 @@ func commandDescription(store *skills.Store, location string) string {
 	return strings.TrimSpace(frontmatter.Description)
 }
 
-// AgentStatus reports Agent provider/model health; the profile adds product status.
+// AgentStatus reports Agent provider/model health; the Profile adds its status.
 func AgentStatus(app *apppkg.App) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
 	if app != nil {

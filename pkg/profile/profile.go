@@ -1,7 +1,7 @@
 // Package profile defines the lifecycle boundary shared by Cyber hosts.
-// Product-specific composition belongs to the executable that implements
-// Application and owns its extension.Set; this package validates product
-// factories without adding another lifecycle wrapper.
+// Composition belongs to the executable that implements Application and owns
+// its extension.Set; this package validates factories without adding another
+// lifecycle wrapper.
 package profile
 
 import (
@@ -18,8 +18,8 @@ import (
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 )
 
-// Application is the complete runtime surface published by a product
-// composition root. Load must publish nothing until the whole graph is active.
+// Application is the complete runtime surface published by a composition root.
+// Load must publish nothing until the whole graph is active.
 type Application interface {
 	Load(context.Context) error
 	Close(context.Context) error
@@ -32,7 +32,7 @@ type Application interface {
 }
 
 // Request contains host-selected inputs. Extension selection and resource
-// construction remain decisions of the product Factory.
+// construction remain decisions of the Factory.
 type Request struct {
 	Option       *cfg.Option
 	ProviderMode ProviderMode
@@ -40,8 +40,8 @@ type Request struct {
 	Logger       telemetry.Logger
 }
 
-// ProviderMode is the host's provider requirement for one product graph and
-// the mode consumed directly by provider startup.
+// ProviderMode is the host's provider requirement for one profile graph and the
+// mode consumed directly by provider startup.
 type ProviderMode = provider.StartupMode
 
 const (
@@ -50,7 +50,7 @@ const (
 	ProviderOptional = provider.StartupOptional
 )
 
-// Factory constructs an unpublished product graph. The caller owns every
+// Factory constructs an unpublished profile graph. The caller owns every
 // non-nil result, including cleanup when construction or loading fails.
 type Factory func(Request) (Application, error)
 

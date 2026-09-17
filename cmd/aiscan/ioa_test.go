@@ -18,22 +18,22 @@ import (
 )
 
 func TestProfileWithoutIOAHasNoCollaborationContributions(t *testing.T) {
-	product, err := newCyberProfile(minimalConfig(nil))
+	p, err := newCyberProfile(minimalConfig(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer product.Close(context.Background())
-	if err := product.Load(t.Context()); err != nil {
+	defer p.Close(context.Background())
+	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	application, err := product.App()
+	application, err := p.App()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if application.Commands.Has("ioa") || application.Skills.ReadBody("ioa") != "" || application.Skills.ReadBody("checkpoint") != "" {
 		t.Fatal("unselected client contributed commands or skills")
 	}
-	if product.ConsoleBindings() != nil || product.AgentStatus().Bound {
+	if p.ConsoleBindings() != nil || p.AgentStatus().Bound {
 		t.Fatal("unselected client exposed host capabilities")
 	}
 }
@@ -69,27 +69,27 @@ func TestServerOutlivesClientProfileReplacement(t *testing.T) {
 	for range 2 {
 		config := minimalConfig(nil)
 		config.IOA = &ioatools.Config{URL: url, NodeName: "client", Space: "persistent", AutoRegister: true, RegisterCommands: true}
-		product, err := newCyberProfile(config)
+		p, err := newCyberProfile(config)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if product.AgentStatus().Bound || product.ConsoleBindings() != nil {
+		if p.AgentStatus().Bound || p.ConsoleBindings() != nil {
 			t.Fatal("unpublished profile exposed IOA state")
 		}
-		if err := product.Load(t.Context()); err != nil {
+		if err := p.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		app, err := product.App()
+		app, err := p.App()
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !app.Commands.Has("ioa") || app.Skills.ReadBody("checkpoint") == "" {
 			t.Fatal("client contribution is incomplete")
 		}
-		if !product.AgentStatus().Bound {
+		if !p.AgentStatus().Bound {
 			t.Fatal("bound client status missing")
 		}
-		reader := product.ioa
+		reader := p.ioa
 		if reader == nil {
 			t.Fatal("loaded profile did not publish its query capability")
 		}
@@ -97,10 +97,10 @@ func TestServerOutlivesClientProfileReplacement(t *testing.T) {
 		if err != nil || len(spaces) != 1 || spaces[0].ID != space.ID {
 			t.Fatalf("profile queries = %v, %v", spaces, err)
 		}
-		if err := product.Close(t.Context()); err != nil {
+		if err := p.Close(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if product.AgentStatus().Bound || product.ConsoleBindings() != nil {
+		if p.AgentStatus().Bound || p.ConsoleBindings() != nil {
 			t.Fatal("closed profile exposed IOA state")
 		}
 		if _, err := reader.ListSpaces(t.Context()); err == nil {

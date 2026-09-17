@@ -249,7 +249,7 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 	}
 }
 
-func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
+func TestLoadContextDoesNotOwnProfileLifetime(t *testing.T) {
 	p, err := newCyberProfile(minimalConfig(&agentsession.Config{}))
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestLoadContextDoesNotOwnProductLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := run.Context().Err(); err != nil {
-		t.Fatalf("startup context canceled product lifetime: %v", err)
+		t.Fatalf("startup context canceled profile lifetime: %v", err)
 	}
 	if err := p.Close(context.Background()); err != nil {
 		t.Fatal(err)

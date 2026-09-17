@@ -25,7 +25,7 @@ type Config struct {
 	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
 	// Tmux constructs the terminal command published by this extension. Nil
-	// selects the native command; product profiles may supply their own session
+	// selects the native command; Profiles may supply their own session
 	// ownership policy without replacing an already published registration.
 	Tmux func(*terminaltool.BashTool) commands.Command
 	// HiddenCommands are control-only registry commands omitted from the Bash

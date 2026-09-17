@@ -298,4 +298,4 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 
 ### Extension architecture
 
-The plugin host is `core/extension.Set`. Product adapters live under `pkg/exts`; raw tool implementations stay under `tools`, and agent loop code stays under `agent`. A Set activates the tool and command registries only after every contributor loads, then drains calls before closing resources.
+The plugin host is `core/extension.Set`. Extension adapters live under `pkg/exts`; raw tool implementations stay under `tools`, and agent loop code stays under `agent`. A Set activates the tool and command registries only after every contributor loads, then drains calls before closing resources.

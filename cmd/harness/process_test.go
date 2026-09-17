@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	buildOnce     sync.Once
-	buildErr      error
-	productBinary string
-	artifactRoot  string
+	buildOnce      sync.Once
+	buildErr       error
+	executablePath string
+	artifactRoot   string
 )
 
 // The harness deliberately imports no application implementation packages.
@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 	if pidText := os.Getenv("CYBER_HARNESS_SIGNAL_PID"); pidText != "" {
 		pid, err := strconv.Atoi(pidText)
 		if err == nil && pid > 0 {
-			err = interruptProduct(pid)
+			err = interruptProcess(pid)
 		} else {
 			err = fmt.Errorf("invalid child pid")
 		}
@@ -71,11 +71,11 @@ func runHarness(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	productBinary = filepath.Join(artifactRoot, "aiscan")
+	executablePath = filepath.Join(artifactRoot, "aiscan")
 	if runtime.GOOS == "windows" {
-		productBinary += ".exe"
+		executablePath += ".exe"
 	}
-	defer os.Remove(productBinary)
+	defer os.Remove(executablePath)
 	fmt.Fprintln(os.Stderr, "harness artifacts:", artifactRoot)
 	return m.Run()
 }
@@ -97,7 +97,7 @@ func repositoryRoot() (string, error) {
 	}
 }
 
-func buildProduct(t *testing.T) string {
+func buildExecutable(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
 		root, err := repositoryRoot()
@@ -109,7 +109,7 @@ func buildProduct(t *testing.T) string {
 		defer cancel()
 		// The full edition includes CSTX, which only compiles with cgo. The
 		// harness runner's default CGO_ENABLED=1 covers that.
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full", "-o", productBinary, "./cmd/aiscan")
+		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full", "-o", executablePath, "./cmd/aiscan")
 		cmd.Dir = root
 		data, err := cmd.CombinedOutput()
 		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {
@@ -117,13 +117,13 @@ func buildProduct(t *testing.T) string {
 			return
 		}
 		if err != nil {
-			buildErr = fmt.Errorf("build current full product: %w\n%s", err, data)
+			buildErr = fmt.Errorf("build current full application: %w\n%s", err, data)
 		}
 	})
 	if buildErr != nil {
 		t.Fatal(buildErr)
 	}
-	return productBinary
+	return executablePath
 }
 
 type workspace struct {
@@ -135,7 +135,7 @@ type workspace struct {
 
 func newWorkspace(t *testing.T) *workspace {
 	t.Helper()
-	buildProduct(t)
+	buildExecutable(t)
 	dir, err := os.MkdirTemp(artifactRoot, t.Name()+"-")
 	if err != nil {
 		t.Fatal(err)
@@ -175,13 +175,13 @@ func redactSecrets(data []byte) []byte {
 
 // Buffer complete log lines so a credential split across Write calls cannot
 // escape redaction. Raw child output is never written to an artifact file.
-type productLog struct {
+type processLog struct {
 	mu      sync.Mutex
 	file    *os.File
 	pending []byte
 }
 
-func (l *productLog) Write(data []byte) (int, error) {
+func (l *processLog) Write(data []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.pending = append(l.pending, data...)
@@ -204,7 +204,7 @@ func (l *productLog) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (l *productLog) Close() error {
+func (l *processLog) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_, writeErr := l.file.Write(redactSecrets(l.pending))
@@ -212,7 +212,7 @@ func (l *productLog) Close() error {
 	return errors.Join(writeErr, l.file.Close())
 }
 
-type product struct {
+type testProcess struct {
 	cmd     *exec.Cmd
 	done    chan struct{}
 	waitErr error
@@ -222,7 +222,7 @@ type product struct {
 
 // Use an explicit config and isolated data directory. Personal credentials and
 // endpoint environment settings must not affect a reproducible local scenario.
-func productEnvironment(includeLLM bool) []string {
+func testEnvironment(includeLLM bool) []string {
 	// Keep only operating-system and native-loader settings. In particular,
 	// LLM_*, OPENAI_*, vendor credentials and IOA settings are not inherited.
 	allowed := map[string]bool{
@@ -253,24 +253,24 @@ func productEnvironment(includeLLM bool) []string {
 	return env
 }
 
-func (w *workspace) launch(t *testing.T, includeLLM bool) *product {
+func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 	t.Helper()
 	w.starts++
-	p := &product{done: make(chan struct{}), logPath: filepath.Join(w.dir, fmt.Sprintf("process-%02d.log", w.starts))}
+	p := &testProcess{done: make(chan struct{}), logPath: filepath.Join(w.dir, fmt.Sprintf("process-%02d.log", w.starts))}
 	log, err := os.Create(p.logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	p.cmd = exec.CommandContext(ctx, productBinary,
+	p.cmd = exec.CommandContext(ctx, executablePath,
 		"--config", w.config, "--data-dir", filepath.Join(w.dir, "data"), "--no-color",
 		"web", "--addr", "127.0.0.1:0",
 		"--db", w.db, "--token", "harness-local-access", "--no-agent")
 	p.cmd.Dir = w.dir
-	p.cmd.Env = productEnvironment(includeLLM)
-	output := &productLog{file: log}
+	p.cmd.Env = testEnvironment(includeLLM)
+	output := &processLog{file: log}
 	p.cmd.Stdout, p.cmd.Stderr = output, output
-	configureProductProcess(p.cmd)
+	configureProcess(p.cmd)
 	if err := p.cmd.Start(); err != nil {
 		cancel()
 		log.Close()
@@ -294,12 +294,12 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *product {
 
 var listening = regexp.MustCompile(`aiscan server listening on http://(127\.0\.0\.1:\d+)`)
 
-func (w *workspace) start(t *testing.T) *product {
+func (w *workspace) start(t *testing.T) *testProcess {
 	t.Helper()
 	return w.startMode(t, false)
 }
 
-func (w *workspace) startMode(t *testing.T, includeLLM bool) *product {
+func (w *workspace) startMode(t *testing.T, includeLLM bool) *testProcess {
 	t.Helper()
 	p := w.launch(t, includeLLM)
 	deadline := time.NewTimer(30 * time.Second)
@@ -318,26 +318,26 @@ func (w *workspace) startMode(t *testing.T, includeLLM bool) *product {
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
-					t.Logf("product ready pid=%d url=%s", p.cmd.Process.Pid, p.url)
+					t.Logf("application ready pid=%d url=%s", p.cmd.Process.Pid, p.url)
 					return p
 				}
 			}
 		}
 		select {
 		case <-p.done:
-			t.Fatalf("product exited before ready: %v\n%s", p.waitErr, readFile(t, p.logPath))
+			t.Fatalf("application exited before ready: %v\n%s", p.waitErr, readFile(t, p.logPath))
 		case <-deadline.C:
-			t.Fatalf("product readiness timed out\n%s", readFile(t, p.logPath))
+			t.Fatalf("application readiness timed out\n%s", readFile(t, p.logPath))
 		case <-ticker.C:
 		}
 	}
 }
 
-func (p *product) crash(t *testing.T) {
+func (p *testProcess) crash(t *testing.T) {
 	t.Helper()
 	select {
 	case <-p.done:
-		t.Fatalf("product exited before crash scenario: %v", p.waitErr)
+		t.Fatalf("application exited before crash scenario: %v", p.waitErr)
 	default:
 	}
 	if err := p.cmd.Process.Kill(); err != nil {
@@ -350,7 +350,7 @@ func (p *product) crash(t *testing.T) {
 	}
 }
 
-func (p *product) interrupt(t *testing.T) {
+func (p *testProcess) interrupt(t *testing.T) {
 	t.Helper()
 	// A separate controller preserves the test runner's console on Windows.
 	bin, err := os.Executable()
@@ -360,9 +360,9 @@ func (p *product) interrupt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	controller := exec.CommandContext(ctx, bin, "-test.run=^$")
-	controller.Env = append(productEnvironment(false), "CYBER_HARNESS_SIGNAL_PID="+strconv.Itoa(p.cmd.Process.Pid))
+	controller.Env = append(testEnvironment(false), "CYBER_HARNESS_SIGNAL_PID="+strconv.Itoa(p.cmd.Process.Pid))
 	if output, err := controller.CombinedOutput(); err != nil {
-		t.Fatalf("interrupt product: %v\n%s", err, output)
+		t.Fatalf("interrupt application: %v\n%s", err, output)
 	}
 }
 
@@ -373,7 +373,7 @@ type userClient struct {
 	mu     sync.Mutex
 }
 
-func (p *product) user(t *testing.T, name string) *userClient {
+func (p *testProcess) user(t *testing.T, name string) *userClient {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {

@@ -19,7 +19,7 @@ import (
 // Values is configuration data, never a registry of running services.
 type Values map[string]map[string]any
 
-// Section is an inert, per-product configuration declaration.
+// Section is an inert configuration declaration.
 type Section struct {
 	Key         string
 	Aliases     []string

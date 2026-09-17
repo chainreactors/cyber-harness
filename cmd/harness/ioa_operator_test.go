@@ -139,9 +139,9 @@ type ioaOperation struct {
 	Node    string `json:"node"`
 }
 
-// Each operator owns its own model history and product process. The harness
+// Each operator owns its own model history and application process. The harness
 // admits only IOA operations with inert data, never model-generated shell code.
-// This is a model acting as an external user, not the product's Agent loop.
+// This is a model acting as an external user, not the application's Agent loop.
 type ioaOperator struct {
 	client         *stdioClient
 	config         map[string]any
@@ -196,7 +196,7 @@ func (o *ioaOperator) phase(t *testing.T, ctx context.Context, task string) {
 	for _, name := range []string{"text", "message", "node"} {
 		properties[name] = map[string]any{"type": "string"}
 	}
-	tool := map[string]any{"type": "function", "function": map[string]any{"name": "ioa", "description": "Perform one IOA operation through your own local product process.", "parameters": map[string]any{"type": "object", "properties": properties, "required": []string{"action", "text", "message", "node"}, "additionalProperties": false}}}
+	tool := map[string]any{"type": "function", "function": map[string]any{"name": "ioa", "description": "Perform one IOA operation through your own local application process.", "parameters": map[string]any{"type": "object", "properties": properties, "required": []string{"action", "text", "message", "node"}, "additionalProperties": false}}}
 	httpClient := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	for o.requests < 24 {
 		o.requests++

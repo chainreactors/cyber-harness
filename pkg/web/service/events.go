@@ -156,7 +156,7 @@ func isReliableAOPEvent(event *aop.Event) bool {
 	return false
 }
 
-// runHubCommand executes a product-level slash command that needs hub state.
+// runHubCommand executes an application-level slash command that needs hub state.
 // name is the canonical catalog name without its leading slash. Agent-scope
 // commands never reach here; they fall through to the agent bridge.
 func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, params map[string]any) {

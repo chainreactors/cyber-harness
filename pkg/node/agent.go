@@ -33,29 +33,29 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	product, err := factory.Build(profile.Request{
+	p, err := factory.Build(profile.Request{
 		Option: option, ProviderMode: profile.ProviderOptional, Logger: logger,
 		Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
 	})
 	if err != nil {
 		return err
 	}
-	if err := product.Load(ctx); err != nil {
-		_ = product.Close(context.Background())
+	if err := p.Load(ctx); err != nil {
+		_ = p.Close(context.Background())
 		return err
 	}
-	defer product.Close(context.Background())
-	application, err := product.App()
+	defer p.Close(context.Background())
+	application, err := p.App()
 	if err != nil {
 		return err
 	}
 	_, providerConfig := application.ProviderState()
 	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
-	rt, err := product.Runtime()
+	rt, err := p.Runtime()
 	if err != nil {
 		return err
 	}
-	repl, err := console.StartPersistent(rt, option, product.ConsoleBindings())
+	repl, err := console.StartPersistent(rt, option, p.ConsoleBindings())
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		option: option,
 		logger: logger,
 		ready:  make(chan struct{}),
-		status: product.AgentStatus,
+		status: p.AgentStatus,
 	}
 
 	connectionDone := make(chan struct{})
@@ -88,9 +88,9 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 			Chat:               chatHandler,
 			NodeID:             nodeID,
 			Runtime:            DefaultRuntimeInfo(),
-			Status:             product.AgentStatus,
+			Status:             p.AgentStatus,
 			Menu:               func() []*types.CommandSpec { return CommandSpecs(rt) },
-			RegisterNamespaces: product.RegisterNamespaces,
+			RegisterNamespaces: p.RegisterNamespaces,
 		}
 		_ = connect(ctx, connection)
 	}()

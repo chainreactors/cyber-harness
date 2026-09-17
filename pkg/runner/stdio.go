@@ -15,17 +15,17 @@ import (
 	"github.com/chainreactors/cyber/pkg/profile"
 )
 
-// RunStdio assembles the product runtime around the transport-only host.
+// RunStdio assembles a Profile around the transport-only host.
 func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
+	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
 	mux := aop.NewNamespaceMux(ctx)
-	if err := product.RegisterNamespaces(mux); err != nil {
-		_ = product.Close(context.Background())
+	if err := p.RegisterNamespaces(mux); err != nil {
+		_ = p.Close(context.Background())
 		return err
 	}
 	h := host.New(mux)
@@ -36,7 +36,7 @@ func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, 
 	// One owner closes in dependency order and checks failures from the last
 	// session-ended events as well as ordinary replies.
 	defer func() {
-		_ = product.Close(context.Background())
+		_ = p.Close(context.Background())
 		unsubscribe.Cancel()
 		h.Close()
 		if err := h.Err(); err != nil {

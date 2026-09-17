@@ -21,7 +21,7 @@ import (
 	"github.com/chainreactors/utils/pty"
 )
 
-// loadPTYRegistry mounts the PTY extension exactly as a product profile does.
+// loadPTYRegistry mounts the PTY extension exactly as a Profile does.
 func loadPTYRegistry(t *testing.T, ctx context.Context, bash *terminaltool.BashTool) *namespaces.Registry {
 	t.Helper()
 	registry := namespaces.New()

@@ -224,7 +224,7 @@ AOP error 事件把 code 保存在 `ProtocolError.code`，params 使用
 
 **机制**: Runtime 产生的 typed AOP event 是 Agent 消息、工具调用和 turn 状态的唯一语义来源。Web 层直接转发和持久化这些事件，不再合成第二套 assistant 完成事件，也不再为中间轮次维护独立的聊天事件协议。
 
-Cyber 产品事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
+Cyber 应用事件使用 AOP core 的 typed Any 插槽；例如 scan 完成通过
 `Event.extension = Any<cyber.scan.SessionScanEvent>` 表达。`Any.type_url` 是唯一类型身份，不再维护 `ExtensionEvent`、namespace 字符串或 `DomainEvent`。
 
 **文件**: `pkg/runner/`, `aop/`, `pkg/web/service.go`

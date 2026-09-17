@@ -90,7 +90,7 @@ func Register(reg tool.Executor) {
 
 ## 社交媒体短文案
 
-### 版本 A：产品发布风格
+### 版本 A：应用发布风格
 
 Cyber Web 现在可以把扫描、Agent 和执行节点放进同一个工作台。
 

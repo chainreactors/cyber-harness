@@ -230,7 +230,7 @@ func requestContains(body map[string]any, needle string) bool {
 	return false
 }
 
-// Completion evidence must be supplied by the product's system inbox, not
+// Completion evidence must be supplied by the application's system inbox, not
 // quoted or invented in an assistant response or tool result.
 func requestCompletionContains(body map[string]any, needle string) bool {
 	messages, _ := body["messages"].([]any)

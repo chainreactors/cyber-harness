@@ -54,11 +54,11 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
+	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
-	defer product.Close(context.Background())
+	defer p.Close(context.Background())
 
 	task = skills.ExpandCommand(task, rt.App().Skills)
 	task, err = rt.App().Skills.ApplySelected(task, option.Skills)
@@ -76,14 +76,14 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 // ---------------------------------------------------------------------------
 
 func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{
+	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
 	if err != nil {
 		return err
 	}
-	defer product.Close(context.Background())
+	defer p.Close(context.Background())
 
 	if _, err := rt.App().Skills.ApplySelected("", option.Skills); err != nil {
 		return err
@@ -92,7 +92,7 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 	if setInterrupt != nil {
 		setInterrupt(func() bool { return false })
 	}
-	return console.AttachLocalREPL(ctx, rt, option, product.ConsoleBindings())
+	return console.AttachLocalREPL(ctx, rt, option, p.ConsoleBindings())
 }
 
 // ---------------------------------------------------------------------------
@@ -134,17 +134,17 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 			},
 		}
 	}
-	product, err := factory.Build(profile.Request{
+	p, err := factory.Build(profile.Request{
 		Option: option, ProviderMode: mode.Provider, Session: sessionConfig, Logger: scannerLogger,
 	})
 	if err != nil {
 		return fmt.Errorf("construct scanner profile: %w", err)
 	}
-	if err := product.Load(ctx); err != nil {
+	if err := p.Load(ctx); err != nil {
 		return fmt.Errorf("load scanner profile: %w", err)
 	}
-	defer product.Close(context.Background())
-	application, err := product.App()
+	defer p.Close(context.Background())
+	application, err := p.App()
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}
 
 	if option.AI && scannerArgs[0] != "scan" {
-		runtime, runtimeErr := product.Runtime()
+		runtime, runtimeErr := p.Runtime()
 		if runtimeErr != nil {
 			return runtimeErr
 		}

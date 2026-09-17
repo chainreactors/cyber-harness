@@ -1,6 +1,6 @@
 # Cyber 协议与传输架构
 
-本文定义 Cyber 的协议职责。ConnectRPC 承担产品管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
+本文定义 Cyber 的协议职责。ConnectRPC 承担应用管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
 
 ## 1. 唯一真相
 
@@ -25,7 +25,7 @@ Agent 对外只使用 `--server-url` 作为 Cyber Web/AOP 基址。IOA 使用独
 
 ### AOP
 
-`cyber-ui/packages/aop/proto/aop` 定义跨产品的语义：
+`cyber-ui/packages/aop/proto/aop` 定义跨应用的语义：
 
 - `aop.ProtocolMessage`：Agent 注册与 Session/Turn 生命周期；
 - `aop.Event`：message、tool、usage、status、error 和生命周期事件；
@@ -35,7 +35,7 @@ Agent 对外只使用 `--server-url` 作为 Cyber Web/AOP 基址。IOA 使用独
 
 ### Cyber
 
-`proto/types` 与 `proto/rpc` 只定义 Cyber 产品机制：
+`proto/types` 与 `proto/rpc` 只定义 Cyber 应用机制：
 
 - `cyber.command`：Cyber 命令目录、请求、结果与 receipt；
 - `cyber.scan`：Scan 状态、快照和实时事件；
@@ -46,7 +46,7 @@ Cyber 专有元数据通过 `google.protobuf.Any` 携带 namespace-owned message
 
 ### Cairn
 
-Cairn 复用 `aop.Envelope`、AOP namespace 和同一条应用 WebSocket。只有 Cairn 自己拥有的产品语义才进入 Cairn namespace；不得在 Cyber 中创建 Cairn DTO、registry 或转发协议。
+Cairn 复用 `aop.Envelope`、AOP namespace 和同一条应用 WebSocket。只有 Cairn 自己拥有的应用语义才进入 Cairn namespace；不得在 Cyber 中创建 Cairn DTO、registry 或转发协议。
 
 ## 4. Envelope 语义
 
@@ -185,4 +185,3 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - Connect boundary：`pkg/web/connect.go`
 
 完成态验收：全仓只能由 `AOPClient` 创建浏览器 WebSocket；不存在 ChatService、WatchEventsResponse、WatchScanEventsResponse、AgentTransport frame、terminal 专用 socket、手写 wire DTO 或 grpc-go service 生成物。
-

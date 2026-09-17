@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Tests install the same provider/contributor path as a product profile.
+// Tests install the same provider/contributor path as a Profile.
 func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()

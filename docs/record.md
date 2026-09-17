@@ -72,7 +72,7 @@ when a set here drifts from the file. It is a data file, not a shell script —
 the values hold spaces, so sourcing it would truncate every one of them.
 
 - **`full`** composes `pkg/exts/cstx`, the only package that imports `libcstx`.
-  CSTX uses the existing `full && cgo` product boundary; there is no second
+  CSTX uses the existing `full && cgo` build boundary; there is no second
   `cstx` feature tag. A full build must therefore use `CGO_ENABLED=1`.
 - **`record`** composes `pkg/exts/record`. That Extension owns its native
   runtime and contributes the record Tool through the typed resource scope.

@@ -29,7 +29,7 @@ type Entry struct {
 	Model    string
 }
 
-// StartupMode expresses whether a product omits, requires, or opportunistically
+// StartupMode expresses whether a Profile omits, requires, or opportunistically
 // initializes its provider.
 type StartupMode uint8
 

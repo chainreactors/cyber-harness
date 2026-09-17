@@ -1,6 +1,6 @@
 // Package harness is the repository test harness. It owns two roles:
 //
-// Scenarios verify user workflows against a freshly built product process using
+// Scenarios verify user workflows against a freshly built application process using
 // public HTTP and stdio interfaces, isolated workspaces and real persistence.
 // Live IOA scenarios use independent model operators and processes.
 //

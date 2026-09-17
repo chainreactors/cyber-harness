@@ -16,7 +16,7 @@ import (
 )
 
 // Use a real child process to verify framing and shutdown without a model,
-// tools, product configuration, or external network dependencies.
+// tools, application configuration, or external network dependencies.
 func TestStdioChildProcess(t *testing.T) {
 	const helper = "CYBER_HARNESS_HOST_TEST_CHILD"
 	if os.Getenv(helper) == "1" {

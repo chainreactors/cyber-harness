@@ -62,19 +62,19 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
 	// later staged reloads, where the candidate config is resolved independently.
-	product, err := initWebProfile(ctx, option, logger, ingestor)
+	p, err := initWebProfile(ctx, option, logger, ingestor)
 	if err != nil {
-		if product != nil {
-			err = errors.Join(err, product.Close(context.Background()))
+		if p != nil {
+			err = errors.Join(err, p.Close(context.Background()))
 		}
 		return fmt.Errorf("init aiscan: %w", err)
 	}
 	defer func() {
-		if product != nil {
-			resultErr = errors.Join(resultErr, product.Close(context.Background()))
+		if p != nil {
+			resultErr = errors.Join(resultErr, p.Close(context.Background()))
 		}
 	}()
-	application, err := product.App()
+	application, err := p.App()
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	service := webservice.NewService(webservice.ServiceConfig{
 		ConfigAPI:   configAPI(),
 		Store:       store,
-		Profile:     product,
+		Profile:     p,
 		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile, runtime: option},
@@ -118,7 +118,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
-	product = nil // Service now owns the initial profile and all replacements.
+	p = nil // Service now owns the initial profile and all replacements.
 	defer func() { resultErr = errors.Join(resultErr, service.Close(context.Background())) }()
 
 	var pool *webservice.AgentPool
@@ -271,14 +271,14 @@ func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg ap
 	profileConfig.Application = appCfg
 	profileConfig.IOA = nil
 	profileConfig.Artifacts = artifacts
-	product, err := newCyberProfile(profileConfig)
+	p, err := newCyberProfile(profileConfig)
 	if err != nil {
 		return nil, err
 	}
-	if err := product.Load(ctx); err != nil {
-		return product, err
+	if err := p.Load(ctx); err != nil {
+		return p, err
 	}
-	return product, nil
+	return p, nil
 }
 
 // ---------------------------------------------------------------------------

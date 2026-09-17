@@ -1,4 +1,4 @@
-// Package proxy adapts proxy resources to the product extension lifecycle.
+// Package proxy adapts proxy resources to the Profile extension lifecycle.
 package proxy
 
 import (

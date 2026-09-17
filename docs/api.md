@@ -285,7 +285,7 @@ Event 公共字段：
 | `error` | `code`, `message`, `retryable` | 非终止或附加业务错误 |
 | `status` | `state` | 运行状态 |
 | `provider_frame` | provider 原始 frame | 仅在启用相关策略时出现 |
-| `extension` | `Any` | 产品自定义主 payload |
+| `extension` | `Any` | 应用自定义主 payload |
 
 #### MessageDelta
 

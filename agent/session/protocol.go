@@ -118,7 +118,7 @@ func (rt *Runtime) HandleCoreNamespace(ctx context.Context, envelope *aop.Envelo
 	}
 }
 
-// HandleCommandNamespace implements the existing product command namespace.
+// HandleCommandNamespace implements the existing command namespace.
 func (rt *Runtime) HandleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
 	value, ok := message.(*types.CommandProtocolMessage)
 	if !ok {

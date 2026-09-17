@@ -22,7 +22,7 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-// A feature unknown to all product option structs uses the same declaration,
+// A feature unknown to all application option structs uses the same declaration,
 // ownership and dependency rules across five independent domains.
 type compositionOptions struct {
 	Text  string `long:"fixture-text" config:"text" json:"text"`

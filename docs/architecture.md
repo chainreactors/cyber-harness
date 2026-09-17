@@ -40,9 +40,9 @@ flowchart TB
 ```
 
 这不是一条 Profile、Extension、Scope、Capability、Contribution、Registry 逐层包装的链。
-系统由产品边界、生命周期和 typed resource 三组关系组成：
+系统由Profile 边界、生命周期和 typed resource 三组关系组成：
 
-- `Profile` 是宿主可加载、关闭和替换的完整产品实例。它拥有 `Set`，并只在整个 Set Active 后
+- `Profile` 是宿主可加载、关闭和替换的完整应用。它拥有 `Set`，并只在整个 Set Active 后
   向 runner、node、transport 和 Web 发布 App、Runtime、Namespace、Console 等稳定领域视图。
 - `Set` 是生命周期控制器。它拥有一个有序 Extension 列表、一个共享 Resource Registry，并为
   每个 Extension 创建一个 Scope。
@@ -73,7 +73,7 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
 
 ## Architecture Invariants
 
-- 一个 Profile 恰好拥有一个产品 Set。Profile 不把 Extension、Scope 或 Resource Registry 暴露给宿主。
+- 一个 Profile 恰好拥有一个Set。Profile 不把 Extension、Scope 或 Resource Registry 暴露给宿主。
 - 一个进程可以有多个互相独立的 Set，例如可热替换的 Profile、HTTP listener 附属资源和一次性
   命令各自具有不同生命周期。它们必须由宿主或用例入口并列持有；Extension、App 和领域对象不得
   在 Load 内创建或隐藏子 Set。
@@ -86,8 +86,8 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
 - 每种 Resource 使用一个具体 Go 类型和一个 Point。领域名称和重复规则属于该 Point，不再建立
   Resource ID、Capability Catalog 或声明 DTO 作为第二事实源。
 - `core/` 只向下依赖 `aop/`（wire 层），不依赖 `pkg/`、`agent/` 或 `tools/`。因此 core 使用的
-  基础类型与机制（例如 `core/types`）必须住在 core 内部；core 需要的产品行为从 core 上移出去，
-  而不是把产品包下沉进 core。
+  基础类型与机制（例如 `core/types`）必须住在 core 内部；core 需要的应用行为从 core 上移出去，
+  而不是把应用包下沉进 core。
 - `pkg/exts/` 是唯一把功能挂到 harness core 的包装层：每个 Extension 包装一个 `tools/*`、
   `agent/*` 或 `pkg/*` 机制，自身不写业务实现。机制住在 `pkg/` 或 `tools/`，生命周期住在
   `pkg/exts/`。每个 `pkg/exts/<feature>` 子树至少声明一个 Extension，由该目录的守卫测试强制。
@@ -96,7 +96,7 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
 - 每条连接一个实例的协议用 `aop.ConnectionBinding` 贡献，而不是在 Extension 或宿主里维护
   跨连接的实例表。
 - `tools/` 是工具与命令的实现层，`pkg/commands` 只保留 Command Point、Registry 和 Execution
-  记录，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的产品对象直接借用具体
+  记录，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的Profile直接借用具体
   `terminal.BashTool`，不为分层外观增加转发 DTO 或只有一个实现的接口。
 
 ## Typed Resource
@@ -231,7 +231,7 @@ Runtime；runner 不再创建隐藏的子 Set 或第二套 Runtime。
 不暴露 Load/Close，拥有者 Extension 保留资源生命周期。可选依赖使用普通 nil/interface
 字段表达，而不是服务查询或 capability gating。
 
-旧产品 Capability Catalog 和 `pkg/edition` 已删除。Scanner CLI 的可用命令与帮助由 scanner 包直接提供；
+旧 Capability Catalog 和 `pkg/edition` 已删除。Scanner CLI 的可用命令与帮助由 scanner 包直接提供；
 Browser、Record 等功能是否存在由 build tag 和实际 Extension 组合决定。远端节点需要通告的
 核心线协议能力仍保留在 `AgentHello.capabilities`，但由连接实现根据它实际支持的协议直接
 生成，不再通过插件贡献 `node.Capability` 后二次投影。插件功能由实际注册的 Namespace、Tool、
@@ -239,12 +239,12 @@ Command 等资源表达，避免展示标签与真实可用功能产生两个事
 
 ## 组合根
 
-- `cmd/aiscan`：完整产品，按 build tag 选择 scanner、search、proxy、IOA、browser、record、Web。
+- `cmd/aiscan`：完整应用，按 build tag 选择 scanner、search、proxy、IOA、browser、record、Web。
 - `cmd/agent`：最小本地 Agent，只包含 hooks/event stream、Tool/Command/Skill Point、files、bash、App、
-  Provider、Agent loop、Session 和 TUI；依赖测试禁止引入上述产品功能。
+  Provider、Agent loop、Session 和 TUI；依赖测试禁止引入上述应用功能。
 - `pkg/runner`：保留共享的 aiscan 运行模式逻辑，不是可执行命令，也不改名。
 
-每个 Profile 只有一个线性产品 Set。宿主可以为不同生命周期建立并列 Set，例如 Web listener
+每个 Profile 只有一个线性Set。宿主可以为不同生命周期建立并列 Set，例如 Web listener
 附属资源、CSTX importer 或一次性 IOA client；这些 Set 不嵌套在 Profile 中，也不共享 Scope
 或 Resource Registry。App 和 Extension 不选择插件、不创建子 Set，也不关闭借用的资源。
 新增插件时，在组合根或明确的用例入口构造依赖并把 Extension 放到正确顺序；新增资源种类时
@@ -257,5 +257,5 @@ Operation 负责调用关联；它们不与资源注册或生命周期互相替�
 Node 只消费实际事件。
 
 关闭时入口先停止接收工作，Set 再逆序撤销贡献并排空调用。Registry handle 只影响自己的
-批次，不会取消其他插件的调用。资源替换通过 Add 新批次和 Close 旧 handle 完成；整个产品
+批次，不会取消其他插件的调用。资源替换通过 Add 新批次和 Close 旧 handle 完成；整个 Profile
 组合变化则构造新 Profile。

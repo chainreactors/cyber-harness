@@ -24,7 +24,7 @@ func profileConfig(active string) map[string]any {
 		})
 	}
 	// Saving incomplete provider settings is a real supported user workflow.
-	// No API key is configured, so the product makes no model calls.
+	// No API key is configured, so the application makes no model calls.
 	return map[string]any{"llm": map[string]any{"activeProfile": active, "providers": profiles}}
 }
 
@@ -209,9 +209,9 @@ func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
 	for !bytes.Contains(readFile(t, p.logPath), []byte("Press Ctrl+C again to exit")) {
 		select {
 		case <-p.done:
-			t.Fatalf("product exited before confirmation: %v", p.waitErr)
+			t.Fatalf("application exited before confirmation: %v", p.waitErr)
 		case <-confirmation.C:
-			t.Fatal("product did not show its exit confirmation")
+			t.Fatal("application did not show its exit confirmation")
 		case <-ticker.C:
 		}
 	}
@@ -226,17 +226,17 @@ func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
 			t.Fatalf("confirmed exit: got %v, want code 130\n%s", p.waitErr, readFile(t, p.logPath))
 		}
 	case <-time.After(15 * time.Second):
-		t.Fatalf("product did not exit after the user's signal\n%s", readFile(t, p.logPath))
+		t.Fatalf("application did not exit after the user's signal\n%s", readFile(t, p.logPath))
 	}
 	listener, err := net.Listen("tcp", strings.TrimPrefix(p.url, "http://"))
 	if err != nil {
-		t.Fatalf("product did not release its listener: %v", err)
+		t.Fatalf("application did not release its listener: %v", err)
 	}
 	listener.Close()
 	if info, err := os.Stat(w.db); err != nil || info.Size() == 0 {
-		t.Fatalf("product did not create its database: %v", err)
+		t.Fatalf("application did not create its database: %v", err)
 	}
-	// Verify the operating system has released the product's database handle.
+	// Verify the operating system has released the application's database handle.
 	if err := os.Rename(w.db, w.db+".closed"); err != nil {
 		t.Fatalf("database still held after shutdown: %v", err)
 	}

@@ -62,7 +62,7 @@ Close 返回普通错误表示回收已经完成；只有仍需重试时返回�
 
 ## 组合与验证
 
-完整产品组合根在 `cmd/aiscan`。最小本地 Agent 在 `cmd/agent`，不得依赖 scanner、search、
+完整应用的组合根在 `cmd/aiscan`。最小本地 Agent 在 `cmd/agent`，不得依赖 scanner、search、
 proxy、IOA、browser、record 或 Web。`pkg/runner` 保留 aiscan 的共享运行模式逻辑，不是命令。
 
 新增或修改资源至少验证：

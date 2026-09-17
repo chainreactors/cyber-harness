@@ -48,7 +48,7 @@ func TestLiveLLMRecoveryAcrossRestart(t *testing.T) {
 	assertLiveReply(t, user.call(t, http.MethodPost, configRPC+"TestLLM", request, http.StatusOK))
 	status := user.call(t, http.MethodPost, "/cyber.rpc.system.SystemService/GetStatus", map[string]any{}, http.StatusOK)
 	if available, _ := field(status, "status", "llmAvailable").(bool); !available {
-		t.Fatalf("product status did not report the configured provider: %v", status)
+		t.Fatalf("application status did not report the configured provider: %v", status)
 	}
 	t.Log("a missing model produces an actionable failure and the user can retry")
 	invalid := map[string]any{"provider": request["provider"], "baseUrl": request["baseUrl"], "apiKey": request["apiKey"]}
@@ -57,7 +57,7 @@ func TestLiveLLMRecoveryAcrossRestart(t *testing.T) {
 		t.Fatalf("missing-model check did not fail clearly: %v", failed)
 	}
 	assertLiveReply(t, user.call(t, http.MethodPost, configRPC+"TestLLM", request, http.StatusOK))
-	t.Log("restart the product with the same deployment credentials and retry from a new client")
+	t.Log("restart the application with the same deployment credentials and retry from a new client")
 	p.crash(t)
 	p = w.startMode(t, true)
 	assertLiveReply(t, p.user(t, "after-restart").call(t, http.MethodPost, configRPC+"TestLLM", request, http.StatusOK))

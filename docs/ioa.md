@@ -81,7 +81,7 @@ extensions:
 
 继续接受 `--ioa-url`、`--server-token`、`--space`、`--node-name`、`ioa ...`、`ioa serve`、
 `serve --addr/--token`。旧 YAML `ioa:` 在客户端命令映射为 `ioa.client`，独立服务端命令映射为
-`ioa.server`；服务端忽略旧节中的客户端 space/node_name。旧 `ioa.node_name` 在产品边界兼容到
+`ioa.server`；服务端忽略旧节中的客户端 space/node_name。旧 `ioa.node_name` 在配置边界兼容到
 通用节点名称。客户端、服务端声明均可独立安装。
 
 扩展字段按显式 CLI > 文件 > 类型默认值解析，通用配置原有环境变量优先级保持不变。

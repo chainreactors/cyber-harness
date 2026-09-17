@@ -59,7 +59,7 @@ waitParent:
 		case err := <-gate.failure:
 			t.Fatalf("model boundary: %v", err)
 		case <-p.done:
-			t.Fatalf("product ended: %v", p.err)
+			t.Fatalf("application ended: %v", p.err)
 		case <-deadline.C:
 			t.Fatal("parent/subagent IOA task exceeded 150s")
 		case <-ticker.C:
@@ -80,7 +80,7 @@ waitParent:
 		}
 	}
 	proof := assertSiblingEvents(t, events, offer, reply, ack, nonce)
-	// Automatic handoff recording is another product path, separate from the
+	// Automatic handoff recording is another application path, separate from the
 	// siblings' own IOA messages. Read it before closing the runtime.
 	if _, err := p.command(t, "ioa space "+space+"-inbox-parent harness"); err != nil {
 		t.Fatal(err)

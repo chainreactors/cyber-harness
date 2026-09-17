@@ -33,7 +33,7 @@ func TestAgentProfileConstructionIsInert(t *testing.T) {
 	}
 }
 
-func TestAgentDependencyClosureExcludesProductFeatures(t *testing.T) {
+func TestAgentDependencyClosureExcludesFullApplicationFeatures(t *testing.T) {
 	output, err := exec.Command("go", "list", "-deps", ".").Output()
 	if err != nil {
 		t.Fatal(err)
