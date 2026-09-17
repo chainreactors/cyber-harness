@@ -12,6 +12,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	web "github.com/chainreactors/cyber/pkg/web"
@@ -29,7 +30,7 @@ type ServiceConfig struct {
 	// Service owns every returned candidate and its cleanup.
 	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Application, error)
 	AgentPool     *AgentPool
-	Artifacts     managementapi.ArtifactImporter
+	Artifacts     coretool.ArtifactImporter
 	MaxConcurrent int
 	ScanTimeout   time.Duration
 	AccessKey     string

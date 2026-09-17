@@ -8,6 +8,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	aopsco "github.com/chainreactors/cyber/aop/sco"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 )
 
@@ -21,18 +22,10 @@ type SCOStore interface {
 
 type SCO struct {
 	store     SCOStore
-	artifacts ArtifactImporter
+	artifacts coretool.ArtifactImporter
 }
 
-// ArtifactImporter is the single server-side boundary for scanner-native
-// artifacts. The protobuf value remains canonical across local events, remote
-// AOP transport and explicit imports.
-type ArtifactImporter interface {
-	ImportArtifact(context.Context, string, *toolpb.Artifact) (uint64, uint64, error)
-	ArtifactTypes() []string
-}
-
-func NewSCO(store SCOStore, artifacts ArtifactImporter) *SCO {
+func NewSCO(store SCOStore, artifacts coretool.ArtifactImporter) *SCO {
 	return &SCO{store: store, artifacts: artifacts}
 }
 

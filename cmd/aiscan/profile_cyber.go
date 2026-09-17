@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
@@ -33,7 +34,6 @@ import (
 	nodepkg "github.com/chainreactors/cyber/pkg/node"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/pkg/skills"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -45,7 +45,7 @@ type cyberProfileConfig struct {
 	Session   *agentsession.Config
 	Observe   []observeext.Kind
 	Output    string
-	Artifacts managementapi.ArtifactImporter
+	Artifacts coretool.ArtifactImporter
 }
 
 func profileConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (cyberProfileConfig, error) {

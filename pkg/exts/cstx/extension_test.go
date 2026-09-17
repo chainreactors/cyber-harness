@@ -9,6 +9,7 @@ import (
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/extension"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 type artifactTestStore struct {
@@ -22,7 +23,7 @@ func (s *artifactTestStore) UpsertSCONodes(_ context.Context, operationID string
 	return nil
 }
 
-func loadImporter(t *testing.T, store ArtifactStore) Importer {
+func loadImporter(t *testing.T, store ArtifactStore) coretool.ArtifactImporter {
 	t.Helper()
 	instance, err := New(store)
 	if err != nil {

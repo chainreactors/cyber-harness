@@ -13,8 +13,8 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -240,7 +240,7 @@ type AgentPool struct {
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
-	artifacts      managementapi.ArtifactImporter
+	artifacts      coretool.ArtifactImporter
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan *ptypb.ProtocolMessage
@@ -250,7 +250,7 @@ type AgentPool struct {
 	upgrader       websocket.Upgrader
 }
 
-func NewAgentPool(hub *Hub, artifacts managementapi.ArtifactImporter, allowedOrigins ...string) *AgentPool {
+func NewAgentPool(hub *Hub, artifacts coretool.ArtifactImporter, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,

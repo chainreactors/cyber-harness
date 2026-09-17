@@ -11,6 +11,7 @@ import (
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/extension"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	libcstx "github.com/chainreactors/libcstx/go"
 	"github.com/chainreactors/libcstx/go/proto/cstxproto"
 )
@@ -28,16 +29,8 @@ type ArtifactStore interface {
 	UpsertSCONodes(context.Context, string, []json.RawMessage) error
 }
 
-// Importer is the import surface the web layer consumes. It mirrors
-// managementapi.ArtifactImporter, which the caller assigns it to, without
-// pulling the web API's dependency closure into this package.
-type Importer interface {
-	ImportArtifact(context.Context, string, *toolpb.Artifact) (uint64, uint64, error)
-	ArtifactTypes() []string
-}
-
-// Extension owns the native CSTX runtime and the SCO import path. Product
-// composition decides whether to construct it; full is the product boundary.
+// Extension owns the native CSTX runtime and the SCO import path. The
+// composition root decides whether to construct it; full is the build boundary.
 type Extension struct {
 	mu        sync.Mutex
 	store     ArtifactStore
@@ -47,7 +40,7 @@ type Extension struct {
 }
 
 var _ extension.Extension = (*Extension)(nil)
-var _ Importer = (*Extension)(nil)
+var _ coretool.ArtifactImporter = (*Extension)(nil)
 
 // New declares the extension without touching the runtime; Load opens it.
 func New(store ArtifactStore) (*Extension, error) {
@@ -91,7 +84,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 }
 
 // Importer returns the import surface, or nil before Load and after Close.
-func (e *Extension) Importer() Importer {
+func (e *Extension) Importer() coretool.ArtifactImporter {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || e.runtime == nil {

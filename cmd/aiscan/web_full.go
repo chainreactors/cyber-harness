@@ -21,6 +21,7 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
 	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
@@ -28,7 +29,6 @@ import (
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/pkg/runner"
 	"github.com/chainreactors/cyber/pkg/web"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	ioaservice "github.com/chainreactors/cyber/tools/ioa/server"
 	webstatic "github.com/chainreactors/cyber/web"
@@ -252,7 +252,7 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts managementapi.ArtifactImporter) (*cyberProfile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
@@ -261,7 +261,7 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg applicationConfig, artifacts managementapi.ArtifactImporter) (*cyberProfile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg applicationConfig, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
 	appCfg.SkipEngines = true
 
 	profileConfig, err := profileConfigFromOption(option, profile.ProviderDisabled, nil, appCfg.Logger)

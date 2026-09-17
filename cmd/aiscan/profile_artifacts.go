@@ -11,7 +11,7 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -20,19 +20,19 @@ const (
 	artifactBytes = 16 << 20
 )
 
-// artifactProjection is the product-owned asynchronous consumer of canonical
+// artifactProjection is the Profile-owned asynchronous consumer of canonical
 // AOP artifact events. It owns queue admission and drain; neither App nor the
 // Web server contains callback wiring for artifact observations.
 type artifactProjection struct {
 	events    *coreevents.Stream
-	artifacts managementapi.ArtifactImporter
+	artifacts coretool.ArtifactImporter
 	logger    telemetry.Logger
 	work      context.Context
 	cancel    context.CancelFunc
 	sub       *eventbus.Subscription[*aop.Event]
 }
 
-func newArtifactProjection(events *coreevents.Stream, artifacts managementapi.ArtifactImporter, logger telemetry.Logger) (*artifactProjection, error) {
+func newArtifactProjection(events *coreevents.Stream, artifacts coretool.ArtifactImporter, logger telemetry.Logger) (*artifactProjection, error) {
 	if events == nil || artifacts == nil {
 		return nil, fmt.Errorf("artifact projection requires an event stream and importer")
 	}
