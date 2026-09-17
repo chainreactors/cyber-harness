@@ -177,7 +177,7 @@ func (h *ProxyHub) captureMatches(flow Flow) bool {
 	if f.Host != "" && !strings.Contains(strings.ToLower(flow.Host), strings.ToLower(f.Host)) {
 		return false
 	}
-	if f.Status != "" && (flow.Response == nil || !matchStatus(flow.Response.StatusCode, f.Status)) {
+	if f.Status != "" && (flow.Response == nil || !matchStatus(int(flow.Response.StatusCode), f.Status)) {
 		return false
 	}
 	if f.CType != "" && !strings.Contains(strings.ToLower(flow.ContentType), strings.ToLower(f.CType)) {

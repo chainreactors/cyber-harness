@@ -12,7 +12,6 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
@@ -48,7 +47,7 @@ func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 }
 
 func cloneFlowMetadata(flow Flow) Flow {
-	flow.Exchange = flow.Clone()
+	flow.Flow = *proto.Clone(&flow.Flow).(*traffic.Flow)
 	if flow.Operation != nil {
 		flow.Operation = proto.Clone(flow.Operation).(*operationpb.Ref)
 	}
@@ -60,15 +59,21 @@ func cloneFlowMetadata(flow Flow) Flow {
 // Includes previews and variable-sized headers/strings, plus conservative
 // fixed overhead. There is also an independent event count limit.
 func flowMetadataSize(flow Flow) int64 {
-	size := int64(1024 + len(flow.ID) + proto.Size(flow.Operation) + len(flow.Host) + len(flow.ContentType) + len(flow.Error))
-	size += int64(len(flow.Request.URL) + len(flow.Request.Method) + len(flow.Request.Protocol) + len(flow.Request.Body))
-	for _, pair := range flow.Request.Headers {
-		size += int64(len(pair.Name) + len(pair.Value) + 64)
+	size := int64(1024 + len(flow.Id) + proto.Size(flow.Operation) + len(flow.Host) + len(flow.ContentType) + len(flow.Error))
+	if flow.Request != nil {
+		size += int64(len(flow.Request.Url) + len(flow.Request.Method) + len(flow.Request.Protocol) + len(flow.Request.Body))
+		for _, pair := range flow.Request.Headers {
+			if pair != nil {
+				size += int64(len(pair.Name) + len(pair.Value) + 64)
+			}
+		}
 	}
 	if flow.Response != nil {
 		size += int64(len(flow.Response.Body) + len(flow.Response.ReasonPhrase))
 		for _, pair := range flow.Response.Headers {
-			size += int64(len(pair.Name) + len(pair.Value) + 64)
+			if pair != nil {
+				size += int64(len(pair.Name) + len(pair.Value) + 64)
+			}
 		}
 	}
 
@@ -83,9 +88,8 @@ func flowSequence(id string) int {
 	return seq
 }
 
-// flowToProto renders a stored flow as a wire Flow: the exchange semantics go
-// through the canonical Exchange, attribution (tool id, timestamp) is stamped
-// on top. Hydration goes through the store's body read lock, which keeps ring
+// flowToProto renders a stored canonical Flow. Hydration goes through the
+// store's body read lock, which keeps ring
 // eviction from deleting a file between the copy and the read.
 func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
 	if flow == nil {
@@ -93,17 +97,12 @@ func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
 	}
 	// The hot Flow contains only previews. File ownership stays in the store;
 	// load bytes only at this boundary, never into a subscriber queue.
-	copy := *flow
-	copy.Exchange = flow.Clone()
+	copy := cloneFlowMetadata(*flow)
 	if s != nil {
 		if err := s.hydrate(&copy); err != nil {
 			copy.Complete = false
 			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
 		}
 	}
-	message := copy.Proto()
-	if !flow.Timestamp.IsZero() {
-		message.Timestamp = timestamppb.New(flow.Timestamp)
-	}
-	return message
+	return &copy.Flow
 }

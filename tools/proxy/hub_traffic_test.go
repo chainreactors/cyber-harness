@@ -122,9 +122,9 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	}
 	addTestBody(t, first, Flow{
 		Operation: &operationpb.Ref{CallId: "call-1"}, Host: "example.test", ContentType: "text/plain",
-		Exchange: traffic.Exchange{
-			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200},
+		Flow: traffic.Flow{
+			Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
+			Response: &traffic.HttpResponse{StatusCode: 200},
 		},
 	}, path)
 	if err := first.Close(); err != nil {
@@ -140,7 +140,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	if len(flows) != 1 || flows[0].Operation.GetCallId() != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}
-	if flows[0].Response == nil || second.files[flows[0].ID][1] != 10 || len(flows[0].Response.Body) != 0 {
+	if flows[0].Response == nil || second.files[flows[0].Id][1] != 10 || len(flows[0].Response.Body) != 0 {
 		t.Fatalf("reloaded body metadata = %#v", flows[0].Response)
 	}
 }

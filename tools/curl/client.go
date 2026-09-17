@@ -211,7 +211,7 @@ func (c *Command) do(ctx context.Context, req *Request, egress commands.Egress, 
 		fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, written))
 	}
 
-	c.emitArtifact(ctx, traffic.ExchangeFromHTTP(resp.Request, resp, nil, nil), written)
+	c.emitArtifact(ctx, traffic.FlowFromHTTP(resp.Request, resp, nil, nil), written)
 	return nil
 }
 
@@ -222,7 +222,7 @@ func (c *Command) failResponse(ctx context.Context, client *http.Client, req *Re
 	if req.WriteOut != "" {
 		fmt.Fprint(stdout, expandWriteOut(req.WriteOut, resp, 0))
 	}
-	c.emitArtifact(ctx, traffic.ExchangeFromHTTP(resp.Request, resp, nil, nil), 0)
+	c.emitArtifact(ctx, traffic.FlowFromHTTP(resp.Request, resp, nil, nil), 0)
 	return fmt.Errorf("curl: (22) The requested URL returned error: %s", resp.Status)
 }
 
@@ -841,8 +841,8 @@ func resolveKey(host, port string) string {
 	return host + ":" + strings.TrimSpace(port)
 }
 
-func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, size int64) {
-	if c.Events == nil || exchange == nil || exchange.Response == nil {
+func (c *Command) emitArtifact(ctx context.Context, flow *traffic.Flow, size int64) {
+	if c.Events == nil || flow == nil || flow.GetRequest() == nil || flow.GetResponse() == nil {
 		return
 	}
 	summary := struct {
@@ -851,9 +851,9 @@ func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, 
 		ContentType string `json:"content_type,omitempty"`
 		BodyLength  int64  `json:"body_length"`
 	}{
-		URL:         exchange.Request.URL,
-		Status:      exchange.Response.StatusCode,
-		ContentType: headerValue(exchange.Response.Headers, "Content-Type"),
+		URL:         flow.GetRequest().GetUrl(),
+		Status:      int(flow.GetResponse().GetStatusCode()),
+		ContentType: headerValue(flow.GetResponse().GetHeaders(), "Content-Type"),
 		BodyLength:  size,
 	}
 	// The compact observation follows CSTX's web schema, which the server reads
@@ -861,10 +861,10 @@ func (c *Command) emitArtifact(ctx context.Context, exchange *traffic.Exchange, 
 	c.EmitArtifactCtx(ctx, "cyber", toolpb.ArtifactKindWeb, summary.URL, summary)
 }
 
-func headerValue(headers []traffic.Pair, name string) string {
+func headerValue(headers []*traffic.Header, name string) string {
 	for _, h := range headers {
-		if strings.EqualFold(h.Name, name) {
-			return h.Value
+		if h != nil && strings.EqualFold(h.GetName(), name) {
+			return h.GetValue()
 		}
 	}
 	return ""
