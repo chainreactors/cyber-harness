@@ -7,7 +7,7 @@
 | Application WebSocket | 双向、长连接、二进制 protobuf | Session/Turn 生命周期和实时事件流 |
 | ConnectRPC | unary 请求/响应 | 会话历史、扫描、配置、Agent、系统状态和 SCO 管理 |
 
-第三方语言的 protobuf 生成和接入流程见 [integration.md](integration.md)。Go 可运行示例见 [`examples/acp/README.md`](../examples/acp/README.md)。字段级自动生成文档见 [api/aop.md](api/aop.md) 和 [api/rpc.md](api/rpc.md)。
+第三方语言的 protobuf 生成和接入流程见 [integration.md](integration.md)。Go 可运行示例见 [`examples/acp/README.md`](../examples/acp/README.md)。字段级参考以 proto 源码为准，需要时按 [api/README.md](api/README.md) 的步骤生成文档。
 
 ## 功能边界
 
@@ -473,7 +473,7 @@ HTTP procedure 示例：
 | `ImportNodes` | 导入结构化 nodes |
 | `ListArtifacts` | 查询支持的 artifact 类型 |
 
-完整字段见 [api/rpc.md](api/rpc.md)。
+完整字段见 `proto/rpc/*.proto`。
 
 ### 4. Session 管理字段
 
@@ -567,10 +567,10 @@ proto/rpc/*.proto
 proto/types/*.proto
 ```
 
-自动生成的字段参考：
+字段参考来源：
 
-- [api/aop.md](api/aop.md)
-- [api/rpc.md](api/rpc.md)
+- Application WebSocket：`web/frontend/cyber-ui/packages/aop/proto/aop/**`
+- 管理平面：`proto/rpc/*.proto`、`proto/types/*.proto`
 
 ### 2. 只生成 Application WebSocket 消息
 

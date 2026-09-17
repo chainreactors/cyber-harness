@@ -164,7 +164,7 @@ AOP 应用面只额外暴露一个双向流服务：
 
 session 只有一个概念、三种视图：协议视图 `aop.Session`（core）、定义视图 `api.Sessions`、机制视图 Service runtime + store。其他同名概念（如 auth cookie session）必须改名，不得共享 "session" 命名。
 
-当前收敛：节点端库剥离为 `pkg/node`；transport adapter 位于 `pkg/web/transport.go`；Application 业务路由位于 `pkg/web/api/envelope.go`（`ServeApplication`）；Node 连接由 `AgentPool.ServeNode` 拥有；两个 endpoint 通过 `pkg/web.Connection` 复用单 reader/FIFO writer/error convergence；Connect 服务直接投影到 Application Endpoint。
+当前收敛：节点端库剥离为 `pkg/node`；transport adapter 位于 `pkg/aopws`（WebSocket ↔ `aop.EnvelopeStream`）；Application 业务路由位于 `pkg/web/service/application.go`（`ServeApplication`）；Node 连接由 `pkg/web/service/agents_stream.go` 的 `AgentPool.ServeNode` 拥有；两个 endpoint 由 `pkg/web/service/endpoints.go` 装配，并通过 `pkg/web.Connection` 复用单 reader/FIFO writer/error convergence；Connect 服务直接投影到 Application Endpoint。
 
 ## 12. 实现位置与验收
 
@@ -174,12 +174,12 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - Cyber Go message：`core/types`
 - Cyber Go RPC：`pkg/rpc`
 - 生成入口：`cmd/gen`
-- AOP endpoint 装配：`pkg/web/endpoints.go`
+- AOP endpoint 装配：`pkg/web/service/endpoints.go`
 - 统一连接机制：`pkg/web/connection.go`
-- EnvelopeStream transport 适配：`pkg/web/transport.go`
-- Application 业务语义（envelope 路由）：`pkg/web/api/envelope.go`
-- Agent 节点连接（AgentPool 拥有）：`pkg/web/agents_stream.go`
-- Agent Runtime session protocol：`pkg/exts/agent/protocol.go`
+- EnvelopeStream transport 适配：`pkg/aopws/stream.go`
+- Application 业务语义（envelope 路由）：`pkg/web/service/application.go`
+- Agent 节点连接（AgentPool 拥有）：`pkg/web/service/agents_stream.go`
+- Agent Runtime session protocol：`agent/session/protocol.go`
 - stdio framing：`pkg/host/stdio.go`；入口组合：`pkg/runner/stdio.go`
 - Browser client：`web/frontend/cyber-ui/packages/aop/src/client.ts`
 - Connect boundary：`pkg/web/connect.go`

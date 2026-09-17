@@ -31,10 +31,10 @@ proto/types/
 -I proto
 ```
 
-schema 的自动生成字段文档：
+字段级参考以 proto 源码为准：
 
-- [api/aop.md](api/aop.md)
-- [api/rpc.md](api/rpc.md)
+- Application WebSocket：`web/frontend/cyber-ui/packages/aop/proto/aop/**`
+- 管理平面：`proto/rpc/*.proto`、`proto/types/*.proto`
 
 ## 2. protobuf 代码生成
 

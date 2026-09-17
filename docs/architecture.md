@@ -217,7 +217,7 @@ owner 注销的第二套生命周期，连接关闭时统一停止准入并排�
 
 Session Extension 只拥有 Runtime 的启动和关闭，不探测 Namespace Point 是否存在。需要暴露
 Session 协议的组合根显式贡献 `Runtime.NamespaceBindings()`；Node 连接也不再硬编码同一组
-core/command handler。连接私有的调用取消在 Namespace 分发前处理，因为它依赖单个连接的
+Command handler。连接私有的调用取消在 Namespace 分发前处理，因为它依赖单个连接的
 运行中调用表，不是可跨传输复用的资源。
 
 Agent Loop 与 Session Runtime 在每个 Profile 的组合根就地组装：先安装 Agent Loop
