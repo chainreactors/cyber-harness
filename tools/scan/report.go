@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -61,7 +62,7 @@ func appendCount64(parts []string, n int64, singular, plural string) []string {
 	return append(parts, strconv.FormatInt(n, 10), word)
 }
 
-func formatTraceEvent(event pipelineEvent) string {
+func formatTraceEvent(event pipeline.Observation[event]) string {
 	parts := []string{string(event.Action)}
 	if event.Capability != "" {
 		parts = append(parts, event.Capability)

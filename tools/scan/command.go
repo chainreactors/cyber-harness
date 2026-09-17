@@ -144,12 +144,12 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	trace := flags.Trace || flags.Debug
-	pipelineBus := eventbus.New[pipeline.Observation]()
+	pipelineBus := eventbus.New[pipeline.Observation[event]]()
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
 	subscribePipeline(pipelineBus, coll, trace, stream)
 
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
-		pipelineBus.Emit(pipeline.Observation{
+		pipelineBus.Emit(pipeline.Observation[event]{
 			Action: pipeline.ActionAccept,
 			Event:  errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw)),
 		})
@@ -159,14 +159,14 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	capabilities := c.buildCapabilities(flags, options, profile)
-	p, err := pipeline.New(ctx, pipeline.Config{
+	p, err := pipeline.New(ctx, pipeline.Config[event]{
 		Capabilities: capabilities,
 		Bus:          pipelineBus,
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
-	p.Run(seedsToEvents(seeds))
+	p.Run(seeds)
 
 	if c.parent != nil && verifyLevel != "" {
 		runVerifyPass(ctx, c.parent, c.readSkill, coll, verifyLevel, c.Logger)
@@ -189,6 +189,19 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	result := coll.StructuredResult()
 	c.emitStructuredData(ctx, result)
 	return out, result, nil
+}
+
+func subscribePipeline(bus *eventbus.Bus[pipeline.Observation[event]], coll *collector, debug bool, writer io.Writer) {
+	if coll != nil {
+		bus.Subscribe(coll.Observe)
+	}
+	if debug && writer != nil {
+		bus.Subscribe(func(observation pipeline.Observation[event]) {
+			if trace := formatTraceEvent(observation); trace != "" {
+				fmt.Fprintln(writer, trace)
+			}
+		})
+	}
 }
 
 func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanResult) {

@@ -43,15 +43,15 @@ func KatanaOptions() []Option {
 			}
 		}),
 
-		WithCapabilityBuilders(func(c *Command, f flags, opts scanOptions, p profile) []pipeline.Capability {
-			var caps []pipeline.Capability
-			katanaWebRoutes := wrapRoutes(acceptsTarget(targetWeb), webSources()...)
+		WithCapabilityBuilders(func(c *Command, f flags, opts scanOptions, p profile) []pipeline.Capability[event] {
+			var caps []pipeline.Capability[event]
+			katanaWebRoutes := routes(acceptsTarget(targetWeb), webSources()...)
 			if p.Enabled(capKatanaCrawl) {
 				depth := p.CrawlDepth
 				if depth <= 0 {
 					depth = 2
 				}
-				caps = append(caps, wrapCapability(
+				caps = append(caps, scanCapability(
 					capKatanaCrawl,
 					katanaWebRoutes,
 					2,
@@ -61,7 +61,7 @@ func KatanaOptions() []Option {
 				))
 			}
 			if p.Enabled(capKatanaDeep) {
-				caps = append(caps, wrapCapability(
+				caps = append(caps, scanCapability(
 					capKatanaDeep,
 					katanaWebRoutes,
 					1,

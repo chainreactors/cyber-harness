@@ -39,11 +39,11 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-func newTestPipeline(t *testing.T, ctx context.Context, caps []pipeline.Capability, coll *collector, debug bool) *pipeline.Pipeline {
+func newTestPipeline(t *testing.T, ctx context.Context, caps []pipeline.Capability[event], coll *collector, debug bool) *pipeline.Pipeline[event] {
 	t.Helper()
-	bus := eventbus.New[pipeline.Observation]()
+	bus := eventbus.New[pipeline.Observation[event]]()
 	subscribePipeline(bus, coll, debug, nil)
-	p, err := pipeline.New(ctx, pipeline.Config{
+	p, err := pipeline.New(ctx, pipeline.Config[event]{
 		Capabilities: caps,
 		Bus:          bus,
 	})
@@ -53,8 +53,8 @@ func newTestPipeline(t *testing.T, ctx context.Context, caps []pipeline.Capabili
 	return p
 }
 
-func testSeeds(events ...event) []pipeline.Event {
-	return seedsToEvents(events)
+func testSeeds(events ...event) []event {
+	return events
 }
 
 func TestScanRunsWithOnlySprayStage(t *testing.T) {
@@ -322,10 +322,8 @@ func TestSprayCapabilityAppliesWebStrategyOptions(t *testing.T) {
 	})
 
 	var emitted []event
-	cap.Run(context.Background(), targetEvent("test", "raw", newWebTarget("raw", "http://127.0.0.1", "")), func(pe pipeline.Event) {
-		if e, ok := pe.(event); ok {
-			emitted = append(emitted, e)
-		}
+	cap.Run(context.Background(), targetEvent("test", "raw", newWebTarget("raw", "http://127.0.0.1", "")), func(e event) {
+		emitted = append(emitted, e)
 	})
 
 	if !reflect.DeepEqual(got.Dictionaries, web.Dictionaries) || !reflect.DeepEqual(got.Rules, web.Rules) {
@@ -814,8 +812,8 @@ func TestScanDerivesTargetsFromResults(t *testing.T) {
 func TestScanPipelineDoesNotDispatchLootOrError(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	var runs int
-	capabilities := []pipeline.Capability{
-		wrapCapability("web", wrapRoutes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("web", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
 			runs++
 		}),
 	}
@@ -888,8 +886,8 @@ func TestScanPipelineFanoutAndDedup(t *testing.T) {
 	var mu sync.Mutex
 	seen := make([]string, 0)
 
-	capabilities := []pipeline.Capability{
-		wrapCapability("service-to-web", wrapRoutes(acceptsTarget(targetService), ""), 1, func(_ context.Context, e event, emit func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("service-to-web", routes(acceptsTarget(targetService), ""), 1, func(_ context.Context, e event, emit func(event)) {
 			mu.Lock()
 			seen = append(seen, "service-to-web")
 			mu.Unlock()
@@ -899,7 +897,7 @@ func TestScanPipelineFanoutAndDedup(t *testing.T) {
 			}
 			emit(targetEvent("test", "", newWebTarget("", service.Result.GetBaseURL(), "")))
 		}),
-		wrapCapability("web-to-finger", wrapRoutes(acceptsTarget(targetWeb), "service-to-web"), 1, func(_ context.Context, e event, emit func(event)) {
+		scanCapability("web-to-finger", routes(acceptsTarget(targetWeb), "service-to-web"), 1, func(_ context.Context, e event, emit func(event)) {
 			mu.Lock()
 			seen = append(seen, "web-to-finger")
 			mu.Unlock()
@@ -1001,8 +999,8 @@ func hasTargetKind(events []event, kind targetKind) bool {
 
 func TestScanPipelineDebugTrace(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, true)
-	capabilities := []pipeline.Capability{
-		wrapCapability("noop", wrapRoutes(acceptsTarget(targetWeb), ""), 1, func(context.Context, event, func(event)) {}),
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("noop", routes(acceptsTarget(targetWeb), ""), 1, func(context.Context, event, func(event)) {}),
 	}
 	p := newTestPipeline(t, context.Background(), capabilities, coll, true)
 	p.Run(testSeeds(targetEvent("test", "", newWebTarget("", "http://127.0.0.1", ""))))
@@ -1022,8 +1020,8 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 	var once sync.Once
 
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	capabilities := []pipeline.Capability{
-		wrapCapability("wait", wrapRoutes(acceptsTarget(targetWeb), ""), 1, func(ctx context.Context, _ event, _ func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("wait", routes(acceptsTarget(targetWeb), ""), 1, func(ctx context.Context, _ event, _ func(event)) {
 			once.Do(func() { close(started) })
 			<-ctx.Done()
 		}),
@@ -1050,8 +1048,8 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 
 func TestScanSummaryJSONLines(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent("test", "", newServiceTarget("", parsers.NewGOGOResult("127.0.0.1", "80")))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:   true,
 		UrlString: "http://127.0.0.1:80",
 		Status:    401,
@@ -1147,7 +1145,7 @@ func TestScanSkipsFailedSprayProbeResults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			coll := newCollector([]string{"seed"}, &buf, false, false)
-			coll.Observe(pipelineEvent{
+			coll.Observe(pipeline.Observation[event]{
 				Action: pipeline.ActionAccept,
 				Event:  targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", tc.result)),
 			})
@@ -1178,14 +1176,14 @@ func TestScanSkipsInternalPluginCheckBaseline(t *testing.T) {
 		BodyLength: 114,
 		Title:      "json data",
 	}
-	event := targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", result))
-	if line := formatEventLine(event, false); line != "" {
+	observationEvent := targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", result))
+	if line := formatEventLine(observationEvent, false); line != "" {
 		t.Fatalf("plugin check baseline line = %q, want empty", line)
 	}
 
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: event})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: observationEvent})
 	if got := buf.String(); got != "" {
 		t.Fatalf("stream output = %q, want empty", got)
 	}
@@ -1206,7 +1204,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	raw := buf.String()
 	if !hasANSI(raw) {
@@ -1224,7 +1222,7 @@ func TestScanStreamsAcceptedResults(t *testing.T) {
 func TestScanColorizesWebProbePrefixOnly(t *testing.T) {
 	var buf bytes.Buffer
 	coll := newCollector([]string{"seed"}, &buf, true, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", &parsers.SprayResult{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capSprayPlugins, "", newWebProbeTarget("", capSprayPlugins, "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:32768/test.war",
 		Source:     parsers.BakSource,
@@ -1315,7 +1313,7 @@ func TestScanStreamsWithoutColor(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 
 	out := buf.String()
 	if hasANSI(out) {
@@ -1332,8 +1330,8 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 	result.Protocol = "http"
 	result.Status = "200"
 
-	coll.Observe(pipelineEvent{Action: pipeline.ActionCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionCapabilityStart, Capability: capGogoPortscan, Event: targetEvent("", "", newScanTarget("", "127.0.0.1", ""))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 	coll.Finish()
 
 	out := coll.String()
@@ -1348,7 +1346,7 @@ func TestScanSummaryUsesStructuredFields(t *testing.T) {
 
 func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdktypes.Stats{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: statsEvent(capGogoPortscan, sdktypes.Stats{
 		Engine:   "gogo",
 		Task:     "scan",
 		Targets:  2,
@@ -1357,7 +1355,7 @@ func TestScanSummaryAggregatesEngineStats(t *testing.T) {
 		Results:  1,
 		Duration: 10 * time.Millisecond,
 	})})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: statsEvent(capSprayCheck, sdktypes.Stats{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: statsEvent(capSprayCheck, sdktypes.Stats{
 		Engine:   "spray",
 		Task:     "check",
 		Targets:  1,
@@ -1387,7 +1385,7 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 
 	observeDone := make(chan struct{})
 	go func() {
-		coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
+		coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", result))})
 		close(observeDone)
 	}()
 
@@ -1421,7 +1419,7 @@ func TestProjectorSlowStreamDoesNotHoldStateLock(t *testing.T) {
 
 func TestScanPlainTextStripsANSI(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent("spray_check", "", newWebProbeTarget("", "spray_check", "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:80",
 		Source:     parsers.CheckSource,
@@ -1446,8 +1444,8 @@ func TestStructuredResultKeepsScannerValuesInsideCollector(t *testing.T) {
 	service.Protocol = "http"
 	service.Midware = "http"
 
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", service))})
-	coll.Observe(pipelineEvent{Action: pipeline.ActionAccept, Event: targetEvent(capSprayCheck, "", newWebProbeTarget("", capSprayCheck, "", &parsers.SprayResult{
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capGogoPortscan, "", newServiceTarget("", service))})
+	coll.Observe(pipeline.Observation[event]{Action: pipeline.ActionAccept, Event: targetEvent(capSprayCheck, "", newWebProbeTarget("", capSprayCheck, "", &parsers.SprayResult{
 		IsValid:    true,
 		UrlString:  "http://127.0.0.1:8080/admin",
 		Status:     200,
@@ -1496,13 +1494,13 @@ func TestPipelinePerRouteDedupIsolation(t *testing.T) {
 	var mu sync.Mutex
 	runs := make(map[string]int)
 
-	capabilities := []pipeline.Capability{
-		wrapCapability("cap-a", wrapRoutes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("cap-a", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
 			mu.Lock()
 			runs["cap-a"]++
 			mu.Unlock()
 		}),
-		wrapCapability("cap-b", wrapRoutes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
+		scanCapability("cap-b", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
 			mu.Lock()
 			runs["cap-b"]++
 			mu.Unlock()
@@ -1527,11 +1525,11 @@ func TestPipelinePerRouteDedupIsolation(t *testing.T) {
 }
 
 func TestPipelineCleanupFreesAllDedupMaps(t *testing.T) {
-	capabilities := []pipeline.Capability{
-		wrapCapability("producer", wrapRoutes(acceptsTarget(targetScan), ""), 1, func(_ context.Context, _ event, emit func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("producer", routes(acceptsTarget(targetScan), ""), 1, func(_ context.Context, _ event, emit func(event)) {
 			emit(targetEvent("producer", "", newWebTarget("", "http://10.0.0.1", "")))
 		}),
-		wrapCapability("consumer", wrapRoutes(acceptsTarget(targetWeb), "producer"), 1, func(_ context.Context, _ event, _ func(event)) {}),
+		scanCapability("consumer", routes(acceptsTarget(targetWeb), "producer"), 1, func(_ context.Context, _ event, _ func(event)) {}),
 	}
 
 	p := newTestPipeline(t, context.Background(), capabilities, nil, false)
@@ -1559,22 +1557,22 @@ func TestPipelineCleanupFreesAllDedupMaps(t *testing.T) {
 }
 
 func TestPipelineDAGValidationRejectsCycle(t *testing.T) {
-	capabilities := []pipeline.Capability{
+	capabilities := []pipeline.Capability[event]{
 		{
 			Name:   "A",
-			Routes: []pipeline.Route{{From: "B", Accept: func(pipeline.Event) bool { return true }}},
+			Routes: []pipeline.Route[event]{{From: "B", Accept: func(event) bool { return true }}},
 			Worker: 1,
-			Run:    func(context.Context, pipeline.Event, func(pipeline.Event)) {},
+			Run:    func(context.Context, event, func(event)) {},
 		},
 		{
 			Name:   "B",
-			Routes: []pipeline.Route{{From: "A", Accept: func(pipeline.Event) bool { return true }}},
+			Routes: []pipeline.Route[event]{{From: "A", Accept: func(event) bool { return true }}},
 			Worker: 1,
-			Run:    func(context.Context, pipeline.Event, func(pipeline.Event)) {},
+			Run:    func(context.Context, event, func(event)) {},
 		},
 	}
 
-	_, err := pipeline.New(context.Background(), pipeline.Config{Capabilities: capabilities})
+	_, err := pipeline.New(context.Background(), pipeline.Config[event]{Capabilities: capabilities})
 	if err == nil {
 		t.Fatal("expected cycle detection error")
 	}
@@ -1584,28 +1582,28 @@ func TestPipelineDAGValidationRejectsCycle(t *testing.T) {
 }
 
 func TestPipelineDAGValidationAcceptsValidGraph(t *testing.T) {
-	capabilities := []pipeline.Capability{
+	capabilities := []pipeline.Capability[event]{
 		{
 			Name:   "A",
-			Routes: []pipeline.Route{{From: "", Accept: func(pipeline.Event) bool { return true }}},
+			Routes: []pipeline.Route[event]{{From: "", Accept: func(event) bool { return true }}},
 			Worker: 1,
-			Run:    func(context.Context, pipeline.Event, func(pipeline.Event)) {},
+			Run:    func(context.Context, event, func(event)) {},
 		},
 		{
 			Name:   "B",
-			Routes: []pipeline.Route{{From: "A", Accept: func(pipeline.Event) bool { return true }}},
+			Routes: []pipeline.Route[event]{{From: "A", Accept: func(event) bool { return true }}},
 			Worker: 1,
-			Run:    func(context.Context, pipeline.Event, func(pipeline.Event)) {},
+			Run:    func(context.Context, event, func(event)) {},
 		},
 		{
 			Name:   "C",
-			Routes: []pipeline.Route{{From: "A"}, {From: "B"}},
+			Routes: []pipeline.Route[event]{{From: "A"}, {From: "B"}},
 			Worker: 1,
-			Run:    func(context.Context, pipeline.Event, func(pipeline.Event)) {},
+			Run:    func(context.Context, event, func(event)) {},
 		},
 	}
 
-	_, err := pipeline.New(context.Background(), pipeline.Config{Capabilities: capabilities})
+	_, err := pipeline.New(context.Background(), pipeline.Config[event]{Capabilities: capabilities})
 	if err != nil {
 		t.Fatalf("unexpected error for valid DAG: %v", err)
 	}
@@ -1614,13 +1612,13 @@ func TestPipelineDAGValidationAcceptsValidGraph(t *testing.T) {
 func TestPipelineRouteDedupPreventsRedundantWork(t *testing.T) {
 	// producer emits the same webTarget 3 times; consumer should only run once.
 	var consumerRuns int
-	capabilities := []pipeline.Capability{
-		wrapCapability("producer", wrapRoutes(acceptsTarget(targetScan), ""), 1, func(_ context.Context, _ event, emit func(event)) {
+	capabilities := []pipeline.Capability[event]{
+		scanCapability("producer", routes(acceptsTarget(targetScan), ""), 1, func(_ context.Context, _ event, emit func(event)) {
 			for i := 0; i < 3; i++ {
 				emit(targetEvent("producer", "", newWebTarget("", "http://dup.example.com", "")))
 			}
 		}),
-		wrapCapability("consumer", wrapRoutes(acceptsTarget(targetWeb), "producer"), 1, func(_ context.Context, _ event, _ func(event)) {
+		scanCapability("consumer", routes(acceptsTarget(targetWeb), "producer"), 1, func(_ context.Context, _ event, _ func(event)) {
 			consumerRuns++
 		}),
 	}
