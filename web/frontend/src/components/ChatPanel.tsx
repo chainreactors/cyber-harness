@@ -45,6 +45,8 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
+import { BudgetWarningSchema, CompactDetailSchema, EvalDetailSchema } from '../cyber-proto'
+import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
@@ -108,6 +110,85 @@ function eventTimestamp(event: AOPEvent): number {
   return Number(event.emittedAt.seconds) * 1000 + event.emittedAt.nanos / 1_000_000
 }
 
+// Evaluator/compaction/budget banners ride on `status` events with a typed
+// detail in the Any extension. The detail schemas are app-owned (cmd/gen routes
+// types/agent.proto to this side only), so the shared reducer cannot decode
+// them — it drops `status` outright and would otherwise leave EvalNote and
+// friends unreachable. Translate the events here, where the schemas live, into
+// the same extension timeline items the renderers already expect.
+function statusTimelineItem(event: AOPEvent, index: number): ExtensionTimelineItem | null {
+  if (event.payload.case !== 'status') return null
+  const state = event.payload.value.state
+  const base = {
+    id: `${event.id || index}:${state}`,
+    kind: 'extension' as const,
+    timestamp: eventTimestamp(event),
+    actorName: event.emitter,
+  }
+  switch (state) {
+    case 'eval_end':
+    case 'eval_error': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, EvalDetailSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'eval',
+        data: {
+          round: value.round,
+          pass: state === 'eval_end' && value.pass,
+          reason: state === 'eval_error' ? value.error : value.reason,
+        },
+      }
+    }
+    case 'compact_end': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, CompactDetailSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'compact',
+        data: {
+          tokens_before: value.tokensBefore,
+          tokens_after: value.tokensAfter,
+          kept_messages: value.keptMessages,
+        },
+      }
+    }
+    case 'token_budget_warning': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, BudgetWarningSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'token_budget',
+        data: { context_tokens: value.contextTokens, token_budget: value.tokenBudget },
+      }
+    }
+    default:
+      return null
+  }
+}
+
+function statusTimelineItems(events: AOPEvent[]): ViewerTimelineItem[] {
+  return events
+    .map((event, index) => statusTimelineItem(event, index))
+    .filter((item): item is ExtensionTimelineItem => item !== null)
+}
+
+// Weave the status items back into the reduced timeline at their emitted
+// position, leaving the existing items in their relative order.
+function mergeTimelineItems(base: ViewerTimelineItem[], extra: ViewerTimelineItem[]): ViewerTimelineItem[] {
+  if (!extra.length) return base
+  const merged: ViewerTimelineItem[] = []
+  let next = 0
+  for (const item of base) {
+    while (next < extra.length && extra[next].timestamp <= item.timestamp) merged.push(extra[next++])
+    merged.push(item)
+  }
+  return merged.concat(extra.slice(next))
+}
+
 function reduceConversationAOP(
   events: AOPEvent[],
   sourceEvents: AOPEvent[],
@@ -129,10 +210,14 @@ function reduceConversationAOP(
   }
 
   const childIDs = new Set(childStarts.keys())
-  const topLevel = reduceAOPToTimeline(
-    events.filter((event) => !childIDs.has(event.sessionId)).map(presentAOPEvent),
-    { streaming, lifecycle: 'errors' },
-  ) as ViewerTimelineItem[]
+  const topLevelEvents = events.filter((event) => !childIDs.has(event.sessionId))
+  const topLevel = mergeTimelineItems(
+    reduceAOPToTimeline(
+      topLevelEvents.map(presentAOPEvent),
+      { streaming, lifecycle: 'errors' },
+    ) as ViewerTimelineItem[],
+    statusTimelineItems(topLevelEvents),
+  )
 
   const childRuns: ViewerTimelineItem[] = []
   for (const [sessionID, start] of childStarts) {
@@ -155,10 +240,13 @@ function reduceConversationAOP(
           ? 'canceled'
           : 'completed'
     const timestamp = eventTimestamp(start)
-    const items = reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
-      streaming: streaming && !end,
-      lifecycle: 'errors',
-    }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[]
+    const items = mergeTimelineItems(
+      reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
+        streaming: streaming && !end,
+        lifecycle: 'errors',
+      }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
+      statusTimelineItems(childEvents),
+    )
 
     childRuns.push({
       id: `subagent:${sessionID}`,

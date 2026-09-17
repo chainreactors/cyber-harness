@@ -19,9 +19,15 @@ export {
 
 export {
   AgentRunOptionsSchema,
+  BudgetWarningSchema,
+  CompactDetailSchema,
+  EvalDetailSchema,
   WebMessageMetadataSchema,
   type AgentListMetadata,
   type AgentView,
+  type BudgetWarning,
+  type CompactDetail,
+  type EvalDetail,
   type WebMessageMetadata,
 } from './gen/types/agent_pb.js'
 export {
