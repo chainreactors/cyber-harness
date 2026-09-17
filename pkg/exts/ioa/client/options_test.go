@@ -33,7 +33,7 @@ func TestClientOptionsAreExplicitAndIndependent(t *testing.T) {
 
 func TestClientLegacyYAMLAndCLIOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("ioa:\n  url: https://ioa.test\n  space: production\n  node_name: worker\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("extensions:\n  ioa.client:\n    url: https://ioa.test\n    space: production\n    node_name: worker\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r := cfg.NewSections()

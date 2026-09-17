@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	cfg "github.com/chainreactors/cyber/core/config"
 	types "github.com/chainreactors/cyber/core/types"
 	app "github.com/chainreactors/cyber/pkg/app"
@@ -14,8 +15,8 @@ import (
 	"net/url"
 )
 
-// cyber.yaml is wider than the shared proto schema: --init also emits the
-// product's own sections and switches (misc, output, traffic, the flat LLM
+// cyber.yaml is wider than the shared proto schema: --init also emits local
+// sections and switches (misc, output, traffic, the flat LLM
 // shorthand, the agent evaluation settings, cyberhub.mitm). The settings page
 // rewrites the whole file, so those keys have to survive a read/write cycle
 // instead of being rejected as unknown fields or dropped by the rewrite.
@@ -37,11 +38,10 @@ func protoKeyTree(descriptor protoreflect.MessageDescriptor) map[string]any {
 	return tree
 }
 
-var productProtoKeys = protoKeyTree((&types.DistributeConfig{}).ProtoReflect().Descriptor())
+var configurationProtoKeys = protoKeyTree((&types.DistributeConfig{}).ProtoReflect().Descriptor())
 
-// splitProductDocument returns the proto projection of a document plus the
-// product's own remainder.
-func splitProductDocument(document, schema map[string]any) (map[string]any, map[string]any) {
+// splitDocument returns the proto projection of a document plus the remainder.
+func splitDocument(document, schema map[string]any) (map[string]any, map[string]any) {
 	canonical, own := map[string]any{}, map[string]any{}
 	for key, value := range document {
 		subtree, accepted := schema[key]
@@ -50,7 +50,7 @@ func splitProductDocument(document, schema map[string]any) (map[string]any, map[
 		if accepted && isSection && wantsSection {
 			// Keep the section even when empty: dropping it would clear the
 			// message's presence and make a second save differ from the first.
-			projected, rest := splitProductDocument(fields, nested)
+			projected, rest := splitDocument(fields, nested)
 			canonical[key] = projected
 			if len(rest) > 0 {
 				own[key] = rest
@@ -66,24 +66,24 @@ func splitProductDocument(document, schema map[string]any) (map[string]any, map[
 	return canonical, own
 }
 
-// mergeProductDocument restores the product's own settings onto a projection
-// rewritten from a settings-page save.
-func mergeProductDocument(projection, own map[string]any) {
+// mergeDocument restores local settings onto a projection rewritten from a
+// settings-page save.
+func mergeDocument(projection, own map[string]any) {
 	for key, value := range own {
 		fields, isSection := value.(map[string]any)
 		target, targetIsSection := projection[key].(map[string]any)
 		if isSection && targetIsSection {
-			mergeProductDocument(target, fields)
+			mergeDocument(target, fields)
 			continue
 		}
 		projection[key] = value
 	}
 }
 
-// productOwnConfig returns the part of a saved cyber.yaml the shared proto does
-// not model. Root keys the extension registry consumes are excluded: those
+// ownConfig returns the part of a saved cyber.yaml the shared proto does not
+// model. Root keys the extension registry consumes are excluded: those
 // round-trip through the proto's extensions map instead.
-func productOwnConfig(data []byte) (map[string]any, error) {
+func ownConfig(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -91,20 +91,26 @@ func productOwnConfig(data []byte) (map[string]any, error) {
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return nil, err
 	}
-	_, own := splitProductDocument(document, productProtoKeys)
-	for _, alias := range productSections(false).Aliases() {
+	if _, legacy := document["ioa"]; legacy {
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+	}
+	_, own := splitDocument(document, configurationProtoKeys)
+	for _, alias := range declareResources(false, nil, nil).Aliases() {
 		delete(own, alias)
 	}
 	return own, nil
 }
 
-func normalizeProductConfig(config *types.DistributeConfig) error { //nolint:unused // used by the full-tag web build
-	return client.NormalizeConfig(config)
+func validateConfig(config *types.DistributeConfig) error {
+	sections := declareResources(false, nil, nil)
+	for key, fields := range cfg.ValuesFromProto(config.GetExtensions()) {
+		if _, err := sections.Decode(key, fields); err != nil {
+			return err
+		}
+	}
+	return nil
 }
-func validateProductConfig(config *types.DistributeConfig) error {
-	return client.ValidateWire(config, productSections(false))
-}
-func parseProductConfig(data []byte) (*types.DistributeConfig, error) {
+func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	// The file's schema is the flags config, not the proto: validate the whole
 	// document the way the runtime reads it, then project the settings payload.
 	var option cfg.Option
@@ -115,12 +121,15 @@ func parseProductConfig(data []byte) (*types.DistributeConfig, error) {
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return nil, err
 	}
-	projection, _ := splitProductDocument(document, productProtoKeys)
+	if _, legacy := document["ioa"]; legacy {
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+	}
+	projection, _ := splitDocument(document, configurationProtoKeys)
 	value, err := cfg.LoadDistributeConfigDocument(projection)
 	if err != nil {
 		return nil, err
 	}
-	fields, err := productSections(false).Normalize(document)
+	fields, err := declareResources(false, nil, nil).Normalize(document)
 	if err != nil {
 		return nil, err
 	}
@@ -128,8 +137,7 @@ func parseProductConfig(data []byte) (*types.DistributeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	value.Ioa = nil
-	if err = validateProductConfig(value); err != nil {
+	if err = validateConfig(value); err != nil {
 		return nil, err
 	}
 	cfg.NormalizeLLMConfig(value.Llm)
@@ -198,13 +206,10 @@ func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig {
 	return llm
 }
 
-// original is the file being replaced; the product's own settings are carried
-// over from it, because the proto projection cannot express them.
-func marshalProductConfig(config *types.DistributeConfig, original []byte) ([]byte, error) {
+// original is the file being replaced; local settings are carried over from it
+// because the proto projection cannot express them.
+func marshalConfig(config *types.DistributeConfig, original []byte) ([]byte, error) {
 	copy := proto.Clone(config).(*types.DistributeConfig)
-	fields := cfg.ValuesFromProto(copy.Extensions)[client.ConfigKey]
-	copy.Ioa = nil
-	delete(copy.Extensions, client.ConfigKey)
 	data, err := cfg.MarshalDistributeConfigYAML(copy)
 	if err != nil {
 		return nil, err
@@ -213,15 +218,12 @@ func marshalProductConfig(config *types.DistributeConfig, original []byte) ([]by
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return nil, err
 	}
-	if fields != nil {
-		document["ioa"] = fields
-	}
 	dropNullValues(document)
-	own, err := productOwnConfig(original)
+	own, err := ownConfig(original)
 	if err != nil {
 		return nil, err
 	}
-	mergeProductDocument(document, own)
+	mergeDocument(document, own)
 	return yaml.Marshal(document)
 }
 
@@ -245,10 +247,10 @@ func dropNullValues(section map[string]any) {
 		}
 	}
 }
-func productConfigAPI() managementapi.ConfigOptions {
-	sections := declareProductResources(false, nil, nil)
+func configAPI() managementapi.ConfigOptions {
+	sections := declareResources(false, nil, nil)
 	return managementapi.ConfigOptions{Sections: sections, Project: func(config *types.DistributeConfig, view *types.ConfigView) {
-		client.ProjectView(config, view)
+		client.RedactView(view)
 		if ext := view.Extensions[server.ConfigKey]; ext != nil && ext.Values != nil {
 			value := ext.Values.Fields["url"].GetStringValue()
 			if u, err := url.Parse(value); err == nil {
@@ -260,7 +262,7 @@ func productConfigAPI() managementapi.ConfigOptions {
 }
 
 // Restoring a masked URL keeps saved credentials only for the same endpoint.
-func preserveProductURLCredentials(incoming, current cfg.Values) {
+func preserveURLCredentials(incoming, current cfg.Values) {
 	for _, key := range []string{client.ConfigKey, server.ConfigKey} {
 		fields := incoming[key]
 		if fields == nil {

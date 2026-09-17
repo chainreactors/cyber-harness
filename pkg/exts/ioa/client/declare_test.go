@@ -10,8 +10,18 @@ import (
 	"sync/atomic"
 	"testing"
 
+	cfg "github.com/chainreactors/cyber/core/config"
 	types "github.com/chainreactors/cyber/core/types"
 )
+
+func testDistributeConfig(t *testing.T, values cfg.Values) *types.DistributeConfig {
+	t.Helper()
+	extensions, err := cfg.ValuesToProto(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &types.DistributeConfig{Extensions: extensions}
+}
 
 func TestConnectionUsesReadOnlyExtension(t *testing.T) {
 	var reads, writes atomic.Int32
@@ -29,7 +39,7 @@ func TestConnectionUsesReadOnlyExtension(t *testing.T) {
 		fmt.Fprint(w, `[{"id":"one","name":"one"}]`)
 	}))
 	defer server.Close()
-	stored := &types.DistributeConfig{Ioa: &types.IOAConfig{Url: server.URL, Token: "stored-token"}}
+	stored := testDistributeConfig(t, cfg.Values{ConfigKey: {"url": server.URL, "token": "stored-token"}})
 	for range 2 {
 		checks := testConnection(t.Context(), &types.DistributeConfig{}, stored)
 		if len(checks) != 1 || !checks[0].Ok {
@@ -50,7 +60,7 @@ func TestConnectionSuccess(t *testing.T) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "1", "name": "default", "nodes": []any{}}})
 	}))
 	defer server.Close()
-	checks := testConnection(context.Background(), &types.DistributeConfig{Ioa: &types.IOAConfig{Url: server.URL, Token: "t"}}, nil)
+	checks := testConnection(context.Background(), testDistributeConfig(t, cfg.Values{ConfigKey: {"url": server.URL, "token": "t"}}), nil)
 	if !checks[0].Ok || !strings.Contains(checks[0].Detail, "1 space") {
 		t.Fatalf("connection test = %+v", checks)
 	}

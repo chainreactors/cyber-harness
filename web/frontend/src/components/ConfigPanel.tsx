@@ -65,7 +65,14 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
     },
     scan: { verify: form.scan.verify },
     search: { tavilyKeys: form.search.tavily_keys },
-    ioa: { url: form.ioa.url, token: form.ioa.token, nodeName: form.ioa.node_name, space: form.ioa.space },
+    extensions: {
+      'ioa.client': {
+        url: form.ioa.url,
+        token: form.ioa.token,
+        node_name: form.ioa.node_name,
+        space: form.ioa.space,
+      },
+    },
     agent: { tools: form.agent.tools, timeout: form.agent.timeout },
   })
 }
@@ -118,7 +125,9 @@ function emptyForm(): ConfigFormState {
 }
 
 function statusToForm(cs: ConfigView): ConfigFormState {
-  const active = cs.llm?.active
+	const active = cs.llm?.active
+	const ioa = cs.extensions['ioa.client']
+	const ioaValues = ioa?.values ?? {}
   const profiles: LLMProfileForm[] = cs.llm?.providers.length
     ? cs.llm.providers.map(profile => ({
         id: profile.id,
@@ -155,7 +164,12 @@ function statusToForm(cs: ConfigView): ConfigFormState {
     recon: { fofa_key: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
     scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
-    ioa: { url: cs.ioa?.url || '', token: '', node_name: cs.ioa?.nodeName || '', space: cs.ioa?.space || '' },
+    ioa: {
+      url: typeof ioaValues.url === 'string' ? ioaValues.url : '',
+      token: '',
+      node_name: typeof ioaValues.node_name === 'string' ? ioaValues.node_name : '',
+      space: typeof ioaValues.space === 'string' ? ioaValues.space : '',
+    },
     agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0 },
   }
 }
@@ -206,8 +220,10 @@ function sectionStatus(
       ]
     case 'search':
       return [tag('Tavily', !!cs?.search?.tavilyKeysConfigured)]
-    case 'ioa':
-      return [tag('Server', !!(cs?.ioa?.url && cs?.ioa?.tokenConfigured))]
+    case 'ioa': {
+      const ioa = cs?.extensions['ioa.client']
+      return [tag('Server', !!(ioa?.values?.url && ioa.configuredSecrets.includes('token')))]
+    }
     default:
       return [] // scan, agent — local only
   }
@@ -694,10 +710,10 @@ function IOATab({ form, setForm, cs }: TabProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('ioaServerUrl')}><Input value={form.ioa.url} onChange={(e) => u('url', e.target.value)} placeholder="http://host:port" /></Field>
-      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.ioa?.tokenConfigured ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
+      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.extensions['ioa.client']?.configuredSecrets.includes('token') ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
       <Field label={t('nodeName')}><Input value={form.ioa.node_name} onChange={(e) => u('node_name', e.target.value)} placeholder={t('autoRegisterNode')} /></Field>
       <Field label={t('space')}><Input value={form.ioa.space} onChange={(e) => u('space', e.target.value)} placeholder="default" /></Field>
-      <ConnTest section="ioa" form={form} />
+		<ConnTest section="ioa.client" form={form} />
     </div>
   )
 }
@@ -740,7 +756,7 @@ function ProbePulse({ className }: { className?: string }) {
 // one result row per external dependency probed (Recon returns FOFA + Hunter).
 // The whole form is sent so unsaved edits are tested; blank secrets fall back to
 // the stored values on the server.
-function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa'; form: ConfigFormState }) {
+function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa.client'; form: ConfigFormState }) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
   const [checks, setChecks] = useState<ConnectionCheck[] | null>(null)

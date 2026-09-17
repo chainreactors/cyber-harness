@@ -16,11 +16,8 @@ import (
 )
 
 // Declare contributes the client resources needed before argument parsing.
-func Declare(resources *resource.Registry, command hostcli.Contribution, legacyAlias bool) error {
+func Declare(resources *resource.Registry, command hostcli.Contribution) error {
 	section := Section()
-	if !legacyAlias {
-		section.Aliases = nil
-	}
 	if _, err := resource.Add[hostcli.Contribution](resources,
 		command,
 		func(registry *hostcli.Registry) error {
@@ -35,20 +32,17 @@ func Declare(resources *resource.Registry, command hostcli.Contribution, legacyA
 	if _, err := resource.Add[cfg.Section](resources, section); err != nil {
 		return err
 	}
-	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: "ioa", Test: testConnection})
+	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: ConfigKey, Test: testConnection})
 	return err
 }
 
 func testConnection(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
 	started := time.Now()
-	result := &types.ConnectionCheck{Name: "ioa"}
+	result := &types.ConnectionCheck{Name: ConfigKey}
 	run := func() (detail string, resultErr error) {
 		read := func(config *types.DistributeConfig) Options {
 			if config == nil {
 				return Options{}
-			}
-			if config.Ioa != nil {
-				return Options{URL: config.Ioa.Url, Token: config.Ioa.Token}
 			}
 			sections := cfg.NewSections()
 			_, _ = sections.Add(Section())

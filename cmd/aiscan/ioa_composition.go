@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
+func declareResources(serving bool, cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
 	resources := resource.New()
 	sections := cfg.NewSections()
 	localCLI := cli == nil
@@ -40,12 +40,12 @@ func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *
 	}
 	mustDeclare(client.Declare(resources, func(registry *hostcli.Registry) error {
 		return clientcli.Register(registry, runIOAClientCommand)
-	}, !serving))
+	}))
 	mustDeclare(server.Declare(resources, func(registry *hostcli.Registry) error {
 		return servercli.Register(registry, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
 			return runIOAServe(ctx, option, env.Logger)
 		})
-	}, serving))
+	}))
 	mustDeclare(recordext.Declare(resources))
 	mustDeclare(scannerext.Declare(resources))
 	mustDeclare(searchext.Declare(resources))
@@ -60,12 +60,9 @@ func declareProductResources(serving bool, cli *hostcli.Registry, agentOptions *
 	return sections
 }
 
-func productSections(serving bool) *cfg.Sections {
-	return declareProductResources(serving, nil, nil)
-}
-func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
+func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent
-	option.Sections = productSections(serving)
+	option.Sections = declareResources(serving, nil, nil)
 	if serving {
 		if fields := option.Extensions[client.ConfigKey]; fields != nil {
 			if option.Extensions[server.ConfigKey] == nil {
@@ -82,8 +79,8 @@ func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
 	}
 }
 
-func productDefaultConfig() string {
-	defaults := productSections(false).Defaults()
+func defaultConfig() string {
+	defaults := declareResources(false, nil, nil).Defaults()
 	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
 	if defaults[client.ConfigKey]["url"] == "" {
 		delete(defaults[client.ConfigKey], "url")
@@ -93,8 +90,8 @@ func productDefaultConfig() string {
 	return cfg.InitDefaultConfig() + "\n" + string(b)
 }
 
-// Legacy node identity is projected once at the product boundary.
-func applyProductIdentity(option *cfg.Option) error {
+// Legacy node identity is projected once at the configuration boundary.
+func applyIdentity(option *cfg.Option) error {
 	value, err := client.ReadOptions(option)
 	if err != nil {
 		return err

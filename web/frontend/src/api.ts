@@ -232,7 +232,7 @@ export async function listLLMModels(req: MessageInitShape<typeof LLMProbeRequest
 }
 
 // testConn probes the external dependencies of a settings section
-// (cyberhub | recon | search | ioa). The current (possibly unsaved) form is
+// (cyberhub | recon | search | ioa.client). The current form is
 // sent so edits are tested; blank secrets fall back to stored values server-side.
 export async function testConn(section: string, config: DistributeConfig): Promise<TestConnectionResponse> {
   return cyberRPC.config.testConnection({ section, config })

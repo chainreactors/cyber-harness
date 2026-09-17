@@ -23,7 +23,7 @@ type Options struct {
 }
 
 func Section() cfg.Section {
-	return cfg.Section{Key: ConfigKey, Aliases: []string{"ioa"}, New: func() any { return &Options{URL: DefaultURL, Space: DefaultSpace} }, Secrets: []string{"token"}, Validate: func(v any) error {
+	return cfg.Section{Key: ConfigKey, New: func() any { return &Options{URL: DefaultURL, Space: DefaultSpace} }, Secrets: []string{"token"}, Validate: func(v any) error {
 		value := v.(*Options)
 		if value.URL != "" {
 			u, err := url.Parse(value.URL)

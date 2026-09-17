@@ -14,21 +14,21 @@ import (
 // The generated cyber.yaml is written to the flags schema, which is wider than
 // the proto the settings page speaks. Reading it must not fail and saving it
 // must not drop the sections the proto does not model.
-func TestProductConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
-	source := []byte(productDefaultConfig())
-	value, err := parseProductConfig(source)
+func TestConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
+	source := []byte(defaultConfig())
+	value, err := parseConfig(source)
 	if err != nil {
 		t.Fatalf("generated defaults rejected: %v", err)
 	}
-	data, err := marshalProductConfig(value, source)
+	data, err := marshalConfig(value, source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := productOwnConfig(source)
+	before, err := ownConfig(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := productOwnConfig(data)
+	after, err := ownConfig(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,11 +42,11 @@ func TestProductConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
 	}
 	// Repeated saves must not drift: the settings page rewrites the same file
 	// on every submit.
-	roundTrip, err := parseProductConfig(data)
+	roundTrip, err := parseConfig(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := marshalProductConfig(roundTrip, data)
+	again, err := marshalConfig(roundTrip, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +57,10 @@ func TestProductConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
 
 func TestGeneratedDefaultsKeepSameOriginDerivation(t *testing.T) {
 	var document map[string]any
-	if err := yaml.Unmarshal([]byte(productDefaultConfig()), &document); err != nil {
+	if err := yaml.Unmarshal([]byte(defaultConfig()), &document); err != nil {
 		t.Fatal(err)
 	}
-	values, err := productSections(false).Normalize(document)
+	values, err := declareResources(false, nil, nil).Normalize(document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,48 +71,41 @@ func TestGeneratedDefaultsKeepSameOriginDerivation(t *testing.T) {
 	}
 }
 
-func TestProductConfigPreservesLegacyAndCanonicalPresence(t *testing.T) {
-	for _, source := range []string{
-		"ioa:\n  url: ''\n  space: ''\n  token: secret\n  node_name: worker\nnode:\n  name: common-node\n",
-		"extensions:\n  ioa.client:\n    url: ''\n    space: ''\n    token: secret\n    node_name: worker\nnode:\n  name: common-node\n",
-	} {
-		value, err := parseProductConfig([]byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if value.Ioa != nil {
-			t.Fatal("legacy field escaped normalization")
-		}
-		fields := cfg.ValuesFromProto(value.Extensions)[client.ConfigKey]
-		if fields["url"] != "" || fields["space"] != "" {
-			t.Fatalf("zero presence lost: %#v", fields)
-		}
-		data, err := marshalProductConfig(value, []byte(source))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "ioa:") {
-			t.Fatal("legacy YAML spelling lost")
-		}
-		roundTrip, err := parseProductConfig(data)
-		if err != nil || !proto.Equal(value, roundTrip) {
-			t.Fatalf("round trip = %v, %v\n%s", roundTrip, err, data)
-		}
+func TestConfigUsesCanonicalExtension(t *testing.T) {
+	source := []byte("extensions:\n  ioa.client:\n    url: ''\n    space: ''\n    token: secret\n    node_name: worker\nnode:\n  name: common-node\n")
+	value, err := parseConfig(source)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := parseProductConfig([]byte("ioa:\n  space: a\nextensions:\n  ioa.client:\n    space: b\n")); err == nil {
-		t.Fatal("ambiguous aliases accepted")
+	fields := cfg.ValuesFromProto(value.Extensions)[client.ConfigKey]
+	if fields["url"] != "" || fields["space"] != "" {
+		t.Fatalf("zero presence lost: %#v", fields)
 	}
-	if _, err := parseProductConfig([]byte("extensions:\n  missing:\n    enabled: true\n")); err == nil {
+	data, err := marshalConfig(value, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "ioa.client:") {
+		t.Fatal("canonical extension key was not written")
+	}
+	roundTrip, err := parseConfig(data)
+	if err != nil || !proto.Equal(value, roundTrip) {
+		t.Fatalf("round trip = %v, %v\n%s", roundTrip, err, data)
+	}
+	if _, err := parseConfig([]byte("ioa:\n  space: a\n")); err == nil {
+		t.Fatal("removed root ioa configuration accepted")
+	}
+	if _, err := parseConfig([]byte("extensions:\n  missing:\n    enabled: true\n")); err == nil {
 		t.Fatal("unregistered configuration accepted")
 	}
 }
 
-func TestProductConfigMasksAndRestoresURLCredentials(t *testing.T) {
-	value, err := parseProductConfig([]byte("extensions:\n  ioa.client:\n    url: https://credential@example.test/ioa\n    token: token-secret\n  ioa.server:\n    url: http://server-secret@localhost:8765\n    token: access-secret\n"))
+func TestConfigMasksAndRestoresURLCredentials(t *testing.T) {
+	value, err := parseConfig([]byte("extensions:\n  ioa.client:\n    url: https://credential@example.test/ioa\n    token: token-secret\n  ioa.server:\n    url: http://server-secret@localhost:8765\n    token: access-secret\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := productConfigAPI()
+	options := configAPI()
 	view := &types.ConfigView{Extensions: options.Sections.ProtoViews(value.Extensions)}
 	options.Project(value, view)
 	for _, secret := range []string{"credential", "token-secret", "server-secret", "access-secret"} {
@@ -120,24 +113,25 @@ func TestProductConfigMasksAndRestoresURLCredentials(t *testing.T) {
 			t.Fatalf("view leaked %q", secret)
 		}
 	}
-	if !view.GetIoa().TokenConfigured {
-		t.Fatal("missing legacy secret indicator")
+	ioa := view.GetExtensions()[client.ConfigKey]
+	if ioa == nil || len(ioa.GetConfiguredSecrets()) != 1 || ioa.GetConfiguredSecrets()[0] != "token" {
+		t.Fatal("missing extension secret indicator")
 	}
-	incoming := cfg.Values{client.ConfigKey: {"url": view.Ioa.Url}}
-	preserveProductURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
+	incoming := cfg.Values{client.ConfigKey: {"url": ioa.GetValues().GetFields()["url"].GetStringValue()}}
+	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
 	if incoming[client.ConfigKey]["url"] != "https://credential@example.test/ioa" {
 		t.Fatal("masked URL erased credential")
 	}
 	incoming[client.ConfigKey]["url"] = "https://different.test/ioa"
-	preserveProductURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
+	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
 	if strings.Contains(incoming[client.ConfigKey]["url"].(string), "credential") {
 		t.Fatal("credential copied to different host")
 	}
 }
 
 func TestServingConfigDoesNotRequireClientFields(t *testing.T) {
-	r := productSections(true)
-	values, err := r.Normalize(map[string]any{"ioa": map[string]any{"url": "http://localhost:9000", "space": "default", "node_name": "legacy", "token": "secret"}})
+	r := declareResources(true, nil, nil)
+	values, err := r.Normalize(map[string]any{"extensions": map[string]any{"ioa.server": map[string]any{"url": "http://localhost:9000", "token": "secret"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,13 +142,13 @@ func TestServingConfigDoesNotRequireClientFields(t *testing.T) {
 
 // The settings page writes a file the flags loader reads back on the next start,
 // so the saved keys have to be the Option schema's snake-case spelling.
-func TestProductConfigSaveStaysReadableByTheFlagsLoader(t *testing.T) {
+func TestConfigSaveStaysReadableByTheFlagsLoader(t *testing.T) {
 	source := []byte("llm:\n  active_profile: main\n  providers:\n    - id: main\n      provider: openai\n      base_url: https://api.example.test/v1\n      api_key: sk-test\n      model: gpt-4o\n")
-	value, err := parseProductConfig(source)
+	value, err := parseConfig(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := marshalProductConfig(value, source)
+	data, err := marshalConfig(value, source)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,11 +7,8 @@ import (
 )
 
 // Declare contributes the server resources needed before argument parsing.
-func Declare(resources *resource.Registry, command hostcli.Contribution, legacyAlias bool) error {
+func Declare(resources *resource.Registry, command hostcli.Contribution) error {
 	section := Section()
-	if legacyAlias {
-		section.Aliases = []string{"ioa"}
-	}
 	if _, err := resource.Add[hostcli.Contribution](resources, command); err != nil {
 		return err
 	}

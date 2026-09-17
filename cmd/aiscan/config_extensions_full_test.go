@@ -74,12 +74,12 @@ func TestWebConfigStoreProjectsRuntimeFlagsWithoutConfigFile(t *testing.T) {
 // An unset extension value survives structpb as a JSON null, which would reach
 // the operator's file as an explicit `token: null`. A hand-written config omits
 // the key instead, and every reader treats the two the same.
-func TestMarshalProductConfigOmitsNullValues(t *testing.T) {
+func TestMarshalConfigOmitsNullValues(t *testing.T) {
 	extensions, err := cfg.ValuesToProto(cfg.Values{"ioa.client": {"url": "http://ioa.test", "token": nil}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := marshalProductConfig(&types.DistributeConfig{Extensions: extensions}, nil)
+	data, err := marshalConfig(&types.DistributeConfig{Extensions: extensions}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,12 +93,16 @@ func TestMarshalProductConfigOmitsNullValues(t *testing.T) {
 
 func TestWebConfigExtensionSavePreservesOmittedSectionsAndSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	original := []byte("ioa:\n  url: http://ioa.test\n  token: secret\n  space: team\nextensions:\n  ioa.server:\n    token: server-secret\n")
+	original := []byte("extensions:\n  ioa.client:\n    url: http://ioa.test\n    token: secret\n    space: team\n  ioa.server:\n    token: server-secret\n")
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
 	store := &webConfigStore{explicit: path}
-	for _, incoming := range []*types.DistributeConfig{{}, {Ioa: &types.IOAConfig{Url: "http://ioa.test", Space: ""}}} {
+	clientExtension, err := cfg.ValuesToProto(cfg.Values{"ioa.client": {"url": "http://ioa.test", "space": ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, incoming := range []*types.DistributeConfig{{}, {Extensions: clientExtension}} {
 		prepared, err := store.PrepareDistributeConfig(t.Context(), incoming)
 		if err != nil {
 			t.Fatal(err)
