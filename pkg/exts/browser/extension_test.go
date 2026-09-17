@@ -6,20 +6,19 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {
-	registry := commands.NewRegistry(nil)
-	instance, err := New(registry, t.TempDir(), "default")
+	registry := commands.NewRegistry()
+	instance, err := New(t.TempDir(), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
 	set := hosttest.Set(t,
-		instance,
 		registry,
+		instance,
 	)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

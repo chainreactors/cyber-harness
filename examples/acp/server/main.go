@@ -17,15 +17,15 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/web"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
+func newHeadlessHandler(store *webservice.SQLiteStore, ingestor coretool.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
 	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
 	pool := webservice.NewAgentPool(service.Hub(), ingestor)
 	service.SetAgentPool(pool)
