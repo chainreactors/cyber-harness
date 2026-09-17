@@ -13,7 +13,7 @@ import (
 )
 
 func Names() []string {
-	return append([]string{"curl", "gogo", "neutron", "proton", "spray", "zombie", "scan"}, editionNames()...)
+	return append([]string{"curl", "gogo", "neutron", "proton", "spray", "zombie", "scan"}, manifestNames()...)
 }
 
 func Available(name string) bool {
@@ -42,7 +42,7 @@ func Usage(name string) (string, bool) {
 	case "scan":
 		return scan.Usage(), true
 	default:
-		return editionUsage(name)
+		return manifestUsage(name)
 	}
 }
 
@@ -71,6 +71,6 @@ func scannerDescription(name string) string {
 	case "zombie":
 		return "Run zombie directly"
 	default:
-		return editionDescription(name)
+		return manifestDescription(name)
 	}
 }

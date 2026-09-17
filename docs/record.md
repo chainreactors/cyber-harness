@@ -67,7 +67,7 @@ editions exist, and each one pins its CGO setting:
 
 `editions.env` at the repository root is the source of truth for this table:
 the Makefile includes it, the workflows append it to `$GITHUB_ENV`, and
-`TestEditionsAreConsistent` / `TestBuildTagsMatchEdition` in `cmd/aiscan` fail
+`TestBuildManifestIsConsistent` and the manifest tag tests in `cmd/aiscan` fail
 when a set here drifts from the file. It is a data file, not a shell script —
 the values hold spaces, so sourcing it would truncate every one of them.
 

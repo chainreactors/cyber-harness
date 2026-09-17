@@ -18,9 +18,9 @@ func TestRecordFullScannerSet(t *testing.T) {
 	}
 }
 
-func TestRecordEditionBuildTags(t *testing.T) {
-	assertEditionTags(t, "RECORD")
-	assertEditionCGO(t, "RECORD")
+func TestRecordManifestTags(t *testing.T) {
+	assertManifestTags(t, "RECORD")
+	assertManifestCGO(t, "RECORD")
 }
 
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {

@@ -14,7 +14,7 @@ func TestFullScannerSet(t *testing.T) {
 	}
 }
 
-func TestFullEditionBuildTags(t *testing.T) {
-	assertEditionTags(t, "FULL")
-	assertEditionCGO(t, "FULL")
+func TestFullManifestTags(t *testing.T) {
+	assertManifestTags(t, "FULL")
+	assertManifestCGO(t, "FULL")
 }

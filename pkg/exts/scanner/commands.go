@@ -30,7 +30,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 		scannerResources = engineSet.Resources
 	}
 
-	options := editionScanOptions()
+	options := manifestScanOptions()
 	model, providerConfig := application.ProviderState()
 	if model != nil {
 		if loop == nil {
@@ -92,11 +92,11 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 	} else {
 		values = append(values, command)
 	}
-	editionCommands, err := editionScannerCommands(application, engineSet, logger, proxyURL)
+	manifestCommands, err := manifestScannerCommands(application, engineSet, logger, proxyURL)
 	if err != nil {
 		return nil, err
 	}
-	return append(values, editionCommands...), nil
+	return append(values, manifestCommands...), nil
 }
 
 func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {

@@ -10,8 +10,8 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func editionScannerCommands(*app.App, *engine.Set, telemetry.Logger, string) ([]commands.Command, error) {
+func manifestScannerCommands(*app.App, *engine.Set, telemetry.Logger, string) ([]commands.Command, error) {
 	return nil, nil
 }
 
-func editionScanOptions() []scan.Option { return nil }
+func manifestScanOptions() []scan.Option { return nil }

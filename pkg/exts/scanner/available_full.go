@@ -7,9 +7,9 @@ import (
 	"github.com/chainreactors/cyber/tools/passive"
 )
 
-func editionNames() []string { return []string{"katana", "passive"} }
+func manifestNames() []string { return []string{"katana", "passive"} }
 
-func editionUsage(name string) (string, bool) {
+func manifestUsage(name string) (string, bool) {
 	switch name {
 	case "katana":
 		return katana.New().Usage(), true
@@ -20,7 +20,7 @@ func editionUsage(name string) (string, bool) {
 	}
 }
 
-func editionDescription(name string) string {
+func manifestDescription(name string) string {
 	switch name {
 	case "katana":
 		return "Run katana web crawler"

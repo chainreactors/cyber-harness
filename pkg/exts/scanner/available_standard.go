@@ -2,6 +2,6 @@
 
 package scanner
 
-func editionNames() []string             { return nil }
-func editionUsage(string) (string, bool) { return "", false }
-func editionDescription(string) string   { return "" }
+func manifestNames() []string             { return nil }
+func manifestUsage(string) (string, bool) { return "", false }
+func manifestDescription(string) string   { return "" }

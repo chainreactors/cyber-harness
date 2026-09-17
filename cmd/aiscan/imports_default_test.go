@@ -15,9 +15,9 @@ func TestDefaultScannerSet(t *testing.T) {
 	}
 }
 
-// CGO is deliberately not asserted here: the standard edition gates no cgo
+// CGO is deliberately not asserted here: the standard manifest gates no cgo
 // file, so STANDARD_CGO only keeps the release binary free of a C toolchain,
 // while a test build may legitimately leave cgo at its default.
-func TestStandardEditionBuildTags(t *testing.T) {
-	assertEditionTags(t, "STANDARD")
+func TestStandardManifestTags(t *testing.T) {
+	assertManifestTags(t, "STANDARD")
 }

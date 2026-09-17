@@ -12,8 +12,8 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func editionScannerCommands(application *app.App, engines *engine.Set, logger telemetry.Logger, proxyURL string) ([]commands.Command, error) {
+func manifestScannerCommands(application *app.App, engines *engine.Set, logger telemetry.Logger, proxyURL string) ([]commands.Command, error) {
 	return []commands.Command{katana.NewCommand(logger, proxyURL, application), passive.NewCommand(engines, logger)}, nil
 }
 
-func editionScanOptions() []scan.Option { return scan.KatanaOptions() }
+func manifestScanOptions() []scan.Option { return scan.KatanaOptions() }

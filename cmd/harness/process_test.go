@@ -107,7 +107,7 @@ func buildExecutable(t *testing.T) string {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		// The full edition includes CSTX, which only compiles with cgo. The
+		// The full manifest includes CSTX, which only compiles with cgo. The
 		// harness runner's default CGO_ENABLED=1 covers that.
 		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full", "-o", executablePath, "./cmd/aiscan")
 		cmd.Dir = root
