@@ -73,6 +73,16 @@ export default {
   tools: '工具',
   thinkingLabel: '思考',
   responseLabel: '回复',
+  // 工具调用卡片(ToolCallDisplay / ScannerToolCall)的公共标签
+  toolCard: {
+    arguments: '参数',
+    result: '结果',
+    rawOutput: '原始输出',
+    loadingResults: '正在加载结构化结果…',
+    failed: '失败',
+    running: '运行中',
+    completed: '已完成',
+  },
   persistMode: 'Goal',
   persistHint: '开启 Goal 模式:用自然语言描述目标与完成标准,由独立评估器逐轮判定,未达标则带反馈自动重跑,直到达标或评估器判定再跑也没有进展。',
   evalCriteriaLabel: '完成标准',

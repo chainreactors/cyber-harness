@@ -41,6 +41,7 @@ export default function ScannerToolCall({
   error = false,
 }: ScannerToolCallProps) {
   const { t } = useTranslation('scan')
+  const { t: tChat } = useTranslation('chat')
   const command = useMemo(() => scannerCommand(toolName, toolArgs), [toolName, toolArgs])
   const [nodes, setNodes] = useState<SCONode[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -59,6 +60,14 @@ export default function ScannerToolCall({
     return () => { disposed = true }
   }, [command, error, id, pending])
 
+  const labels = {
+    arguments: tChat('toolCard.arguments'),
+    result: tChat('toolCard.result'),
+    failed: tChat('toolCard.failed'),
+    running: tChat('toolCard.running'),
+    completed: tChat('toolCard.completed'),
+  }
+
   if (!command) {
     return (
       <ToolCallDisplay
@@ -67,6 +76,7 @@ export default function ScannerToolCall({
         result={result}
         pending={pending}
         error={error}
+        labels={labels}
       />
     )
   }
@@ -94,7 +104,7 @@ export default function ScannerToolCall({
             {command}
           </Badge>
           <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={summary || formattedArgs}>
-            {summary || (error ? 'failed' : pending ? 'running' : 'completed')}
+            {summary || (error ? labels.failed : pending ? labels.running : labels.completed)}
           </span>
           {nodes && nodes.length > 0 && (
             <Badge variant="muted" size="sm" className="shrink-0 rounded-full font-mono tabular-nums">
@@ -118,13 +128,13 @@ export default function ScannerToolCall({
         {loading && (
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Loading structured results...</span>
+            <span>{tChat('toolCard.loadingResults')}</span>
           </div>
         )}
         {toolArgs && (
           <details className="border-t border-border">
             <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              Arguments
+              {labels.arguments}
             </summary>
             <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-xs text-muted-foreground">
               {formattedArgs}
@@ -134,7 +144,7 @@ export default function ScannerToolCall({
         {displayResult !== undefined && (
           <details className="border-t border-border" open={!nodes && !loading}>
             <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              Raw Output
+              {tChat('toolCard.rawOutput')}
             </summary>
             <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-xs text-muted-foreground">
               {displayResult}

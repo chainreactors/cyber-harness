@@ -73,6 +73,16 @@ export default {
   tools: 'Tools',
   thinkingLabel: 'Thinking',
   responseLabel: 'Response',
+  // Shared labels for tool-call cards (ToolCallDisplay / ScannerToolCall).
+  toolCard: {
+    arguments: 'Arguments',
+    result: 'Result',
+    rawOutput: 'Raw Output',
+    loadingResults: 'Loading structured results...',
+    failed: 'failed',
+    running: 'running',
+    completed: 'completed',
+  },
   persistMode: 'Goal',
   persistHint: 'Goal mode: describe the goal and its done-when criteria in plain language; an independent evaluator judges each round and re-runs with feedback until it passes, or until it decides another round would not help.',
   evalCriteriaLabel: 'Done-when',
