@@ -89,7 +89,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		accessKey = protocols.NewToken()
 	}
 	service := webservice.NewService(webservice.ServiceConfig{
-		ConfigAPI:   productConfigAPI(),
+		ConfigAPI:   configAPI(),
 		Store:       store,
 		Profile:     product,
 		Artifacts:   ingestor,
@@ -101,7 +101,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
-			candidateOption.Sections = productSections(false)
+			candidateOption.Sections = declareResources(false, nil, nil)
 			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
 				return nil, err
 			}
@@ -204,7 +204,7 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	if base != nil {
 		option = *base
 	}
-	if err := applyProductIdentity(&option); err != nil {
+	if err := applyIdentity(&option); err != nil {
 		return cfg.Option{}, err
 	}
 	serverURL := &url.URL{Scheme: "http", Host: listenAddr}
@@ -309,7 +309,7 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	if err != nil {
 		return p, false, nil, err
 	}
-	dc, err := parseProductConfig(data)
+	dc, err := parseConfig(data)
 	return p, true, dc, err
 }
 
@@ -330,7 +330,7 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 			return nil, err
 		}
 		original = data
-		current, err = parseProductConfig(data)
+		current, err = parseConfig(data)
 		if err != nil {
 			return nil, err
 		}
@@ -361,21 +361,18 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
-	if err := normalizeProductConfig(incoming); err != nil {
-		return nil, err
-	}
-	sections := productSections(false)
+	sections := declareResources(false, nil, nil)
 	nextValues, currentValues := cfg.ValuesFromProto(incoming.Extensions), cfg.ValuesFromProto(current.Extensions)
-	preserveProductURLCredentials(nextValues, currentValues)
+	preserveURLCredentials(nextValues, currentValues)
 	incoming.Extensions, err = cfg.ValuesToProto(sections.Preserve(nextValues, currentValues))
 	if err != nil {
 		return nil, err
 	}
-	if err = validateProductConfig(incoming); err != nil {
+	if err = validateConfig(incoming); err != nil {
 		return nil, err
 	}
 
-	next, err := marshalProductConfig(incoming, original)
+	next, err := marshalConfig(incoming, original)
 	if err != nil {
 		return nil, err
 	}

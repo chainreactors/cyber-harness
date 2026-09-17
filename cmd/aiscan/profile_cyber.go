@@ -94,7 +94,7 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 		return nil, fmt.Errorf("cyber profile option is required")
 	}
 	if request.Option.Resolved == nil {
-		resolved, err := productSections(false).ResolveValues(request.Option.Extensions, nil, nil)
+		resolved, err := declareResources(false, nil, nil).ResolveValues(request.Option.Extensions, nil, nil)
 		if err != nil {
 			return nil, err
 		}

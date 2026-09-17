@@ -91,7 +91,7 @@ func cyber() {
 		return
 	}
 	if option.InitConfig {
-		if err := os.WriteFile(cfg.DefaultConfigName, []byte(productDefaultConfig()), 0o644); err != nil {
+		if err := os.WriteFile(cfg.DefaultConfigName, []byte(defaultConfig()), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
@@ -118,7 +118,7 @@ func cyber() {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
-	if err := applyProductIdentity(&option); err != nil {
+	if err := applyIdentity(&option); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
@@ -187,7 +187,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
 				option := cfg.Option{MiscOptions: cli.MiscOptions}
-				finalizeProductOptions(&option, nil)
+				finalizeOptions(&option, nil)
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
@@ -206,7 +206,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	option := buildOption(&cli, parser)
 	action := cli.registry.Selected()
 	option.Extensions = cli.registry.Values()
-	finalizeProductOptions(&option, action)
+	finalizeOptions(&option, action)
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
 	}
@@ -263,7 +263,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}
 
 	option := cfg.Option{MiscOptions: cli.MiscOptions}
-	finalizeProductOptions(&option, nil)
+	finalizeOptions(&option, nil)
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -410,7 +410,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	cli.registry = hostcli.New(parser)
-	declareProductResources(false, cli.registry, &cli.Agent.AgentOptions)
+	declareResources(false, cli.registry, &cli.Agent.AgentOptions)
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}
