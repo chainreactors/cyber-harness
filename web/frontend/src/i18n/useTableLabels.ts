@@ -9,6 +9,7 @@ const KEYS = [
   'noMatch', 'noMatchHint', 'noTypeMatch', 'noTypeMatchHint', 'emptyHint',
   'clearSearch', 'clearFilters', 'rangeOf', 'perPage', 'emptyRows',
   'search', 'searchField',
+  'exportXlsx', 'exportCsv', 'exportReport',
 ] as const
 
 export function useTableLabels() {

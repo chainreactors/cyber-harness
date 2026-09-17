@@ -16,4 +16,7 @@ export default {
   emptyRows: '0 rows',
   search: 'Search...',
   searchField: 'Search... (type:domain value~example)',
+  exportXlsx: 'Export XLSX',
+  exportCsv: 'Export CSV',
+  exportReport: 'Generate report',
 }

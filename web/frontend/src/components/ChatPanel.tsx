@@ -731,6 +731,14 @@ export default function ChatPanel({
                   renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
                   placeholder={t('typeMessageWithCommands')}
+                  labels={{
+                    dropFiles: t('dropFiles'),
+                    attachFiles: t('attachFiles'),
+                    sendMessage: t('sendMessage'),
+                    pauseResponse: t('pauseResponse'),
+                    injectAsContext: t('injectAsContext'),
+                    uploadToRemote: t('uploadToRemote'),
+                  }}
                   enableAttachments={!!activeSessionID}
                 />
               </div>
