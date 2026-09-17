@@ -440,11 +440,13 @@ jobs:
 
       - name: Check generated protobuf bindings are committed
         run: |
-          git diff --exit-code -- \
-            pkg/rpc \
-            core/types \
-            web/frontend/src/gen \
-            web/frontend/cyber-ui/packages/aop/src/gen/aop
+          # Untracked output is drift too: a new proto yields a new binding file,
+          # which `git diff` never reports.
+          test -z "$(git status --porcelain -- pkg/rpc core/types web/frontend/src/gen)"
+          # The AOP bindings are generated into the cyber-ui submodule, where the
+          # superproject tracks only the gitlink, so a regeneration inside it is
+          # invisible from here and the check has to run in the submodule.
+          test -z "$(git -C web/frontend/cyber-ui status --porcelain -- packages/aop/src/gen/aop)"
 
       - name: Build embedded frontend
         run: |
