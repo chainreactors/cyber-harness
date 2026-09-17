@@ -120,6 +120,9 @@ export default {
     empty: '无匹配',
     switchCategory: '切换分类',
     navigate: '移动',
+    // 资产分类是多选(勾选 + “插入所选”),其余分类 Enter 直接插入
+    selectKey: '勾选',
+    insertKey: '插入',
   },
   // 后端系统消息(按 code 本地化;英文原文仅作兜底)。与 pkg/web 的 Sys* 常量一一对应。
   sys: {

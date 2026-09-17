@@ -120,6 +120,10 @@ export default {
     empty: 'No matches',
     switchCategory: 'switch category',
     navigate: 'move',
+    // Assets are multi-select (checkbox + "Insert selected"); the other
+    // categories insert on Enter directly.
+    selectKey: 'select',
+    insertKey: 'insert',
   },
   // Backend system messages (localized by code; English here is also the fallback).
   // Mirrors the Sys* codes in pkg/web.

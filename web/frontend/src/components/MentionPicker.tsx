@@ -256,7 +256,10 @@ export default function MentionPicker({
             )}
           </button>
         ))}
-        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">← → {t('mention.switchCategory')} · ↑ ↓ {t('mention.navigate')} · Enter</span>
+        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">
+          ← → {t('mention.switchCategory')} · ↑ ↓ {t('mention.navigate')} · Enter{' '}
+          {active === 'cstx' ? t('mention.selectKey') : t('mention.insertKey')}
+        </span>
         <Button
           variant="ghost"
           size="xs"
