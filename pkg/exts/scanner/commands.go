@@ -8,7 +8,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/truncate"
 	app "github.com/chainreactors/cyber/pkg/app"
@@ -17,6 +16,7 @@ import (
 	gotools "github.com/chainreactors/cyber/tools/gogo"
 	neutrontools "github.com/chainreactors/cyber/tools/neutron"
 	protontools "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	spraytools "github.com/chainreactors/cyber/tools/spray"

@@ -12,10 +12,10 @@ import (
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	_ "github.com/chainreactors/cyber/tools/gogo"
 	_ "github.com/chainreactors/cyber/tools/neutron"
+	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	_ "github.com/chainreactors/cyber/tools/spray"
 	"github.com/chainreactors/utils/parsers"

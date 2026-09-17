@@ -147,7 +147,7 @@ prepare:
 # Only reachable through EMBED=1, which also strips the tags that would
 # otherwise keep these resources external.
 embed-resources:
-	$(GO) generate ./core/resources
+	$(GO) generate ./tools/resources
 
 ldflags:
 	@echo "$(GO_LDFLAGS)"

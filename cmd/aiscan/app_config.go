@@ -5,11 +5,11 @@ import (
 
 	"github.com/chainreactors/cyber/agent/provider"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	app "github.com/chainreactors/cyber/pkg/app"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 

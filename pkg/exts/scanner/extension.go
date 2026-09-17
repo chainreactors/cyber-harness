@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	app "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/sdk/pkg/association"
 )

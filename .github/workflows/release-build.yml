@@ -178,7 +178,7 @@ jobs:
           path: web/static
 
       - name: Generate embedded resources
-        run: go generate ./core/resources
+        run: go generate ./tools/resources
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"

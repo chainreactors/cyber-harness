@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	protoncmd "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/resources"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 

@@ -2,9 +2,9 @@ package proton
 
 import (
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/resources"
 )
 
 func NewCommand(workDir string, resources *resources.Set, logger telemetry.Logger, proxy string, events aop.EventPublisher) commands.Command {

@@ -185,7 +185,7 @@ jobs:
           bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Generate embedded resources
-        run: go generate ./core/resources/...
+        run: go generate ./tools/resources/...
 
       - name: Run AOP module tests
         working-directory: aop
@@ -223,7 +223,7 @@ jobs:
           echo "Total coverage ${coverage}% meets the 50.0% floor"
 
       - name: Check generated resources are committed
-        run: git diff --exit-code -- core/resources/template.go
+        run: git diff --exit-code -- tools/resources/template.go
 
       - name: Display coverage summary
         if: always()
