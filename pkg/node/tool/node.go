@@ -21,16 +21,21 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/aopws"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/gorilla/websocket"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // DefaultWSPath is the hub route the tool node dials; the agent node in pkg/node
 // dials the same route.
-const DefaultWSPath = "/api/aop/node/ws"
+const (
+	DefaultWSPath        = "/api/aop/node/ws"
+	websocketWriteWait   = 10 * time.Second
+	websocketPingPeriod  = 30 * time.Second
+	websocketPongTimeout = 90 * time.Second
+)
 
 type Config struct {
 	ServerURL string
@@ -109,42 +114,6 @@ func retryDelay(attempt int) time.Duration {
 	return time.Duration(1<<attempt) * 250 * time.Millisecond
 }
 
-type stream struct {
-	conn *websocket.Conn
-	json bool
-}
-
-func (s stream) recv() (*aop.Envelope, error) {
-	_, data, err := s.conn.ReadMessage()
-	if err != nil {
-		return nil, err
-	}
-	envelope := new(aop.Envelope)
-	if s.json {
-		err = protojson.Unmarshal(data, envelope)
-	} else {
-		err = proto.Unmarshal(data, envelope)
-	}
-	return envelope, err
-}
-
-func (s stream) send(envelope *aop.Envelope) error {
-	frame := websocket.BinaryMessage
-	var data []byte
-	var err error
-	if s.json {
-		frame = websocket.TextMessage
-		data, err = protojson.Marshal(envelope)
-	} else {
-		data, err = proto.Marshal(envelope)
-	}
-	if err != nil {
-		return err
-	}
-	_ = s.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return s.conn.WriteMessage(frame, data)
-}
-
 func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	dialURL, token, err := connectionURL(cfg.ServerURL, cfg.WSPath)
 	if err != nil {
@@ -164,15 +133,24 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	if err != nil {
 		return err
 	}
-	s := stream{conn: conn, json: cfg.JSON}
 	connectionCtx, cancel := context.WithCancel(ctx)
+	encoding := aopws.Binary
+	if cfg.JSON {
+		encoding = aopws.ProtoJSON
+	}
+	stream, err := aopws.New(connectionCtx, conn, aopws.Options{
+		Encoding:     encoding,
+		WriteTimeout: websocketWriteWait,
+		PingInterval: websocketPingPeriod,
+		PongTimeout:  websocketPongTimeout,
+	})
+	if err != nil {
+		cancel()
+		return err
+	}
 	defer func() {
 		cancel()
-		_ = conn.Close()
-	}()
-	go func() {
-		<-connectionCtx.Done()
-		_ = conn.Close()
+		_ = stream.Close()
 	}()
 	namespaces := aop.NewNamespaceMux(connectionCtx)
 	if cfg.RegisterNamespaces != nil {
@@ -187,10 +165,10 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		return err
 	}
 	helloEnvelope := aop.Reply("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
-	if err := s.send(helloEnvelope); err != nil {
+	if err := stream.Send(helloEnvelope); err != nil {
 		return err
 	}
-	acceptedEnvelope, err := s.recv()
+	acceptedEnvelope, err := stream.Recv()
 	if err != nil {
 		return err
 	}
@@ -214,7 +192,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		for {
 			select {
 			case envelope := <-sendCh:
-				if err := s.send(envelope); err != nil {
+				if err := stream.Send(envelope); err != nil {
 					select {
 					case writerErr <- err:
 					default:
@@ -275,7 +253,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	}()
 
 	for {
-		envelope, err := s.recv()
+		envelope, err := stream.Recv()
 		if err != nil {
 			select {
 			case writeErr := <-writerErr:

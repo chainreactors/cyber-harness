@@ -31,6 +31,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/aopws"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
@@ -579,7 +580,12 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 	if response != nil && response.Body != nil {
 		response.Body.Close()
 	}
-	stream, err := newWebSocketEnvelopeStream(wsConn, false)
+	stream, err := aopws.New(context.Background(), wsConn, aopws.Options{
+		Encoding:     aopws.Binary,
+		WriteTimeout: websocketWriteWait,
+		PingInterval: websocketPingPeriod,
+		PongTimeout:  websocketPongWait,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +604,7 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 	}
 }
 
-func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
+func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -609,18 +615,16 @@ func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	stream, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	stream, err := dialProtoWebSocket(ctx, connectionConfig{ServerURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if err := stream.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
-		t.Fatal(err)
-	}
 	_, err = stream.Recv()
-	var netErr net.Error
-	if !errors.As(err, &netErr) || !netErr.Timeout() {
-		t.Fatalf("Recv error = %v, want timeout", err)
+	if err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("Recv error = %v, context error = %v; want context deadline closure", err, ctx.Err())
 	}
 }
 

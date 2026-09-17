@@ -31,17 +31,12 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/aopws"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	toolset "github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/gorilla/websocket"
-	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
 )
-
-type webSocketEnvelopeStream struct {
-	conn *websocket.Conn
-	json bool
-}
 
 func attachToolProgress(progressBus *eventbus.Bus[*toolpb.Progress], send func(string, protobuf.Message)) *eventbus.Subscription[*toolpb.Progress] {
 	if progressBus == nil {
@@ -65,74 +60,7 @@ const (
 	reconnectStableAfter = websocketPongWait + websocketPingPeriod
 )
 
-func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool) (*webSocketEnvelopeStream, error) {
-	if err := conn.SetReadDeadline(time.Now().Add(websocketPongWait)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
-	})
-	return &webSocketEnvelopeStream{conn: conn, json: json}, nil
-}
-
-func (s *webSocketEnvelopeStream) heartbeat(ctx context.Context) {
-	ticker := time.NewTicker(websocketPingPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			_ = s.conn.Close()
-			return
-		case <-ticker.C:
-			if err := s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(websocketWriteWait)); err != nil {
-				_ = s.conn.Close()
-				return
-			}
-		}
-	}
-}
-
-func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
-
-func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
-	_, data, err := s.conn.ReadMessage()
-	if err != nil {
-		return nil, err
-	}
-	envelope := new(aop.Envelope)
-	if s.json {
-		if err := protojson.Unmarshal(data, envelope); err != nil {
-			return nil, fmt.Errorf("decode AOP envelope: %w", err)
-		}
-		return envelope, nil
-	}
-	if err := protobuf.Unmarshal(data, envelope); err != nil {
-		return nil, fmt.Errorf("decode AOP envelope: %w", err)
-	}
-	return envelope, nil
-}
-
-func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
-	var data []byte
-	var err error
-	frame := websocket.BinaryMessage
-	if s.json {
-		data, err = protojson.Marshal(envelope)
-		frame = websocket.TextMessage
-	} else {
-		data, err = protobuf.Marshal(envelope)
-	}
-	if err != nil {
-		return err
-	}
-	if err := s.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
-		return err
-	}
-	return s.conn.WriteMessage(frame, data)
-}
-
-func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnvelopeStream, error) {
+func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*aopws.Stream, error) {
 	dialURL, accessKey := SplitAccessKey(cc.ServerURL)
 	if cc.Token != "" {
 		accessKey = cc.Token
@@ -155,7 +83,16 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 		}
 		return nil, err
 	}
-	return newWebSocketEnvelopeStream(conn, cc.JSONFrames)
+	encoding := aopws.Binary
+	if cc.JSONFrames {
+		encoding = aopws.ProtoJSON
+	}
+	return aopws.New(ctx, conn, aopws.Options{
+		Encoding:     encoding,
+		WriteTimeout: websocketWriteWait,
+		PingInterval: websocketPingPeriod,
+		PongTimeout:  websocketPongWait,
+	})
 }
 
 func shouldResetReconnectBackoff(connectedAt, disconnectedAt time.Time) bool {
@@ -177,10 +114,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 		connectedAt := time.Time{}
 		if err == nil {
 			connectedAt = time.Now()
-			heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
-			go stream.heartbeat(heartbeatCtx)
 			err = serveAgentConnection(ctx, cc, logger, stream)
-			stopHeartbeat()
 			_ = stream.Close()
 		}
 		if ctx.Err() != nil {
