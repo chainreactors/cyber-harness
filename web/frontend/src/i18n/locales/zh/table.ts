@@ -19,4 +19,6 @@ export default {
   exportXlsx: '导出 XLSX',
   exportCsv: '导出 CSV',
   exportReport: '生成报告',
+  selectAllRows: '全选筛选结果',
+  selectRow: '选择第 {n} 行',
 }

@@ -359,6 +359,8 @@ function LLMProfileSwitcher({
   disabled: boolean
   onChange: (profileID: string) => void
 }) {
+  const { t } = useTranslation('app')
+
   if (profiles.length === 0) {
     return <span className="ml-1 hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">{fallbackModel}</span>
   }
@@ -366,7 +368,7 @@ function LLMProfileSwitcher({
   return (
     <Select value={activeProfileID || profiles[0].id} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
-        aria-label="Switch LLM profile"
+        aria-label={t('switchLLMProfile')}
         className="ml-1 hidden h-7 w-auto min-w-[120px] max-w-[230px] gap-1 border-0 bg-transparent px-2 font-mono text-[10px] text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground sm:flex"
       >
         <SelectValue placeholder={fallbackModel} />

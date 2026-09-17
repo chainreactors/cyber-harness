@@ -315,6 +315,7 @@ export default function QuickConnect({ serverURL, version }: Props) {
 
               <CommandRow
                 label={t('quickConnectInstall')}
+                copyLabel={t('quickConnectCopy')}
                 commands={[
                   { key: `install-${downloadSource}`, text: install },
                 ]}
@@ -324,6 +325,7 @@ export default function QuickConnect({ serverURL, version }: Props) {
 
               <CommandRow
                 label={t('quickConnectOnly')}
+                copyLabel={t('quickConnectCopy')}
                 commands={[
                   { key: 'connect', text: connect },
                 ]}
@@ -349,8 +351,9 @@ interface CmdEntry {
   text: string
 }
 
-function CommandRow({ label, commands, copied, onCopy, className }: {
+function CommandRow({ label, copyLabel, commands, copied, onCopy, className }: {
   label: string
+  copyLabel: string
   commands: CmdEntry[]
   copied: CopiedKey
   onCopy: (key: string, text: string) => void
@@ -365,7 +368,7 @@ function CommandRow({ label, commands, copied, onCopy, className }: {
         </pre>
         <div className="mt-1.5 flex gap-1.5 justify-end">
           {commands.map((c) => (
-            <CopyButton key={c.key} tag={c.tag} copied={copied === c.key} onClick={() => onCopy(c.key, c.text)} />
+            <CopyButton key={c.key} tag={c.tag} label={`${copyLabel} — ${label}`} copied={copied === c.key} onClick={() => onCopy(c.key, c.text)} />
           ))}
         </div>
       </div>
@@ -373,11 +376,12 @@ function CommandRow({ label, commands, copied, onCopy, className }: {
   )
 }
 
-function CopyButton({ tag, copied, onClick }: { tag?: string; copied: boolean; onClick: () => void }) {
+function CopyButton({ tag, label, copied, onClick }: { tag?: string; label: string; copied: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
       className={cn(
         'inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors',
         copied

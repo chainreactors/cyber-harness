@@ -22,6 +22,7 @@ export default {
   profileName: 'Profile name',
   profileNameHint: 'e.g. DeepSeek production',
   unnamedProfile: 'Unnamed LLM',
+  newProfileName: 'New LLM',
   addLLMProfile: 'Add LLM',
   setActiveProfile: 'Set active',
   removeProfile: 'Remove',

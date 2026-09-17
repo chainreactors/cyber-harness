@@ -25,6 +25,7 @@ export default {
   profileName: '配置名称',
   profileNameHint: '例如：DeepSeek 生产环境',
   unnamedProfile: '未命名 LLM',
+  newProfileName: '新建 LLM',
   addLLMProfile: '添加 LLM',
   setActiveProfile: '设为当前',
   removeProfile: '删除',

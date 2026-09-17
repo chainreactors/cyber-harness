@@ -19,4 +19,6 @@ export default {
   exportXlsx: 'Export XLSX',
   exportCsv: 'Export CSV',
   exportReport: 'Generate report',
+  selectAllRows: 'Select all filtered rows',
+  selectRow: 'Select row {n}',
 }

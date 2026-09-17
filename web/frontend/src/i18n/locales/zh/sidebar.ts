@@ -4,6 +4,8 @@ export default {
   rosterIdle: '无在线节点',
   collapseSidebar: '收起侧边栏',
   expandSidebar: '展开侧边栏',
+  switchToLight: '切换到浅色主题',
+  switchToDark: '切换到深色主题',
   history: '历史',
   running: '{{count}} 运行中',
   noScansYet: '暂无扫描记录',

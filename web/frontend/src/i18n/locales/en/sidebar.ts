@@ -4,6 +4,8 @@ export default {
   rosterIdle: 'No nodes online',
   collapseSidebar: 'Collapse sidebar',
   expandSidebar: 'Expand sidebar',
+  switchToLight: 'Switch to light theme',
+  switchToDark: 'Switch to dark theme',
   history: 'History',
   running: '{{count}} running',
   noScansYet: 'No scans yet.',

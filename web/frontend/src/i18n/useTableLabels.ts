@@ -10,6 +10,7 @@ const KEYS = [
   'clearSearch', 'clearFilters', 'rangeOf', 'perPage', 'emptyRows',
   'search', 'searchField',
   'exportXlsx', 'exportCsv', 'exportReport',
+  'selectAllRows', 'selectRow',
 ] as const
 
 export function useTableLabels() {

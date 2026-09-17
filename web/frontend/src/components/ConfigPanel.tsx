@@ -111,8 +111,8 @@ const LLM_PROVIDER_PRESETS: { value: string; label: string; protocol: LLMProtoco
   { value: 'custom-anthropic', label: '', protocol: 'anthropic', baseUrl: '' },
 ]
 
-function emptyForm(): ConfigFormState {
-  const profile = blankLLMProfile('default')
+function emptyForm(name: string): ConfigFormState {
+  const profile = blankLLMProfile('default', name)
   return {
     llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
@@ -174,8 +174,8 @@ function statusToForm(cs: ConfigView): ConfigFormState {
   }
 }
 
-function blankLLMProfile(id = `llm-${Date.now()}`): LLMProfileForm {
-  return { id, name: 'New LLM', provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
+function blankLLMProfile(id: string, name: string): LLMProfileForm {
+  return { id, name, provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
 }
 
 function providerPresetValue(profile: LLMProfileForm): string {
@@ -232,7 +232,7 @@ function sectionStatus(
 export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPanelProps) {
   const { t } = useTranslation('config')
   const [cs, setCs] = useState<ConfigView | null>(null)
-  const [form, setForm] = useState<ConfigFormState>(emptyForm)
+  const [form, setForm] = useState<ConfigFormState>(() => emptyForm(t('newProfileName')))
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -419,7 +419,7 @@ function LLMTab({
   }
 
   const addProfile = () => {
-    const next = blankLLMProfile()
+    const next = blankLLMProfile(`llm-${Date.now()}`, t('newProfileName'))
     setForm(current => ({ ...current, llm: { ...current.llm, providers: [...current.llm.providers, next] } }))
     onSelectProfile(next.id)
     setModels([])

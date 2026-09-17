@@ -20,7 +20,7 @@ function LocalizedConfirmProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation('app')
   return (
     <ConfirmProvider
-      labels={{ title: t('confirmTitle'), confirm: t('confirm'), cancel: t('cancel') }}
+      labels={{ title: t('confirmTitle'), confirm: t('confirm'), cancel: t('cancel'), close: t('closeDialog') }}
     >
       {children}
     </ConfirmProvider>
