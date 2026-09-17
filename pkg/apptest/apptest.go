@@ -23,6 +23,7 @@ func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extens
 	t.Helper()
 	if application == nil {
 		t.Fatal("test application is required")
+		return nil
 	}
 	tools, ok := application.Tools.(*toolset.Registry)
 	if !ok {
