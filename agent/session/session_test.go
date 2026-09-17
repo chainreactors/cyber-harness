@@ -743,3 +743,39 @@ func TestRotationCommandsRejectActiveRunWithoutSwitchingSession(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The web hub drops the CommandResult that a command returns to its caller —
+// only messages published onto the AOP stream reach the chat. /compact used to
+// return its no-op text without publishing it, so an operator with too little
+// context to compact saw the command silently do nothing.
+func TestCompactWithoutEnoughContextPublishesItsResult(t *testing.T) {
+	runtime := newBareRuntime(t, nil, nil)
+	session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: "chat-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID := session.ID()
+
+	var events []*aop.Event
+	unsub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	result, err := session.Command(context.Background(), "/compact")
+	unsub.Cancel()
+	if err != nil {
+		t.Fatalf("/compact: %v", err)
+	}
+	if text := provider.MessageText(&aop.Message{Content: result.Content}); !strings.Contains(text, "Nothing to compact") {
+		t.Fatalf("compact result = %#v", result)
+	}
+	if session.ID() != originalID {
+		t.Fatalf("compact rotated with nothing to compact: %q -> %q", originalID, session.ID())
+	}
+	published := false
+	for _, event := range events {
+		if message := event.GetMessage(); message != nil && strings.Contains(provider.MessageText(message), "Nothing to compact") {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatal("nothing-to-compact result never reached the session stream")
+	}
+}

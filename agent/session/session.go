@@ -920,7 +920,9 @@ func (s *Session) rotateCommand(ctx context.Context, line string) (*types.Comman
 	case "/compact":
 		messages := state.agent.MessagesSnapshot()
 		if len(messages) < 4 {
-			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).").result, nil
+			outcome := commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).")
+			state.emitCommandResult(outcome.result)
+			return outcome.result, nil
 		}
 		values, err := commands.SplitCommandLine(line)
 		if err != nil {
