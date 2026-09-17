@@ -2,30 +2,77 @@ package console
 
 import (
 	"context"
-	"fmt"
-	"github.com/chainreactors/cyber/cmd/harness"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/utils/pty"
 )
 
-func newPTYRouter(bash *terminaltool.BashTool) (*ptyext.Router, error) {
-	manager := bashManager(bash)
-	if manager == nil || manager.Manager == nil {
-		return nil, fmt.Errorf("pty manager unavailable")
+// loadPTYRegistry mounts the PTY extension exactly as a product profile does.
+func loadPTYRegistry(t *testing.T, ctx context.Context, bash *terminaltool.BashTool) *namespaces.Registry {
+	t.Helper()
+	registry := namespaces.New()
+	value := hosttest.Set(t, registry, ptyext.New(bash))
+	if err := value.Load(ctx); err != nil {
+		t.Fatal(err)
 	}
-	return ptyext.NewRuntimeRouter(manager.Manager), nil
+	t.Cleanup(func() { _ = value.Close(context.Background()) })
+	return registry
+}
+
+// ptyTransport models one AOP connection. Binding the registry opens a fresh
+// PTY handler for it, and cancelling its context is what a connection ending
+// looks like now that the router has no teardown of its own.
+type ptyTransport struct {
+	t        *testing.T
+	mux      *aop.NamespaceMux
+	cancel   context.CancelFunc
+	messages chan *ptypb.ProtocolMessage
+}
+
+func newPTYTransport(t *testing.T, ctx context.Context, registry *namespaces.Registry, buffer int) *ptyTransport {
+	t.Helper()
+	connectionCtx, cancel := context.WithCancel(ctx)
+	transport := &ptyTransport{t: t, cancel: cancel, messages: make(chan *ptypb.ProtocolMessage, buffer)}
+	transport.mux = aop.NewNamespaceMux(connectionCtx)
+	if err := registry.Bind(transport.mux); err != nil {
+		t.Fatalf("bind PTY namespace: %v", err)
+	}
+	t.Cleanup(transport.close)
+	return transport
+}
+
+func (p *ptyTransport) close() {
+	p.cancel()
+	_ = p.mux.Close(context.Background())
+}
+
+func (p *ptyTransport) dispatch(message *ptypb.ProtocolMessage) {
+	p.t.Helper()
+	handled, err := p.mux.Dispatch(aop.MustWrap("envelope", "", message), func(out *aop.Envelope) error {
+		reply := &ptypb.ProtocolMessage{}
+		if err := out.GetPayload().UnmarshalTo(reply); err != nil {
+			return err
+		}
+		p.messages <- reply
+		return nil
+	})
+	if err != nil || !handled {
+		p.t.Fatalf("dispatch PTY message: handled=%v err=%v", handled, err)
+	}
 }
 
 func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
@@ -45,7 +92,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := harness.Set(t, rt)
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -75,16 +122,12 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("unexpected resident repl: %+v", initial)
 	}
 
-	messages := make(chan *ptypb.ProtocolMessage, 64)
-	router, err := newPTYRouter(rt.Runtime().App().Bash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer router.Close()
-
-	router.Handle(ctx, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
+	registry := loadPTYRegistry(t, ctx, rt.Runtime().App().Bash)
+	transport := newPTYTransport(t, ctx, registry, 64)
+	messages := transport.messages
+	transport.dispatch(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
 		StreamId: "term-repl", SessionId: initial.ID,
-	}}}, func(message *ptypb.ProtocolMessage) { messages <- message })
+	}}})
 	opened := waitForPTYMessage(t, messages, time.Second, func(message *ptypb.ProtocolMessage) bool {
 		if value := message.GetError(); value != nil {
 			t.Fatalf("unexpected pty error: %s", value.GetMessage())
@@ -95,9 +138,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("transport created a second repl: got %s want %s", opened.GetAttached().GetSession().GetId(), initial.ID)
 	}
 
-	router.Handle(ctx, ptyInput("term-repl", "/status\n"), func(message *ptypb.ProtocolMessage) {
-		messages <- message
-	})
+	transport.dispatch(ptyInput("term-repl", "/status\n"))
 	waitForPTYMessage(t, messages, 3*time.Second, func(message *ptypb.ProtocolMessage) bool {
 		if value := message.GetError(); value != nil {
 			t.Fatalf("unexpected pty error: %s", value.GetMessage())
@@ -106,17 +147,13 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	})
 
 	beforeExit, _ := mgr.Get(initial.ID)
-	router.Handle(ctx, ptyInput("term-repl", "/exit\n"), func(message *ptypb.ProtocolMessage) {
-		messages <- message
-	})
+	transport.dispatch(ptyInput("term-repl", "/exit\n"))
 	waitForCondition(t, 3*time.Second, func() bool {
 		info, ok := mgr.Get(initial.ID)
 		return ok && info.State == pty.StateRunning && info.OutputBytes > beforeExit.OutputBytes
 	})
 
-	router.Handle(ctx, ptyInput("term-repl", "!tmux new-session -d -s webtask echo tmux_remote_ok\n"), func(message *ptypb.ProtocolMessage) {
-		messages <- message
-	})
+	transport.dispatch(ptyInput("term-repl", "!tmux new-session -d -s webtask echo tmux_remote_ok\n"))
 	waitForCondition(t, 3*time.Second, func() bool {
 		for _, info := range mgr.List() {
 			if info.Name == "webtask" {
@@ -126,24 +163,17 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		return false
 	})
 
-	// Closing one transport Router only detaches its monitor. A new transport
+	// Ending one transport only releases its own monitor. A new transport
 	// must reuse the same process-owned session and buffered console.
-	router.Close()
+	transport.close()
 	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
-		t.Fatalf("router close terminated resident repl: %+v ok=%v", info, ok)
+		t.Fatalf("transport close terminated resident repl: %+v ok=%v", info, ok)
 	}
-	router2, err := newPTYRouter(rt.Runtime().App().Bash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer router2.Close()
-	reconnected := make(chan *ptypb.ProtocolMessage, 16)
-	router2.Handle(ctx, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
+	second := newPTYTransport(t, ctx, registry, 16)
+	second.dispatch(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
 		StreamId: "term-repl-2", SessionId: initial.ID,
-	}}}, func(message *ptypb.ProtocolMessage) {
-		reconnected <- message
-	})
-	attached := waitForPTYMessage(t, reconnected, time.Second, func(message *ptypb.ProtocolMessage) bool {
+	}}})
+	attached := waitForPTYMessage(t, second.messages, time.Second, func(message *ptypb.ProtocolMessage) bool {
 		return message.GetAttached() != nil
 	})
 	if attached.GetAttached().GetSession().GetId() != initial.ID {
@@ -192,7 +222,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 		t.Fatalf("runtime without provider: %v", err)
 	}
 
-	rtSet := harness.Set(t, rt)
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

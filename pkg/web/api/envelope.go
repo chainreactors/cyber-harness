@@ -10,7 +10,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/exts/pty"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -295,7 +294,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 		if !ok {
 			return fmt.Errorf("unexpected application PTY message %T", message)
 		}
-		streamID := pty.StreamID(value)
+		streamID := ptypb.StreamID(value)
 		if streamID == "" {
 			fail(envelope.Id, "INVALID_PTY", fmt.Errorf("PTY stream_id is required"))
 			return nil
@@ -304,7 +303,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("PTY is unavailable"))
 			return nil
 		}
-		nodeID := pty.NodeID(value)
+		nodeID := ptypb.NodeID(value)
 		stateMu.Lock()
 		route, routed := ptyRoutes[streamID]
 		stateMu.Unlock()
@@ -334,7 +333,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 				}
 			}(streamID, messages)
 			if !online {
-				_ = send(streamID, "", pty.NewDetached(streamID))
+				_ = send(streamID, "", ptypb.NewDetached(streamID))
 			}
 		}
 		if forwardErr := backends.PTY.ForwardPTY(nodeID, value); forwardErr != nil {
@@ -342,7 +341,7 @@ func ServeApplication(connection ApplicationConnection, first *aop.Envelope, bac
 			removePTY(streamID, false)
 			return nil
 		}
-		if pty.IsDetach(value) {
+		if ptypb.IsDetach(value) {
 			removePTY(streamID, false)
 		}
 		return nil

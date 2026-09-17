@@ -19,3 +19,19 @@ func (b NamespaceBinding) Register(mux *NamespaceMux) error {
 	}
 	return mux.Register(b.Prototype, b.Handler)
 }
+
+// ConnectionBinding contributes one protocol whose handler is created once per
+// connection. The mux keeps only that handler, so connection-local state —
+// stream tables, monitors, cancellations — ends with the connection and no
+// contributor has to track or release it.
+type ConnectionBinding struct {
+	Prototype proto.Message
+	Open      func() NamespaceHandler
+}
+
+func (b ConnectionBinding) Register(mux *NamespaceMux) error {
+	if mux == nil || b.Prototype == nil || b.Open == nil {
+		return fmt.Errorf("connection binding requires a mux, prototype and opener")
+	}
+	return mux.Register(b.Prototype, b.Open())
+}

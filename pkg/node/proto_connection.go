@@ -24,7 +24,6 @@ import (
 	execpb "github.com/chainreactors/cyber/aop/exec"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
-	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -32,7 +31,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/exts/pty"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	toolset "github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/gorilla/websocket"
@@ -379,27 +377,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}(cloneAgentStatus(initial))
 	}
 
-	var router *pty.Router
-	if cc.PTYRouter != nil {
-		router, err = cc.PTYRouter()
-	} else if cc.Bash != nil {
-		router = NewPTYRouter(cc.Bash)
-	}
-	if err != nil {
-		return err
-	}
-	if router != nil {
-		defer router.Close()
-	}
-	if cc.PTYRouter == nil && cc.Bash != nil {
-		if manager := RegistryPTYManager(cc.Bash); manager != nil {
-			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(message *ptypb.ProtocolMessage) {
-				send("", message)
-			})
-			defer unsubscribe()
-		}
-	}
-
 	sendEnvelope := func(envelope *aop.Envelope) {
 		if envelope == nil {
 			return
@@ -409,7 +386,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		case <-connectionCtx.Done():
 		}
 	}
-	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, router, send, &operationsMu, operations, sealed)
+	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, send, &operationsMu, operations, sealed)
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
@@ -462,7 +439,6 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 func newAgentConnectionNamespaceMux(
 	connectionCtx context.Context,
 	cc connectionConfig,
-	router *pty.Router,
 	send func(string, protobuf.Message),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
@@ -511,16 +487,6 @@ func newAgentConnectionNamespaceMux(
 			return fmt.Errorf("unexpected reload namespace message %T", message)
 		}
 		handleAgentReloadMessage(cc, envelope, value, send)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register(&ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, ok := message.(*ptypb.ProtocolMessage)
-		if !ok {
-			return fmt.Errorf("unexpected PTY namespace message %T", message)
-		}
-		handleAgentPTYMessage(ctx, router, envelope, value, send)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -727,16 +693,6 @@ func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value
 		send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: status}})
 	}
 	send(replyTo, &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: result}})
-}
-
-func handleAgentPTYMessage(ctx context.Context, router *pty.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
-	if router == nil {
-		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "PTY router is unavailable"))
-		return
-	}
-	router.Handle(ctx, value, func(out *ptypb.ProtocolMessage) {
-		send(envelope.GetId(), out)
-	})
 }
 
 func workingDir(runtimeInfo *aop.AgentRuntimeInfo) string {

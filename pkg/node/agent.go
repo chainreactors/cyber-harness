@@ -17,7 +17,6 @@ import (
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console"
-	"github.com/chainreactors/cyber/pkg/exts/pty"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
@@ -91,8 +90,6 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 			Runtime:            DefaultRuntimeInfo(),
 			Status:             product.AgentStatus,
 			Menu:               func() []*types.CommandSpec { return CommandSpecs(rt) },
-			PTYRouter:          func() (*pty.Router, error) { return NewPTYRouter(application.Bash), nil },
-			Bash:               application.Bash,
 			RegisterNamespaces: product.RegisterNamespaces,
 		}
 		_ = connect(ctx, connection)

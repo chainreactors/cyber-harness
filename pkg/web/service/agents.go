@@ -14,7 +14,6 @@ import (
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/exts/pty"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
@@ -293,7 +292,7 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 	}
 	p.mu.Unlock()
 	if removed {
-		p.notifyPTY(a.NodeID(), pty.NewDetached)
+		p.notifyPTY(a.NodeID(), ptypb.NewDetached)
 	}
 	a.state().closeAllTasks()
 }
@@ -570,11 +569,11 @@ func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error
 }
 
 func (p *AgentPool) CancelPTY(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", pty.NewKill(terminalID))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", ptypb.NewKill(terminalID))
 }
 
 func (p *AgentPool) ClosePTY(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", pty.NewDetach(terminalID))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", ptypb.NewDetach(terminalID))
 }
 
 func (p *AgentPool) SubscribePTY(nodeID, terminalID string) (<-chan *ptypb.ProtocolMessage, bool, func()) {
@@ -636,7 +635,7 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	for _, terminalID := range terminalIDs {
 		terminalID := terminalID
 		go func() {
-			_ = agent.enqueue(aop.MustWrap(generateID(), "", pty.NewList(terminalID, "")))
+			_ = agent.enqueue(aop.MustWrap(generateID(), "", ptypb.NewList(terminalID, "")))
 		}()
 	}
 }

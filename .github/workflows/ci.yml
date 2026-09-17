@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Check repository architecture and dependencies
-        run: go test -count=1 ./core/resource ./core/extension ./core/registry ./cmd/agent
+        run: go test -count=1 ./core/resource ./core/extension ./core/registry ./pkg/exts ./cmd/agent
 
       - name: Build the minimal agent
         run: |

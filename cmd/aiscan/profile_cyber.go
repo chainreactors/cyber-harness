@@ -25,6 +25,7 @@ import (
 	ioaconsole "github.com/chainreactors/cyber/pkg/exts/ioa/client/console"
 	observeext "github.com/chainreactors/cyber/pkg/exts/observe"
 	proxyext "github.com/chainreactors/cyber/pkg/exts/proxy"
+	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
@@ -187,6 +188,10 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	}
 	values = append(values, proxyExtension)
 	values = append(values, applicationGraph.extensions...)
+	// The PTY protocol borrows the Bash tool owned by the terminal extension,
+	// which the application graph installed above; reverse close releases PTY
+	// before that owner stops.
+	values = append(values, ptyext.New(application.Bash))
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
 		bundle, diagnostics := ioaext.Skills()

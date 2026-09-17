@@ -23,3 +23,11 @@ TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动�
 依赖顺序由 Profile 组合根或明确用例入口中的线性列表表达。可选功能由是否构造对应 Extension
 决定，不使用 Descriptor、Provides/Requires 或 capability gating。IOA client/server 相互独立；
 产品兼容映射留在 `cmd/aiscan`。完整约定见 [系统架构](../../docs/architecture.md)。
+
+## 规则
+
+- 每个 `pkg/exts/<feature>` 子树至少声明一个 Extension，由 `pkg/exts` 的守卫测试强制。
+  不属于任何功能树的胶水应该移回拥有该资源的功能包，而不是留在这里当裸函数。
+- 按连接的协议用 `aop.ConnectionBinding` 贡献：Extension 只提供 opener，每个连接建立时由
+  Namespace Registry 打开自己的 handler。宿主（`pkg/node`、`pkg/web`）不得再硬编码协议注册，
+  也不需要为这类协议追踪实例或生命周期。

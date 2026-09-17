@@ -12,8 +12,6 @@ import (
 	"github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/exts/pty"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 // agentEndpoint is the sole event ingress/egress point for a node connection.
@@ -37,7 +35,6 @@ type connectionConfig struct {
 	Executor   tool.Executor
 	// Registry supplies the Bash pseudo-command projection to Cyber agent nodes.
 	Registry commands.Executor
-	Bash     *terminaltool.BashTool
 	// Agent owns connection-side events.
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]
@@ -49,7 +46,6 @@ type connectionConfig struct {
 	Menu          func() []*types.CommandSpec
 	RunnerFileRPC bool
 	Hooks         *hooks.Registry
-	PTYRouter     func() (*pty.Router, error)
 	// RegisterNamespaces binds control protocols backed by resources
 	// owned by the loaded profile. The connection owns only their registrations.
 	RegisterNamespaces func(*aop.NamespaceMux) error

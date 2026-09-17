@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	runtimepty "github.com/chainreactors/utils/pty"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -30,7 +32,6 @@ type Router struct {
 	sessions map[string]string
 	cancels  map[string]context.CancelFunc
 	resizers map[string]runtimepty.ResizeFunc
-	streams  map[string]struct{}
 }
 
 type Option func(*Router)
@@ -76,7 +77,6 @@ func NewRouter(mgr runtimepty.SessionManager, opts ...Option) *Router {
 		sessions:        make(map[string]string),
 		cancels:         make(map[string]context.CancelFunc),
 		resizers:        make(map[string]runtimepty.ResizeFunc),
-		streams:         make(map[string]struct{}),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -92,12 +92,27 @@ func NewRuntimeRouter(mgr *runtimepty.Manager, opts ...Option) *Router {
 	return NewRouter(mgr, append(defaults, opts...)...)
 }
 
-func (r *Router) Handle(ctx context.Context, message *ptypb.ProtocolMessage, send SendFunc) {
+// Handler adapts the router to the AOP namespace contract. One handler serves
+// one connection; every reply is addressed to the envelope that asked for it.
+func (r *Router) Handler() aop.NamespaceHandler {
+	return func(ctx context.Context, envelope *aop.Envelope, message proto.Message, send aop.SendFunc) error {
+		value, ok := message.(*ptypb.ProtocolMessage)
+		if !ok {
+			return fmt.Errorf("unexpected PTY namespace message %T", message)
+		}
+		replyTo := envelope.GetId()
+		r.handle(ctx, value, func(out *ptypb.ProtocolMessage) {
+			_ = send(aop.Reply(replyTo, out))
+		})
+		return nil
+	}
+}
+
+func (r *Router) handle(ctx context.Context, message *ptypb.ProtocolMessage, send SendFunc) {
 	if send == nil {
 		send = func(*ptypb.ProtocolMessage) {}
 	}
-	streamID := StreamID(message)
-	r.touchStream(streamID)
+	streamID := ptypb.StreamID(message)
 	defer func() {
 		if value := recover(); value != nil {
 			r.sendError(send, streamID, fmt.Sprintf("panic: %v", value))
@@ -228,8 +243,7 @@ func (r *Router) attachExisting(ctx context.Context, streamID string, info runti
 
 func (r *Router) detach(streamID string, send SendFunc) {
 	r.releaseStream(streamID)
-	r.dropStream(streamID)
-	send(NewDetached(streamID))
+	send(ptypb.NewDetached(streamID))
 }
 
 func (r *Router) list(streamID string, send SendFunc) {
@@ -295,22 +309,6 @@ func (r *Router) kill(streamID string, send SendFunc) {
 	}
 	if err := r.mgr.Kill(sessionID); err != nil {
 		r.sendError(send, streamID, err.Error())
-	}
-}
-
-func (r *Router) Close() {
-	r.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(r.cancels))
-	for _, cancel := range r.cancels {
-		cancels = append(cancels, cancel)
-	}
-	r.sessions = make(map[string]string)
-	r.cancels = make(map[string]context.CancelFunc)
-	r.resizers = make(map[string]runtimepty.ResizeFunc)
-	r.streams = make(map[string]struct{})
-	r.mu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
 	}
 }
 
@@ -383,46 +381,6 @@ func (r *Router) sessionForStream(streamID string) string {
 	return r.sessions[streamID]
 }
 
-func (r *Router) StreamIDs() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	streamIDs := make([]string, 0, len(r.streams))
-	for streamID := range r.streams {
-		streamIDs = append(streamIDs, streamID)
-	}
-	return streamIDs
-}
-
-// BroadcastSessions emits the current runtime session state as canonical AOP
-// PTY messages for every active stream.
-func (r *Router) BroadcastSessions(send SendFunc) {
-	if r == nil || r.mgr == nil || send == nil {
-		return
-	}
-	sessions := r.mgr.List()
-	for _, streamID := range r.StreamIDs() {
-		send(newSessions(streamID, sessions))
-	}
-}
-
-func (r *Router) touchStream(streamID string) {
-	if streamID == "" {
-		return
-	}
-	r.mu.Lock()
-	r.streams[streamID] = struct{}{}
-	r.mu.Unlock()
-}
-
-func (r *Router) dropStream(streamID string) {
-	if streamID == "" {
-		return
-	}
-	r.mu.Lock()
-	delete(r.streams, streamID)
-	r.mu.Unlock()
-}
-
 func (r *Router) findReusableSession(kind, name string) (runtimepty.Info, bool) {
 	if r.mgr == nil {
 		return runtimepty.Info{}, false
@@ -448,88 +406,6 @@ func (r *Router) sendError(send SendFunc, streamID, message string) {
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Error{Error: &ptypb.Error{
 		StreamId: streamID, Message: message,
 	}}})
-}
-
-func StreamID(message *ptypb.ProtocolMessage) string {
-	if message == nil {
-		return ""
-	}
-	switch payload := message.Message.(type) {
-	case *ptypb.ProtocolMessage_Open:
-		return payload.Open.GetStreamId()
-	case *ptypb.ProtocolMessage_Opened:
-		return payload.Opened.GetStreamId()
-	case *ptypb.ProtocolMessage_Input:
-		return payload.Input.GetStreamId()
-	case *ptypb.ProtocolMessage_Output:
-		return payload.Output.GetStreamId()
-	case *ptypb.ProtocolMessage_Resize:
-		return payload.Resize.GetStreamId()
-	case *ptypb.ProtocolMessage_List:
-		return payload.List.GetStreamId()
-	case *ptypb.ProtocolMessage_Sessions:
-		return payload.Sessions.GetStreamId()
-	case *ptypb.ProtocolMessage_Attach:
-		return payload.Attach.GetStreamId()
-	case *ptypb.ProtocolMessage_Attached:
-		return payload.Attached.GetStreamId()
-	case *ptypb.ProtocolMessage_Detach:
-		return payload.Detach.GetStreamId()
-	case *ptypb.ProtocolMessage_Detached:
-		return payload.Detached.GetStreamId()
-	case *ptypb.ProtocolMessage_Kill:
-		return payload.Kill.GetStreamId()
-	case *ptypb.ProtocolMessage_Close:
-		return payload.Close.GetStreamId()
-	case *ptypb.ProtocolMessage_Closed:
-		return payload.Closed.GetStreamId()
-	case *ptypb.ProtocolMessage_State:
-		return payload.State.GetStreamId()
-	case *ptypb.ProtocolMessage_Error:
-		return payload.Error.GetStreamId()
-	default:
-		return ""
-	}
-}
-
-func NodeID(message *ptypb.ProtocolMessage) string {
-	if message == nil {
-		return ""
-	}
-	switch payload := message.Message.(type) {
-	case *ptypb.ProtocolMessage_Open:
-		return payload.Open.GetNodeId()
-	case *ptypb.ProtocolMessage_List:
-		return payload.List.GetNodeId()
-	default:
-		return ""
-	}
-}
-
-func IsDetach(message *ptypb.ProtocolMessage) bool {
-	_, ok := message.GetMessage().(*ptypb.ProtocolMessage_Detach)
-	return ok
-}
-
-func IsClosed(message *ptypb.ProtocolMessage) bool {
-	_, ok := message.GetMessage().(*ptypb.ProtocolMessage_Closed)
-	return ok
-}
-
-func NewList(streamID, nodeID string) *ptypb.ProtocolMessage {
-	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_List{List: &ptypb.List{StreamId: streamID, NodeId: nodeID}}}
-}
-
-func NewKill(streamID string) *ptypb.ProtocolMessage {
-	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Kill{Kill: &ptypb.Kill{StreamId: streamID}}}
-}
-
-func NewDetach(streamID string) *ptypb.ProtocolMessage {
-	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Detach{Detach: &ptypb.Detach{StreamId: streamID}}}
-}
-
-func NewDetached(streamID string) *ptypb.ProtocolMessage {
-	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Detached{Detached: &ptypb.Detached{StreamId: streamID}}}
 }
 
 func newSessions(streamID string, sessions []runtimepty.Info) *ptypb.ProtocolMessage {

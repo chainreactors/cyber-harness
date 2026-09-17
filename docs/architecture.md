@@ -90,7 +90,11 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
   而不是把产品包下沉进 core。
 - `pkg/exts/` 是唯一把功能挂到 harness core 的包装层：每个 Extension 包装一个 `tools/*`、
   `agent/*` 或 `pkg/*` 机制，自身不写业务实现。机制住在 `pkg/` 或 `tools/`，生命周期住在
-  `pkg/exts/`。
+  `pkg/exts/`。每个 `pkg/exts/<feature>` 子树至少声明一个 Extension，由该目录的守卫测试强制。
+- 整块功能通过 Extension 挂载，新增协议、能力或资源不得由宿主（`pkg/node`、`pkg/web` 等）
+  硬编码。宿主只做连接 IO、生命周期与装配；它不认识的协议无从接入。
+- 每条连接一个实例的协议用 `aop.ConnectionBinding` 贡献，而不是在 Extension 或宿主里维护
+  跨连接的实例表。
 - `tools/` 是工具与命令的实现层，`pkg/commands` 只保留 Command Point、Registry 和 Execution
   记录，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的产品对象直接借用具体
   `terminal.BashTool`，不为分层外观增加转发 DTO 或只有一个实现的接口。
@@ -134,6 +138,12 @@ Console Bindings 与 Web Route 由宿主物化为固定快照。通用 Resource 
 
 资源定义顺序也是可见性边界：较早的 Extension 不能保留 Scope 后向较晚才定义的资源类型
 注册。这样无需依赖图，也能阻止隐式反向依赖。
+
+同一个领域可以有两种绑定形态，用不同的 Go 类型区分。`aop.NamespaceBinding` 携带
+Profile 级 handler，`aop.ConnectionBinding` 携带 opener，由连接建立时调用一次生成该连接
+私有的 handler。两者由 Namespace Registry 用窄适配器 `ConnectionPoint()` 分列两个 Point，
+共享同一命名空间空间和顺序，因为 Go 方法不能重载 `Add`。按连接的实例因此不需要任何跨连接
+表：mux 只引用自己那个 handler，连接结束时它随连接 context 一起结束，贡献者无需追踪或释放。
 
 ## 声明期资源
 
@@ -188,6 +198,7 @@ Profile 只有全部 Extension 成功加载后才 Active。Close 开始即停止
 | `skills.Bundle` | Skill Library | IOA 及未来知识插件 |
 | `*console/api.Bindings` | TUI | Session、IOA presentation |
 | `aop.NamespaceBinding` | Namespace Registry | Session、Proxy 等协议插件 |
+| `aop.ConnectionBinding` | Namespace Registry connection point | PTY |
 | `web.Route` | Web route Registry | Management API、IOA server |
 | `cli.Contribution` | CLI Registry | IOA commands、Session flags |
 | `config.Section` | Config Sections | IOA client/server、record |
@@ -198,9 +209,10 @@ Command 和 Tool 是不同执行协议，但共同使用 `core/registry.Store[T]
 自己的领域类型，不通过字符串形式的万能资源表。CLI 与 Config 由各自 Point 校验，不经过聚合
 Catalog。
 
-每个连接从 Namespace Registry 绑定一次当前快照。关闭 contribution handle 会移除后续连接的
-绑定，已建立连接仍由自己的 `aop.NamespaceMux` 和连接 context 管理，这避免运行期跨连接共享
-可变路由状态。Namespace 的唯一身份是 protobuf full name；Mux 不再维护字符串 owner 或按
+每个连接从 Namespace Registry 绑定一次当前快照，快照同时包含静态 handler 和按连接 opener。
+关闭 contribution handle 会移除后续连接的绑定，已建立连接仍由自己的 `aop.NamespaceMux` 和
+连接 context 管理，这避免运行期跨连接共享可变路由状态。Namespace 的唯一身份是 protobuf
+full name，且同一个 namespace 不能既是静态又是按连接；Mux 不再维护字符串 owner 或按
 owner 注销的第二套生命周期，连接关闭时统一停止准入并排空已接受的 dispatch。
 
 Session Extension 只拥有 Runtime 的启动和关闭，不探测 Namespace Point 是否存在。需要暴露
