@@ -147,6 +147,18 @@ func (s *Set) closeFrom(ctx context.Context, start int) error {
 				return errors.Join(errs...)
 			}
 		}
+		// Borrows release last. An Extension drains the work still calling a
+		// borrowed value inside its own Close, so releasing earlier would let
+		// the provider shut down underneath it.
+		if it.scope != nil {
+			if err := incompleteOnCancellation(it.scope.release(ctx)); err != nil {
+				errs = append(errs, fmt.Errorf("release borrows for extension %d (%T): %w", i, it.extension, err))
+				if errors.Is(err, ErrCloseIncomplete) {
+					s.nextClose = i
+					return errors.Join(errs...)
+				}
+			}
+		}
 		s.nextClose = i - 1
 	}
 	return errors.Join(errs...)

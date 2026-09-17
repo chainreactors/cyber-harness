@@ -89,7 +89,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 func TestArtifactProjectionOwnsRawArtifactObservation(t *testing.T) {
 	events := coreevents.New()
 	ingestor := &recordingArtifactImporter{}
-	projection, err := newArtifactProjection(events, ingestor, telemetry.NopLogger())
+	projection, err := newArtifactProjection(ingestor, telemetry.NopLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestArtifactProjectionOwnsRawArtifactObservation(t *testing.T) {
 func TestArtifactProjectionDoesNotBlockAOPPublisher(t *testing.T) {
 	events := coreevents.New()
 	importer := &blockingArtifactImporter{started: make(chan struct{}), release: make(chan struct{})}
-	projection, err := newArtifactProjection(events, importer, telemetry.NopLogger())
+	projection, err := newArtifactProjection(importer, telemetry.NopLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

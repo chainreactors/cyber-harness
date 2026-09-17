@@ -47,17 +47,16 @@ func CommandSpecs(runtime *session.Runtime) []*types.CommandSpec {
 	if runtime == nil {
 		return nil
 	}
-	return commandSpecs(runtime.App(), runtime.CommandSpecs(true))
+	return commandSpecs(runtime, runtime.CommandSpecs(true))
 }
 
-func commandSpecs(app *apppkg.App, specs []*types.CommandSpec) []*types.CommandSpec {
-	if app != nil {
-		specs = append(specs, RegistryCommandSpecs(app.Commands, app.Skills)...)
-	}
-	if app == nil || app.Skills == nil {
+func commandSpecs(runtime *session.Runtime, specs []*types.CommandSpec) []*types.CommandSpec {
+	store := runtime.Skills()
+	specs = append(specs, RegistryCommandSpecs(runtime.CommandRegistry(), store)...)
+	if store == nil {
 		return specs
 	}
-	for _, skill := range app.Skills.All() {
+	for _, skill := range store.All() {
 		if strings.TrimSpace(skill.Name) == "" || skill.Internal {
 			continue
 		}

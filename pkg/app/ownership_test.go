@@ -15,13 +15,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestNewDoesNotPopulateBorrowedRegistries(t *testing.T) {
-	a := newTestApp(t, nil, Dependencies{})
-	if len(a.Skills.All()) != 0 || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
-		t.Fatal("New populated profile-owned resources")
-	}
-}
-
 func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 	stream := coreevents.New()
 	a := &App{events: stream}

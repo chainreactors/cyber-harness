@@ -8,6 +8,18 @@ import (
 	"github.com/chainreactors/utils/proc"
 )
 
+// Sessions is the process registry as the callers that only read and steer
+// sessions see it. It is declared here, rather than reused from the runtime
+// module, so that the capability key belongs to this repository: a key any
+// module could name is a key two owners could claim.
+type Sessions interface {
+	proc.SessionManager
+	// Openers are the session kinds this registry can start. They come from
+	// the owner because only it knows how to build a session in its own
+	// registry; a borrower that could only read would have nothing to attach.
+	Openers() map[string]proc.OpenFunc
+}
+
 // Manager wraps proc.Manager and exposes cyber's event subscription API.
 type Manager struct {
 	*proc.Manager
@@ -27,6 +39,11 @@ func NewManager() *Manager {
 		}
 	})
 	return m
+}
+
+// Openers exposes the standard session kinds for this manager.
+func (m *Manager) Openers() map[string]proc.OpenFunc {
+	return proc.DefaultOpeners(m.Manager, proc.DefaultSessionTimeout, proc.DefaultEnv())
 }
 
 // Subscribe registers an event listener owned by the returned subscription.

@@ -22,7 +22,6 @@ import (
 type DeliverFunc func(context.Context, inbox.Message) error
 
 type Dependencies struct {
-	Events  *events.Stream
 	Deliver DeliverFunc
 	Logger  telemetry.Logger
 	Skills  []skills.Bundle
@@ -78,13 +77,17 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	receiveCtx, receiveCancel := context.WithCancel(scope.Lifetime())
 	e.receiveCancel = receiveCancel
-	if e.deps.Events != nil && e.config.Space != "" {
+	stream, err := extension.Use[*events.Stream](scope)
+	if err != nil {
+		return err
+	}
+	if e.config.Space != "" {
 		// Output survives Scope cancellation to drain Agent termination events.
 		// Close owns this context and joins the consumer before releasing resources.
 		sendCtx, cancel := context.WithCancel(context.Background())
 		e.sendCancel = cancel
 		var err error
-		e.sub, err = consumeHandoff(e.deps.Events, newHandoff(sendCtx, client, e.config.Space, e.deps.Logger, func(err error) {
+		e.sub, err = consumeHandoff(stream, newHandoff(sendCtx, client, e.config.Space, e.deps.Logger, func(err error) {
 			e.outputMu.Lock()
 			// This records an output failure, not incomplete resource cleanup.
 			// Do not unwrap a canceled send into Set's Close retry policy.

@@ -14,13 +14,12 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	ioaext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
@@ -35,6 +34,7 @@ import (
 	nodepkg "github.com/chainreactors/cyber/pkg/node"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type cyberProfileConfig struct {
@@ -74,6 +74,8 @@ func parseObserve(value string) []observeext.Kind {
 type cyberProfile struct {
 	extensions *extension.Set
 	app        *apppkg.App
+	commands   commands.Executor
+	bash       *terminaltool.BashTool
 	runtime    *agentsession.Runtime
 	ioa        *ioatools.Service
 	tui        *tuiext.Extension
@@ -131,13 +133,11 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve Cyber working directory: %w", err)
 	}
-	hookRegistry := hooks.New()
 	capture := config.Application.Tools.MitmCapture == nil || *config.Application.Tools.MitmCapture
-	proxyExtension, err := proxyext.New(workDir, config.Application.Scanner.Resources.Proxy, capture, hookRegistry, config.Application.Tools.TrafficStorage)
-	if err != nil {
-		return nil, fmt.Errorf("construct proxy infrastructure: %w", err)
-	}
-	eventStream := events.New()
+	proxyExtension := proxyext.New(proxyext.Config{
+		WorkDir: workDir, Proxy: config.Application.Scanner.Resources.Proxy,
+		Capture: capture, Storage: config.Application.Tools.TrafficStorage,
+	})
 	var scannerLoop agent.Loop
 	if config.Session != nil {
 		scannerLoop = config.Session.Loop
@@ -145,48 +145,45 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if scannerLoop == nil && config.Application.Provider.Mode != provider.StartupDisabled {
 		scannerLoop = agent.StandardLoop{}
 	}
-	graph, err := newAppGraph(config.Application, hookRegistry, eventStream, proxyExtension.Hub(), scannerLoop, workDir)
+	graph, err := newAppGraph(config.Application, scannerLoop, workDir, proxyExtension)
 	if err != nil {
 		return nil, fmt.Errorf("construct Cyber application: %w", err)
 	}
-	application := graph.application
 
+	// The graph publishes the capabilities everything else borrows, so it comes
+	// first. The observers follow it: they subscribe to hooks and to the event
+	// stream, both of which fire at run time rather than during load.
 	namespaceRegistry := namespaces.New()
-	values := []extension.Extension{namespaceRegistry}
+	values := append([]extension.Extension{namespaceRegistry}, graph...)
 	if strings.TrimSpace(config.Output) != "" {
-		output, err := telemetryext.New(eventStream, telemetryext.Options{Path: config.Output})
+		output, err := telemetryext.New(telemetryext.Options{Path: config.Output})
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, output)
 	}
 	if config.Artifacts != nil {
-		projection, err := newArtifactProjection(eventStream, config.Artifacts, logger)
+		projection, err := newArtifactProjection(config.Artifacts, logger)
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, projection)
 	}
 	if len(config.Observe) > 0 {
-		observer, err := observeext.New(hookRegistry, eventStream, observeext.Options{Kinds: config.Observe, Logger: logger})
+		observer, err := observeext.New(observeext.Options{Kinds: config.Observe, Logger: logger})
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, observer)
 	}
-	values = append(values, proxyExtension)
-	values = append(values, graph.extensions...)
-	// The PTY protocol borrows the Bash tool owned by the terminal extension,
-	// which the application graph installed above; reverse close releases PTY
-	// before that owner stops.
-	values = append(values, ptyext.New(application.Bash))
+	values = append(values, ptyext.New())
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
 		bundle, diagnostics := ioaext.Skills()
 		if len(diagnostics) > 0 {
 			return nil, fmt.Errorf("load IOA skills: %v", diagnostics)
 		}
-		deps := ioaext.Dependencies{Events: eventStream, Logger: logger, Skills: []skills.Bundle{bundle}}
+		deps := ioaext.Dependencies{Logger: logger, Skills: []skills.Bundle{bundle}}
 		if config.Session != nil {
 			deps.Deliver = func(ctx context.Context, message inbox.Message) error {
 				if p.extensions == nil || !p.extensions.Active() {
@@ -212,7 +209,6 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	}
 	if config.Session != nil {
 		agentConfig := *config.Session
-		agentConfig.Application = application
 		agentConfig.NodeName = nodeName
 		if config.IOA != nil && config.IOA.Space != "" {
 			agentConfig.Preamble = strings.TrimSpace(agentConfig.Preamble + "\n" + ioaext.Preamble(*config.IOA))
@@ -224,26 +220,42 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 			agentConfig.Loop = loop.Loop()
 			values = append(values, loop)
 		}
-		sessions, err := sessionext.New(agentConfig)
-		if err != nil {
-			return nil, fmt.Errorf("construct Cyber runtime: %w", err)
-		}
-		p.runtime = sessions.Runtime()
-		values = append(values, sessions)
+		values = append(values, sessionext.New(agentConfig))
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return extension.Add(scope, p.runtime.NamespaceBindings()...)
+			runtime, err := extension.Use[*agentsession.Runtime](scope)
+			if err != nil {
+				return err
+			}
+			return extension.Add(scope, runtime.NamespaceBindings()...)
 		}})
-		presentation, err := sessionconsole.New(p.runtime)
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, presentation)
+		values = append(values, sessionconsole.New())
 	}
+	// Last in the slice, so it borrows after everything is published and
+	// releases before anything is torn down. This is how a composition root
+	// reads what the graph assembled without reaching into the registry.
+	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		application, err := extension.Use[*apppkg.App](scope)
+		if err != nil {
+			return err
+		}
+		p.app = application
+		if p.commands, err = extension.Use[commands.Executor](scope); err != nil {
+			return err
+		}
+		if p.bash, err = extension.Use[*terminaltool.BashTool](scope); err != nil {
+			return err
+		}
+		if config.Session == nil {
+			return nil
+		}
+		p.runtime, err = extension.Use[*agentsession.Runtime](scope)
+		return err
+	}})
 	set, err := extension.New(values...)
 	if err != nil {
 		return nil, err
 	}
-	p.extensions, p.app, p.namespaces = set, application, namespaceRegistry
+	p.extensions, p.namespaces = set, namespaceRegistry
 	return p, nil
 }
 
@@ -320,4 +332,14 @@ func (p *cyberProfile) ConsoleBindings() *consoleapi.Bindings {
 		return nil
 	}
 	return p.tui.Bindings()
+}
+
+// Shell is the command surface a host runs scanner subcommands through. It is
+// how a profile without a session runtime still executes commands: the registry
+// and the tool are capabilities, published whether or not an agent is running.
+func (p *cyberProfile) Shell() (commands.Executor, *terminaltool.BashTool) {
+	if p == nil {
+		return nil, nil
+	}
+	return p.commands, p.bash
 }

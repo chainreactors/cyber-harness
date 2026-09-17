@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	observe "github.com/chainreactors/cyber/pkg/exts/observe"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
@@ -22,16 +23,15 @@ import (
 func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 	hookRegistry := hooks.New()
 	stream := coreevents.New()
-	observer, err := observe.New(hookRegistry, stream, observe.Options{Kinds: []observe.Kind{observe.Tools, observe.Files}})
+	observer, err := observe.New(observe.Options{Kinds: []observe.Kind{observe.Tools, observe.Files}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	registry := toolset.NewRegistry(hookRegistry)
-	fileTools, err := fileext.New(hookRegistry, files.Config{Directory: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+	fileTools := fileext.New(files.Config{Directory: t.TempDir()})
 	set, err := extension.New(
+		hosttest.Provide[*hooks.Registry](hookRegistry),
+		hosttest.Provide[*coreevents.Stream](stream),
 		registry,
 		observer,
 		fileTools,
@@ -98,15 +98,11 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 }
 
 func TestObserveRejectsInvalidSelection(t *testing.T) {
-	stream := coreevents.New()
-	if _, err := observe.New(hooks.New(), stream, observe.Options{Kinds: []observe.Kind{"unknown"}}); err == nil {
+	if _, err := observe.New(observe.Options{Kinds: []observe.Kind{"unknown"}}); err == nil {
 		t.Fatal("accepted unknown observation kind")
 	}
-	if _, err := observe.New(hooks.New(), stream, observe.Options{Kinds: []observe.Kind{observe.Files, observe.Files}}); err == nil {
+	if _, err := observe.New(observe.Options{Kinds: []observe.Kind{observe.Files, observe.Files}}); err == nil {
 		t.Fatal("accepted duplicate observation kind")
-	}
-	if _, err := observe.New(nil, stream, observe.Options{}); err == nil {
-		t.Fatal("accepted missing hook registry")
 	}
 	if err := (*observe.Extension)(nil).Close(context.Background()); err != nil {
 		t.Fatal(err)

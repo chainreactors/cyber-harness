@@ -148,7 +148,7 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
+			application := newTestApp(t, telemetry.NopLogger(), nil)
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
@@ -157,7 +157,7 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := hosttest.Set(t, rt)
+			rtSet := hosttest.Set(t, hosttest.Provide[*apppkg.App](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

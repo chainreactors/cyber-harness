@@ -8,6 +8,7 @@ import (
 	"time"
 
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
@@ -65,7 +66,11 @@ func testConnection(ctx context.Context, in, stored *types.DistributeConfig) []*
 		connectionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		adapter := New(ioatools.Config{URL: value.URL, Token: value.Token}, Dependencies{})
-		set, err := extension.New(adapter)
+		stream := events.New()
+		publish := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+			return extension.Provide[*events.Stream](scope, stream)
+		}}
+		set, err := extension.New(publish, adapter)
 		if err != nil {
 			return "", err
 		}

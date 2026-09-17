@@ -15,6 +15,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/commands"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type scannerProvider struct{}
@@ -62,11 +63,17 @@ func (p *scannerProfile) Runtime() (*agentsession.Runtime, error) {
 }
 func (*scannerProfile) RegisterNamespaces(*aop.NamespaceMux) error { return nil }
 func (*scannerProfile) AgentStatus() *aop.AgentStatus              { return &aop.AgentStatus{} }
-func (*scannerProfile) ConsoleBindings() *consoleapi.Bindings      { return nil }
+
+// Shell is what a host publishes once its graph has loaded; this profile only
+// needs it to get past the command check and reach the runtime path.
+func (p *scannerProfile) Shell() (commands.Executor, *terminaltool.BashTool) {
+	return scannerCommands{}, &terminaltool.BashTool{}
+}
+func (*scannerProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
 
 func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	runtimeErr := errors.New("profile runtime sentinel")
-	application := &apppkg.App{Commands: scannerCommands{}}
+	application := &apppkg.App{}
 	application.SetProvider(scannerProvider{}, provider.ProviderConfig{})
 	p := &scannerProfile{app: application, runtimeErr: runtimeErr}
 	var request profilepkg.Request

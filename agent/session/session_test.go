@@ -21,7 +21,6 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
 	"github.com/chainreactors/cyber/pkg/hosttest"
@@ -627,11 +626,8 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	ctx, cancel := context.WithCancel(context.Background())
 	reg := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
-	terminal, err := terminaltools.New(nil, reg, terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries := []extension.Extension{reg, tools, terminal}
+	terminal := terminaltools.New(terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
+	entries := []extension.Extension{hosttest.Capabilities(), reg, tools, terminal}
 	if len(values) > 0 {
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Add(scope, values...)
@@ -643,20 +639,19 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 		t.Fatal(err)
 	}
 	bash := terminal.Bash()
-	application := newTestApp(t, nil, apppkg.Dependencies{})
-	application.Commands = reg
-	application.Tools = tools
-	application.Bash = bash
+	application := newTestApp(t, nil, nil)
 	rt := &Runtime{
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
+		commandRegistry: reg, tools: tools, bash: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
 		closeDone:   make(chan struct{}), loaded: true,
 	}
-	rt.commands, rt.commandIndex, err = commandDeclarations(nil)
+	commandValues, commandIndex, err := commandDeclarations(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rt.commands, rt.commandIndex = commandValues, commandIndex
 	t.Cleanup(func() {
 		_ = terminalSet.Close(context.Background())
 	})

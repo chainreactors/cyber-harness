@@ -12,19 +12,20 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/output"
 	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	events := coreevents.New()
-	writer, err := telemetry.New(events, telemetry.Options{Path: path, Queue: 8})
+	writer, err := telemetry.New(telemetry.Options{Path: path, Queue: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("constructor touched output: %v", err)
 	}
-	set, err := extension.New(writer)
+	set, err := extension.New(hosttest.Provide[*coreevents.Stream](events), writer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +56,11 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 		if err := os.WriteFile(path, want, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		writer, err := telemetry.New(coreevents.New(), telemetry.Options{Path: path})
+		writer, err := telemetry.New(telemetry.Options{Path: path})
 		if err != nil {
 			t.Fatal(err)
 		}
-		set, err := extension.New(writer)
+		set, err := extension.New(hosttest.Provide[*coreevents.Stream](coreevents.New()), writer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,11 +80,11 @@ func TestOutputRejectsExistingDestinationWithoutTruncating(t *testing.T) {
 func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.jsonl")
 	events := coreevents.New()
-	writer, err := telemetry.New(events, telemetry.Options{Path: path})
+	writer, err := telemetry.New(telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := extension.New(writer)
+	set, err := extension.New(hosttest.Provide[*coreevents.Stream](events), writer)
 	if err != nil {
 		t.Fatal(err)
 	}

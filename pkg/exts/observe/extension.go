@@ -57,10 +57,7 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry *corehooks.Registry, stream *coreevents.Stream, options Options) (*Extension, error) {
-	if registry == nil || stream == nil {
-		return nil, fmt.Errorf("observe requires shared hooks and AOP stream")
-	}
+func New(options Options) (*Extension, error) {
 	kinds := make(map[Kind]bool, len(options.Kinds))
 	for _, kind := range options.Kinds {
 		switch kind {
@@ -82,7 +79,7 @@ func New(registry *corehooks.Registry, stream *coreevents.Stream, options Option
 		logger = telemetry.NopLogger()
 	}
 	return &Extension{
-		hooks: registry, events: stream, kinds: kinds, file: fileOptions,
+		kinds: kinds, file: fileOptions,
 		snapshots: make(map[string]Snapshot), logger: logger,
 	}, nil
 }
@@ -99,6 +96,15 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
+	registry, err := extension.Use[*corehooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	stream, err := extension.Use[*coreevents.Stream](scope)
+	if err != nil {
+		return err
+	}
+	e.hooks, e.events = registry, stream
 	e.loaded = true
 	const source = "observe"
 	if e.kinds[Tools] {

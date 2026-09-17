@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/skills"
+	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
 	app "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
@@ -23,24 +28,54 @@ type Extension struct {
 	config      Config
 	loop        agent.Loop
 	workDir     string
-	proxyURL    string
 	logger      telemetry.Logger
 	engines     *engine.Set
 }
 
-func New(application *app.App, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) *Extension {
+func New(config Config, loop agent.Loop, workDir string, logger telemetry.Logger) *Extension {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Extension{application: application, config: config, loop: loop, workDir: workDir, proxyURL: proxyURL, logger: logger}
+	return &Extension{config: config, loop: loop, workDir: workDir, logger: logger}
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
-	if e == nil || e.application == nil || e.application.Commands == nil || scope == nil {
+	if e == nil || scope == nil {
 		return fmt.Errorf("scanner extension is not configured")
 	}
+	application, err := extension.Use[*app.App](scope)
+	if err != nil {
+		return err
+	}
+	endpoint, err := extension.Use[egress.Endpoint](scope)
+	if err != nil {
+		return err
+	}
+	tools, err := extension.Use[tool.Executor](scope)
+	if err != nil {
+		return err
+	}
+	commandRegistry, err := extension.Use[commands.Executor](scope)
+	if err != nil {
+		return err
+	}
+	bash, err := extension.Use[*terminaltool.BashTool](scope)
+	if err != nil {
+		return err
+	}
+	store, err := extension.Use[*skills.Store](scope)
+	if err != nil {
+		return err
+	}
+	e.application = application
+	proxyURL := endpoint.ProxyURL()
+	if proxyURL == "" {
+		proxyURL = e.config.Resources.Proxy
+	}
 	e.engines = initEngines(scope.Init(), e.config, e.logger)
-	values, err := buildScannerCommands(e.application, e.engines, e.config, e.loop, e.workDir, e.proxyURL, e.logger)
+	values, err := buildScannerCommands(borrowed{
+		application: application, tools: tools, commands: commandRegistry, bash: bash, skills: store,
+	}, e.engines, e.config, e.loop, e.workDir, proxyURL, e.logger)
 	if err != nil || len(values) == 0 {
 		return err
 	}

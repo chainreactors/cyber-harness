@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
@@ -24,7 +26,19 @@ import (
 	zombietools "github.com/chainreactors/cyber/tools/zombie"
 )
 
-func buildScannerCommands(application *app.App, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+// borrowed is what the scanner reaches for that other extensions own. It is
+// named so the call below reads as a list of capabilities rather than a run of
+// positional arguments.
+type borrowed struct {
+	application *app.App
+	tools       tool.Executor
+	commands    commands.Executor
+	bash        *terminaltool.BashTool
+	skills      *skills.Store
+}
+
+func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+	application := borrow.application
 	var scannerResources *resources.Set
 	if engineSet != nil {
 		scannerResources = engineSet.Resources
@@ -39,7 +53,7 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 		parent := agent.NewAgent(agent.Config{
 			Loop:          loop,
 			Provider:      model,
-			Tools:         application.Tools,
+			Tools:         borrow.tools,
 			Model:         providerConfig.Model,
 			MaxTokens:     providerConfig.MaxTokens,
 			ContextWindow: providerConfig.ContextWindow,
@@ -49,12 +63,12 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 		options = append(options,
 			scan.WithParent(parent),
 			scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-				return collectDeepBrowserArtifacts(ctx, application.Commands, application.Bash, targetURL, logger)
+				return collectDeepBrowserArtifacts(ctx, borrow.commands, borrow.bash, targetURL, logger)
 			}),
 		)
-		if application.Skills != nil {
+		if borrow.skills != nil {
 			options = append(options, scan.WithSkillReader(func(name string) string {
-				content, ok, err := application.Skills.ReadVirtual("cyber://skills/scan/" + name + ".md")
+				content, ok, err := borrow.skills.ReadVirtual("cyber://skills/scan/" + name + ".md")
 				if !ok || err != nil {
 					return ""
 				}

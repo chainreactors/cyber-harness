@@ -55,21 +55,17 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 
 func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentsession.Runtime {
 	t.Helper()
-	a := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
-
-	aSet := loadConsoleApplication(t, t.Context(), a)
+	a := newTestApp(t, telemetry.NopLogger(), nil)
+	// The runtime reads provider state while loading, so the provider is set
+	// first. One graph: the session extension borrows the same capabilities a
+	// profile publishes, so the test publishes them once and mounts it alongside.
 	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
-	t.Cleanup(func() { _ = aSet.Close(context.Background()) })
-	rt, err := sessionext.New(agentsession.Config{Application: a, Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
-	if err != nil {
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	set := hosttest.Set(t, append(apptest.Entries(t, a), rt)...)
+	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-
-	rtSet := hosttest.Set(t, rt)
-	if err := rtSet.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
+	t.Cleanup(func() { _ = set.Close(context.Background()) })
 	return rt.Runtime()
 }
 
@@ -84,11 +80,11 @@ func sessionTestEvent(id string, event *aop.Event) *aop.Event {
 func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	t.Helper()
 	stream := coreevents.New()
-	recorder, err := telemetryext.New(stream, telemetryext.Options{Path: path})
+	recorder, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadOutputRecorder(t, recorder); err != nil {
+	if err := loadOutputRecorder(t, stream, recorder); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {

@@ -13,9 +13,13 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 // ---------------------------------------------------------------------------
@@ -32,6 +36,11 @@ type Runtime struct {
 	config           Config
 	primarySessionID string
 	app              *apppkg.App
+	hooks            *hooks.Registry
+	tools            tool.Executor
+	commandRegistry  commands.Executor
+	skills           *skills.Store
+	bash             *terminaltool.BashTool
 	nodeName         string
 	systemPrompt     string
 	heartbeat        time.Duration
@@ -57,10 +66,19 @@ type Runtime struct {
 }
 
 type Config struct {
-	History          HistoryStore
-	BaseSkills       []string
-	Commands         []Command
-	Application      *apppkg.App
+	History     HistoryStore
+	BaseSkills  []string
+	Commands    []Command
+	Application *apppkg.App
+
+	// The runtime borrows these from the host rather than reaching through
+	// Application for them: they belong to the extensions that own them, and
+	// Application is not a place to park other people's things.
+	Hooks            *hooks.Registry
+	Tools            tool.Executor
+	CommandRegistry  commands.Executor
+	Skills           *skills.Store
+	Bash             *terminaltool.BashTool
 	NodeName         string
 	Preamble         string
 	Option           *cfg.Option
@@ -70,6 +88,45 @@ type Config struct {
 	MaxPending       int
 	// Loop supplies the algorithm; this extension owns admission and drain.
 	Loop agent.Loop
+}
+
+// Skills, CommandRegistry, Tools and Bash are what the runtime borrowed from
+// the host. They are exposed because the console and the web service present
+// the same session; reading them here keeps that view in one place instead of
+// parking them on the application for anyone to reach.
+func (rt *Runtime) Skills() *skills.Store {
+	if rt == nil {
+		return nil
+	}
+	return rt.skills
+}
+
+func (rt *Runtime) CommandRegistry() commands.Executor {
+	if rt == nil {
+		return nil
+	}
+	return rt.commandRegistry
+}
+
+func (rt *Runtime) Hooks() *hooks.Registry {
+	if rt == nil {
+		return nil
+	}
+	return rt.hooks
+}
+
+func (rt *Runtime) Tools() tool.Executor {
+	if rt == nil {
+		return nil
+	}
+	return rt.tools
+}
+
+func (rt *Runtime) Bash() *terminaltool.BashTool {
+	if rt == nil {
+		return nil
+	}
+	return rt.bash
 }
 
 // NodeName is the profile-selected name shared by sessions and node transports.
@@ -138,17 +195,17 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	}
 	rt.nodeName = nodeName
 	executor := coretool.EmptyExecutor()
-	if rt.app.Tools != nil {
-		executor = rt.app.Tools
+	if rt.tools != nil {
+		executor = rt.tools
 	}
 
-	store := rt.app.Skills
+	store := rt.skills
 	if store == nil {
 		store = skills.NewStore(nil)
 	}
 	var scannerDocs string
-	if rt.app.Commands != nil {
-		scannerDocs = rt.app.Commands.UsageDocs()
+	if rt.commandRegistry != nil {
+		scannerDocs = rt.commandRegistry.UsageDocs()
 	}
 	pc := &prompt.PromptConfig{
 		Tools:       executor,
@@ -207,7 +264,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		Logger:                logger,
 		CacheRetention:        agent.CacheShort,
 		Bus:                   rt.app,
-		Hooks:                 rt.app.Hooks,
+		Hooks:                 rt.hooks,
 		CaptureProviderFrames: option.CaptureProviderFrames,
 		MessageCounter:        resumeCounter,
 	}

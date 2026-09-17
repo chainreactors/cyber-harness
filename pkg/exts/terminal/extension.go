@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/tool"
@@ -19,9 +21,6 @@ type Config struct {
 	Environment    map[string]string
 	Directory      string
 	Timeout        int
-	Proxy          string
-	ProxyCA        string
-	Egress         func(context.Context) (string, string, func())
 	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
 	// Tmux constructs the terminal command published by this extension. Nil
@@ -34,36 +33,25 @@ type Config struct {
 }
 type Extension struct {
 	mu                 sync.Mutex
-	commands           commands.Executor
+	config             Config
 	bash               *terminaltool.BashTool
-	tmux               commands.Command
 	registered, closed bool
 	done               chan struct{}
 }
 
-func New(registry *hooks.Registry, c commands.Executor, config Config) (*Extension, error) {
-	if c == nil || config.Directory == "" {
-		return nil, fmt.Errorf("terminal requires commands and a working directory")
-	}
-	bash := terminaltool.NewBashTool(config.Directory, config.Timeout, registry).
-		WithEnvironment(config.Environment).
-		WithScannerProxy(config.Proxy).
-		WithScannerProxyCA(config.ProxyCA).
-		WithProcessContainment(config.Containment).
-		WithForegroundTimeoutCeiling(config.MaximumTimeout)
-	bash.SetEgressResolver(config.Egress)
-	bash.EnableShellCommands(c)
-	bash.HideCommands(config.HiddenCommands...)
-	tmux := terminaltool.NewTmuxCommand(bash)
-	if config.Tmux != nil {
-		tmux = config.Tmux(bash)
-	}
-	if tmux.Name != "tmux" || tmux.Run == nil {
-		return nil, fmt.Errorf("terminal tmux command must be named tmux and executable")
-	}
-	return &Extension{commands: c, bash: bash, tmux: tmux}, nil
+func New(config Config) *Extension { return &Extension{config: config} }
+
+// Bash is the tool this extension owns. It is nil until the extension has
+// loaded; consumers borrow it as a capability rather than reading it here.
+func (m *Extension) Bash() *terminaltool.BashTool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bash
 }
-func (m *Extension) Bash() *terminaltool.BashTool { return m.bash }
+
+// Load builds the tool here rather than in New because everything it needs --
+// the hook registry, the command executor, the egress endpoint -- is a
+// capability, and capabilities only exist once the graph is loading.
 func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
@@ -77,10 +65,51 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := extension.Add(scope, m.tmux); err != nil {
+	if m.config.Directory == "" {
+		return fmt.Errorf("terminal requires a working directory")
+	}
+	registry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
 		return err
 	}
-	if err := extension.Add[tool.Tool](scope, m.bash); err != nil {
+	executor, err := extension.Use[commands.Executor](scope)
+	if err != nil {
+		return err
+	}
+	endpoint, err := extension.Use[egress.Endpoint](scope)
+	if err != nil {
+		return err
+	}
+
+	bash := terminaltool.NewBashTool(m.config.Directory, m.config.Timeout, registry).
+		WithEnvironment(m.config.Environment).
+		WithScannerProxy(endpoint.ProxyURL()).
+		WithScannerProxyCA(endpoint.CAPath()).
+		WithProcessContainment(m.config.Containment).
+		WithForegroundTimeoutCeiling(m.config.MaximumTimeout)
+	bash.SetEgressResolver(endpoint.Egress)
+	bash.EnableShellCommands(executor)
+	bash.HideCommands(m.config.HiddenCommands...)
+
+	tmux := terminaltool.NewTmuxCommand(bash)
+	if m.config.Tmux != nil {
+		tmux = m.config.Tmux(bash)
+	}
+	if tmux.Name != "tmux" || tmux.Run == nil {
+		return fmt.Errorf("terminal tmux command must be named tmux and executable")
+	}
+	m.bash = bash
+
+	if err := extension.Add(scope, tmux); err != nil {
+		return err
+	}
+	if err := extension.Add[tool.Tool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[*terminaltool.BashTool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[procbus.Sessions](scope, bash.Manager()); err != nil {
 		return err
 	}
 	m.registered = true
@@ -89,6 +118,12 @@ func (m *Extension) Load(scope *extension.Scope) error {
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	if m.bash == nil {
+		// Load never got far enough to build the tool.
+		m.closed = true
 		m.mu.Unlock()
 		return nil
 	}

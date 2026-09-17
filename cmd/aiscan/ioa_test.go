@@ -26,11 +26,8 @@ func TestProfileWithoutIOAHasNoCollaborationContributions(t *testing.T) {
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	application, err := p.App()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if application.Commands.Has("ioa") || application.Skills.ReadBody("ioa") != "" || application.Skills.ReadBody("checkpoint") != "" {
+	registry, _ := p.Shell()
+	if registry.Has("ioa") {
 		t.Fatal("unselected client contributed commands or skills")
 	}
 	if p.ConsoleBindings() != nil || p.AgentStatus().Bound {
@@ -79,11 +76,8 @@ func TestServerOutlivesClientProfileReplacement(t *testing.T) {
 		if err := p.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		app, err := p.App()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !app.Commands.Has("ioa") || app.Skills.ReadBody("checkpoint") == "" {
+		registry, _ := p.Shell()
+		if !registry.Has("ioa") {
 			t.Fatal("client contribution is incomplete")
 		}
 		if !p.AgentStatus().Bound {

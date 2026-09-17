@@ -8,6 +8,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -28,6 +29,7 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	registry := commands.NewRegistry(nil)
 	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
 	set, err := extension.New(
+		hosttest.Capabilities(),
 		registry,
 		ioa,
 	)

@@ -58,11 +58,17 @@ func NewResource(config Config) (*Resource, error) {
 	}
 	application := config.Application
 	if application == nil {
-		application = &apppkg.App{Tools: tool.EmptyExecutor()}
+		application = &apppkg.App{}
+	}
+	tools := config.Tools
+	if tools == nil {
+		tools = tool.EmptyExecutor()
 	}
 	return &Resource{runtime: &Runtime{
 		commands: declared, commandIndex: index, history: config.History,
 		app: application, option: config.Option, logger: config.Logger, config: config,
+		hooks: config.Hooks, tools: tools, commandRegistry: config.CommandRegistry,
+		skills: config.Skills, bash: config.Bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		closeDone: make(chan struct{}),
 	}}, nil

@@ -11,15 +11,12 @@ import (
 
 // Extension is the only files plugin and the sole lifecycle owner of Files.
 type Extension struct {
+	config   files.Config
 	resource *files.Resource
 }
 
-func New(hookRegistry *hooks.Registry, config files.Config) (*Extension, error) {
-	value, err := files.New(config, hookRegistry)
-	if err != nil {
-		return nil, err
-	}
-	return &Extension{resource: value}, nil
+func New(config files.Config) *Extension {
+	return &Extension{config: config}
 }
 
 // Files returns the filesystem behavior. Its concrete type has no lifecycle
@@ -32,6 +29,13 @@ func (e *Extension) Files() *files.Files {
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
+	registry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	if e.resource, err = files.New(e.config, registry); err != nil {
+		return err
+	}
 	if err := e.resource.Open(scope.Init()); err != nil {
 		return err
 	}

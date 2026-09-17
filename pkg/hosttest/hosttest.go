@@ -9,6 +9,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/chainreactors/cyber/core/egress"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/tool"
@@ -69,4 +71,28 @@ func ToolsWithHooks(t testing.TB, registry *hooks.Registry, values ...tool.Tool)
 	tools := toolset.NewRegistry(registry)
 	Load(t, context.Background(), tools, contribute(values...))
 	return tools
+}
+
+// Provide returns an Extension publishing value as the capability keyed by T.
+// A test that exercises one extension uses it to stand in for whichever owner
+// would have published that capability in a real profile.
+func Provide[T any](value T) extension.Extension {
+	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return extension.Provide[T](scope, value)
+	}}
+}
+
+// Capabilities is the set every extension can expect from a profile: a hook
+// registry, an event stream, and a routing endpoint that routes nothing.
+func Capabilities() extension.Extension {
+	registry, stream := hooks.New(), events.New()
+	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		if err := extension.Provide[*hooks.Registry](scope, registry); err != nil {
+			return err
+		}
+		if err := extension.Provide[*events.Stream](scope, stream); err != nil {
+			return err
+		}
+		return extension.Provide[egress.Endpoint](scope, egress.Disabled())
+	}}
 }

@@ -54,7 +54,13 @@ func (r *Registry) Load(scope *extension.Scope) error {
 	if r == nil || r.store == nil || scope == nil {
 		return ErrUnavailable
 	}
+	// A registry makes two statements about itself: it owns the point that
+	// stores Commands, and it offers the Executor behaviour. They are separate
+	// type keys, so neither shadows the other.
 	if err := extension.Define[Command](scope, r); err != nil {
+		return err
+	}
+	if err := extension.Provide[Executor](scope, r); err != nil {
 		return err
 	}
 	return r.store.Activate(scope.Init())

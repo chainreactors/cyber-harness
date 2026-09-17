@@ -108,11 +108,11 @@ func sessionTestEvent(sessionID string, event *aop.Event) *aop.Event {
 func writeSessionEvents(t *testing.T, path string, events []*aop.Event) {
 	t.Helper()
 	bus := coreevents.New()
-	output, err := telemetry.New(bus, telemetry.Options{Path: path})
+	output, err := telemetry.New(telemetry.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadtelemetry(t, output); err != nil {
+	if err := loadtelemetry(t, bus, output); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {

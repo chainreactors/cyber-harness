@@ -11,7 +11,6 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
@@ -184,12 +183,12 @@ func removeScannerFlag(args []string, flag string) []string {
 	return out
 }
 
-func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *apppkg.App, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
-	if provider, _ := application.ProviderState(); provider == nil {
-		return fmt.Errorf("--ai requires a configured LLM provider")
-	}
+func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
 	if runtime == nil {
 		return fmt.Errorf("scanner Agent runtime is unavailable")
+	}
+	if provider, _ := runtime.App().ProviderState(); provider == nil {
+		return fmt.Errorf("--ai requires a configured LLM provider")
 	}
 	lock, err := acquirePIDLock(agentPIDFilePath(), logger)
 	if err != nil {
@@ -197,7 +196,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	}
 	defer lock.Release()
 
-	intent, err := resolveScannerIntent(option, application.Skills, scannerArgs[0])
+	intent, err := resolveScannerIntent(option, runtime.Skills(), scannerArgs[0])
 	if err != nil {
 		return err
 	}

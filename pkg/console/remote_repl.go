@@ -27,7 +27,7 @@ func StartPersistent(rt *agentsession.Runtime, option *cfg.Option, bindings *con
 	if rt == nil || rt.App() == nil {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
-	manager := bashManager(rt.App().Bash)
+	manager := bashManager(rt.Bash())
 	if manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}

@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/hosttest"
@@ -25,7 +27,12 @@ import (
 func loadPTYRegistry(t *testing.T, ctx context.Context, bash *terminaltool.BashTool) *namespaces.Registry {
 	t.Helper()
 	registry := namespaces.New()
-	value := hosttest.Set(t, registry, ptyext.New(bash))
+	// The PTY extension borrows the session registry the terminal owns; a test
+	// stands in for that owner.
+	sessions := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return extension.Provide[procbus.Sessions](scope, bash.Manager())
+	}}
+	value := hosttest.Set(t, registry, sessions, ptyext.New())
 	if err := value.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -80,19 +87,13 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
+	application := newTestApp(t, telemetry.NopLogger(), nil)
 
-	applicationSet := loadConsoleApplication(t, ctx, application)
-	defer applicationSet.Close(context.Background())
-	rt, err := sessionext.New(agentsession.Config{Application: application, Option: option, Logger: telemetry.NopLogger(),
+	rt := sessionext.New(agentsession.Config{Option: option, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	if err != nil {
-		t.Fatalf("runtime without provider: %v", err)
-	}
-
-	rtSet := hosttest.Set(t, rt)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repl.Close()
-	mgr := bashManager(rt.Runtime().App().Bash)
+	mgr := bashManager(rt.Runtime().Bash())
 	if mgr == nil {
 		t.Fatal("pty manager unavailable")
 	}
@@ -122,7 +123,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("unexpected resident repl: %+v", initial)
 	}
 
-	registry := loadPTYRegistry(t, ctx, rt.Runtime().App().Bash)
+	registry := loadPTYRegistry(t, ctx, rt.Runtime().Bash())
 	transport := newPTYTransport(t, ctx, registry, 64)
 	messages := transport.messages
 	transport.dispatch(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
@@ -210,25 +211,19 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
+	application := newTestApp(t, telemetry.NopLogger(), nil)
 
-	applicationSet := loadConsoleApplication(t, ctx, application)
-	defer applicationSet.Close(context.Background())
-	rt, err := sessionext.New(agentsession.Config{Application: application, Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	if err != nil {
-		t.Fatalf("runtime without provider: %v", err)
-	}
-
-	rtSet := hosttest.Set(t, rt)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer rtSet.Close(context.Background())
 
-	for _, info := range bashManager(rt.Runtime().App().Bash).List() {
+	for _, info := range bashManager(rt.Runtime().Bash()).List() {
 		if info.Kind == "repl" && info.Name == MainREPLName {
 			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
 		}

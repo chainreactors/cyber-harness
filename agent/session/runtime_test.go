@@ -6,6 +6,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/hosttest"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"io"
 	"os"
 	"path/filepath"
@@ -25,7 +26,6 @@ import (
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
-	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -73,7 +73,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 }
 
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := newTestApp(t, nil, apppkg.Dependencies{})
+	application := newTestApp(t, nil, nil)
 	application.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -391,7 +391,7 @@ func loadTestApplication(t *testing.T, application *apppkg.App) *extension.Set {
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := newTestApp(t, nil, apppkg.Dependencies{})
+	a := newTestApp(t, nil, nil)
 	rt, err := New(Config{Application: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
@@ -442,22 +442,22 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	appResource := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
-	app := appResource
-	terminal, err := terminalext.New(app.Hooks, app.Commands, terminalext.Config{
-		Directory: t.TempDir(), Timeout: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	app.Bash = terminal.Bash()
-	entries := apptest.Entries(t, appResource)
-	entries[len(entries)-1] = terminal
-	appSet := hosttest.Set(t, entries...)
+	app := newTestApp(t, telemetry.NopLogger(), nil)
+	// The terminal owns the tool and publishes it; nothing parks it on the
+	// application for others to read, so the test borrows it too.
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		value, err := extension.Use[*terminaltool.BashTool](scope)
+		bash = value
+		return err
+	}}
+	appSet := hosttest.Set(t, append(apptest.Entries(t, app), borrow)...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bash := app.Bash
+	if bash == nil {
+		t.Fatal("the terminal published no tool")
+	}
 	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
 	rt, err := New(Config{Application: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
@@ -866,22 +866,26 @@ func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistencePro
 func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{Events: stream})
+	appResource := newTestApp(t, telemetry.NopLogger(), stream)
 	app := appResource
 	var dependencies []string
 	var entries []extension.Extension
 	var output *telemetryext.Extension
 	if option.OutputFile != "" {
 		var outputErr error
-		output, outputErr = telemetryext.New(stream, telemetryext.Options{Path: option.OutputFile})
+		output, outputErr = telemetryext.New(telemetryext.Options{Path: option.OutputFile})
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
-		entries = append(entries, output)
 		dependencies = append(dependencies, "output")
 	}
 	applicationEntries := apptest.Entries(t, appResource, dependencies...)
 	entries = append(entries, applicationEntries...)
+	// The recorder borrows the event stream, so it loads after whoever
+	// publishes it.
+	if output != nil {
+		entries = append(entries, output)
+	}
 	appSet := hosttest.Set(t, entries...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
@@ -951,11 +955,11 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	}
 	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := coreevents.New()
-	writer, err := telemetryext.New(bus, telemetryext.Options{Path: path})
+	writer, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadtelemetry(t, writer); err != nil {
+	if err := loadtelemetry(t, bus, writer); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {
@@ -984,13 +988,13 @@ func persistenceMessagesText(messages []*aop.Message) string {
 func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.jsonl")
 	bus := coreevents.New()
-	output, err := telemetryext.New(bus, telemetryext.Options{Path: path})
+	output, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := newTestApp(t, nil, apppkg.Dependencies{Events: bus})
+	a := newTestApp(t, nil, bus)
 	applicationEntries := apptest.Entries(t, a, "output")
-	aSet := hosttest.Set(t, append([]extension.Extension{output}, applicationEntries...)...)
+	aSet := hosttest.Set(t, append(applicationEntries, output)...)
 	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

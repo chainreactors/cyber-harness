@@ -32,14 +32,14 @@ type artifactProjection struct {
 	sub       *eventbus.Subscription[*aop.Event]
 }
 
-func newArtifactProjection(events *coreevents.Stream, artifacts coretool.ArtifactImporter, logger telemetry.Logger) (*artifactProjection, error) {
-	if events == nil || artifacts == nil {
-		return nil, fmt.Errorf("artifact projection requires an event stream and importer")
+func newArtifactProjection(artifacts coretool.ArtifactImporter, logger telemetry.Logger) (*artifactProjection, error) {
+	if artifacts == nil {
+		return nil, fmt.Errorf("artifact projection requires an importer")
 	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &artifactProjection{events: events, artifacts: artifacts, logger: logger}, nil
+	return &artifactProjection{artifacts: artifacts, logger: logger}, nil
 }
 
 func (p *artifactProjection) Load(scope *extension.Scope) error {
@@ -49,6 +49,11 @@ func (p *artifactProjection) Load(scope *extension.Scope) error {
 	if p.sub != nil {
 		return nil
 	}
+	stream, err := extension.Use[*coreevents.Stream](scope)
+	if err != nil {
+		return err
+	}
+	p.events = stream
 	// Set.Close drains this consumer before canceling its work. The scope still
 	// contributes values, but its early cancellation cannot discard admitted
 	// observations during shutdown.

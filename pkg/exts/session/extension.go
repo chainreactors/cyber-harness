@@ -6,32 +6,76 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/tool"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type Extension struct {
+	config   session.Config
 	resource *session.Resource
 }
 
-func New(config session.Config) (*Extension, error) {
-	resource, err := session.NewResource(config)
-	if err != nil {
-		return nil, err
-	}
-	return &Extension{resource: resource}, nil
-}
+// New keeps the profile's choices. The application it runs against is borrowed
+// during Load, because the application is itself assembled from capabilities
+// and does not exist before the graph starts loading.
+func New(config session.Config) *Extension { return &Extension{config: config} }
+
+// Runtime is the session runtime. It is nil until this extension has loaded.
 func (e *Extension) Runtime() *session.Runtime {
 	if e == nil || e.resource == nil {
 		return nil
 	}
 	return e.resource.Runtime()
 }
+
 func (e *Extension) Load(scope *extension.Scope) error {
-	if e == nil || e.resource == nil || scope == nil {
+	if e == nil || scope == nil {
 		return fmt.Errorf("session extension is unavailable")
+	}
+	application, err := extension.Use[*apppkg.App](scope)
+	if err != nil {
+		return err
+	}
+	hookRegistry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	tools, err := extension.Use[tool.Executor](scope)
+	if err != nil {
+		return err
+	}
+	commandRegistry, err := extension.Use[commands.Executor](scope)
+	if err != nil {
+		return err
+	}
+	store, err := extension.Use[*skills.Store](scope)
+	if err != nil {
+		return err
+	}
+	bash, err := extension.Use[*terminaltool.BashTool](scope)
+	if err != nil {
+		return err
+	}
+	config := e.config
+	config.Application = application
+	config.Hooks, config.Tools, config.CommandRegistry = hookRegistry, tools, commandRegistry
+	config.Skills, config.Bash = store, bash
+	resource, err := session.NewResource(config)
+	if err != nil {
+		return err
+	}
+	e.resource = resource
+	if err := extension.Provide[*session.Runtime](scope, resource.Runtime()); err != nil {
+		return err
 	}
 	return e.resource.Start(scope.Init(), scope.Lifetime())
 }
+
 func (e *Extension) Close(ctx context.Context) error {
 	if e == nil || e.resource == nil {
 		return nil

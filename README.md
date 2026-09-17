@@ -248,6 +248,7 @@ llm:
 | [Agent Mode](docs/agent.md) | Toolset, Goal Evaluation, REPL |
 | [IOA](docs/ioa.md) | Multi-agent architecture, Space/Node/Message model |
 | [Record Tool](docs/record.md) | Desktop/window capture, platform support, native builds |
+| [Extension Architecture](docs/architecture.md) | Contribution points and shared capabilities, load and close order, composition roots |
 | [Reference](docs/reference.md) | Configuration, providers, flags, scanner usage, FAQ |
 | [v1.0.0 Guide](docs/v1.0.0.md) | Stable API baseline, removed pre-v1 interfaces, release profiles |
 | [Changelog](docs/changelog.md) | Version history |

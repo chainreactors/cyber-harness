@@ -8,6 +8,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
@@ -15,11 +16,9 @@ import (
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 	commands := commands.NewRegistry(nil)
 	tools := toolset.NewRegistry(nil)
-	instance, err := New(nil, commands, Config{Directory: t.TempDir(), Timeout: 5})
-	if err != nil {
-		t.Fatal(err)
-	}
+	instance := New(Config{Directory: t.TempDir(), Timeout: 5})
 	set, err := extension.New(
+		hosttest.Capabilities(),
 		commands,
 		tools,
 		instance,
@@ -54,16 +53,14 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 		Name: "tmux",
 		Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
 	}
-	instance, err := New(nil, commandRegistry, Config{
+	instance := New(Config{
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
 		Tmux:           func(*terminaltool.BashTool) commands.Command { return custom },
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	set, err := extension.New(
+		hosttest.Capabilities(),
 		commandRegistry,
 		tools,
 		control,

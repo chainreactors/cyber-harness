@@ -60,8 +60,8 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 	}
 	defer p.Close(context.Background())
 
-	task = skills.ExpandCommand(task, rt.App().Skills)
-	task, err = rt.App().Skills.ApplySelected(task, option.Skills)
+	task = skills.ExpandCommand(task, rt.Skills())
+	task, err = rt.Skills().ApplySelected(task, option.Skills)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 	}
 	defer p.Close(context.Background())
 
-	if _, err := rt.App().Skills.ApplySelected("", option.Skills); err != nil {
+	if _, err := rt.Skills().ApplySelected("", option.Skills); err != nil {
 		return err
 	}
 
@@ -98,6 +98,13 @@ func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cf
 // ---------------------------------------------------------------------------
 // Scanner direct execution
 // ---------------------------------------------------------------------------
+
+// shellHost is a profile that publishes a command surface. It is declared here
+// because this is the only caller that needs one; a host that cannot run
+// commands simply does not implement it.
+type shellHost interface {
+	Shell() (commands.Executor, *terminaltool.BashTool)
+}
 
 func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
 	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
@@ -151,7 +158,17 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	_, providerConfig := application.ProviderState()
 	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
 
-	if !application.Commands.Has(scannerArgs[0]) {
+	// A host without a session runtime still runs commands: the registry and
+	// the tool are capabilities its graph publishes either way.
+	host, ok := p.(shellHost)
+	if !ok {
+		return fmt.Errorf("profile does not expose a command surface")
+	}
+	registry, bash := host.Shell()
+	if registry == nil || bash == nil {
+		return fmt.Errorf("bash tool is not registered")
+	}
+	if !registry.Has(scannerArgs[0]) {
 		return fmt.Errorf("unknown subcommand: %s", scannerArgs[0])
 	}
 	if option.Debug && scannerCommandSupportsDebug(scannerArgs[0]) && !toolargs.BoolFlagEnabled(scannerArgs[1:], "--debug") {
@@ -163,7 +180,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 		if runtimeErr != nil {
 			return runtimeErr
 		}
-		return runScannerWithAgent(ctx, option, application, runtime, scannerArgs, logger)
+		return runScannerWithAgent(ctx, option, runtime, scannerArgs, logger)
 	}
 
 	if option.NoColor && scannerArgs[0] == "scan" && !HasScannerFlag(scannerArgs[1:], "--no-color") {
@@ -172,10 +189,6 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	sessionID := fmt.Sprintf("scan-%d", time.Now().UnixNano())
 	turnID := sessionID + "-run"
 	emitter := scannerArgs[0]
-	bash := application.Bash
-	if bash == nil {
-		return fmt.Errorf("bash tool is not registered")
-	}
 	callID := turnID + "-call"
 	ctx = operation.ContextWithInvocation(ctx, operation.Invocation{
 		CallID: callID, SessionID: sessionID, TurnID: turnID, Emitter: emitter,

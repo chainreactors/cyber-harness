@@ -7,6 +7,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/console/api"
 	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"testing"
 )
 
@@ -14,11 +15,8 @@ import (
 func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()
-	contribution, err := sessionconsole.New(runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(tui, contribution)
+	contribution := sessionconsole.New()
+	set, err := extension.New(hosttest.Provide[*agentsession.Runtime](runtime), tui, contribution)
 	if err != nil {
 		t.Fatal(err)
 	}

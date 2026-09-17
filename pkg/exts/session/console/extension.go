@@ -15,17 +15,18 @@ type Extension struct {
 	runtime *agentsession.Runtime
 }
 
-func New(runtime *agentsession.Runtime) (*Extension, error) {
-	if runtime == nil {
-		return nil, fmt.Errorf("session presentation requires session runtime")
-	}
-	return &Extension{runtime: runtime}, nil
-}
+func New() *Extension { return &Extension{} }
+
 func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	return extension.Add(scope, bindings(e.runtime))
+	runtime, err := extension.Use[*agentsession.Runtime](scope)
+	if err != nil {
+		return err
+	}
+	e.runtime = runtime
+	return extension.Add(scope, bindings(runtime))
 }
 
 // bindings snapshots the runtime commands at installation. Runtime additions remain

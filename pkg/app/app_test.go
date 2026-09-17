@@ -7,10 +7,8 @@ import (
 	"encoding/json"
 
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/pkg/commands"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,13 +28,9 @@ import (
 )
 
 func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
-	hookRegistry := hooks.New()
-	commandRegistry := commands.NewRegistry(hookRegistry)
-	toolRegistry := toolset.NewRegistry(hookRegistry)
-	application := newTestApp(t, telemetry.NopLogger(), Dependencies{
-		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
-	})
-	if application.Commands != commandRegistry || application.Tools != toolRegistry || application.Hooks != hookRegistry {
+	stream := coreevents.New()
+	application := newTestApp(t, telemetry.NopLogger(), stream)
+	if application.Events() != stream {
 		t.Fatal("application replaced profile-owned registries")
 	}
 }
@@ -129,12 +123,13 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	events := coreevents.New()
-	recorder, err := telemetryext.New(events, telemetryext.Options{Path: path})
+	recorder, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := newTestApp(t, telemetry.NopLogger(), Dependencies{Events: events})
+	app := newTestApp(t, telemetry.NopLogger(), events)
 	appSet := testSet(t,
+		hosttest.Provide[*coreevents.Stream](events),
 		recorder,
 	)
 	if err := appSet.Load(t.Context()); err != nil {

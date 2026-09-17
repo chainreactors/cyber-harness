@@ -3,9 +3,14 @@ package search
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/chainreactors/cyber/agent/provider"
+
+	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/tool"
+	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	searchtools "github.com/chainreactors/cyber/tools/search"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -16,15 +21,8 @@ type Extension struct {
 	config Config
 }
 
-type ProxyEndpoint interface {
-	ProxyURL() string
-	CAPath() string
-}
-
 type Config struct {
-	Search     func(context.Context, string, int) (string, error)
 	TavilyKeys string
-	Proxy      ProxyEndpoint
 	// ResolveIndex is evaluated during Load, after any engine dependency has
 	// published its association index. Nil installs the command with no index.
 	ResolveIndex func() *association.Index
@@ -36,10 +34,15 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("search extension context is required")
 	}
-	var proxy, proxyCA string
-	if e.config.Proxy != nil {
-		proxy, proxyCA = e.config.Proxy.ProxyURL(), e.config.Proxy.CAPath()
+	endpoint, err := extension.Use[egress.Endpoint](scope)
+	if err != nil {
+		return err
 	}
+	application, err := extension.Use[*app.App](scope)
+	if err != nil {
+		return err
+	}
+	proxy, proxyCA := endpoint.ProxyURL(), endpoint.CAPath()
 	tavily := searchtools.NewTavilySearch(e.config.TavilyKeys)
 	if proxy != "" {
 		tavily.SetProxy(proxy)
@@ -61,7 +64,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
 		Run:             cyberhub.Run,
 	}
-	searchTool := searchtools.NewWebSearchTool(e.config.Search, tavily)
+	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
 	entries := []commands.Command{fetchCommand, cyberhubCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
@@ -73,4 +76,36 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	return nil
+}
+
+// providerWebSearch adapts the configured model's own web search, when it has
+// one, to the search tool's signature. It lives here because it is search
+// behaviour, not composition.
+func providerWebSearch(application *app.App) func(context.Context, string, int) (string, error) {
+	model, _ := application.ProviderState()
+	searcher, ok := model.(provider.WebSearchProvider)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context, query string, maxResults int) (string, error) {
+		response, err := searcher.WebSearch(ctx, query, maxResults)
+		if err != nil {
+			return "", err
+		}
+		var text strings.Builder
+		fmt.Fprintf(&text, "Web search results for: %s\n\n", query)
+		if len(response.Results) == 0 && response.Summary == "" {
+			text.WriteString("No results found.\n")
+			return text.String(), nil
+		}
+		for index, result := range response.Results {
+			fmt.Fprintf(&text, "[%d] %s\n    URL: %s\n\n", index+1, result.Title, result.URL)
+		}
+		if response.Summary != "" {
+			text.WriteString("Summary:\n")
+			text.WriteString(response.Summary)
+			text.WriteByte('\n')
+		}
+		return text.String(), nil
+	}
 }

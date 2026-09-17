@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -71,7 +72,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Dependencies{
 				Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil },
 			})
-			set, err := extension.New(adapter)
+			set, err := extension.New(hosttest.Capabilities(), adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,7 +132,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 	server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "test-key")))
 	defer server.Close()
 	stream := events.New()
-	adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Dependencies{Events: stream})
+	adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Dependencies{})
 	agent := extension.Func{CloseFunc: func(context.Context) error {
 		start := &aop.Event{SessionId: "child", Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentSessionId: "parent", ParentToolCallId: "spawn"}}}
 		setDelegation(t, start)
@@ -139,7 +140,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 		stream.Publish(&aop.Event{SessionId: "child", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
 		return nil
 	}}
-	set, err := extension.New(adapter, agent)
+	set, err := extension.New(hosttest.Provide[*events.Stream](stream), adapter, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,8 +173,8 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	}))
 	defer server.Close()
 	stream := events.New()
-	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{Events: stream})
-	set, err := extension.New(adapter)
+	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{})
+	set, err := extension.New(hosttest.Provide[*events.Stream](stream), adapter)
 	if err != nil {
 		t.Fatal(err)
 	}

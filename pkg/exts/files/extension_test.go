@@ -14,6 +14,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
@@ -21,11 +22,9 @@ import (
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 	t.Helper()
 	registry := toolset.NewRegistry(nil)
-	f, err := fileext.New(nil, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := fileext.New(cfg)
 	set, err := extension.New(
+		hosttest.Capabilities(),
 		registry,
 		f,
 	)
@@ -95,10 +94,7 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 }
 
 func TestFilesDoesNotExposeLifecycle(t *testing.T) {
-	adapter, err := fileext.New(nil, files.Config{Directory: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := fileext.New(files.Config{Directory: t.TempDir()})
 	filesystem := adapter.Files()
 	if _, ok := any(filesystem).(interface{ Close(context.Context) error }); ok {
 		t.Fatal("file access exposes Close")

@@ -5,68 +5,46 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/agent/provider"
-	"github.com/chainreactors/cyber/agent/skills"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
+// App owns what no extension does: the provider state a host reconfigures at
+// runtime, the progress bus, the event stream it publishes on, and the logger.
+// It borrows nothing. Everything an extension owns is reached as a capability,
+// by the extension that needs it, rather than parked here for others to read.
 type App struct {
 	Providers provider.State
-	Commands  commands.Executor
-	Tools     tool.Executor
-	Bash      *terminaltool.BashTool
-	Hooks     *hooks.Registry
-	Skills    *skills.Store
-	events    *coreevents.Stream
 	Progress  *eventbus.Bus[*toolpb.Progress]
+	events    *coreevents.Stream
 	loggerMu  sync.RWMutex
 	logger    telemetry.Logger
 }
 
-// Dependencies are concrete values selected by the composition root. App
-// borrows them; their Extensions retain lifecycle ownership.
-type Dependencies struct {
-	Skills   *skills.Store
-	Hooks    *hooks.Registry
-	Events   *coreevents.Stream
-	Commands commands.Executor
-	Tools    tool.Executor
-	Bash     *terminaltool.BashTool
-}
-
-// New constructs an inert application around extensions selected by its profile.
-func New(logger telemetry.Logger, dependencies Dependencies) (*App, error) {
-	if dependencies.Hooks == nil {
-		return nil, fmt.Errorf("application requires profile hooks")
-	}
-	if dependencies.Events == nil {
-		return nil, fmt.Errorf("application requires profile events")
-	}
-	if dependencies.Commands == nil {
-		return nil, fmt.Errorf("application requires profile command registry")
-	}
-	if dependencies.Tools == nil {
-		return nil, fmt.Errorf("application requires profile tool registry")
-	}
-	if dependencies.Skills == nil {
-		dependencies.Skills = skills.NewStore(nil)
+// New constructs an inert application around the event stream its host owns.
+func New(logger telemetry.Logger, stream *coreevents.Stream) (*App, error) {
+	if stream == nil {
+		return nil, fmt.Errorf("application requires an event stream")
 	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	a := &App{
-		logger: logger,
-		Hooks:  dependencies.Hooks, events: dependencies.Events,
-		Progress: eventbus.New[*toolpb.Progress](), Commands: dependencies.Commands,
-		Tools: dependencies.Tools, Bash: dependencies.Bash, Skills: dependencies.Skills,
+	return &App{
+		logger: logger, events: stream,
+		Progress: eventbus.New[*toolpb.Progress](),
+	}, nil
+}
+
+// Events is the stream this application publishes on. A host publishes the
+// same stream as a capability, so that consumers and the application observe
+// one sequence rather than two.
+func (a *App) Events() *coreevents.Stream {
+	if a == nil {
+		return nil
 	}
-	return a, nil
+	return a.events
 }
 
 func (a *App) Logger() telemetry.Logger {

@@ -1049,10 +1049,10 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 }
 
 func (r *AgentConsole) pseudoCommandNames() []string {
-	if r.runtime.App().Commands == nil {
+	if r.runtime.CommandRegistry() == nil {
 		return nil
 	}
-	return r.runtime.App().Commands.Names()
+	return r.runtime.CommandRegistry().Names()
 }
 
 func splitArgs(args []string) []string {

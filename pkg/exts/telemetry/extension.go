@@ -46,10 +46,7 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(events *coreevents.Stream, options Options) (*Extension, error) {
-	if events == nil {
-		return nil, fmt.Errorf("event output requires an AOP event stream")
-	}
+func New(options Options) (*Extension, error) {
 	if strings.TrimSpace(options.Path) == "" {
 		return nil, fmt.Errorf("event output path is required")
 	}
@@ -59,7 +56,7 @@ func New(events *coreevents.Stream, options Options) (*Extension, error) {
 	if options.MaxBytes <= 0 {
 		options.MaxBytes = defaultBytes
 	}
-	return &Extension{events: events, options: options}, nil
+	return &Extension{options: options}, nil
 }
 
 func open(path string) (*os.File, string, error) {
@@ -91,6 +88,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
+	stream, err := extension.Use[*coreevents.Stream](scope)
+	if err != nil {
+		return err
+	}
+	e.events = stream
 	file, path, err := open(e.options.Path)
 	if err != nil {
 		return err

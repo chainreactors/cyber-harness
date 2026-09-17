@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -46,7 +47,7 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 	client := clientext.New(ioatools.Config{
 		URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true,
 	}, clientext.Dependencies{})
-	set, err := extension.New(client)
+	set, err := extension.New(hosttest.Capabilities(), client)
 	if err != nil {
 		t.Fatal(err)
 	}

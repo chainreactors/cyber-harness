@@ -114,7 +114,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		defer cancel()
 	}
 	if !cfg.HasAgentOneShotInput(&option) {
-		if _, err := profile.app.Skills.ApplySelected("", option.Skills); err != nil {
+		if _, err := profile.runtime.Skills().ApplySelected("", option.Skills); err != nil {
 			return err
 		}
 		return console.AttachLocalREPL(runCtx, profile.runtime, &option, profile.tui.Bindings())
@@ -123,8 +123,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 	if err != nil {
 		return err
 	}
-	task = skills.ExpandCommand(task, profile.app.Skills)
-	task, err = profile.app.Skills.ApplySelected(task, option.Skills)
+	task = skills.ExpandCommand(task, profile.runtime.Skills())
+	task, err = profile.runtime.Skills().ApplySelected(task, option.Skills)
 	if err != nil {
 		return err
 	}

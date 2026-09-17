@@ -358,12 +358,12 @@ func scanArgsForScan(scan *types.Scan) []string {
 }
 
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, error) {
-	app, release := s.acquireApp()
+	runtime, release := s.acquireRuntime()
 	defer release()
-	if app == nil || app.Bash == nil {
+	if runtime == nil || runtime.Bash() == nil {
 		return "", fmt.Errorf("cyber runtime is not ready")
 	}
-	bash := app.Bash
+	bash := runtime.Bash()
 	var text strings.Builder
 	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), terminaltool.BashExecOptions{
 		OnOutput: func(data []byte) {

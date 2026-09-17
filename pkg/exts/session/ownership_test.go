@@ -11,6 +11,7 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 )
@@ -27,12 +28,10 @@ func (inertProvider) ChatCompletion(context.Context, *provider.ChatCompletionReq
 }
 
 func TestSessionCloseDoesNotCloseBorrowedLoop(t *testing.T) {
+	application := &apppkg.App{}
 	l := loopext.New(loopFunc(func(context.Context, agent.Config) (*agent.Result, error) { return &agent.Result{Output: "alive"}, nil }))
-	s, err := sessionext.New(agentsession.Config{Loop: l.Loop()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(l, s)
+	s := sessionext.New(agentsession.Config{Loop: l.Loop()})
+	set, err := extension.New(append(apptest.Entries(t, application), l, s)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,18 +70,17 @@ func TestLoopPrecedesSessionInCompositionOrder(t *testing.T) {
 	config := agentsession.Config{Application: application, Loop: selected}
 	loop := loopext.New(config.Loop)
 	config.Loop = loop.Loop()
-	sessions, err := sessionext.New(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(loop, sessions)
+	sessions := sessionext.New(config)
+	set, err := extension.New(append(apptest.Entries(t, application), loop, sessions)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = set.Close(context.Background()) })
 
-	if _, err := sessions.Runtime().OpenSession(t.Context(), agentsession.SessionOptions{ID: "early"}); err == nil {
-		t.Fatal("Session admitted work before the composition loaded")
+	// The runtime is built during Load, so before that there is nothing to
+	// admit work at all -- a stronger guarantee than refusing it.
+	if sessions.Runtime() != nil {
+		t.Fatal("the session runtime existed before the composition loaded")
 	}
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

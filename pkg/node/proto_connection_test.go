@@ -214,16 +214,10 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
+	app := newTestApp(t, telemetry.NopLogger(), nil)
 
-	appSet := loadNodeTestApplication(t, ctx, app)
-	defer appSet.Close(context.Background())
-	rt, err := sessionext.New(agentsession.Config{Application: app, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rtSet := hosttest.Set(t, rt)
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -634,14 +628,9 @@ func loadNodeTestApplication(t *testing.T, ctx context.Context, application *app
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := newTestApp(t, telemetry.NopLogger(), apppkg.Dependencies{})
-	appSet := loadNodeTestApplication(t, t.Context(), app)
-	defer appSet.Close(context.Background())
-	rt, err := sessionext.New(agentsession.Config{Application: app, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rtSet := hosttest.Set(t, rt)
+	app := newTestApp(t, telemetry.NopLogger(), nil)
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), rt)...)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -652,8 +641,8 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 			OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "embedded"},
 		}}),
 	}
-	err = serveAgentConnection(context.Background(), connectionConfig{
-		Name: "embedded", NodeID: "embedded", Registry: app.Commands, Agent: rt.Runtime(),
+	err := serveAgentConnection(context.Background(), connectionConfig{
+		Name: "embedded", NodeID: "embedded", Registry: rt.Runtime().CommandRegistry(), Agent: rt.Runtime(),
 		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
 			for _, binding := range rt.Runtime().NamespaceBindings() {
 				if err := binding.Register(mux); err != nil {

@@ -3,8 +3,11 @@ package console_test
 import (
 	"context"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
@@ -17,22 +20,16 @@ import (
 
 func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	tui := tuiext.New()
-	session, err := sessionext.New(agentsession.Config{Commands: []agentsession.Command{{
+	session := sessionext.New(agentsession.Config{Commands: []agentsession.Command{{
 		Spec:    &types.CommandSpec{Name: "/inspect", Aliases: []string{"/i"}},
 		Handler: func(context.Context, *agentsession.Session, []string) (*types.CommandResult, error) { return nil, nil },
 	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	presentation, err := contributor.New(session.Runtime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(
+	presentation := contributor.New()
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)),
 		tui,
 		session,
 		presentation,
-	)
+	)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,15 +64,8 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 }
 
 func TestMissingProviderLoadFailsContribution(t *testing.T) {
-	session, err := sessionext.New(agentsession.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	presentation, err := contributor.New(session.Runtime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(presentation)
+	presentation := contributor.New()
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), presentation)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,4 +76,14 @@ func TestMissingProviderLoadFailsContribution(t *testing.T) {
 	if set.Active() {
 		t.Fatal("failed profile published")
 	}
+}
+
+// newTestApplication is the application this package's tests run against.
+func newTestApplication(t *testing.T) *apppkg.App {
+	t.Helper()
+	application, err := apppkg.New(nil, coreevents.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application
 }

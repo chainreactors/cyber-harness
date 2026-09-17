@@ -282,7 +282,7 @@ var _ profile.Application = (*recordingProfile)(nil)
 
 func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
 	t.Helper()
-	resource := newTestApp(t, nil, apppkg.Dependencies{})
+	resource := newTestApp(t, nil, nil)
 	var closed atomic.Bool
 	extensions, err := extension.New(extension.Func{CloseFunc: func(context.Context) error {
 		closed.Store(true)

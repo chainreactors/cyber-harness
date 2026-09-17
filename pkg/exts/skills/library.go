@@ -31,6 +31,9 @@ func (e *Library) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
+	if err := extension.Provide[*skills.Store](scope, e.store); err != nil {
+		return err
+	}
 	loaded, diagnostics := skills.LoadFrom(e.config.Directory, e.config.Paths)
 	values := loaded.All()
 	if len(e.config.Exclude) > 0 {

@@ -201,6 +201,7 @@ func (s *commandSession) statusText() string {
 	rt := s.state.runtime
 	rt.mu.RLock()
 	app := rt.app
+	tools, commandRegistry, store := rt.tools, rt.commandRegistry, rt.skills
 	provider := rt.agentConfig.Provider
 	model := rt.agentConfig.Model
 	providerConfig := agent.ProviderConfig{}
@@ -266,8 +267,8 @@ func (s *commandSession) statusText() string {
 	commandNames := []string(nil)
 	skillState := "not loaded"
 	if app != nil {
-		if app.Tools != nil {
-			for _, definition := range app.Tools.ToolDefinitions() {
+		if tools != nil {
+			for _, definition := range tools.ToolDefinitions() {
 				if definition != nil && strings.TrimSpace(definition.Name) != "" {
 					toolNames = append(toolNames, definition.Name)
 				}
@@ -276,18 +277,18 @@ func (s *commandSession) statusText() string {
 				toolState = "ready"
 			}
 		}
-		if app.Commands != nil {
-			commandNames = app.Commands.Names()
+		if commandRegistry != nil {
+			commandNames = commandRegistry.Names()
 		}
-		if app.Skills != nil {
+		if store != nil {
 			visible := 0
-			for _, skill := range app.Skills.All() {
+			for _, skill := range store.All() {
 				if strings.TrimSpace(skill.Name) != "" && !skill.Internal {
 					visible++
 				}
 			}
 			skillState = fmt.Sprintf("ready (%d loaded)", visible)
-			if diagnostics := app.Skills.Diagnostics(); len(diagnostics) > 0 {
+			if diagnostics := store.Diagnostics(); len(diagnostics) > 0 {
 				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(diagnostics))
 			}
 		}
@@ -360,7 +361,7 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if command == "" {
 		return commandOutcome{err: fmt.Errorf("command is required after !")}
 	}
-	bash := s.state.runtime.app.Bash
+	bash := s.state.runtime.bash
 	if bash == nil {
 		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
 	}
@@ -1166,7 +1167,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 		message.Role = "user"
 	}
 	if len(message.Content) == 1 && message.Content[0].GetText() != nil {
-		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.app.Skills)
+		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.skills)
 	}
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()

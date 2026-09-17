@@ -51,7 +51,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
 	}
 
-	resource, err := session.NewResource(session.Config{Application: &apppkg.App{Commands: registry, Skills: store}})
+	resource, err := session.NewResource(session.Config{Application: &apppkg.App{}, CommandRegistry: registry, Skills: store})
 	if err != nil {
 		t.Fatal(err)
 	}

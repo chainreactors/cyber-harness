@@ -69,7 +69,11 @@ func (r *Registry) Load(scope *extension.Scope) error {
 	if r == nil || r.store == nil || scope == nil {
 		return ErrUnavailable
 	}
+	// The point stores Tools; the capability offers the Executor behaviour.
 	if err := extension.Define[tool.Tool](scope, r); err != nil {
+		return err
+	}
+	if err := extension.Provide[tool.Executor](scope, r); err != nil {
 		return err
 	}
 	return r.store.Activate(scope.Init())

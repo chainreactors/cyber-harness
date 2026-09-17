@@ -245,6 +245,7 @@ llm:
 | [Agent 模式详解](docs/agent.md) | Agent 工具集、Goal Evaluation、REPL |
 | [IOA 协作](docs/ioa.md) | 多 Agent 协作架构、Space/Node/Message 模型 |
 | [Record 工具](docs/record.md) | 桌面/窗口捕获、平台支持与原生构建 |
+| [扩展与装配架构](docs/architecture.md) | 贡献点与共享能力、加载与关闭顺序、装配根、工作单元注册表 |
 | [协议与传输架构](docs/protocol-architecture.md) | AOP WebSocket、Connect 管理平面、namespace 与身份边界 |
 | [参考手册](docs/reference.md) | 配置、LLM Provider、全局参数、扫描器用法、FAQ |
 | [v1.0.0 发布与迁移](docs/v1.0.0.md) | 稳定接口基线、pre-v1 接口清理与发布平台 |
