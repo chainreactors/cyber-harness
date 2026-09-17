@@ -3,11 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
 
+	"github.com/chainreactors/aiscan/core/commandline"
 	coreregistry "github.com/chainreactors/aiscan/core/registry"
- "github.com/chainreactors/aiscan/core/commandline"
 )
 
 var (
@@ -26,48 +24,6 @@ type Command struct {
 	Run             func(context.Context, *Execution) (any, error)
 }
 
-func stripShellSyntax(tokens []string) ([]string, error) {
-	clean := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		if token == "|" || token == "||" {
-			return nil, fmt.Errorf("pseudo-commands run in-process and do not support shell pipes (got %q). To limit output, use the scanner's own flags or call a separate filter step", token)
-		}
-		if token == "&&" || token == ";" {
-			return nil, fmt.Errorf("pseudo-commands do not support shell command chaining (got %q). Issue each command separately", token)
-		}
-		if isStderrDup(token) {
-			continue
-		}
-		if isFileRedirection(token) {
-			return nil, fmt.Errorf("pseudo-commands do not support file redirection (got %q); use the returned tool result", token)
-		}
-		clean = append(clean, token)
-	}
-	return clean, nil
-}
-
-func isStderrDup(token string) bool {
-	switch token {
-	case "2>&1", "1>&2", ">&2", ">&1":
-		return true
-	default:
-		return false
-	}
-}
-
-func isFileRedirection(token string) bool {
-	switch token {
-	case ">", ">>", "<", "<<", "2>", "1>", "0<", "&>", "&>>":
-		return true
-	}
-	for _, prefix := range []string{"&>", "2>", "1>", "0<", ">>", ">", "<<", "<"} {
-		if strings.HasPrefix(token, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func normalizeNoColor(name string, args []string) []string {
 	if name != "scan" {
 		return args
@@ -81,4 +37,6 @@ func normalizeNoColor(name string, args []string) []string {
 }
 
 func SplitCommandLine(input string) ([]string, error) { return commandline.SplitCommandLine(input) }
-func JoinCommandLine(name string, args []string) string { return commandline.JoinCommandLine(name, args) }
+func JoinCommandLine(name string, args []string) string {
+	return commandline.JoinCommandLine(name, args)
+}
