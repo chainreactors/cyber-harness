@@ -188,16 +188,14 @@ func (r *Registry) Execute(ctx context.Context, name string, execution *Executio
 	return entry.Value.Run(call, execution)
 }
 
+// Run executes an already parsed argv. Shell syntax belongs to BashTool's
+// script boundary; metacharacters here are ordinary argument data.
 func (r *Registry) Run(ctx context.Context, tokens []string, parent *Execution) (any, error) {
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
-	args, err := stripShellSyntax(tokens[1:])
-	if err != nil {
-		return nil, err
-	}
 	name := tokens[0]
-	args = normalizeNoColor(name, args)
+	args := normalizeNoColor(name, append([]string(nil), tokens[1:]...))
 	if parent == nil {
 		return nil, fmt.Errorf("command %s requires an execution", name)
 	}
