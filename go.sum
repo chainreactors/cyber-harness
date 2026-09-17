@@ -260,6 +260,8 @@ github.com/chainreactors/utils/parsers v0.0.3 h1:3ld7xG5TSvzikVOCkQHjqjHO3otjODw
 github.com/chainreactors/utils/parsers v0.0.3/go.mod h1:bE/znJWt08n9QOORWsWu0ggB8GWfOg3+dfUMMITmwV4=
 github.com/chainreactors/utils/proc v0.0.0-20260917040030-cdb89bd3c90c h1:A0FqPd9c6KtjRhPCUKXfQmYvaHoeLRWtQZciDDDekeQ=
 github.com/chainreactors/utils/proc v0.0.0-20260917040030-cdb89bd3c90c/go.mod h1:fwBG9qg5mG7LARtlh7Lhz3n1+90CGXW08kX3Vf7nyWA=
+github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2 h1:gqvdOz6JuP3ciqsQQ8IETJRvK7OT0Qnm6368pGjhg0I=
+github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2/go.mod h1:fwBG9qg5mG7LARtlh7Lhz3n1+90CGXW08kX3Vf7nyWA=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5 h1:GB3a4+i5Yb1yO8eg9bTXtQUcttHOEs9KF75yq2a9EU4=
