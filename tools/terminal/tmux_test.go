@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	tmuxpkg "github.com/chainreactors/cyber/agent/tmux"
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 type testOutputWriter struct{ bytes.Buffer }
@@ -23,7 +23,7 @@ var Output = &testOutputWriter{}
 
 type testTmuxCommand struct {
 	command commands.Command
-	manager *tmuxpkg.Manager
+	manager *procbus.Manager
 }
 
 func (c *testTmuxCommand) Execute(ctx context.Context, args []string) error {
@@ -310,7 +310,7 @@ func TestTmuxKillSession(t *testing.T) {
 
 	<-tmux.manager.Done(id)
 	info, _ := tmux.manager.Get(id)
-	if info.State != pty.StateKilled {
+	if info.State != proc.StateKilled {
 		t.Fatalf("state = %s, want killed", info.State)
 	}
 }

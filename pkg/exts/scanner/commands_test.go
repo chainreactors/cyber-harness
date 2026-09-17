@@ -23,11 +23,11 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	"github.com/chainreactors/cyber/cmd/harness"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/tools/curl"
 	"github.com/chainreactors/cyber/tools/gogo"
 	"github.com/chainreactors/cyber/tools/neutron"
@@ -66,14 +66,14 @@ func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 		commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
 		commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
 	)
-	return harness.Commands(t, values...)
+	return hosttest.Commands(t, values...)
 }
 
 func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
 	t.Helper()
 	values := scannerCommandValues(engineSet, workDir, events, logger)
 	values = append(values, extra...)
-	return harness.Commands(t, values...)
+	return hosttest.Commands(t, values...)
 }
 
 func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {

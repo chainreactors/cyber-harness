@@ -164,10 +164,10 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 		},
 		Recon: &types.ReconConfig{
 			FofaKey: option.FofaKey, HunterApiKey: option.HunterAPIKey,
-			Proxy: option.ReconProxy, Limit: int32(applicationIntValue(option.ReconLimit)),
+			Proxy: option.ReconProxy, Limit: int32(intValue(option.ReconLimit)),
 		},
 		Scan:       &types.ScanConfig{Verify: option.ScanConfig.Verify},
-		Search:     &types.SearchConfig{TavilyKeys: applicationTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys)},
+		Search:     &types.SearchConfig{TavilyKeys: tavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys)},
 		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: int32(option.Timeout)},
 		Node:       &types.NodeConfig{Id: option.NodeID, Name: option.NodeName},
 		Extensions: extensions,

@@ -13,12 +13,12 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/node/tool"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -110,7 +110,7 @@ func TestWireCallCancellationAndStableReconnectIdentity(t *testing.T) {
 			started := make(chan struct{})
 			events := coreevents.New()
 			progress := eventbus.New[*toolpb.Progress]()
-			r := harness.Tools(t, &testTool{started: started, events: events})
+			r := hosttest.Tools(t, &testTool{started: started, events: events})
 			instanceIDs := make(chan string, 2)
 			result := make(chan *aop.ToolResult, 1)
 			extras := make(chan string, 2)

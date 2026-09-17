@@ -117,8 +117,8 @@ func executeRegistryCommand(ctx context.Context, registry commands.Executor, bas
 	if !retained && execution.ID != "" {
 		return output.String(), fmt.Errorf("command session %s is no longer available", execution.ID)
 	}
-	if info.ExitCode != 0 {
-		return output.String(), fmt.Errorf("command exited with code %d", info.ExitCode)
+	if info.ExitStatus() != 0 {
+		return output.String(), fmt.Errorf("command exited with code %d", info.ExitStatus())
 	}
 	return output.String(), nil
 }

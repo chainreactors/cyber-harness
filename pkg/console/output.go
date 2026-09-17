@@ -16,7 +16,6 @@ import (
 	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/truncate"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/core/util"
 	"golang.org/x/term"
 )
 
@@ -738,7 +737,7 @@ func (o *AgentOutput) coloredElapsed(started time.Time) string {
 		return ""
 	}
 	d := time.Since(started)
-	text := "· " + util.FormatDuration(d)
+	text := "· " + truncate.FormatDuration(d)
 	switch {
 	case d > 30*time.Second:
 		return o.color.Wrap(text, output.ANSIRed)
@@ -812,7 +811,7 @@ func (o *AgentOutput) agentEnd(data *aop.TurnEnded) {
 		if provider.UsageTotalTokens(o.totalUsage) > 0 {
 			parts = append(parts, formatTokenUsage(o.totalUsage))
 		}
-		parts = append(parts, util.FormatDuration(elapsed))
+		parts = append(parts, truncate.FormatDuration(elapsed))
 		if data.Error != nil {
 			parts = append(parts, fmt.Sprintf("err=%q", data.Error.Message))
 		}

@@ -11,7 +11,7 @@ import (
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 type Admission struct {
@@ -88,7 +88,7 @@ type ProcessEvent struct {
 type ProcessCompletion struct {
 	Lifecycle
 	Process ProcessEvent
-	Session *pty.Info
+	Session *proc.Info
 }
 
 var BeforeProcess = corehooks.NewPoint[ProcessEvent, Admission]("process.before").

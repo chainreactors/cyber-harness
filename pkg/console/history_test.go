@@ -2,8 +2,9 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,7 +43,7 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 type consoleProvider struct{ usage *aop.TokenUsage }
 
 func loadConsoleApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
-	return harness.AppLoad(t, ctx, application)
+	return apptest.Load(t, ctx, application)
 }
 
 func (*consoleProvider) Name() string { return "console-test" }
@@ -64,7 +65,7 @@ func newConsoleRuntime(t *testing.T, provider agent.Provider) *agentsession.Runt
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, rt)
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

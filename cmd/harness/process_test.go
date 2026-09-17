@@ -179,6 +179,21 @@ type processLog struct {
 	mu      sync.Mutex
 	file    *os.File
 	pending []byte
+	closed  bool
+}
+
+// newLog opens an artifact log whose file is released when the test ends. The
+// caller may still Close it earlier to flush and report the error; Close is
+// idempotent so both paths can run.
+func newLog(t *testing.T, path string) *processLog {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &processLog{file: file}
+	t.Cleanup(func() { _ = log.Close() })
+	return log
 }
 
 func (l *processLog) Write(data []byte) (int, error) {
@@ -207,6 +222,10 @@ func (l *processLog) Write(data []byte) (int, error) {
 func (l *processLog) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return nil
+	}
+	l.closed = true
 	_, writeErr := l.file.Write(redactSecrets(l.pending))
 	l.pending = nil
 	return errors.Join(writeErr, l.file.Close())
@@ -257,10 +276,7 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 	t.Helper()
 	w.starts++
 	p := &testProcess{done: make(chan struct{}), logPath: filepath.Join(w.dir, fmt.Sprintf("process-%02d.log", w.starts))}
-	log, err := os.Create(p.logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	output := newLog(t, p.logPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	p.cmd = exec.CommandContext(ctx, executablePath,
 		"--config", w.config, "--data-dir", filepath.Join(w.dir, "data"), "--no-color",
@@ -268,12 +284,10 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 		"--db", w.db, "--token", "harness-local-access", "--no-agent")
 	p.cmd.Dir = w.dir
 	p.cmd.Env = testEnvironment(includeLLM)
-	output := &processLog{file: log}
 	p.cmd.Stdout, p.cmd.Stderr = output, output
 	configureProcess(p.cmd)
 	if err := p.cmd.Start(); err != nil {
 		cancel()
-		log.Close()
 		t.Fatal(err)
 	}
 	go func() {

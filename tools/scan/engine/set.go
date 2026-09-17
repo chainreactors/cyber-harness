@@ -7,7 +7,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/util"
+	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/fingers/alias"
 	fingersLib "github.com/chainreactors/fingers/fingers"
 	sdkfingers "github.com/chainreactors/sdk/fingers"
@@ -87,8 +87,8 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if resourceSet.RemoteEnabled {
 		logger.Infof("%s", telemetry.StartupOK("cyberhub", fmt.Sprintf("%s · %s fingers · %s neutron",
 			resourceSet.Mode,
-			util.FormatNumber(resourceSet.RemoteFingers),
-			util.FormatNumber(resourceSet.RemoteNeutron))))
+			truncate.FormatNumber(resourceSet.RemoteFingers),
+			truncate.FormatNumber(resourceSet.RemoteNeutron))))
 		if resourceSet.RemoteFingersErr != nil {
 			logger.Warnf("%s", telemetry.StartupLine("skip", "cyberhub", fmt.Sprintf("fingers fallback=local reason=%q", resourceSet.RemoteFingersErr)))
 		} else if resourceSet.RemoteFingers == 0 {
@@ -106,7 +106,7 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 		logger.Warnf("%s", telemetry.StartupLine("skip", "fingers", "no templates"))
 	} else if fEngine.Count() > 0 {
 		set.Fingers = fEngine
-		logger.Infof("%s", telemetry.StartupOK("fingers", util.FormatNumber(fEngine.Count())+" templates"))
+		logger.Infof("%s", telemetry.StartupOK("fingers", truncate.FormatNumber(fEngine.Count())+" templates"))
 	} else {
 		logger.Warnf("%s", telemetry.StartupLine("skip", "fingers", "no templates"))
 		_ = fEngine.Close()
@@ -115,7 +115,7 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	nEngine := resourceSet.Neutron
 	if nEngine != nil && nEngine.Count() > 0 {
 		set.Neutron = nEngine
-		logger.Infof("%s", telemetry.StartupOK("neutron", util.FormatNumber(nEngine.Count())+" templates"))
+		logger.Infof("%s", telemetry.StartupOK("neutron", truncate.FormatNumber(nEngine.Count())+" templates"))
 	} else {
 		logger.Warnf("%s", telemetry.StartupLine("skip", "neutron", "no templates"))
 		if nEngine != nil {
@@ -202,11 +202,11 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 
 func fingerPOCDetail(fingers, aliases, templates int) string {
 	parts := []string{
-		util.FormatNumber(fingers) + " fingers",
-		util.FormatNumber(templates) + " templates",
+		truncate.FormatNumber(fingers) + " fingers",
+		truncate.FormatNumber(templates) + " templates",
 	}
 	if aliases > 0 {
-		parts = append(parts, util.FormatNumber(aliases)+" aliases")
+		parts = append(parts, truncate.FormatNumber(aliases)+" aliases")
 	}
 	return strings.Join(parts, " · ")
 }

@@ -322,7 +322,7 @@ jobs:
       - name: Run remaining full-tag unit variants
         run: |
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
-            ./cmd/aiscan ./pkg/skills ./tools/passive ./tools/scan/engine
+            ./cmd/aiscan ./agent/skills ./tools/passive ./tools/scan/engine
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan

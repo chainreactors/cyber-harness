@@ -1,6 +1,6 @@
 //go:build !windows
 
-package pidlock
+package runner
 
 import (
 	"errors"
@@ -16,7 +16,7 @@ func unlockFile(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }
 
-func ProcessExists(pid int) bool {
+func processExists(pid int) bool {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false

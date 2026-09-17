@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/cyber/agent/tmux"
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 type tmuxCommand struct {
-	manager *tmux.Manager
+	manager *procbus.Manager
 	start   func(context.Context, string, BashExecOptions) (*commands.Execution, error)
 }
 
@@ -83,7 +83,7 @@ func (t *tmuxCommand) run(ctx context.Context, execution *commands.Execution) (a
 
 func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
 	cmdLine := strings.Join(args, " ")
-	info, err := t.createSession(ctx, cmdLine, "", pty.DefaultTimeout, true)
+	info, err := t.createSession(ctx, cmdLine, "", proc.DefaultTimeout, true)
 	if err != nil {
 		return "", err
 	}
@@ -121,7 +121,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	}
 
 	cmdLine := strings.Join(cmdParts, " ")
-	timeout := pty.DefaultTimeout
+	timeout := proc.DefaultTimeout
 	if timeoutStr != "" {
 		d, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -145,8 +145,8 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		return "", err
 	}
 	output := t.manager.PeekOrEmpty(info.ID, 50)
-	if result.ExitCode != 0 {
-		output += fmt.Sprintf("\n[exit code: %d]", result.ExitCode)
+	if result.ExitStatus() != 0 {
+		output += fmt.Sprintf("\n[exit code: %d]", result.ExitStatus())
 	}
 	return output, nil
 }
@@ -155,10 +155,10 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 // tool call that created it, so it hands its lifetime to the process manager;
 // a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
-func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (pty.Info, error) {
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (proc.Info, error) {
 	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
 	if err != nil {
-		return pty.Info{}, err
+		return proc.Info{}, err
 	}
 	if detached {
 		execution.DetachParent()
@@ -169,7 +169,7 @@ func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, t
 
 // ls / list-sessions
 func (t *tmuxCommand) cmdListSessions() (string, error) {
-	var items []pty.Info
+	var items []proc.Info
 	for _, it := range t.manager.List() {
 		if it.Kind != builtinSessionKind {
 			items = append(items, it)
@@ -183,7 +183,7 @@ func (t *tmuxCommand) cmdListSessions() (string, error) {
 	var sb strings.Builder
 	for _, it := range items {
 		var elapsed time.Duration
-		if it.State == pty.StateRunning {
+		if it.State == proc.StateRunning {
 			elapsed = time.Since(it.StartedAt).Round(time.Second)
 		} else {
 			elapsed = it.EndedAt.Sub(it.StartedAt).Round(time.Second)
@@ -339,12 +339,12 @@ func (t *tmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if info.State == pty.StateRunning {
+	if info.State == proc.StateRunning {
 		return fmt.Sprintf("%s: still running (%s elapsed)",
 			info.ID, time.Since(info.StartedAt).Round(time.Second)), nil
 	}
 	duration := info.EndedAt.Sub(info.StartedAt).Round(time.Second)
-	return fmt.Sprintf("%s: %s (exit %d, %s)", info.ID, info.State, info.ExitCode, duration), nil
+	return fmt.Sprintf("%s: %s (exit %d, %s)", info.ID, info.State, info.ExitStatus(), duration), nil
 }
 
 func parseTarget(args []string) (string, []string) {

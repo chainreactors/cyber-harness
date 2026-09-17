@@ -15,15 +15,15 @@ import (
 	"github.com/chainreactors/cyber/agent/evaluator"
 	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
 	providerpkg "github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
-	commands "github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	toolpkg "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/proto"
 )
 

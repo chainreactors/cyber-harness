@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/agent/skills"
 	"strings"
 	"testing"
 )

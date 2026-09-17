@@ -10,7 +10,7 @@ import (
 
 	"github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
-	runtimepty "github.com/chainreactors/utils/pty"
+	runtimeproc "github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -23,20 +23,20 @@ const (
 type SendFunc func(*ptypb.ProtocolMessage)
 
 type Router struct {
-	mgr             runtimepty.SessionManager
-	openers         map[string]runtimepty.OpenFunc
+	mgr             runtimeproc.SessionManager
+	openers         map[string]runtimeproc.OpenFunc
 	attachBytes     int
 	monitorInterval time.Duration
 
 	mu       sync.Mutex
 	sessions map[string]string
 	cancels  map[string]context.CancelFunc
-	resizers map[string]runtimepty.ResizeFunc
+	resizers map[string]runtimeproc.ResizeFunc
 }
 
 type Option func(*Router)
 
-func WithOpeners(openers map[string]runtimepty.OpenFunc) Option {
+func WithOpeners(openers map[string]runtimeproc.OpenFunc) Option {
 	return func(r *Router) {
 		for kind, opener := range openers {
 			r.openers[kind] = opener
@@ -44,7 +44,7 @@ func WithOpeners(openers map[string]runtimepty.OpenFunc) Option {
 	}
 }
 
-func WithOpener(kind string, opener runtimepty.OpenFunc) Option {
+func WithOpener(kind string, opener runtimeproc.OpenFunc) Option {
 	return func(r *Router) {
 		if kind != "" && opener != nil {
 			r.openers[strings.ToLower(strings.TrimSpace(kind))] = opener
@@ -68,15 +68,15 @@ func WithMonitorInterval(interval time.Duration) Option {
 	}
 }
 
-func NewRouter(mgr runtimepty.SessionManager, opts ...Option) *Router {
+func NewRouter(mgr runtimeproc.SessionManager, opts ...Option) *Router {
 	r := &Router{
 		mgr:             mgr,
-		openers:         make(map[string]runtimepty.OpenFunc),
+		openers:         make(map[string]runtimeproc.OpenFunc),
 		attachBytes:     DefaultAttachBytes,
 		monitorInterval: DefaultMonitorInterval,
 		sessions:        make(map[string]string),
 		cancels:         make(map[string]context.CancelFunc),
-		resizers:        make(map[string]runtimepty.ResizeFunc),
+		resizers:        make(map[string]runtimeproc.ResizeFunc),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -87,8 +87,8 @@ func NewRouter(mgr runtimepty.SessionManager, opts ...Option) *Router {
 // NewRuntimeRouter wraps the utils/pty runtime with the canonical AOP PTY
 // protocol. Callers above this boundary only exchange ProtocolMessage values;
 // runtime opener and session details remain private to this package.
-func NewRuntimeRouter(mgr *runtimepty.Manager, opts ...Option) *Router {
-	defaults := []Option{WithOpeners(runtimepty.DefaultOpeners(mgr, runtimepty.DefaultSessionTimeout, runtimepty.DefaultEnv()))}
+func NewRuntimeRouter(mgr *runtimeproc.Manager, opts ...Option) *Router {
+	defaults := []Option{WithOpeners(runtimeproc.DefaultOpeners(mgr, runtimeproc.DefaultSessionTimeout, runtimeproc.DefaultEnv()))}
 	return NewRouter(mgr, append(defaults, opts...)...)
 }
 
@@ -174,7 +174,7 @@ func (r *Router) open(ctx context.Context, request *ptypb.Open, send SendFunc) {
 		r.sendError(send, streamID, "unsupported pty kind: "+kind)
 		return
 	}
-	result, err := opener(ctx, runtimepty.OpenSpec{
+	result, err := opener(ctx, runtimeproc.OpenSpec{
 		Kind: kind, Name: name, Command: request.GetCommand(), Args: append([]string(nil), request.GetArgs()...),
 		Cols: int(request.GetCols()), Rows: int(request.GetRows()),
 	})
@@ -190,7 +190,7 @@ func (r *Router) open(ctx context.Context, request *ptypb.Open, send SendFunc) {
 		r.mu.Unlock()
 	}
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Opened{Opened: &ptypb.Opened{
-		StreamId: streamID, Session: sessionToProto(&info),
+		StreamId: streamID, Session: SessionToProto(&info),
 	}}})
 	r.monitor(ctx, streamID, info.ID, 0, send)
 	r.resizeSession(streamID, info.ID, int(request.GetCols()), int(request.GetRows()), send)
@@ -222,7 +222,7 @@ func (r *Router) attach(ctx context.Context, request *ptypb.Attach, send SendFun
 	r.attachExisting(ctx, streamID, info, int(request.GetCols()), int(request.GetRows()), send)
 }
 
-func (r *Router) attachExisting(ctx context.Context, streamID string, info runtimepty.Info, cols, rows int, send SendFunc) {
+func (r *Router) attachExisting(ctx context.Context, streamID string, info runtimeproc.Info, cols, rows int, send SendFunc) {
 	output, offset, err := r.mgr.SnapshotBytes(info.ID, r.attachBytes)
 	if err != nil {
 		r.sendError(send, streamID, err.Error())
@@ -230,7 +230,7 @@ func (r *Router) attachExisting(ctx context.Context, streamID string, info runti
 	}
 	r.releaseStream(streamID)
 	send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attached{Attached: &ptypb.Attached{
-		StreamId: streamID, Session: sessionToProto(&info),
+		StreamId: streamID, Session: SessionToProto(&info),
 	}}})
 	if len(output) > 0 {
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Output{Output: &ptypb.Output{
@@ -264,7 +264,7 @@ func (r *Router) input(request *ptypb.Input, send SendFunc) {
 		r.sendError(send, streamID, "pty session_id required")
 		return
 	}
-	if info, ok := r.mgr.Get(sessionID); ok && info.State != runtimepty.StateRunning {
+	if info, ok := r.mgr.Get(sessionID); ok && info.State != runtimeproc.StateRunning {
 		return
 	}
 	if err := r.mgr.Write(sessionID, request.GetData()); err != nil {
@@ -354,7 +354,7 @@ func (r *Router) monitor(ctx context.Context, streamID, sessionID string, offset
 		delete(r.resizers, sessionID)
 		r.mu.Unlock()
 		send(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Closed{Closed: &ptypb.Closed{
-			StreamId: streamID, Session: sessionToProto(&final),
+			StreamId: streamID, Session: SessionToProto(&final),
 		}}})
 	}()
 }
@@ -381,14 +381,14 @@ func (r *Router) sessionForStream(streamID string) string {
 	return r.sessions[streamID]
 }
 
-func (r *Router) findReusableSession(kind, name string) (runtimepty.Info, bool) {
+func (r *Router) findReusableSession(kind, name string) (runtimeproc.Info, bool) {
 	if r.mgr == nil {
-		return runtimepty.Info{}, false
+		return runtimeproc.Info{}, false
 	}
-	var fallback runtimepty.Info
+	var fallback runtimeproc.Info
 	hasFallback := false
 	for _, info := range r.mgr.List() {
-		if info.State != runtimepty.StateRunning || strings.ToLower(strings.TrimSpace(info.Kind)) != kind {
+		if info.State != runtimeproc.StateRunning || strings.ToLower(strings.TrimSpace(info.Kind)) != kind {
 			continue
 		}
 		if name != "" && info.Name == name {
@@ -408,22 +408,35 @@ func (r *Router) sendError(send SendFunc, streamID, message string) {
 	}}})
 }
 
-func newSessions(streamID string, sessions []runtimepty.Info) *ptypb.ProtocolMessage {
+func newSessions(streamID string, sessions []runtimeproc.Info) *ptypb.ProtocolMessage {
 	value := &ptypb.Sessions{StreamId: streamID, Sessions: make([]*ptypb.Session, 0, len(sessions))}
 	for index := range sessions {
-		value.Sessions = append(value.Sessions, sessionToProto(&sessions[index]))
+		value.Sessions = append(value.Sessions, SessionToProto(&sessions[index]))
 	}
 	return &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Sessions{Sessions: value}}
 }
 
-func sessionToProto(value *runtimepty.Info) *ptypb.Session {
+// SessionToProto is the single projection from a registry unit onto the wire.
+// It is exported because the observe extension reports the same units on the
+// same protocol: two copies of this mapping drift the moment a field is added.
+func SessionToProto(value *runtimeproc.Info) *ptypb.Session {
 	if value == nil {
 		return nil
 	}
 	info := &ptypb.Session{
 		Id: value.ID, Kind: value.Kind, Name: value.Name, Command: value.Command,
-		Pid: int32(value.PID), ActivitySeq: value.ActivitySeq, OutputBytes: value.OutputBytes,
-		ExitCode: int32(value.ExitCode), State: string(value.State), KillCause: value.KillCause,
+		Shape: string(value.Shape), ActivitySeq: value.ActivitySeq, OutputBytes: value.OutputBytes,
+		State: string(value.State), KillCause: value.Reason,
+		// Pid and ExitCode stay populated for clients that predate Process.
+		Pid: int32(value.ProcessID()), ExitCode: int32(value.ExitStatus()),
+	}
+	if value.Proc != nil {
+		info.Process = &ptypb.Process{
+			Pid: int32(value.Proc.PID), ExitCode: int32(value.Proc.ExitCode), Signal: value.Proc.Signal,
+		}
+	}
+	if !value.ReadyAt.IsZero() {
+		info.ReadyAt = timestamppb.New(value.ReadyAt)
 	}
 	if !value.StartedAt.IsZero() {
 		info.StartedAt = timestamppb.New(value.StartedAt)

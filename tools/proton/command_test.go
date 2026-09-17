@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/core/resources"
 	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	protoncmd "github.com/chainreactors/cyber/tools/proton"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
@@ -27,7 +27,7 @@ func e2eBash(t *testing.T) (*terminaltool.BashTool, string) {
 	dir := t.TempDir()
 
 	rs := &resources.Set{}
-	registry := harness.Commands(t, protoncmd.NewCommand(dir, rs, nil, "", nil))
+	registry := hosttest.Commands(t, protoncmd.NewCommand(dir, rs, nil, "", nil))
 
 	bash := terminaltool.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)

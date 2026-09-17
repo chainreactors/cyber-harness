@@ -1,9 +1,9 @@
-// Package harness is the repository test harness. It owns two roles:
+// Package harness is the repository scenario suite. It verifies user workflows
+// against a freshly built application process through public HTTP and stdio
+// interfaces, with isolated workspaces and real persistence. Live IOA scenarios
+// drive independent model operators and processes.
 //
-// Scenarios verify user workflows against a freshly built application process using
-// public HTTP and stdio interfaces, isolated workspaces and real persistence.
-// Live IOA scenarios use independent model operators and processes.
-//
-// The exported constructors build owned extension hosts for package tests.
-// Production code must construct its explicit profile instead.
+// The suite imports no application implementation package: every scenario runs
+// the same executable a user starts from the command line. Package tests that
+// need an in-process host use pkg/hosttest and pkg/apptest instead.
 package harness

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	commands "github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/proto"
 )
 

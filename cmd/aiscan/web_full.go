@@ -108,7 +108,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			// The staged YAML is resolved into the flags config, which stays the
 			// truth for the candidate runtime; the proto is only the settings
 			// payload that produced it.
-			appCfg := applicationConfigFromOption(&candidateOption, profile.ProviderOptional, logger)
+			appCfg := appConfigFromOption(&candidateOption, profile.ProviderOptional, logger)
 			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
 			if err != nil {
 				return candidateProfile, err
@@ -118,7 +118,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
-	p = nil // Service now owns the initial profile and all replacements.
+	p = nil // Service now owns the initial Profile and all replacements.
 	defer func() { resultErr = errors.Join(resultErr, service.Close(context.Background())) }()
 
 	var pool *webservice.AgentPool
@@ -257,11 +257,11 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := applicationConfigFromOption(&option, profile.ProviderOptional, logger)
+	appCfg := appConfigFromOption(&option, profile.ProviderOptional, logger)
 	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
 }
 
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg applicationConfig, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
+func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg appConfig, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
 	appCfg.SkipEngines = true
 
 	profileConfig, err := profileConfigFromOption(option, profile.ProviderDisabled, nil, appCfg.Logger)

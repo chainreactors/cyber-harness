@@ -29,12 +29,20 @@ import (
 	proxytool "github.com/chainreactors/cyber/tools/proxy"
 )
 
-type applicationGraph struct {
+type appGraph struct {
 	application *app.App
 	extensions  []extension.Extension
 }
 
-func newApplicationGraph(config applicationConfig, registry *hooks.Registry, stream *events.Stream, proxy *proxytool.ProxyHub, loop agent.Loop, workDir string) (*applicationGraph, error) {
+type appFactory func(appConfig, string) (extension.Extension, error)
+
+var appFactories []appFactory
+
+func registerApp(factory appFactory) {
+	appFactories = append(appFactories, factory)
+}
+
+func newAppGraph(config appConfig, registry *hooks.Registry, stream *events.Stream, proxy *proxytool.ProxyHub, loop agent.Loop, workDir string) (*appGraph, error) {
 	config.DataDir = cfg.ResolveDataDir(config.DataDir)
 	config.Scanner.Resources.CacheDir = filepath.Join(config.DataDir, "cache")
 	commandRegistry := commands.NewRegistry(registry)
@@ -55,12 +63,11 @@ func newApplicationGraph(config applicationConfig, registry *hooks.Registry, str
 	}
 
 	extensions := []extension.Extension{commandRegistry, toolRegistry, skillLibrary}
-	var childEnv map[string]string
 	arsenal, err := arsenalext.New(filepath.Join(config.DataDir, "arsenal"))
 	if err != nil {
 		return nil, err
 	}
-	childEnv = map[string]string{"PATH": arsenal.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH")}
+	childEnv := map[string]string{"PATH": arsenal.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH")}
 
 	workspace, err := fileext.New(registry, files.Config{Directory: workDir})
 	if err != nil {
@@ -117,15 +124,28 @@ func newApplicationGraph(config applicationConfig, registry *hooks.Registry, str
 		if scanner != nil {
 			searchConfig.ResolveIndex = scanner.Index
 		}
-		search := searchext.New(searchConfig)
-		extensions = append(extensions, search)
+		extensions = append(extensions, searchext.New(searchConfig))
 	}
-	edition, err := editionExtensions(config, workDir)
+	optional, err := appExtensions(config, workDir)
 	if err != nil {
 		return nil, err
 	}
-	extensions = append(extensions, edition...)
-	return &applicationGraph{application: application, extensions: extensions}, nil
+	extensions = append(extensions, optional...)
+	return &appGraph{application: application, extensions: extensions}, nil
+}
+
+func appExtensions(config appConfig, workDir string) ([]extension.Extension, error) {
+	result := make([]extension.Extension, 0, len(appFactories))
+	for _, factory := range appFactories {
+		value, err := factory(config, workDir)
+		if err != nil {
+			return nil, err
+		}
+		if value != nil {
+			result = append(result, value)
+		}
+	}
+	return result, nil
 }
 
 func optionalToolEnabled(selected []string, name string) bool {

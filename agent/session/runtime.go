@@ -10,12 +10,12 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/skills"
 )
 
 // ---------------------------------------------------------------------------

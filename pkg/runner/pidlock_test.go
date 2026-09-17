@@ -1,4 +1,4 @@
-package pidlock
+package runner
 
 import (
 	"os"
@@ -10,15 +10,15 @@ import (
 
 func TestAcquireRejectsHeldLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.pid")
-	first, err := Acquire(path, nil)
+	first, err := acquirePIDLock(path, nil)
 	if err != nil {
-		t.Fatalf("first Acquire() error = %v", err)
+		t.Fatalf("first acquirePIDLock() error = %v", err)
 	}
 	defer first.Release()
 
-	_, err = Acquire(path, nil)
+	_, err = acquirePIDLock(path, nil)
 	if err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Fatalf("Acquire() error = %v, want already running", err)
+		t.Fatalf("acquirePIDLock() error = %v, want already running", err)
 	}
 }
 
@@ -28,15 +28,15 @@ func TestAcquireReclaimsInvalidPIDFile(t *testing.T) {
 		t.Fatalf("write pidfile: %v", err)
 	}
 
-	lock, err := Acquire(path, nil)
+	lock, err := acquirePIDLock(path, nil)
 	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
+		t.Fatalf("acquirePIDLock() error = %v", err)
 	}
 	defer lock.Release()
 
-	got, err := ReadPIDFile(path)
+	got, err := readPIDFile(path)
 	if err != nil {
-		t.Fatalf("ReadPIDFile() error = %v", err)
+		t.Fatalf("readPIDFile() error = %v", err)
 	}
 	if got != os.Getpid() {
 		t.Fatalf("pidfile pid = %d, want %d", got, os.Getpid())
@@ -47,7 +47,7 @@ func TestAcquireIsAtomic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.pid")
 	const workers = 8
 	type result struct {
-		lock *Lock
+		lock *pidLock
 		err  error
 	}
 
@@ -57,7 +57,7 @@ func TestAcquireIsAtomic(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lock, err := Acquire(path, nil)
+			lock, err := acquirePIDLock(path, nil)
 			results <- result{lock: lock, err: err}
 		}()
 	}
@@ -82,9 +82,9 @@ func TestAcquireIsAtomic(t *testing.T) {
 
 func TestReleaseOnlyRemovesOwnedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.pid")
-	lock, err := Acquire(path, nil)
+	lock, err := acquirePIDLock(path, nil)
 	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
+		t.Fatalf("acquirePIDLock() error = %v", err)
 	}
 	if err := os.WriteFile(path, []byte("1\n"), 0644); err != nil {
 		t.Fatalf("write pidfile: %v", err)

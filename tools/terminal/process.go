@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 // Start is the real managed-process boundary. Its completion notification is
@@ -152,7 +152,7 @@ func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *comm
 
 // executionSession takes a stable copy; hook observers must not retain a
 // manager-owned mutable value.
-func executionSession(execution *commands.Execution) *pty.Info {
+func executionSession(execution *commands.Execution) *proc.Info {
 	if info, ok := execution.Session(); ok {
 		return &info
 	}

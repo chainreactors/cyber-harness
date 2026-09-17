@@ -1,4 +1,9 @@
-package harness
+// Package apptest builds a minimal App host graph owned by a single test.
+//
+// It is hosttest plus the App-level wiring, kept separate so that packages App
+// itself depends on can still use hosttest without an import cycle.
+// Production code must construct an explicit Profile instead.
+package apptest
 
 import (
 	"context"
@@ -7,12 +12,14 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	app "github.com/chainreactors/cyber/pkg/app"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
-// AppEntries supplies a minimal App host graph for tests. Production code must
-// construct a concrete Profile instead.
-func AppEntries(t testing.TB, application *app.App, _ ...string) []extension.Extension {
+// Entries returns the extensions a test App host owns. A test that supplies no
+// Bash gets a terminal built here, and the returned owner closes whichever of
+// the two the test ended up with.
+func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extension {
 	t.Helper()
 	if application == nil {
 		t.Fatal("test application is required")
@@ -42,11 +49,8 @@ func AppEntries(t testing.TB, application *app.App, _ ...string) []extension.Ext
 	}
 }
 
-func AppLoad(t testing.TB, ctx context.Context, application *app.App, dependencies ...string) *extension.Set {
+// Load builds the App host graph and loads it.
+func Load(t testing.TB, ctx context.Context, application *app.App, dependencies ...string) *extension.Set {
 	t.Helper()
-	set := Set(t, AppEntries(t, application, dependencies...)...)
-	if err := set.Load(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return set
+	return hosttest.Load(t, ctx, Entries(t, application, dependencies...)...)
 }

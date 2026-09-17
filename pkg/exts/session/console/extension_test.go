@@ -3,9 +3,9 @@ package console_test
 import (
 	"context"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	contributor "github.com/chainreactors/cyber/pkg/exts/session/console"
@@ -53,7 +53,7 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 		if err := root.Execute(); err != nil {
 			t.Fatal(err)
 		}
-		args, err := commandline.SplitCommandLine(received)
+		args, err := commands.SplitCommandLine(received)
 		if err != nil || len(args) != 3 || args[0] != "/inspect" || args[1] != "two words" || args[2] != "--literal" {
 			t.Fatalf("%s: %q %v", terminal, received, err)
 		}

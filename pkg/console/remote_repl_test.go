@@ -18,7 +18,7 @@ import (
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 // loadPTYRegistry mounts the PTY extension exactly as a Profile does.
@@ -108,9 +108,9 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatal("pty manager unavailable")
 	}
 
-	var initial pty.Info
+	var initial proc.Info
 	for _, info := range mgr.List() {
-		if info.State == pty.StateRunning && info.Kind == "repl" && info.Name == MainREPLName {
+		if info.State == proc.StateRunning && info.Kind == "repl" && info.Name == MainREPLName {
 			initial = info
 			break
 		}
@@ -118,7 +118,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	if initial.ID == "" {
 		t.Fatal("main-repl was not created eagerly")
 	}
-	if initial.Name != MainREPLName || initial.Kind != "repl" || initial.State != pty.StateRunning {
+	if initial.Name != MainREPLName || initial.Kind != "repl" || initial.State != proc.StateRunning {
 		t.Fatalf("unexpected resident repl: %+v", initial)
 	}
 
@@ -150,7 +150,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	transport.dispatch(ptyInput("term-repl", "/exit\n"))
 	waitForCondition(t, 3*time.Second, func() bool {
 		info, ok := mgr.Get(initial.ID)
-		return ok && info.State == pty.StateRunning && info.OutputBytes > beforeExit.OutputBytes
+		return ok && info.State == proc.StateRunning && info.OutputBytes > beforeExit.OutputBytes
 	})
 
 	transport.dispatch(ptyInput("term-repl", "!tmux new-session -d -s webtask echo tmux_remote_ok\n"))
@@ -166,7 +166,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	// Ending one transport only releases its own monitor. A new transport
 	// must reuse the same process-owned session and buffered console.
 	transport.close()
-	if info, ok := mgr.Get(initial.ID); !ok || info.State != pty.StateRunning {
+	if info, ok := mgr.Get(initial.ID); !ok || info.State != proc.StateRunning {
 		t.Fatalf("transport close terminated resident repl: %+v ok=%v", info, ok)
 	}
 	second := newPTYTransport(t, ctx, registry, 16)
@@ -182,7 +182,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 
 	running := 0
 	for _, info := range mgr.List() {
-		if info.State == pty.StateRunning && info.Kind == "repl" && info.Name == MainREPLName {
+		if info.State == proc.StateRunning && info.Kind == "repl" && info.Name == MainREPLName {
 			running++
 		}
 	}
@@ -195,7 +195,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	repl.Close()
 	waitForCondition(t, time.Second, func() bool {
 		info, ok := mgr.Get(initial.ID)
-		return !ok || info.State != pty.StateRunning
+		return !ok || info.State != proc.StateRunning
 	})
 	session, err := rt.Runtime().OpenSession(ctx, agentsession.SessionOptions{ID: "after-console"})
 	if err != nil {

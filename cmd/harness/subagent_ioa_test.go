@@ -101,7 +101,7 @@ waitParent:
 		t.Fatal(err)
 	default:
 	}
-	writeJSONEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
+	writeEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
 	t.Logf("parent and two real subagents completed IOA exchange; model requests: %v", counts)
 }
 
@@ -253,14 +253,6 @@ func eventOutputText(value any) string {
 		}
 	}
 	return out.String()
-}
-func writeJSONEvidence(t *testing.T, path string, value any) {
-	t.Helper()
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, path, redactSecrets(data))
 }
 
 func waitSiblingHandoffs(t *testing.T, p *stdioClient, proof map[string]siblingSession) []map[string]any {

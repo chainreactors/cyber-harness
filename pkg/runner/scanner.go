@@ -7,15 +7,14 @@ import (
 	"strings"
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/pidlock"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/skills"
 	"github.com/chainreactors/cyber/tools/scan"
 )
 
@@ -192,7 +191,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *a
 	if runtime == nil {
 		return fmt.Errorf("scanner Agent runtime is unavailable")
 	}
-	lock, err := pidlock.Acquire(pidlock.AgentPIDFilePath(), logger)
+	lock, err := acquirePIDLock(agentPIDFilePath(), logger)
 	if err != nil {
 		return err
 	}

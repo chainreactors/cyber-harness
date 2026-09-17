@@ -14,7 +14,6 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/core/util"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
 	"golang.org/x/term"
@@ -219,8 +218,8 @@ func formatTokenUsage(u *aop.TokenUsage) string {
 		return ""
 	}
 	s := fmt.Sprintf("%s%s %s%s",
-		inputTokenMarker, util.FormatNumber(int(u.InputTokens)),
-		outputTokenMarker, util.FormatNumber(int(u.OutputTokens)))
+		inputTokenMarker, truncate.FormatNumber(int(u.InputTokens)),
+		outputTokenMarker, truncate.FormatNumber(int(u.OutputTokens)))
 	if ratio := provider.CacheHitRatio(u); ratio > 0 {
 		s += fmt.Sprintf(" %s%.0f%%", cacheHitMarker, ratio*100)
 	}

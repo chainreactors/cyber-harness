@@ -14,8 +14,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
-	"github.com/chainreactors/cyber/agent/tmux"
-	"github.com/chainreactors/cyber/core/commandline"
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/output"
@@ -23,7 +22,7 @@ import (
 	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 const (
@@ -68,7 +67,7 @@ type BashTool struct {
 	scannerProxy   string
 	scannerProxyCA string
 	egressResolver func(context.Context) (proxyURL, caPath string, release func())
-	tasks          *tmux.Manager
+	tasks          *procbus.Manager
 	registry       commands.Executor
 	shellCommands  bool
 	hiddenCommands map[string]struct{}
@@ -83,10 +82,10 @@ func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashToo
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &BashTool{workDir: workDir, timeout: timeout, hooks: registry, tasks: tmux.NewManager()}
+	return &BashTool{workDir: workDir, timeout: timeout, hooks: registry, tasks: procbus.NewManager()}
 }
 
-func (t *BashTool) Manager() *tmux.Manager          { return t.tasks }
+func (t *BashTool) Manager() *procbus.Manager       { return t.tasks }
 func (t *BashTool) SetScannerProxy(proxy string)    { t.scannerProxy = proxy }
 func (t *BashTool) SetScannerProxyCA(caPath string) { t.scannerProxyCA = caPath }
 func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, func())) {
@@ -302,7 +301,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 
 // RunForeground executes command through the same tmux/registered-command
 // router used by the bash agent tool, streams raw output, and waits for the
-// final session state. Non-zero exits are represented by Info.ExitCode rather
+// final session state. Non-zero exits are represented by Info.ExitStatus() rather
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*commands.Execution, error) {
 	command = strings.TrimSpace(command)
@@ -416,7 +415,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	leftToken := firstCommandToken(left)
 	if !hasPipe {
 		if cmd, ok := t.resolve(leftToken); ok {
-			if tokens, err := commandline.SplitCommandLine(left); err == nil {
+			if tokens, err := commands.SplitCommandLine(left); err == nil {
 				if args, syntaxErr := commands.StripShellSyntax(tokens[1:]); syntaxErr == nil {
 					args = commands.NormalizeNoColor(cmd.Name, args)
 					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
@@ -437,7 +436,8 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 		contextID := adapter.retainContext(ctx)
 		env := t.runEnv(ctx, options.Env, adapter, contextID)
 		execution := commands.NewExecution(t.tasks, command, nil, workDir, env)
-		info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+		info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
+			proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env}))
 		if err != nil {
 			adapter.releaseContext(contextID)
 			cleanup()
@@ -453,7 +453,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	}
 	env := t.runEnv(ctx, options.Env, nil, "")
 	if cmd, ok := t.resolve(leftToken); ok {
-		tokens, err := commandline.SplitCommandLine(left)
+		tokens, err := commands.SplitCommandLine(left)
 		if err != nil {
 			return nil, err
 		}
@@ -481,7 +481,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	if hasPipe && right != "" {
 		rightToken := firstCommandToken(right)
 		if cmd, ok := t.resolve(rightToken); ok {
-			tokens, err := commandline.SplitCommandLine(right)
+			tokens, err := commands.SplitCommandLine(right)
 			if err != nil {
 				return nil, err
 			}
@@ -510,7 +510,8 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	}
 	env = t.runEnv(ctx, options.Env, nil, "")
 	execution := commands.NewExecution(t.tasks, command, nil, workDir, env)
-	info, err := t.tasks.Create(workDir, command, options.Name, timeout, env, "")
+	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
+		proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env}))
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -518,6 +519,13 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	execution.BindID(info.ID)
 	t.releaseProcess(cleanup, execution)
 	return execution, nil
+}
+
+// procSpec is the registry-level half of a bash invocation: identity and
+// deadline. What the unit actually is -- a terminal, a pipe, a function -- is
+// the attachment's business.
+func procSpec(name, command string, timeout time.Duration) proc.Spec {
+	return proc.Spec{Name: name, Command: command, Timeout: timeout, StripANSI: true}
 }
 
 func (t *BashTool) prepareShell(command string, options BashExecOptions) (BashExecOptions, func(), error) {
@@ -570,14 +578,14 @@ func (t *BashTool) startBuiltin(
 	if name == "" {
 		name = command.Name
 	}
-	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
 		stdout := joinedWriter(session, options.Stdout)
 		stderr := joinedWriter(session, options.Stderr)
 		execution.SetIO(options.Stdin, stdout, stderr)
 		details, runErr := t.registry.Execute(runCtx, command.Name, execution)
 		execution.SetDetails(details)
 		return runErr
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +609,7 @@ func (t *BashTool) startBuiltinToShell(
 	if name == "" {
 		name = command.Name
 	}
-	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
 		reader, writer := io.Pipe()
 		sh := exec.CommandContext(runCtx, "sh", "-c", pipeline)
 		sh.Stdin = reader
@@ -623,7 +631,7 @@ func (t *BashTool) startBuiltinToShell(
 			return commandErr
 		}
 		return shellErr
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +655,7 @@ func (t *BashTool) startShellToBuiltin(
 	if name == "" {
 		name = command.Name
 	}
-	info, err := t.tasks.CreateFunc(ctx, name, timeout, func(runCtx context.Context, session io.Writer) error {
+	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
 		reader, writer := io.Pipe()
 		sh := exec.CommandContext(runCtx, "sh", "-c", shellLine)
 		sh.Stdin = options.Stdin
@@ -670,7 +678,7 @@ func (t *BashTool) startShellToBuiltin(
 			return commandErr
 		}
 		return shellErr
-	})
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -744,14 +752,14 @@ func (t *BashTool) collectResult(execution *commands.Execution) *coretool.Result
 			startLine, r.TotalLines, r.TotalLines, truncate.FormatSize(r.OutputBytes), truncate.FormatSize(r.TotalBytes))
 	}
 	info, _ := t.tasks.Get(execution.ID)
-	if info.KillCause != "" {
-		text += fmt.Sprintf("\n[command stopped: %s]", info.KillCause)
+	if info.Reason != "" {
+		text += fmt.Sprintf("\n[command stopped: %s]", info.Reason)
 	}
-	if info.ExitCode != 0 && info.State != pty.StateRunning {
-		text += fmt.Sprintf("\n[exit code: %d]", info.ExitCode)
+	if info.ExitStatus() != 0 && info.State != proc.StateRunning {
+		text += fmt.Sprintf("\n[exit code: %d]", info.ExitStatus())
 	}
 	result := coretool.TextResult(text)
-	result.IsError = info.KillCause != "" || (info.ExitCode != 0 && info.State != pty.StateRunning)
+	result.IsError = info.Reason != "" || (info.ExitStatus() != 0 && info.State != proc.StateRunning)
 	return result
 }
 
@@ -808,7 +816,7 @@ func (t *BashTool) proxyEnv(ctx context.Context) []string {
 	return commands.EgressEnvironment(proxy, ca)
 }
 
-func (t *BashTool) startMonitor(info pty.Info, targetInbox inbox.Inbox) {
+func (t *BashTool) startMonitor(info proc.Info, targetInbox inbox.Inbox) {
 	if targetInbox == nil {
 		return
 	}
@@ -832,12 +840,12 @@ func (t *BashTool) startMonitor(info pty.Info, targetInbox inbox.Inbox) {
 			return
 		}
 		tail := t.tasks.PeekOrEmpty(info.ID, 20)
-		msg := inbox.NewMessage(inbox.OriginSession, "user", pty.FormatCompletion(final, tail))
+		msg := inbox.NewMessage(inbox.OriginSession, "user", FormatCompletion(final, tail))
 		msg.Priority = inbox.PriorityHigh
 		msg.Meta = map[string]any{
 			"session_id":   final.ID,
 			"session_name": final.Name,
-			"exit_code":    final.ExitCode,
+			"exit_code":    final.ExitStatus(),
 			"type":         "completion",
 		}
 		pushCompletion(targetInbox, msg)
@@ -884,7 +892,7 @@ func stripCommentsAndBlanks(input string) string {
 }
 
 func firstCommandToken(input string) string {
-	tokens, err := commandline.SplitCommandLine(input)
+	tokens, err := commands.SplitCommandLine(input)
 	if err != nil || len(tokens) == 0 {
 		return ""
 	}

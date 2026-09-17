@@ -3,8 +3,6 @@ package truncate
 import (
 	"strings"
 	"unicode/utf8"
-
-	"github.com/chainreactors/cyber/core/util"
 )
 
 // ── Tier 1: 通用工具结果 (bash/read/grep/find/ls/inbox/agent result) ──
@@ -232,11 +230,6 @@ func Line(line string, maxChars int) (string, bool) {
 	}
 	runes := []rune(line)
 	return string(runes[:maxChars]) + "... [truncated]", true
-}
-
-// FormatSize returns a human-readable size string.
-func FormatSize(bytes int) string {
-	return util.FormatSize(bytes)
 }
 
 // safeUTF8Cut truncates s to at most maxBytes, backing up to a valid

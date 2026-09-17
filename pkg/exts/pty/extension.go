@@ -7,7 +7,7 @@ import (
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	"github.com/chainreactors/cyber/core/extension"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
-	runtimepty "github.com/chainreactors/utils/pty"
+	runtimeproc "github.com/chainreactors/utils/proc"
 )
 
 // Extension owns the canonical AOP PTY protocol. It borrows the Bash tool owned
@@ -15,15 +15,15 @@ import (
 // every connection opens its own router and no contributor has to track or
 // release one between connections.
 type Extension struct {
-	manager *runtimepty.Manager
+	manager *runtimeproc.Manager
 	opts    []Option
 }
 
 func New(bash *terminaltool.BashTool, opts ...Option) *Extension {
-	var manager *runtimepty.Manager
+	var manager *runtimeproc.Manager
 	if bash != nil {
-		if tmux := bash.Manager(); tmux != nil {
-			manager = tmux.Manager
+		if bridge := bash.Manager(); bridge != nil {
+			manager = bridge.Manager
 		}
 	}
 	return &Extension{manager: manager, opts: append([]Option(nil), opts...)}

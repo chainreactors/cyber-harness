@@ -11,6 +11,7 @@ import (
 	agentprompt "github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/events"
@@ -33,13 +34,12 @@ import (
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	nodepkg "github.com/chainreactors/cyber/pkg/node"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/skills"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
 type cyberProfileConfig struct {
 	Option      *cfg.Option
-	Application applicationConfig
+	Application appConfig
 	IOA         *ioatools.Config
 	// Session nil creates the application-only profile used by the Web service.
 	Session   *agentsession.Config
@@ -53,24 +53,17 @@ func profileConfigFromOption(option *cfg.Option, providerMode profilepkg.Provide
 	if err != nil {
 		return cyberProfileConfig{}, err
 	}
-	application := applicationConfigFromOption(option, providerMode, logger)
+	application := appConfigFromOption(option, providerMode, logger)
 	return cyberProfileConfig{
 		Option: option, Application: application,
-		IOA: ioaConfig, Session: cloneConfig(sessionConfig),
-		Observe: parseObserve(option.Observe), Output: resolveOutputPath(option),
+		IOA: ioaConfig, Session: sessionConfig,
+		Observe: parseObserve(option.Observe), Output: strings.TrimSpace(option.OutputFile),
 	}, nil
-}
-
-func resolveOutputPath(option *cfg.Option) string {
-	if option == nil {
-		return ""
-	}
-	return strings.TrimSpace(option.OutputFile)
 }
 
 func parseObserve(value string) []observeext.Kind {
 	var result []observeext.Kind
-	for _, item := range strings.Split(value, ",") {
+	for item := range strings.SplitSeq(value, ",") {
 		if item = strings.TrimSpace(item); item != "" {
 			result = append(result, observeext.Kind(item))
 		}
@@ -111,19 +104,18 @@ var cyberProfileFactory profilepkg.Factory = func(request profilepkg.Request) (p
 }
 
 func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
-	p := &cyberProfile{}
-	if config.Session != nil {
-		config.Session = cloneConfig(config.Session)
-		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
-	}
 	if config.Option == nil {
 		return nil, fmt.Errorf("cyber profile option is required")
+	}
+	config.Session = cloneConfig(config.Session)
+	if config.Session != nil {
+		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
 	}
 	if config.Application.Logger == nil {
 		config.Application.Logger = telemetry.NopLogger()
 	}
 	logger := config.Application.Logger
-	config.Session = cloneConfig(config.Session)
+	p := &cyberProfile{}
 	nodeName := config.Option.NodeName
 	if config.IOA != nil && config.IOA.NodeName != "" {
 		nodeName = config.IOA.NodeName
@@ -145,49 +137,45 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("construct proxy infrastructure: %w", err)
 	}
-	proxyHub := proxyExtension.Hub()
 	eventStream := events.New()
-	var runtimeLoop agent.Loop
+	var scannerLoop agent.Loop
 	if config.Session != nil {
-		runtimeLoop = config.Session.Loop
+		scannerLoop = config.Session.Loop
 	}
-	scannerLoop := runtimeLoop
 	if scannerLoop == nil && config.Application.Provider.Mode != provider.StartupDisabled {
 		scannerLoop = agent.StandardLoop{}
 	}
-	applicationGraph, err := newApplicationGraph(config.Application, hookRegistry, eventStream, proxyHub, scannerLoop, workDir)
+	graph, err := newAppGraph(config.Application, hookRegistry, eventStream, proxyExtension.Hub(), scannerLoop, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("construct Cyber application: %w", err)
 	}
-	application := applicationGraph.application
+	application := graph.application
 
 	namespaceRegistry := namespaces.New()
 	values := []extension.Extension{namespaceRegistry}
 	if strings.TrimSpace(config.Output) != "" {
-		output, outputErr := telemetryext.New(eventStream, telemetryext.Options{Path: config.Output})
-		if outputErr != nil {
-			return nil, outputErr
+		output, err := telemetryext.New(eventStream, telemetryext.Options{Path: config.Output})
+		if err != nil {
+			return nil, err
 		}
 		values = append(values, output)
 	}
 	if config.Artifacts != nil {
-		projection, projectionErr := newArtifactProjection(eventStream, config.Artifacts, logger)
-		if projectionErr != nil {
-			return nil, projectionErr
+		projection, err := newArtifactProjection(eventStream, config.Artifacts, logger)
+		if err != nil {
+			return nil, err
 		}
 		values = append(values, projection)
 	}
-	var observer *observeext.Extension
 	if len(config.Observe) > 0 {
-		var observeErr error
-		observer, observeErr = observeext.New(hookRegistry, eventStream, observeext.Options{Kinds: config.Observe, Logger: logger})
-		if observeErr != nil {
-			return nil, observeErr
+		observer, err := observeext.New(hookRegistry, eventStream, observeext.Options{Kinds: config.Observe, Logger: logger})
+		if err != nil {
+			return nil, err
 		}
 		values = append(values, observer)
 	}
 	values = append(values, proxyExtension)
-	values = append(values, applicationGraph.extensions...)
+	values = append(values, graph.extensions...)
 	// The PTY protocol borrows the Bash tool owned by the terminal extension,
 	// which the application graph installed above; reverse close releases PTY
 	// before that owner stops.
@@ -210,15 +198,13 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		ioa = ioaext.New(*config.IOA, deps)
 		values = append(values, ioa)
 	}
-	var run *agentsession.Runtime
-	var ioaService *ioatools.Service
 	if config.Session != nil || ioa != nil {
 		p.tui = tuiext.New()
 		values = append(values, p.tui)
 	}
 	if ioa != nil {
-		ioaService = ioa.Service()
-		presentation, err := ioaconsole.New(ioaService, config.IOA.Space, config.IOA.URL)
+		p.ioa = ioa.Service()
+		presentation, err := ioaconsole.New(p.ioa, config.IOA.Space, config.IOA.URL)
 		if err != nil {
 			return nil, err
 		}
@@ -242,23 +228,22 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("construct Cyber runtime: %w", err)
 		}
-		run = sessions.Runtime()
+		p.runtime = sessions.Runtime()
 		values = append(values, sessions)
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return extension.Add(scope, run.NamespaceBindings()...)
+			return extension.Add(scope, p.runtime.NamespaceBindings()...)
 		}})
-		presentation, err := sessionconsole.New(run)
+		presentation, err := sessionconsole.New(p.runtime)
 		if err != nil {
 			return nil, err
 		}
 		values = append(values, presentation)
 	}
-	extensions, err := extension.New(values...)
+	set, err := extension.New(values...)
 	if err != nil {
 		return nil, err
 	}
-	p.extensions, p.app, p.runtime, p.ioa = extensions, application, run, ioaService
-	p.namespaces = namespaceRegistry
+	p.extensions, p.app, p.namespaces = set, application, namespaceRegistry
 	return p, nil
 }
 

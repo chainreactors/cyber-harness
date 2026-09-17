@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/cyber/core/util"
+	"github.com/chainreactors/cyber/core/truncate"
 	bspinner "github.com/charmbracelet/bubbles/spinner"
 )
 
@@ -270,7 +270,7 @@ func (v *LiveView) expandLineLocked(line, frame string) string {
 		if !v.elapsed.IsZero() {
 			elapsed = time.Since(v.elapsed)
 		}
-		line = strings.ReplaceAll(line, elapsedSentinel, util.FormatDuration(elapsed))
+		line = strings.ReplaceAll(line, elapsedSentinel, truncate.FormatDuration(elapsed))
 	}
 	return line
 }

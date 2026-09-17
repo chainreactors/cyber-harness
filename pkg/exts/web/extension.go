@@ -33,7 +33,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := extension.Define[webpkg.Route](scope, e); err != nil {
 		return err
 	}
-	return extension.Add(scope, serviceRoutes(e.service)...)
+	return extension.Add(scope, webpkg.ManagementRoutes(e.service)...)
 }
 
 func (e *Extension) Add(values ...webpkg.Route) (resource.Handle, error) {
@@ -100,37 +100,6 @@ func (e *Extension) Routes() []webpkg.Route {
 		if route, exists := e.routes[pattern]; exists {
 			routes = append(routes, route)
 		}
-	}
-	return routes
-}
-
-func serviceRoutes(service webpkg.Service) []webpkg.Route {
-	routes := []webpkg.Route{webpkg.AOPRoute(service)}
-	if api := service.API(); api != nil {
-		if api.Sessions != nil {
-			routes = append(routes, webpkg.SessionRoute(service))
-		}
-		if api.Scans != nil {
-			routes = append(routes, webpkg.ScanRoute(service))
-		}
-		if api.Config != nil {
-			routes = append(routes, webpkg.ConfigRoute(service))
-		}
-		if api.Agents != nil {
-			routes = append(routes, webpkg.AgentRoute(service))
-		}
-		if api.Status != nil {
-			routes = append(routes, webpkg.SystemRoute(service))
-		}
-		if api.SCO != nil {
-			routes = append(routes, webpkg.SCORoute(service))
-		}
-	}
-	if handler := service.ApplicationWebSocketHandler(); handler != nil {
-		routes = append(routes, webpkg.Route{Pattern: webpkg.ApplicationWebSocketPath, Handler: handler})
-	}
-	if handler := service.NodeWebSocketHandler(); handler != nil {
-		routes = append(routes, webpkg.Route{Pattern: webpkg.NodeWebSocketPath, Handler: handler})
 	}
 	return routes
 }

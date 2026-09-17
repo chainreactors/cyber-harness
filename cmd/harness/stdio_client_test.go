@@ -56,37 +56,23 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 	cmd := exec.CommandContext(ctx, executablePath, args...)
 	cmd.Dir, cmd.Env = dir, testEnvironment(!internalAgent)
 	p := &stdioClient{replies: make(chan map[string]any, 16), done: make(chan struct{})}
-	errFile, err := os.Create(filepath.Join(dir, "stderr.log"))
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	errLog := &processLog{file: errFile}
+	errLog := newLog(t, filepath.Join(dir, "stderr.log"))
+	trace := newLog(t, filepath.Join(dir, "protocol.jsonl"))
 	cmd.Stderr = errLog
-	p.input, err = cmd.StdinPipe()
+	input, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		errLog.Close()
 		t.Fatal(err)
 	}
+	p.input = input
 	output, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		errLog.Close()
 		t.Fatal(err)
 	}
-	traceFile, err := os.Create(filepath.Join(dir, "protocol.jsonl"))
-	if err != nil {
-		cancel()
-		errLog.Close()
-		t.Fatal(err)
-	}
-	trace := &processLog{file: traceFile}
 	configureProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		cancel()
-		trace.Close()
-		errLog.Close()
 		t.Fatal(err)
 	}
 	go func() {

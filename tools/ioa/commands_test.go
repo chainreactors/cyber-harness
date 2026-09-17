@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -517,11 +517,11 @@ func TestLLMIOAToolUsage(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "test-space"})
 	cmds := NewCommands(client, "llm-tester", nil)
 
-	registry := harness.Commands(t, cmds...)
+	registry := hosttest.Commands(t, cmds...)
 	dir := t.TempDir()
 	bash := terminaltool.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)
-	tools := harness.Tools(t, bash)
+	tools := hosttest.Tools(t, bash)
 	t.Cleanup(bash.Close)
 
 	systemPrompt := `You are a testing agent. You have IOA tools available as pseudo-commands through the bash tool.

@@ -11,17 +11,17 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	agentprompt "github.com/chainreactors/cyber/agent/prompt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/commandline"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/skills"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/cyber/tools/toolargs"
 )
@@ -223,7 +223,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	}()
 	streaming := ShouldStreamScannerOutput(scannerArgs)
 	var captured strings.Builder
-	execution, err := bash.RunForeground(ctx, commandline.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), terminaltool.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, commands.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), terminaltool.BashExecOptions{
 		OnOutput: func(data []byte) {
 			if streaming {
 				_, _ = os.Stdout.Write(data)
@@ -245,8 +245,8 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	if !retained && execution.ID != "" {
 		return fmt.Errorf("command session %s is no longer available", execution.ID)
 	}
-	if info.ExitCode != 0 {
-		return fmt.Errorf("%s exited with code %d", scannerArgs[0], info.ExitCode)
+	if info.ExitStatus() != 0 {
+		return fmt.Errorf("%s exited with code %d", scannerArgs[0], info.ExitStatus())
 	}
 	return nil
 }

@@ -32,7 +32,7 @@ require (
 	github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873
 	github.com/chainreactors/utils/parsers v0.0.3
-	github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059
+	github.com/chainreactors/utils/proc v0.0.0-20260917040030-cdb89bd3c90c
 	github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0

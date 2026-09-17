@@ -5,8 +5,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/chainreactors/cyber/agent/tmux"
-	"github.com/chainreactors/utils/pty"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/utils/proc"
 )
 
 // Execution contains one invocation's arguments, streams and command details.
@@ -26,7 +26,7 @@ type Execution struct {
 
 	Details any
 
-	manager *tmux.Manager
+	manager *procbus.Manager
 	mu      sync.RWMutex
 	// idReady closes after the execution receives either its manager-assigned
 	// session ID or its in-process call ID. A built-in command may start before
@@ -133,7 +133,7 @@ func (e *Execution) WaitProcessCompletion(ctx context.Context) error {
 }
 
 // NewExecution builds the invocation record handed to Command.Run.
-func NewExecution(manager *tmux.Manager, command string, args []string, dir string, env []string) *Execution {
+func NewExecution(manager *procbus.Manager, command string, args []string, dir string, env []string) *Execution {
 	return &Execution{
 		Command: command,
 		Args:    append([]string(nil), args...),
@@ -206,15 +206,15 @@ func (e *Execution) SetDetails(details any) {
 
 // Session returns the manager's current native snapshot. false means there is
 // no retained terminal session; a call ID alone does not imply a process.
-func (e *Execution) Session() (pty.Info, bool) {
+func (e *Execution) Session() (proc.Info, bool) {
 	if e == nil {
-		return pty.Info{}, false
+		return proc.Info{}, false
 	}
 	e.mu.RLock()
 	id := e.ID
 	e.mu.RUnlock()
 	if id == "" || e.manager == nil {
-		return pty.Info{}, false
+		return proc.Info{}, false
 	}
 	return e.manager.Get(id)
 }

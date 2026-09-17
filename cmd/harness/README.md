@@ -4,10 +4,11 @@
 版本，启动真实应用子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
 进程重启与资源释放。场景测试不导入业务实现包，不注入 fake store、Provider 或 Host。
 
-同目录的导出构造器（`Set`、`Commands`、`Tools`、`AppEntries`、`AppLoad`）供包测试构建
-自己拥有的 extension host；生产代码必须构造显式 Profile，不能使用这些构造器。
-harness 依赖 `pkg`，因此被它依赖的包（`agent`、`pkg/app`、`tools/proton`）不能反向导入
-harness，这些包改为在自己的测试文件里构建 host。
+包测试需要的进程内 extension host 不在这里：低层构造器（`Set`、`Load`、`Commands`、
+`Tools`、`ToolsWithHooks`）在 `pkg/hosttest`，App 级的（`Entries`、`Load`）在
+`pkg/apptest`。两者分开是因为 `pkg/app` 依赖 `agent`，合在一个包里会让 `agent` 自己的
+测试用不了低层构造器。生产代码必须构造显式 Profile，`pkg/hosttest` 的守卫测试会在任何
+非测试文件引用这两个包时失败。
 
 协议回显测试位于 `pkg/host/process_test.go`，不计入用户场景验收。
 

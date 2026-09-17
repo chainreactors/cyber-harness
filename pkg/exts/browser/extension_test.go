@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/cyber/cmd/harness"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {
@@ -17,7 +17,7 @@ func TestModuleOwnsBrowserRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := harness.Set(t,
+	set := hosttest.Set(t,
 		instance,
 		registry,
 	)

@@ -26,7 +26,7 @@ func TestRecordEditionBuildTags(t *testing.T) {
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	p, err := newCyberProfile(cyberProfileConfig{
 		Option: &cfg.Option{},
-		Application: applicationConfig{
+		Application: appConfig{
 			Logger: telemetry.NopLogger(), SkipEngines: true,
 		},
 	})

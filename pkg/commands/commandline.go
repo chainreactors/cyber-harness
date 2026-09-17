@@ -1,5 +1,5 @@
-// Package commandline parses and formats command text without executing it.
-package commandline
+// SplitCommandLine parses command text without executing it.
+package commands
 
 import (
 	"fmt"

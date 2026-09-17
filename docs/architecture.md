@@ -40,7 +40,7 @@ flowchart TB
 ```
 
 这不是一条 Profile、Extension、Scope、Capability、Contribution、Registry 逐层包装的链。
-系统由Profile 边界、生命周期和 typed resource 三组关系组成：
+系统由 Profile 边界、生命周期和 typed resource 三组关系组成：
 
 - `Profile` 是宿主可加载、关闭和替换的完整应用。它拥有 `Set`，并只在整个 Set Active 后
   向 runner、node、transport 和 Web 发布 App、Runtime、Namespace、Console 等稳定领域视图。
@@ -73,7 +73,7 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
 
 ## Architecture Invariants
 
-- 一个 Profile 恰好拥有一个Set。Profile 不把 Extension、Scope 或 Resource Registry 暴露给宿主。
+- 一个 Profile 恰好拥有一个 Set。Profile 不把 Extension、Scope 或 Resource Registry 暴露给宿主。
 - 一个进程可以有多个互相独立的 Set，例如可热替换的 Profile、HTTP listener 附属资源和一次性
   命令各自具有不同生命周期。它们必须由宿主或用例入口并列持有；Extension、App 和领域对象不得
   在 Load 内创建或隐藏子 Set。
@@ -95,8 +95,8 @@ Point，但在参数解析前由组合根直接定义和注册，不由 `Set`、
   硬编码。宿主只做连接 IO、生命周期与装配；它不认识的协议无从接入。
 - 每条连接一个实例的协议用 `aop.ConnectionBinding` 贡献，而不是在 Extension 或宿主里维护
   跨连接的实例表。
-- `tools/` 是工具与命令的实现层，`pkg/commands` 只保留 Command Point、Registry 和 Execution
-  记录，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的Profile直接借用具体
+- `tools/` 是工具与命令的实现层，`pkg/commands` 保留 Command Point、Registry、Execution
+  记录和命令文本工具，bash/tmux 的执行实现住在 `tools/terminal`。需要 Bash 行为的 Profile 直接借用具体
   `terminal.BashTool`，不为分层外观增加转发 DTO 或只有一个实现的接口。
 
 ## Typed Resource
@@ -244,7 +244,7 @@ Command 等资源表达，避免展示标签与真实可用功能产生两个事
   Provider、Agent loop、Session 和 TUI；依赖测试禁止引入上述应用功能。
 - `pkg/runner`：保留共享的 aiscan 运行模式逻辑，不是可执行命令，也不改名。
 
-每个 Profile 只有一个线性Set。宿主可以为不同生命周期建立并列 Set，例如 Web listener
+每个 Profile 只有一个线性 Set。宿主可以为不同生命周期建立并列 Set，例如 Web listener
 附属资源、CSTX importer 或一次性 IOA client；这些 Set 不嵌套在 Profile 中，也不共享 Scope
 或 Resource Registry。App 和 Extension 不选择插件、不创建子 Set，也不关闭借用的资源。
 新增插件时，在组合根或明确的用例入口构造依赖并把 Extension 放到正确顺序；新增资源种类时

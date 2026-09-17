@@ -7,24 +7,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/cyber/agent/tmux"
-	"github.com/chainreactors/utils/pty"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/utils/proc"
 )
 
 func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
-	manager := tmux.NewManager()
+	manager := procbus.NewManager()
 	defer manager.Shutdown()
 	release := make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
-	info, err := manager.CreateFunc(t.Context(), "local lifecycle", time.Minute, func(ctx context.Context, _ io.Writer) error {
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	})
+	info, err := manager.Start(t.Context(), proc.Spec{Name: "local lifecycle", Timeout: time.Minute},
+		proc.Func(func(ctx context.Context, _ io.Writer) error {
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
 	}
 	for _, execution := range []*Execution{parent, child} {
 		snapshot, ok := execution.Session()
-		if !ok || snapshot.ID != info.ID || snapshot.State != pty.StateRunning {
+		if !ok || snapshot.ID != info.ID || snapshot.State != proc.StateRunning {
 			t.Fatalf("running session = %+v, retained = %v", snapshot, ok)
 		}
 	}
@@ -53,7 +54,7 @@ func TestNestedExecutionReadsLiveSessionWithoutStateCopies(t *testing.T) {
 	// Neither invocation needs Wait or an explicit refresh to see completion.
 	for _, execution := range []*Execution{parent, child} {
 		snapshot, ok := execution.Session()
-		if !ok || snapshot.State != pty.StateCompleted || snapshot.ExitCode != 0 || snapshot.EndedAt.IsZero() {
+		if !ok || snapshot.State != proc.StateCompleted || snapshot.ExitStatus() != 0 || snapshot.EndedAt.IsZero() {
 			t.Fatalf("completed session = %+v, retained = %v", snapshot, ok)
 		}
 	}

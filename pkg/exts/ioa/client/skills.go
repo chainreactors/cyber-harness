@@ -3,7 +3,7 @@ package client
 import (
 	"embed"
 	"fmt"
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/agent/skills"
 	"strings"
 
 	ioaskills "github.com/chainreactors/ioa/skills"

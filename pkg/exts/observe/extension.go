@@ -12,14 +12,13 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
-	ptypb "github.com/chainreactors/cyber/aop/pty"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
-	"github.com/chainreactors/utils/pty"
+	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -209,33 +208,12 @@ func (e *Extension) processCompleted(ctx context.Context, event toolhooks.Proces
 	}
 	if e.kinds[Processes] {
 		if event.Session != nil {
-			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, processSession(event.Session))
+			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, ptyext.SessionToProto(event.Session))
 		} else {
 			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle)
 		}
 	}
 	return struct{}{}, nil
-}
-
-func processSession(value *pty.Info) *ptypb.Session {
-	if value == nil {
-		return nil
-	}
-	result := &ptypb.Session{
-		Id: value.ID, Kind: value.Kind, Name: value.Name, Command: value.Command,
-		Pid: int32(value.PID), ActivitySeq: value.ActivitySeq, OutputBytes: value.OutputBytes,
-		ExitCode: int32(value.ExitCode), State: string(value.State), KillCause: value.KillCause,
-	}
-	if !value.StartedAt.IsZero() {
-		result.StartedAt = timestamppb.New(value.StartedAt)
-	}
-	if !value.LastActivityAt.IsZero() {
-		result.LastActivityAt = timestamppb.New(value.LastActivityAt)
-	}
-	if !value.EndedAt.IsZero() {
-		result.EndedAt = timestamppb.New(value.EndedAt)
-	}
-	return result
 }
 
 func (e *Extension) fileAccess(ctx context.Context, event toolhooks.FileEvent) (struct{}, error) {

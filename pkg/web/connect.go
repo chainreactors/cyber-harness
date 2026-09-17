@@ -77,6 +77,40 @@ func SCORoute(service Service) Route {
 	return Route{Pattern: path, Handler: handler}
 }
 
+// ManagementRoutes projects one service onto the routes it can actually serve.
+// A nil API family means the profile did not build that handler, so its route is
+// not advertised; the extension layer only publishes the result.
+func ManagementRoutes(service Service) []Route {
+	routes := []Route{AOPRoute(service)}
+	if api := service.API(); api != nil {
+		if api.Sessions != nil {
+			routes = append(routes, SessionRoute(service))
+		}
+		if api.Scans != nil {
+			routes = append(routes, ScanRoute(service))
+		}
+		if api.Config != nil {
+			routes = append(routes, ConfigRoute(service))
+		}
+		if api.Agents != nil {
+			routes = append(routes, AgentRoute(service))
+		}
+		if api.Status != nil {
+			routes = append(routes, SystemRoute(service))
+		}
+		if api.SCO != nil {
+			routes = append(routes, SCORoute(service))
+		}
+	}
+	if handler := service.ApplicationWebSocketHandler(); handler != nil {
+		routes = append(routes, Route{Pattern: ApplicationWebSocketPath, Handler: handler})
+	}
+	if handler := service.NodeWebSocketHandler(); handler != nil {
+		routes = append(routes, Route{Pattern: NodeWebSocketPath, Handler: handler})
+	}
+	return routes
+}
+
 func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[aop.Envelope, aop.Envelope]) error {
 	err := s.service.ServeApplication(ctx, connectEnvelopeStream{stream: stream})
 	if errors.Is(err, io.EOF) {

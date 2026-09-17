@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/skills"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -12,7 +13,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/skills"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 

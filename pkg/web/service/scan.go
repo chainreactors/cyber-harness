@@ -14,11 +14,11 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/commands"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
@@ -365,7 +365,7 @@ func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writ
 	}
 	bash := app.Bash
 	var text strings.Builder
-	if _, err := bash.RunForeground(ctx, commandline.JoinCommandLine("scan", args), terminaltool.BashExecOptions{
+	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), terminaltool.BashExecOptions{
 		OnOutput: func(data []byte) {
 			_, _ = text.Write(data)
 			if stream != nil {

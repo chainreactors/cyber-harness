@@ -11,13 +11,13 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/skills"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/pkg/runner"
-	"github.com/chainreactors/cyber/pkg/skills"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -783,7 +783,7 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 
 		opt := &cfg.Option{}
 		cfg.ApplyDefaults(opt)
-		appCfg := applicationConfigFromOption(opt, profile.ProviderOptional, telemetry.NopLogger())
+		appCfg := appConfigFromOption(opt, profile.ProviderOptional, telemetry.NopLogger())
 		if appCfg.Scanner.Resources.CyberhubURL != cfg.DefaultCyberhubURL || appCfg.Scanner.Resources.APIKey != cfg.DefaultCyberhubKey || appCfg.Scanner.Resources.Mode != cfg.DefaultCyberhubMode {
 			t.Fatalf("scanner cyberhub config = %#v", appCfg.Scanner)
 		}

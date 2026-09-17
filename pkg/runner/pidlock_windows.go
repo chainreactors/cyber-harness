@@ -1,6 +1,6 @@
 //go:build windows
 
-package pidlock
+package runner
 
 import (
 	"errors"
@@ -28,7 +28,7 @@ func unlockFile(f *os.File) error {
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &overlapped)
 }
 
-func ProcessExists(pid int) bool {
+func processExists(pid int) bool {
 	if pid <= 0 || uint64(pid) > uint64(^uint32(0)) {
 		return false
 	}

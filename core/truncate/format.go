@@ -1,10 +1,11 @@
-package util
+package truncate
 
 import (
 	"fmt"
 	"time"
 )
 
+// FormatSize returns a human-readable size string.
 func FormatSize(bytes int) string {
 	switch {
 	case bytes < 1024:
@@ -16,6 +17,7 @@ func FormatSize(bytes int) string {
 	}
 }
 
+// FormatNumber renders an integer with thousands separators.
 func FormatNumber(n int) string {
 	if n < 0 {
 		return "-" + FormatNumber(-n)
@@ -26,6 +28,8 @@ func FormatNumber(n int) string {
 	return FormatNumber(n/1000) + fmt.Sprintf(",%03d", n%1000)
 }
 
+// FormatDuration renders an elapsed duration at millisecond or second
+// resolution, whichever the magnitude calls for.
 func FormatDuration(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%dms", d.Milliseconds())

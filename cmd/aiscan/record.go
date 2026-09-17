@@ -9,17 +9,17 @@ import (
 	"github.com/chainreactors/cyber/pkg/exts/record"
 )
 
-func appendRecorderExtension(values []extension.Extension, config applicationConfig, workDir string) ([]extension.Extension, error) {
+func init() {
+	registerApp(newRecordExtension)
+}
+
+func newRecordExtension(config appConfig, workDir string) (extension.Extension, error) {
 	if !optionalToolEnabled(config.Tools.OptionalTools, "record") {
-		return values, nil
+		return nil, nil
 	}
 	options, err := record.ReadOptions(config.Resolved)
 	if err != nil {
 		return nil, err
 	}
-	recorder, err := record.New(workDir, filepath.Join(config.DataDir, "record"), options.MaxConcurrent)
-	if err != nil {
-		return nil, err
-	}
-	return append(values, recorder), nil
+	return record.New(workDir, filepath.Join(config.DataDir, "record"), options.MaxConcurrent)
 }

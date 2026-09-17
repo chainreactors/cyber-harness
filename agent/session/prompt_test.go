@@ -7,12 +7,12 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	agentprompt "github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/agent/skills"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestBuildSystemPromptIncludesSkills(t *testing.T) {
@@ -157,7 +157,7 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := harness.Set(t, rt)
+			rtSet := hosttest.Set(t, rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

@@ -10,15 +10,17 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
+	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/agent/provider"
-	"github.com/chainreactors/cyber/agent/tmux"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -30,7 +32,7 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 		}
 		return toolhooks.Admission{}, nil
 	})
-	tools := testToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
+	tools := hosttest.ToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
 	var logs bytes.Buffer
 	cfg := Config{
 		Tools:  tools,
@@ -396,7 +398,7 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	beforeCalled := false
 	afterCalled := false
 	registry := hooks.New()
-	tools := testToolsWithHooks(t, registry, echo)
+	tools := hosttest.ToolsWithHooks(t, registry, echo)
 	toolhooks.Before.On(registry, "test", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
 		beforeCalled = true
 		return toolhooks.Admission{}, nil
@@ -593,7 +595,7 @@ func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	}
 	rewritten := "rewritten result"
 	registry := hooks.New()
-	tools := testToolsWithHooks(t, registry, echo)
+	tools := hosttest.ToolsWithHooks(t, registry, echo)
 	toolhooks.After.On(registry, "test", func(_ context.Context, event toolhooks.ResultEvent) (struct{}, error) {
 		event.Result.Output = []*aop.Content{aop.Text(rewritten)}
 		event.Result.IsError = false
@@ -1105,17 +1107,18 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 
 	ib := inbox.NewBuffered(8)
-	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info pty.Info) {
+	sessMgr := procbus.NewManager()
+	sessMgr.SetOnDone(func(info proc.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			pty.FormatCompletion(info, tail))
+			terminaltool.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{"session_id": info.ID}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := sessMgr.Create(dir, "echo background-result", "bg-scan", 10*time.Second, nil, "")
+	_, err := sessMgr.Start(t.Context(), proc.Spec{Name: "bg-scan", Command: "echo background-result", Timeout: 10 * time.Second},
+		proc.TTY(proc.ProcOptions{Line: "echo background-result", Dir: dir}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -1181,21 +1184,22 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 
 func TestSessionCompletionMetadata(t *testing.T) {
 	ib := inbox.NewBuffered(4)
-	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info pty.Info) {
+	sessMgr := procbus.NewManager()
+	sessMgr.SetOnDone(func(info proc.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			pty.FormatCompletion(info, tail))
+			terminaltool.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{
 			"session_id":   info.ID,
 			"session_name": info.Name,
-			"exit_code":    info.ExitCode,
+			"exit_code":    info.ExitStatus(),
 		}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := sessMgr.Create(dir, "echo done", "test-session", 10*time.Second, nil, "")
+	_, err := sessMgr.Start(t.Context(), proc.Spec{Name: "test-session", Command: "echo done", Timeout: 10 * time.Second},
+		proc.TTY(proc.ProcOptions{Line: "echo done", Dir: dir}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

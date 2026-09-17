@@ -24,7 +24,7 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 		TrafficOptions:     cfg.TrafficOptions{BodyStorage: "disk"},
 		UncoverCredentials: map[string]string{"SHODAN_API_KEY": "shodan-key"},
 	}
-	config := applicationConfigFromOption(option, profilepkg.ProviderDisabled, telemetry.NopLogger())
+	config := appConfigFromOption(option, profilepkg.ProviderDisabled, telemetry.NopLogger())
 	if config.Provider.Config.Model != "gpt-4o" || config.Provider.Mode != provider.StartupDisabled {
 		t.Fatalf("provider config = %+v", config.Provider)
 	}

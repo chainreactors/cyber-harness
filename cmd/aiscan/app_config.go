@@ -13,20 +13,20 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-// applicationConfig is composition input. It stays in cmd/aiscan so the shared
+// appConfig is composition input. It stays in cmd/aiscan so the shared
 // App contains runtime state rather than scanner settings.
-type applicationConfig struct {
+type appConfig struct {
 	Resolved      *cfg.Resolved
 	DataDir       string
 	Provider      provider.StartupConfig
 	Scanner       scannerext.Config
-	Tools         applicationToolConfig
+	Tools         toolConfig
 	Logger        telemetry.Logger
 	CLISkillPaths []string
 	SkipEngines   bool
 }
 
-type applicationToolConfig struct {
+type toolConfig struct {
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string
@@ -34,9 +34,9 @@ type applicationToolConfig struct {
 	TrafficStorage    cfg.TrafficOptions
 }
 
-func applicationConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, logger telemetry.Logger) applicationConfig {
+func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, logger telemetry.Logger) appConfig {
 	dataDir := cfg.ResolveDataDir(option.DataDir)
-	return applicationConfig{
+	return appConfig{
 		DataDir: dataDir, Resolved: option.Resolved,
 		Provider: provider.StartupConfig{
 			Mode: providerMode, Config: app.ProviderConfig(option),
@@ -49,19 +49,19 @@ func applicationConfigFromOption(option *cfg.Option, providerMode profilepkg.Pro
 			},
 			Recon: engine.ReconOptions{
 				FofaKey: option.FofaKey, HunterAPIKey: option.HunterAPIKey, IngressProxy: option.ReconProxy,
-				Limit: applicationIntValue(option.ReconLimit), Credentials: cloneApplicationStrings(option.UncoverCredentials),
+				Limit: intValue(option.ReconLimit), Credentials: cloneStrings(option.UncoverCredentials),
 			},
 		},
-		Tools: applicationToolConfig{
-			TavilyKeys:        applicationTavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
+		Tools: toolConfig{
+			TavilyKeys:        tavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
 			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
-			MitmCapture: cloneApplicationBool(option.Mitm), TrafficStorage: option.TrafficOptions,
+			MitmCapture: cloneBool(option.Mitm), TrafficStorage: option.TrafficOptions,
 		},
-		Logger: logger, CLISkillPaths: applicationSkillPaths(option),
+		Logger: logger, CLISkillPaths: skillPaths(option),
 	}
 }
 
-func applicationSkillPaths(option *cfg.Option) []string {
+func skillPaths(option *cfg.Option) []string {
 	var paths []string
 	for _, value := range option.Skills {
 		if strings.ContainsAny(value, `/\`) || strings.HasPrefix(value, ".") {
@@ -71,7 +71,7 @@ func applicationSkillPaths(option *cfg.Option) []string {
 	return paths
 }
 
-func applicationTavilyKeys(primary string, fallbacks ...string) string {
+func tavilyKeys(primary string, fallbacks ...string) string {
 	keys := make([]string, 0, len(fallbacks)+1)
 	for _, raw := range append([]string{primary}, fallbacks...) {
 		if raw = strings.TrimSpace(raw); raw != "" {
@@ -81,14 +81,14 @@ func applicationTavilyKeys(primary string, fallbacks ...string) string {
 	return strings.Join(keys, ",")
 }
 
-func applicationIntValue(value *int) int {
+func intValue(value *int) int {
 	if value != nil {
 		return *value
 	}
 	return 0
 }
 
-func cloneApplicationStrings(source map[string]string) map[string]string {
+func cloneStrings(source map[string]string) map[string]string {
 	if len(source) == 0 {
 		return nil
 	}
@@ -99,7 +99,7 @@ func cloneApplicationStrings(source map[string]string) map[string]string {
 	return result
 }
 
-func cloneApplicationBool(source *bool) *bool {
+func cloneBool(source *bool) *bool {
 	if source == nil {
 		return nil
 	}

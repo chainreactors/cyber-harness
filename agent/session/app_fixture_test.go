@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/agent/skills"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/events"

@@ -15,7 +15,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 type adapterTestExitError struct{ code int }
@@ -73,7 +73,7 @@ func newAdapterTestBash(t *testing.T) (*BashTool, *commands.Registry, *adapterTe
 	return bash, registry, state
 }
 
-func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, command string, workDir string) (pty.Info, string) {
+func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, command string, workDir string) (proc.Info, string) {
 	t.Helper()
 	var output strings.Builder
 	execution, err := bash.RunForeground(ctx, command, BashExecOptions{
@@ -95,8 +95,8 @@ func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, comman
 func TestShellCommandAdapterIsLazy(t *testing.T) {
 	bash, _, _ := newAdapterTestBash(t)
 	session, output := runAdapterCommand(t, bash, context.Background(), "memory_echo direct", t.TempDir())
-	if session.ExitCode != 0 || !strings.Contains(output, "direct") {
-		t.Fatalf("direct command exit=%d output=%q", session.ExitCode, output)
+	if session.ExitStatus() != 0 || !strings.Contains(output, "direct") {
+		t.Fatalf("direct command exit=%d output=%q", session.ExitStatus(), output)
 	}
 	if bash.shellAdapter != nil {
 		t.Fatal("simple registered command allocated shell runtime state")
@@ -116,23 +116,23 @@ func TestShellCommandComposition(t *testing.T) {
 	workDir := t.TempDir()
 
 	session, output := runAdapterCommand(t, bash, context.Background(), "memory_echo one && memory_echo two", workDir)
-	if session.ExitCode != 0 || !strings.Contains(output, "one") || !strings.Contains(output, "two") {
-		t.Fatalf("and composition exit=%d output=%q", session.ExitCode, output)
+	if session.ExitStatus() != 0 || !strings.Contains(output, "one") || !strings.Contains(output, "two") {
+		t.Fatalf("and composition exit=%d output=%q", session.ExitStatus(), output)
 	}
 
 	session, output = runAdapterCommand(t, bash, context.Background(), "memory_fail || memory_echo recovered", workDir)
-	if session.ExitCode != 0 || !strings.Contains(output, "recovered") {
-		t.Fatalf("or composition exit=%d output=%q", session.ExitCode, output)
+	if session.ExitStatus() != 0 || !strings.Contains(output, "recovered") {
+		t.Fatalf("or composition exit=%d output=%q", session.ExitStatus(), output)
 	}
 
 	session, output = runAdapterCommand(t, bash, context.Background(), "memory_echo hello | memory_upper", workDir)
-	if session.ExitCode != 0 || !strings.Contains(output, "HELLO") {
-		t.Fatalf("pipeline exit=%d output=%q", session.ExitCode, output)
+	if session.ExitStatus() != 0 || !strings.Contains(output, "HELLO") {
+		t.Fatalf("pipeline exit=%d output=%q", session.ExitStatus(), output)
 	}
 
 	session, _ = runAdapterCommand(t, bash, context.Background(), "memory_fail && memory_echo unreachable", workDir)
-	if session.ExitCode != 7 {
-		t.Fatalf("short-circuit exit code = %d, want 7", session.ExitCode)
+	if session.ExitStatus() != 7 {
+		t.Fatalf("short-circuit exit code = %d, want 7", session.ExitStatus())
 	}
 }
 
@@ -144,8 +144,8 @@ func TestShellCommandRedirectionAndInvocationContext(t *testing.T) {
 	})
 
 	session, _ := runAdapterCommand(t, bash, ctx, "memory_context > adapter-context.txt", workDir)
-	if session.ExitCode != 0 {
-		t.Fatalf("redirection exit code = %d", session.ExitCode)
+	if session.ExitStatus() != 0 {
+		t.Fatalf("redirection exit code = %d", session.ExitStatus())
 	}
 	data, err := os.ReadFile(filepath.Join(workDir, "adapter-context.txt"))
 	if err != nil {
@@ -163,8 +163,8 @@ func TestShellCommandAdapterUsesSealedRegistry(t *testing.T) {
 	bash, _, _ := newAdapterTestBash(t)
 	command := "scan -i http://127.0.0.1:1 --timeout 1 --no-color && memory_echo ready"
 	session, output := runAdapterCommand(t, bash, context.Background(), command, t.TempDir())
-	if session.ExitCode != 0 || !strings.Contains(output, "http://127.0.0.1:1") || !strings.Contains(output, "ready") {
-		t.Fatalf("late alias exit=%d output=%q", session.ExitCode, output)
+	if session.ExitStatus() != 0 || !strings.Contains(output, "http://127.0.0.1:1") || !strings.Contains(output, "ready") {
+		t.Fatalf("late alias exit=%d output=%q", session.ExitStatus(), output)
 	}
 }
 

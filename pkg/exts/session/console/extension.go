@@ -5,8 +5,8 @@ package console
 import (
 	"fmt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/core/commandline"
 	"github.com/chainreactors/cyber/core/extension"
+	cmdline "github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	"github.com/spf13/cobra"
 )
@@ -48,7 +48,7 @@ func bindings(runtime *agentsession.Runtime) *api.Bindings {
 					if view.Command == nil {
 						return fmt.Errorf("session command requires an attached terminal")
 					}
-					if err := view.Command(commandline.JoinCommandLine(name, args)); err != nil {
+					if err := view.Command(cmdline.JoinCommandLine(name, args)); err != nil {
 						return err
 					}
 					if name == "/status" && view.RefreshStatus != nil {

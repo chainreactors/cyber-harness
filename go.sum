@@ -258,8 +258,8 @@ github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873 h1:e
 github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/parsers v0.0.3 h1:3ld7xG5TSvzikVOCkQHjqjHO3otjODwSwHQDkMKbu5o=
 github.com/chainreactors/utils/parsers v0.0.3/go.mod h1:bE/znJWt08n9QOORWsWu0ggB8GWfOg3+dfUMMITmwV4=
-github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059 h1:jnBzt8QOl9ekFKR2sBQsZdaeYUJlpA9PAky/KYmSwjg=
-github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
+github.com/chainreactors/utils/proc v0.0.0-20260917040030-cdb89bd3c90c h1:A0FqPd9c6KtjRhPCUKXfQmYvaHoeLRWtQZciDDDekeQ=
+github.com/chainreactors/utils/proc v0.0.0-20260917040030-cdb89bd3c90c/go.mod h1:fwBG9qg5mG7LARtlh7Lhz3n1+90CGXW08kX3Vf7nyWA=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5 h1:GB3a4+i5Yb1yO8eg9bTXtQUcttHOEs9KF75yq2a9EU4=

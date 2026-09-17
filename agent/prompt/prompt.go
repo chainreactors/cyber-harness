@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/skills"
 )
 
 type PromptConfig struct {

@@ -24,7 +24,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
-	"github.com/chainreactors/cyber/cmd/harness"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -33,8 +32,10 @@ import (
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/aopws"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/commands"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	proxytool "github.com/chainreactors/cyber/tools/proxy"
 	"github.com/gorilla/websocket"
@@ -47,7 +48,7 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 
 func testToolExecutor(t *testing.T, tools ...coretool.Tool) coretool.Executor {
 	t.Helper()
-	return harness.Tools(t, tools...)
+	return hosttest.Tools(t, tools...)
 }
 
 func (singleDeliveryProbeTool) Name() string { return "single_delivery_probe" }
@@ -222,7 +223,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, rt)
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +630,7 @@ func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 }
 
 func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
-	return harness.AppLoad(t, ctx, application)
+	return apptest.Load(t, ctx, application)
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
@@ -640,7 +641,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rtSet := harness.Set(t, rt)
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

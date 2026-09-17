@@ -18,7 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 // ---------------------------------------------------------------------------
@@ -594,7 +594,7 @@ func TestBashRunForegroundStreams(t *testing.T) {
 		t.Fatalf("stream = %q", got)
 	}
 	session, retained := result.Session()
-	if !retained || session.ExitCode != 0 || session.State != pty.StateCompleted {
+	if !retained || session.ExitStatus() != 0 || session.State != proc.StateCompleted {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -741,7 +741,7 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 		t.Fatal("timeout did not stop the session promptly")
 	}
 	session, retained := result.Session()
-	if !retained || session.State != pty.StateKilled || session.KillCause == "" {
+	if !retained || session.State != proc.StateKilled || session.Reason == "" {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -760,7 +760,7 @@ func TestBashRunReportsNonZeroExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, retained := result.Session()
-	if !retained || !strings.Contains(output.String(), "failure") || session.ExitCode != 7 {
+	if !retained || !strings.Contains(output.String(), "failure") || session.ExitStatus() != 7 {
 		t.Fatalf("result=%+v output=%q", result, output.String())
 	}
 }
@@ -811,10 +811,11 @@ func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 	}
 
 	release := make(chan struct{})
-	info, err := tool.tasks.CreateFunc(context.Background(), "scoped-inbox", 5*time.Second, func(context.Context, io.Writer) error {
-		<-release
-		return nil
-	})
+	info, err := tool.tasks.Start(context.Background(), proc.Spec{Name: "scoped-inbox", Timeout: 5 * time.Second},
+		proc.Func(func(context.Context, io.Writer) error {
+			<-release
+			return nil
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -851,10 +852,12 @@ func TestBashBackgroundMonitorDeliversConcurrentCompletions(t *testing.T) {
 	const jobs = 16
 	release := make(chan struct{})
 	for i := 0; i < jobs; i++ {
-		info, err := tool.tasks.CreateFunc(context.Background(), fmt.Sprintf("job-%d", i), 5*time.Second, func(context.Context, io.Writer) error {
-			<-release
-			return nil
-		})
+		info, err := tool.tasks.Start(context.Background(),
+			proc.Spec{Name: fmt.Sprintf("job-%d", i), Timeout: 5 * time.Second},
+			proc.Func(func(context.Context, io.Writer) error {
+				<-release
+				return nil
+			}))
 		if err != nil {
 			t.Fatal(err)
 		}

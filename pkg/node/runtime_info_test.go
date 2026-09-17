@@ -9,10 +9,10 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/cmd/harness"
+	"github.com/chainreactors/cyber/agent/skills"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/skills"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
@@ -36,7 +36,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 }
 
 func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
-	registry := harness.Commands(t,
+	registry := hosttest.Commands(t,
 		commands.Command{
 			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
 			DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md",
@@ -76,7 +76,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 }
 
 func TestCommandSpecsMissingDescriptionPathStayVisible(t *testing.T) {
-	registry := harness.Commands(t, commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
+	registry := hosttest.Commands(t, commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
 	catalog := RegistryCommandSpecs(registry, nil)
 	for _, spec := range catalog {
 		if spec.GetName() == "!custom" && spec.GetDescription() != "" {
