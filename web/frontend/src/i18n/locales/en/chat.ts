@@ -67,7 +67,7 @@ export default {
   thinkingLabel: 'Thinking',
   responseLabel: 'Response',
   persistMode: 'Goal',
-  persistHint: 'Goal mode: describe the goal and its done-when criteria in plain language; an independent evaluator judges each round and re-runs with feedback until it passes (up to N rounds).',
+  persistHint: 'Goal mode: describe the goal and its done-when criteria in plain language; an independent evaluator judges each round and re-runs with feedback until it passes, or until it decides another round would not help.',
   evalCriteriaLabel: 'Done-when',
   evalCriteriaPlaceholder: 'Describe in plain language what "done" looks like — judged by an independent evaluator',
   evalModeBadge: 'AI-judged',
