@@ -243,7 +243,10 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 			return
 		}
 		if res.Err != "" {
-			s.broadcastHubError(sessionID, "", res.Err, nil)
+			// The agent's error text is a raw Go string ("context canceled" and
+			// friends). Code it so the client frames it in the reader's language
+			// instead of rendering the string bare.
+			s.broadcastHubError(sessionID, "command_failed", res.Err, map[string]any{"error": res.Err})
 		}
 	}()
 	return taskID, nil

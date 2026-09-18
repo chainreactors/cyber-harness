@@ -138,6 +138,7 @@ export default {
     agent_status_busy: 'busy',
     dispatch_failed: 'Failed to dispatch the task to the agent.',
     agent_disconnected: 'Agent disconnected.',
+    command_failed: 'Command failed: {{error}}',
     session_context_reset:
       'The node recreated this session — the agent no longer has the earlier conversation in context.',
     help_commands: 'Commands',
