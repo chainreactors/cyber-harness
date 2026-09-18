@@ -28,9 +28,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // The backend serves three top-level families: the auth + AOP-websocket
+      // JSON API, the IOA read API, and the ConnectRPC services. Missing any of
+      // them leaves the dev server rendering an app with no data.
       '/api': {
         target: backendURL,
         ws: true,
+      },
+      '/ioa': {
+        target: backendURL,
+      },
+      '/cyber.rpc.': {
+        target: backendURL,
       },
     },
   },

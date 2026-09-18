@@ -14,7 +14,10 @@ export default {
     // ONLY inside cyber-ui — e.g. the DisclosureCard `grid-rows-[0fr]/[1fr]`
     // collapse animation — are never generated and silently no-op (the
     // expand/collapse body never actually collapses).
-    './cyber-ui/packages/**/src/**/*.{js,ts,jsx,tsx}',
+    // `packages/*/src` (not `packages/**/src`): every package sits one level
+    // down, and the `**` form also walks into packages/*/node_modules, which
+    // Tailwind warns about and pays for on every build.
+    './cyber-ui/packages/*/src/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {

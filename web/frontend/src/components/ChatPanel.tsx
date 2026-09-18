@@ -773,7 +773,7 @@ export default function ChatPanel({
             eyebrow={t('readyEyebrow')}
             title={t('ready')}
             subtitle={
-              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan &lt;target&gt;</code>{t('readyHintAfter')}</>
+              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan -i &lt;target&gt;</code>{t('readyHintAfter')}</>
             }
           />
         </div>
