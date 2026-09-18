@@ -357,7 +357,8 @@ export function useChatSession() {
           void listSCONodes({ scanId: scan.scanId, limit: 2000 }).then((nodes) => {
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
-          }).catch(() => {})        } catch {
+          }).catch(() => {})
+        } catch {
           // Ignore malformed application extensions; the AOP stream remains usable.
         }
         break
