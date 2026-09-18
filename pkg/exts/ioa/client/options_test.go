@@ -31,6 +31,20 @@ func TestClientOptionsAreExplicitAndIndependent(t *testing.T) {
 	}
 }
 
+// The runtime client must receive the configured token. Dropping it silently
+// downgrades the client to node-ID auth, so a credential that the connection
+// test exercises is never sent by the agent's own IOA client.
+func TestRuntimeConfigCarriesTheToken(t *testing.T) {
+	option := &cfg.Option{Extensions: cfg.Values{ConfigKey: {"url": "https://ioa.test", "token": "secret"}}}
+	config, err := ConfigFromOption(option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config == nil || config.Token != "secret" {
+		t.Fatalf("token not carried into the runtime config: %+v", config)
+	}
+}
+
 func TestClientLegacyYAMLAndCLIOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("extensions:\n  ioa.client:\n    url: https://ioa.test\n    space: production\n    node_name: worker\n"), 0600); err != nil {

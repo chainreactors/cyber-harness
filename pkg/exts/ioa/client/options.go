@@ -84,7 +84,11 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	if value.URL == "" {
 		return nil, nil
 	}
-	return &service.Config{URL: value.URL, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
+	// Carry the token across: without it the runtime client falls through to the
+	// node-ID constructor, which ignores `ioa.client.token` and authenticates
+	// only from URL userinfo — so a configured credential was accepted, redacted
+	// in config output, honoured by the connection test, and then never sent.
+	return &service.Config{URL: value.URL, Token: value.Token, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
 }
 func Preamble(config service.Config) string {
 	if config.Space == "" {
