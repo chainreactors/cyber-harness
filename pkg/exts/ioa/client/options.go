@@ -84,11 +84,26 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	if value.URL == "" {
 		return nil, nil
 	}
-	// Carry the token across: without it the runtime client falls through to the
-	// node-ID constructor, which ignores `ioa.client.token` and authenticates
-	// only from URL userinfo — so a configured credential was accepted, redacted
-	// in config output, honoured by the connection test, and then never sent.
-	return &service.Config{URL: value.URL, Token: value.Token, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
+	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
+}
+
+// accessKeyURL folds the configured credential into the endpoint as userinfo.
+// The credential is the IOA server access key — that is what the `--server-token`
+// flag, the Web "Access Token" field and the `ioa serve` mirror all mean — and
+// the SDK reads an access key only from URL userinfo. Handing the same string to
+// NewClientWithToken instead sends it verbatim as a bearer token, which the
+// server rejects: access keys are accepted by POST /auth/register alone, and the
+// token that registration issues is what the remaining endpoints want.
+func accessKeyURL(endpoint, token string) string {
+	if token == "" {
+		return endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return endpoint
+	}
+	parsed.User = url.User(token)
+	return parsed.String()
 }
 func Preamble(config service.Config) string {
 	if config.Space == "" {

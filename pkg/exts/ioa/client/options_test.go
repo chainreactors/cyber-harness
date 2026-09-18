@@ -2,6 +2,8 @@ package client
 
 import (
 	cfg "github.com/chainreactors/cyber/core/config"
+	ioaclient "github.com/chainreactors/ioa/client"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,17 +33,47 @@ func TestClientOptionsAreExplicitAndIndependent(t *testing.T) {
 	}
 }
 
-// The runtime client must receive the configured token. Dropping it silently
-// downgrades the client to node-ID auth, so a credential that the connection
-// test exercises is never sent by the agent's own IOA client.
-func TestRuntimeConfigCarriesTheToken(t *testing.T) {
+// The runtime client must be able to authenticate with the configured key, and
+// the SDK reads an access key only from URL userinfo. Handing the same string
+// over as a bearer token makes the server answer 401 "invalid token", so assert
+// the key reaches the access-key slot and never the bearer slot.
+func TestRuntimeConfigCarriesTheAccessKey(t *testing.T) {
 	option := &cfg.Option{Extensions: cfg.Values{ConfigKey: {"url": "https://ioa.test", "token": "secret"}}}
 	config, err := ConfigFromOption(option)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config == nil || config.Token != "secret" {
-		t.Fatalf("token not carried into the runtime config: %+v", config)
+	if config == nil || config.Token != "" {
+		t.Fatalf("access key handed over as a bearer token: %+v", config)
+	}
+	client, err := ioaclient.NewClient(config.URL, config.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.AccessKey() != "secret" {
+		t.Fatalf("access key unreadable by the SDK: %q", client.AccessKey())
+	}
+}
+
+func TestAccessKeyURL(t *testing.T) {
+	for _, test := range []struct{ name, endpoint, token, wantKey string }{
+		{"absent", "https://ioa.test/base", "", ""},
+		{"folded", "https://ioa.test/base", "secret", "secret"},
+		{"already credentialed", "https://existing@ioa.test/base", "secret", "existing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parsed, err := url.Parse(accessKeyURL(test.endpoint, test.token))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := ""
+			if parsed.User != nil {
+				key = parsed.User.Username()
+			}
+			if key != test.wantKey || parsed.Host != "ioa.test" || parsed.Path != "/base" {
+				t.Fatalf("endpoint = %q, key = %q (want %q)", parsed.String(), key, test.wantKey)
+			}
+		})
 	}
 }
 

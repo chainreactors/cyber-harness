@@ -65,7 +65,10 @@ func testConnection(ctx context.Context, in, stored *types.DistributeConfig) []*
 		}
 		connectionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		adapter := New(ioatools.Config{URL: value.URL, Token: value.Token}, Dependencies{})
+		// Registration is what turns the access key into a token, and the read
+		// endpoints reject an access key outright — so a server that requires one
+		// can only be proven reachable by exchanging the key first.
+		adapter := New(ioatools.Config{URL: accessKeyURL(value.URL, value.Token), NodeName: cfg.ResolveNodeName(value.NodeName), AutoRegister: true}, Dependencies{})
 		stream := events.New()
 		publish := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Provide[*events.Stream](scope, stream)
