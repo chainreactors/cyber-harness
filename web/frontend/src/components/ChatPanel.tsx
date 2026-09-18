@@ -250,6 +250,20 @@ function orderedTimelineItems(...groups: ViewerTimelineItem[][]): ViewerTimeline
   return groups.flat().sort((left, right) => left.timestamp - right.timestamp)
 }
 
+// A failed turn is published twice: once as a bare `error` event and again as
+// the `turnEnded.error` of the same turn. The shared reducer renders an error
+// divider for each, back to back, so every LLM failure shows up as the same
+// warning line twice. Drop a divider that repeats the one before it.
+function collapseRepeatedDividers(items: ViewerTimelineItem[]): ViewerTimelineItem[] {
+  const collapsed: ViewerTimelineItem[] = []
+  for (const item of items) {
+    const previous = collapsed[collapsed.length - 1]
+    if (item.kind === 'divider' && previous?.kind === 'divider' && previous.label === item.label) continue
+    collapsed.push(item)
+  }
+  return collapsed
+}
+
 // Weave the status items back into the reduced timeline at their emitted
 // position, leaving the existing items in their relative order.
 function mergeTimelineItems(base: ViewerTimelineItem[], extra: ViewerTimelineItem[]): ViewerTimelineItem[] {
@@ -286,13 +300,13 @@ function reduceConversationAOP(
   const childIDs = new Set(childStarts.keys())
   const topLevelEvents = events.filter((event) => !childIDs.has(event.sessionId))
   const topLevelSplit = splitCommandResults(topLevelEvents)
-  const topLevel = mergeTimelineItems(
+  const topLevel = collapseRepeatedDividers(mergeTimelineItems(
     reduceAOPToTimeline(
       topLevelSplit.messages.map(presentAOPEvent),
       { streaming, lifecycle: 'errors' },
     ) as ViewerTimelineItem[],
     orderedTimelineItems(statusTimelineItems(topLevelSplit.messages), topLevelSplit.commands),
-  )
+  ))
 
   const childRuns: ViewerTimelineItem[] = []
   for (const [sessionID, start] of childStarts) {
@@ -316,13 +330,13 @@ function reduceConversationAOP(
           : 'completed'
     const timestamp = eventTimestamp(start)
     const childSplit = splitCommandResults(childEvents)
-    const items = mergeTimelineItems(
+    const items = collapseRepeatedDividers(mergeTimelineItems(
       reduceAOPToTimeline(childSplit.messages.map(presentAOPEvent), {
         streaming: streaming && !end,
         lifecycle: 'errors',
       }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
       orderedTimelineItems(statusTimelineItems(childSplit.messages), childSplit.commands),
-    )
+    ))
 
     childRuns.push({
       id: `subagent:${sessionID}`,
