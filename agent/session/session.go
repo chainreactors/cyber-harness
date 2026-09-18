@@ -1291,7 +1291,7 @@ func (rt *Runtime) runSession(session *sessionState) {
 
 func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
-		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
+		Id: s.runtime.nextCommandResultID(), Role: "assistant", Content: result.GetContent(),
 	}}}
 	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
 	s.runtime.app.Publish(event)
@@ -1365,6 +1365,16 @@ func (rt *Runtime) nextRuntimeID(prefix string) string {
 	id := fmt.Sprintf("%s-%d", prefix, rt.requestSeq)
 	rt.mu.Unlock()
 	return id
+}
+
+// A command result is a durable transcript entry, but the runtime counter it
+// used to be named after restarts at one with the node process. The hub keeps
+// every earlier result, so after a reconnect two different results share a
+// message id and any reader that identifies messages by id — the web transcript
+// does — overwrites one with the other. Stamp the emission time into the id so
+// it stays unique across restarts, the way rotated session ids already do.
+func (rt *Runtime) nextCommandResultID() string {
+	return rt.nextRuntimeID(fmt.Sprintf("command-%d", time.Now().UnixNano()))
 }
 
 func (rt *Runtime) nextContinuationID(logicalID string) string {

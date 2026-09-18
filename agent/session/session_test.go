@@ -420,6 +420,37 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 }
 
+// The hub keeps a session's transcript while the node that served it restarts,
+// so a command result emitted afterwards must not reuse the id of one emitted
+// before: the web transcript identifies messages by id, and a repeated id makes
+// the newer result overwrite the older one instead of appearing beside it.
+func TestCommandResultIDsSurviveNodeRestart(t *testing.T) {
+	ids := make([]string, 0, 2)
+	for _, marker := range []string{"BEFORE", "AFTER"} {
+		rt := newBareRuntime(t, nil, nil)
+		session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-restart"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var commandEvent *aop.Event
+		rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+			if event.GetMessage() != nil && event.TurnId == "" {
+				commandEvent = event
+			}
+		}))
+		if _, err := session.Command(context.Background(), "!printf "+marker); err != nil {
+			t.Fatal(err)
+		}
+		if commandEvent == nil || commandEvent.GetMessage().GetId() == "" {
+			t.Fatalf("command %s emitted no identified AOP message event: %+v", marker, commandEvent)
+		}
+		ids = append(ids, commandEvent.GetMessage().GetId())
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("command result id %q was reused across runtimes", ids[0])
+	}
+}
+
 func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

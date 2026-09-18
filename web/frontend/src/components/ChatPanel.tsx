@@ -25,7 +25,7 @@ import {
 import { cn } from '@cyber/theme'
 import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import BrandMark from './brand/BrandMark'
-import { MarkdownContent } from '@/markdown'
+import { CodeBlock, MarkdownContent } from '@/markdown'
 import {
   AssistantResponse,
   ChatPanel as ViewerChatPanel,
@@ -45,7 +45,7 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
-import { BudgetWarningSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
+import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
@@ -197,6 +197,53 @@ function statusTimelineItems(events: AOPEvent[]): ViewerTimelineItem[] {
     .filter((item): item is ExtensionTimelineItem => item !== null)
 }
 
+// A command result is the output of an operator slash command, identified by its
+// CommandDetail extension. It carries no turn id, so the shared reducer folds
+// every one of them into the single turn-less assistant card at the position of
+// the first result — and because that card is keyed by message id, any id the
+// node reuses collapses two results into one. CommandDetail is an app-owned
+// schema, so render these here, one item each, and keep them out of the reducer.
+function commandResultItem(event: AOPEvent, index: number): ViewerTimelineItem | null {
+  if (event.payload.case !== 'message' || event.payload.value.role !== 'assistant') return null
+  const detail = event.extensions
+    .map((extension) => anyUnpack(extension, CommandDetailSchema))
+    .find((candidate) => candidate !== undefined)
+  if (!detail) return null
+  return {
+    id: event.id || `command:${event.seq ?? index}`,
+    kind: 'message',
+    timestamp: eventTimestamp(event),
+    actorName: event.emitter,
+    role: 'assistant',
+    content: eventText(event),
+    streaming: false,
+    metadata: { commandLine: detail.line, presentation: detail.presentation },
+  }
+}
+
+// Split command results out of the event stream the reducer consumes. Their
+// order is preserved on both sides, so each result still renders at the point it
+// was emitted, right after the operator's command.
+function splitCommandResults(events: AOPEvent[]): {
+  messages: AOPEvent[]
+  commands: ViewerTimelineItem[]
+} {
+  const messages: AOPEvent[] = []
+  const commands: ViewerTimelineItem[] = []
+  events.forEach((event, index) => {
+    const item = commandResultItem(event, index)
+    if (item) commands.push(item)
+    else messages.push(event)
+  })
+  return { messages, commands }
+}
+
+// mergeTimelineItems walks `extra` in ascending time order, so a set assembled
+// from two sources has to be re-sorted before it is woven back in.
+function orderedTimelineItems(...groups: ViewerTimelineItem[][]): ViewerTimelineItem[] {
+  return groups.flat().sort((left, right) => left.timestamp - right.timestamp)
+}
+
 // Weave the status items back into the reduced timeline at their emitted
 // position, leaving the existing items in their relative order.
 function mergeTimelineItems(base: ViewerTimelineItem[], extra: ViewerTimelineItem[]): ViewerTimelineItem[] {
@@ -232,12 +279,13 @@ function reduceConversationAOP(
 
   const childIDs = new Set(childStarts.keys())
   const topLevelEvents = events.filter((event) => !childIDs.has(event.sessionId))
+  const topLevelSplit = splitCommandResults(topLevelEvents)
   const topLevel = mergeTimelineItems(
     reduceAOPToTimeline(
-      topLevelEvents.map(presentAOPEvent),
+      topLevelSplit.messages.map(presentAOPEvent),
       { streaming, lifecycle: 'errors' },
     ) as ViewerTimelineItem[],
-    statusTimelineItems(topLevelEvents),
+    orderedTimelineItems(statusTimelineItems(topLevelSplit.messages), topLevelSplit.commands),
   )
 
   const childRuns: ViewerTimelineItem[] = []
@@ -261,12 +309,13 @@ function reduceConversationAOP(
           ? 'canceled'
           : 'completed'
     const timestamp = eventTimestamp(start)
+    const childSplit = splitCommandResults(childEvents)
     const items = mergeTimelineItems(
-      reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
+      reduceAOPToTimeline(childSplit.messages.map(presentAOPEvent), {
         streaming: streaming && !end,
         lifecycle: 'errors',
       }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
-      statusTimelineItems(childEvents),
+      orderedTimelineItems(statusTimelineItems(childSplit.messages), childSplit.commands),
     )
 
     childRuns.push({
@@ -888,6 +937,8 @@ function timelineContent(
         >
           {item.role === 'system' && systemCode(item.metadata) ? (
             <SystemMessageContent metadata={item.metadata!} fallback={item.content} />
+          ) : item.content && isPreformattedCommand(item) ? (
+            <CodeBlock code={item.content} copyable />
           ) : item.content ? (
             <MessageBody content={item.content} compact={item.role !== 'system'} />
           ) : null}
@@ -970,6 +1021,14 @@ function timelineContent(
 // reads in the user's language on both the live path and after a reload.
 function systemCode(metadata?: Record<string, unknown>): string {
   return typeof metadata?.code === 'string' ? metadata.code : ''
+}
+
+// Command output is a terminal dump, so markdown would collapse its line
+// structure into one paragraph. CommandDetail.presentation marks the dumps.
+function isPreformattedCommand(item: ViewerTimelineItem): boolean {
+  if (item.kind !== 'message') return false
+  const presentation = item.metadata?.presentation
+  return typeof presentation === 'string' && presentation === 'preformatted'
 }
 
 function systemParams(metadata: Record<string, unknown>): Record<string, unknown> {
