@@ -20,6 +20,7 @@ const (
 	SysAgentsList        = "agents_list"
 	SysAgentNotConnected = "agent_not_connected"
 	SysSessionContextReset = "session_context_reset"
+	SysHelp                = "help"
 )
 
 func (s *Service) runHubCommand(sessionID, name, args string) {
@@ -49,25 +50,30 @@ func parseCommand(content string) (cmd, args string, ok bool) {
 }
 
 // handleHelpCommand renders the merged "/" command catalog (hub-scope plus the
-// bound agent's reported agent-scope commands) as a system message. Broadcast
-// with an empty code so the frontend shows this dynamic, already-localized text
-// verbatim instead of translating it.
+// bound agent's reported agent-scope commands) as a system message. The catalog
+// travels as metadata and the frontend renders it from its own description
+// strings; the body here is only the fallback for a client that does not know
+// this code, so it stays language-neutral and description-free.
 func (s *Service) handleHelpCommand(sessionID string) {
+	menu := s.SessionMenu(sessionID)
+	s.broadcastSystemMessageMetadata(sessionID, helpFallback(menu), &types.WebMessageMetadata{
+		Code:     SysHelp,
+		Commands: menu,
+	})
+}
+
+func helpFallback(menu []*types.CommandSpec) string {
 	var b strings.Builder
 	b.WriteString("**Commands**\n")
-	for _, c := range s.SessionMenu(sessionID) {
-		syntax := c.Usage
+	for _, c := range menu {
+		syntax := c.GetUsage()
 		if syntax == "" {
-			syntax = c.Name
+			syntax = c.GetName()
 		}
-		if c.Description != "" {
-			fmt.Fprintf(&b, "- `%s` — %s\n", syntax, c.Description)
-		} else {
-			fmt.Fprintf(&b, "- `%s`\n", syntax)
-		}
+		fmt.Fprintf(&b, "- `%s`\n", syntax)
 	}
-	b.WriteString("\n`!<command>` 直接在 agent 上执行 shell/伪命令;其他文本作为对话发送给 agent。")
-	s.broadcastSystemMessage(sessionID, "", b.String(), nil)
+	b.WriteString("\n`!<command>` runs a shell or pseudo command directly on the agent; any other text is sent to the agent as conversation.")
+	return b.String()
 }
 
 // SessionMenu is the web "/" command catalog for a session: the hub-scope

@@ -137,5 +137,7 @@ export default {
     dispatch_failed: '任务下发到 agent 失败。',
     agent_disconnected: 'Agent 已断开连接。',
     session_context_reset: '节点重建了该会话 —— agent 已丢失此前的对话上下文。',
+    help_commands: '命令',
+    help_hint: '`!<command>` 直接在 agent 上执行 shell/伪命令；其他文本作为对话发送给 agent。',
   },
 }

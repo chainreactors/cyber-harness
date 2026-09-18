@@ -140,5 +140,8 @@ export default {
     agent_disconnected: 'Agent disconnected.',
     session_context_reset:
       'The node recreated this session — the agent no longer has the earlier conversation in context.',
+    help_commands: 'Commands',
+    help_hint:
+      '`!<command>` runs a shell or pseudo command directly on the agent; any other text is sent to the agent as conversation.',
   },
 }

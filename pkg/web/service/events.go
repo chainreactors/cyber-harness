@@ -190,7 +190,7 @@ func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, met
 			Id: generateID(), Role: "system", Content: []*aop.Content{aop.Text(fallback)},
 		}},
 	}
-	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil) {
+	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil || metadata.GetCommands() != nil) {
 		_ = types.SetWebMessage(event, metadata)
 	}
 	s.BroadcastAOPEvent(sessionID, event)

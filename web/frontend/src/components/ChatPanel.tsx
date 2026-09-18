@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import i18n from '../i18n'
 import {
   AlertTriangle,
@@ -184,7 +185,12 @@ function systemMetadataByMessageID(events: AOPEvent[]): Map<string, Record<strin
     for (const extension of event.extensions) {
       const decoded = anyUnpack(extension, WebMessageMetadataSchema)
       if (!decoded) continue
-      byMessageID.set(messageID, { code: decoded.code, params: decoded.params, agentList: decoded.agentList })
+      byMessageID.set(messageID, {
+        code: decoded.code,
+        params: decoded.params,
+        agentList: decoded.agentList,
+        commands: decoded.commands,
+      })
       break
     }
   }
@@ -587,12 +593,11 @@ export default function ChatPanel({
       return
     }
     let cancelled = false
-    const toHint = (spec: CommandSpec): CommandHint => {
-      const base = spec.name.startsWith('/') ? spec.name.slice(1) : ''
-      const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
-      const localized = key ? t(key, { defaultValue: '' }) : ''
-      return { cmd: spec.name, desc: localized || spec.description || '', usage: spec.usage }
-    }
+    const toHint = (spec: CommandSpec): CommandHint => ({
+      cmd: spec.name,
+      desc: commandDescription(t, spec.name, spec.description || ''),
+      usage: spec.usage,
+    })
     fetchSessionCommands(activeSessionID)
       .then((specs) => {
         if (cancelled) return
@@ -1043,13 +1048,47 @@ function systemParams(metadata: Record<string, unknown>): Record<string, unknown
   return params && typeof params === 'object' ? params as Record<string, unknown> : {}
 }
 
+// A command's description arrives in the server's own language, so the catalog
+// is the only place it can be translated. Keyed by the command name, the way
+// the composer menu already resolves its own entries; dynamic agent-reported
+// commands (skills) have no key and keep the server's text.
+function commandDescription(t: TFunction<'chat'>, name: string, description: string): string {
+  const base = name.startsWith('/') ? name.slice(1) : ''
+  const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
+  const localized = key ? t(key, { defaultValue: '' }) : ''
+  return localized || description
+}
+
 function SystemMessageContent({ metadata, fallback }: { metadata: Record<string, unknown>; fallback: string }) {
   const { t } = useTranslation('chat')
   const code = systemCode(metadata)
   const params = systemParams(metadata)
   if (code === 'agents_list') return <AgentsListContent agentList={metadata.agentList as AgentListMetadata | undefined} fallback={fallback} />
+  if (code === 'help') return <HelpContent commands={metadata.commands} fallback={fallback} />
   const text = t(`sys.${code}`, { ...params, defaultValue: fallback })
   return <MarkdownContent content={trimDisplayContent(text)} />
+}
+
+// The server sends the session menu alongside a `help` code and leaves the body
+// untranslated, so the catalog here is what makes /help read in the user's
+// language. Fall back to the server's body when the catalog is absent (an older
+// server) or empty.
+function HelpContent({ commands, fallback }: { commands: unknown; fallback: string }) {
+  const { t } = useTranslation('chat')
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return <MarkdownContent content={trimDisplayContent(fallback)} />
+  }
+  const lines = [`**${t('sys.help_commands')}**`]
+  for (const entry of commands) {
+    if (!entry || typeof entry !== 'object') continue
+    const spec = entry as CommandSpec
+    if (!spec.name) continue
+    const usage = spec.usage || spec.name
+    const description = commandDescription(t, spec.name, spec.description ?? '')
+    lines.push(description ? `- \`${usage}\` — ${description}` : `- \`${usage}\``)
+  }
+  lines.push('', t('sys.help_hint'))
+  return <MarkdownContent content={trimDisplayContent(lines.join('\n'))} />
 }
 
 function AgentsListContent({ agentList, fallback }: { agentList?: AgentListMetadata; fallback: string }) {

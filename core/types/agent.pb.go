@@ -815,11 +815,15 @@ func (x *AgentListMetadata) GetAgents() []*AgentListEntry {
 }
 
 type WebMessageMetadata struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
-	Params        *structpb.Struct       `protobuf:"bytes,3,opt,name=params,proto3" json:"params,omitempty"`
-	AgentList     *AgentListMetadata     `protobuf:"bytes,4,opt,name=agent_list,json=agentList,proto3" json:"agent_list,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	NodeId    string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Code      string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	Params    *structpb.Struct       `protobuf:"bytes,3,opt,name=params,proto3" json:"params,omitempty"`
+	AgentList *AgentListMetadata     `protobuf:"bytes,4,opt,name=agent_list,json=agentList,proto3" json:"agent_list,omitempty"`
+	// Catalog behind a `code = help` message: the session menu ListCommands also
+	// serves, so the client can render /help in the user's language rather than
+	// the server's single hardcoded one.
+	Commands      []*CommandSpec `protobuf:"bytes,5,rep,name=commands,proto3" json:"commands,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -878,6 +882,13 @@ func (x *WebMessageMetadata) GetParams() *structpb.Struct {
 func (x *WebMessageMetadata) GetAgentList() *AgentListMetadata {
 	if x != nil {
 		return x.AgentList
+	}
+	return nil
+}
+
+func (x *WebMessageMetadata) GetCommands() []*CommandSpec {
+	if x != nil {
+		return x.Commands
 	}
 	return nil
 }
@@ -946,13 +957,14 @@ const file_types_agent_proto_rawDesc = "" +
 	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x14\n" +
 	"\x05model\x18\x05 \x01(\tR\x05model\"H\n" +
 	"\x11AgentListMetadata\x123\n" +
-	"\x06agents\x18\x01 \x03(\v2\x1b.cyber.agent.AgentListEntryR\x06agents\"\xb1\x01\n" +
+	"\x06agents\x18\x01 \x03(\v2\x1b.cyber.agent.AgentListEntryR\x06agents\"\xe9\x01\n" +
 	"\x12WebMessageMetadata\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12/\n" +
 	"\x06params\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06params\x12=\n" +
 	"\n" +
-	"agent_list\x18\x04 \x01(\v2\x1e.cyber.agent.AgentListMetadataR\tagentListB1Z/github.com/chainreactors/cyber/core/types;typesb\x06proto3"
+	"agent_list\x18\x04 \x01(\v2\x1e.cyber.agent.AgentListMetadataR\tagentList\x126\n" +
+	"\bcommands\x18\x05 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommandsB1Z/github.com/chainreactors/cyber/core/types;typesb\x06proto3"
 
 var (
 	file_types_agent_proto_rawDescOnce sync.Once
@@ -999,11 +1011,12 @@ var file_types_agent_proto_depIdxs = []int32{
 	11, // 6: cyber.agent.AgentListMetadata.agents:type_name -> cyber.agent.AgentListEntry
 	19, // 7: cyber.agent.WebMessageMetadata.params:type_name -> google.protobuf.Struct
 	12, // 8: cyber.agent.WebMessageMetadata.agent_list:type_name -> cyber.agent.AgentListMetadata
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	18, // 9: cyber.agent.WebMessageMetadata.commands:type_name -> cyber.command.CommandSpec
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_types_agent_proto_init() }

@@ -94,4 +94,8 @@ message WebMessageMetadata {
   string code = 2;
   google.protobuf.Struct params = 3;
   AgentListMetadata agent_list = 4;
+  // Catalog behind a `code = help` message: the session menu ListCommands also
+  // serves, so the client can render /help in the user's language rather than
+  // the server's single hardcoded one.
+  repeated cyber.command.CommandSpec commands = 5;
 }
