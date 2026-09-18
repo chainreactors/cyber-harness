@@ -256,44 +256,6 @@ export async function getIOAOverview(): Promise<IOAOverview> {
   return { nodes, spaces, messages }
 }
 
-export async function submitScan(target: string, mode: string, options: ScanOptions): Promise<Scan> {
-	try {
-		const response = await cyberRPC.scans.submitScan({ requestId: newRPCID(), target, mode, options })
-		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to submit scan')
-		return response.outcome.value
-	} catch (error) {
-		throw connectFailure(error, 'Failed to submit scan')
-	}
-}
-
-export async function getScan(id: string): Promise<Scan> {
-	try {
-		const response = await cyberRPC.scans.getScan({ scanId: id })
-		if (!response.scan) throw new Error('Scan not found')
-		return response.scan
-	} catch (error) {
-		throw connectFailure(error, 'Scan not found')
-	}
-}
-
-export async function listScans(): Promise<Scan[]> {
-	try {
-		const response = await cyberRPC.scans.listScans({})
-		return response.scans
-	} catch (error) {
-		throw connectFailure(error, 'Failed to list scans')
-	}
-}
-
-export async function deleteScan(id: string): Promise<void> {
-	try {
-		const response = await cyberRPC.scans.cancelScan({ requestId: newRPCID(), scanId: id })
-		if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to cancel scan')
-	} catch (error) {
-		throw connectFailure(error, 'Failed to cancel scan')
-	}
-}
-
 // --- Chat session API ---
 
 export async function createChatSession(nodeID: string, title?: string, scanID?: string): Promise<Session> {
@@ -530,15 +492,6 @@ export { aopClient }
 export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
   const response = await cyberRPC.sco.listNodes({ type: opts?.type || '', operationId: opts?.scanId || '', limit: opts?.limit || 0 })
   return (response.nodes?.nodes || []).map(decodeSCONode)
-}
-
-export async function getSCONode(id: string): Promise<SCONode> {
-  return decodeSCONode((await cyberRPC.sco.getNode({ id })).node)
-}
-
-export async function getSCOStats(): Promise<Record<string, number>> {
-  const values = (await cyberRPC.sco.getStats({})).values
-  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number(value)]))
 }
 
 export async function getSupportedArtifacts(): Promise<string[]> {
