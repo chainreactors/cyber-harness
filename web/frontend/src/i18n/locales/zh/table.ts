@@ -15,7 +15,7 @@ export default {
   perPage: '{n} / 页',
   emptyRows: '0 行',
   search: '搜索…',
-  searchField: '搜索…(type:domain value~example)',
+  searchField: '搜索…(cstx_type:ip name~example)',
   exportXlsx: '导出 XLSX',
   exportCsv: '导出 CSV',
   exportReport: '生成报告',

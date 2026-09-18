@@ -15,7 +15,7 @@ export default {
   perPage: '{n} / page',
   emptyRows: '0 rows',
   search: 'Search...',
-  searchField: 'Search... (type:domain value~example)',
+  searchField: 'Search... (cstx_type:ip name~example)',
   exportXlsx: 'Export XLSX',
   exportCsv: 'Export CSV',
   exportReport: 'Generate report',
