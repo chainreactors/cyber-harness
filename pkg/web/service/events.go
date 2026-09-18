@@ -19,6 +19,7 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 	if !s.prepareAOPEvent(sessionID, event) {
 		return
 	}
+	recreated := s.sessionWasRecreated(sessionID, event)
 	var cursor int64
 	if s.store != nil {
 		storedCursor, persisted, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
@@ -34,6 +35,21 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 		cursor = storedCursor
 	}
 	s.broadcastAOPEvent(sessionID, event, cursor)
+	if recreated {
+		s.broadcastSystemMessage(sessionID, SysSessionContextReset, "The node recreated this session; the agent no longer has the earlier conversation in context.", nil)
+	}
+}
+
+// sessionWasRecreated reports that a SessionStarted event announces a session
+// the hub already holds durable history for. A node only recreates a session it
+// has lost from memory (restart or eviction); the transcript survives here, so
+// the agent silently resumes with an empty context unless the operator is told.
+func (s *Service) sessionWasRecreated(sessionID string, event *aop.Event) bool {
+	if s.store == nil || event.GetSessionStarted() == nil {
+		return false
+	}
+	maximum, err := s.store.MaxAOPEventSeq(context.Background(), sessionID)
+	return err == nil && maximum > 0
 }
 
 // PublishUserMessage records the operator input in the durable AOP timeline.

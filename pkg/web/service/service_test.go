@@ -181,6 +181,59 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 	}
 }
 
+// A node only recreates a session it has lost from memory, and it resumes with
+// an empty context. The hub still holds the transcript, so it must say so
+// instead of letting the operator believe the agent remembers the conversation.
+func TestSessionRecreationBroadcastsContextResetNotice(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "s1")
+
+	svc.BroadcastAOPEvent("s1", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m1", Role: "assistant", Content: []*aop.Content{aop.Text("hello")}}},
+	})
+	svc.BroadcastAOPEvent("s1", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}},
+	})
+
+	events, err := store.ListAOPEvents(context.Background(), "s1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1]
+	if last.GetMessage().GetRole() != "system" {
+		t.Fatalf("last event = %v, want the context-reset notice", last)
+	}
+	metadata, ok, err := types.GetWebMessage(last)
+	if err != nil || !ok {
+		t.Fatalf("notice metadata = %v, %v, %v", metadata, ok, err)
+	}
+	if metadata.GetCode() != SysSessionContextReset {
+		t.Fatalf("notice code = %q, want %q", metadata.GetCode(), SysSessionContextReset)
+	}
+
+	// The first session_started for a session with no durable history is a
+	// normal open and must stay silent.
+	createStoredSession(t, store, "s2")
+	svc.BroadcastAOPEvent("s2", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}},
+	})
+	fresh, err := store.ListAOPEvents(context.Background(), "s2", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh) != 1 {
+		t.Fatalf("fresh session persisted %d events, want 1", len(fresh))
+	}
+}
+
 type sessionProbe struct {
 	sid       string
 	found     bool

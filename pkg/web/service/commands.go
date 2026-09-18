@@ -19,6 +19,7 @@ const (
 	SysNoAgentsConnected = "no_agents_connected"
 	SysAgentsList        = "agents_list"
 	SysAgentNotConnected = "agent_not_connected"
+	SysSessionContextReset = "session_context_reset"
 )
 
 func (s *Service) runHubCommand(sessionID, name, args string) {

@@ -45,7 +45,7 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
-import { BudgetWarningSchema, CompactDetailSchema, EvalDetailSchema } from '../cyber-proto'
+import { BudgetWarningSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
@@ -168,6 +168,27 @@ function statusTimelineItem(event: AOPEvent, index: number): ExtensionTimelineIt
     default:
       return null
   }
+}
+
+// The shared AOP reducer renders a system message from its text alone and never
+// decodes the cyber.web extension, so the hub's translatable code never reaches
+// SystemMessageContent and every backend notice falls back to English. Decode
+// the extensions here, where the schema lives, and hand the codes back by
+// message id so the reducer's items can be annotated in place.
+function systemMetadataByMessageID(events: AOPEvent[]): Map<string, Record<string, unknown>> {
+  const byMessageID = new Map<string, Record<string, unknown>>()
+  for (const event of events) {
+    if (event.payload.case !== 'message') continue
+    const messageID = event.payload.value.id
+    if (!messageID) continue
+    for (const extension of event.extensions) {
+      const decoded = anyUnpack(extension, WebMessageMetadataSchema)
+      if (!decoded) continue
+      byMessageID.set(messageID, { code: decoded.code, params: decoded.params, agentList: decoded.agentList })
+      break
+    }
+  }
+  return byMessageID
 }
 
 function statusTimelineItems(events: AOPEvent[]): ViewerTimelineItem[] {
@@ -385,6 +406,12 @@ export default function ChatPanel({
         || item.kind === 'extension'
         || (item.kind === 'message' && item.role === 'user'))
     const aopItems = reduceConversationAOP(agentEvents, aopEvents, isBusy)
+    const systemMetadata = systemMetadataByMessageID(agentEvents)
+    for (const item of aopItems) {
+      if (item.kind !== 'message' || item.role !== 'system') continue
+      const metadata = systemMetadata.get(item.id)
+      if (metadata) item.metadata = metadata
+    }
 
     // The optimistic user bubble is stamped with the browser clock (Date.now at
     // send time); every agent event is stamped by the agent host. This merged
