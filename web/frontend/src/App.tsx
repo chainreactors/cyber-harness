@@ -137,6 +137,9 @@ export default function App() {
   )
 
   const model = serverStatus?.llmModel || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  // Agents that already joined a collaboration space are where a newly connected
+  // node belongs; with none connected there is nothing to align to.
+  const agentSpace = chat.agents.find((a) => a.status?.space)?.status?.space
   const bashToolCount = useMemo(() => chat.agents.reduce(
     (total, agent) => total + agent.commands.filter((command) => command.name.startsWith('!')).length,
     0,
@@ -246,7 +249,7 @@ export default function App() {
             }} />
             <AgentsButton count={chat.agents.length} open={activeToolPanel === 'agents'} onClick={handleOpenAgentPanel} />
             <ToolsButton count={bashToolCount} open={activeToolPanel === 'tools'} onClick={() => toggleToolPanel('tools')} />
-            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} />
+            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} space={agentSpace} />
             {/* Separate workspace nav (assets / IOA / agents / connect) from the
                 account utilities (settings / logout) so the row reads as two groups. */}
             <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />

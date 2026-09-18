@@ -27,10 +27,13 @@ const ARCH_OPTIONS: { value: Arch; label: string; osFilter?: OS[] }[] = [
 
 const CHINA_MIRROR = 'https://ghfast.top/'
 const NODE_NAME_PLACEHOLDER = 'NODE_NAME'
+const DEFAULT_SPACE = 'default'
 
 interface Props {
   serverURL: string | undefined
   version: string | undefined
+  /** Collaboration space of the agents already here, so the new node lands beside them. */
+  space?: string
 }
 
 function detectPlatform(): Platform {
@@ -72,21 +75,21 @@ function authenticatedURL(rawURL: string, accessToken: string): string {
   return url.toString().replace(/\/$/, '')
 }
 
-function agentArgs(serverURL: string, accessToken: string): string {
-  return `--server-url '${authenticatedURL(serverURL, accessToken)}' --space default --node-name '${NODE_NAME_PLACEHOLDER}'`
+function agentArgs(serverURL: string, accessToken: string, space: string): string {
+  return `--server-url '${authenticatedURL(serverURL, accessToken)}' --space '${space}' --node-name '${NODE_NAME_PLACEHOLDER}'`
 }
 
-function connectCmd(os: OS, serverURL: string, accessToken: string): string {
-  const args = agentArgs(serverURL, accessToken)
+function connectCmd(os: OS, serverURL: string, accessToken: string, space: string): string {
+  const args = agentArgs(serverURL, accessToken, space)
   if (os === 'windows') {
     return `.\\aiscan-full.exe agent ${args}`
   }
   return `./aiscan-full agent ${args}`
 }
 
-function installCmd(os: OS, arch: Arch, serverURL: string, accessToken: string, source: DownloadSource, tag: string): string {
+function installCmd(os: OS, arch: Arch, serverURL: string, accessToken: string, space: string, source: DownloadSource, tag: string): string {
   const dlURL = releaseURL(os, arch, source, tag)
-  const args = agentArgs(serverURL, accessToken)
+  const args = agentArgs(serverURL, accessToken, space)
   if (os === 'windows') {
     return `powershell -c "Invoke-WebRequest '${dlURL}' -OutFile aiscan.zip; Expand-Archive aiscan.zip -DestinationPath .; .\\aiscan-full.exe agent ${args}"`
   }
@@ -96,7 +99,7 @@ function installCmd(os: OS, arch: Arch, serverURL: string, accessToken: string, 
 
 type CopiedKey = string | null
 
-export default function QuickConnect({ serverURL, version }: Props) {
+export default function QuickConnect({ serverURL, version, space }: Props) {
   const { t } = useTranslation('app')
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>(detectPlatform)
@@ -179,8 +182,9 @@ export default function QuickConnect({ serverURL, version }: Props) {
   ]
 
   const tokenReady = accessToken !== null
-  const install = tokenReady ? installCmd(os, arch, serverURL, accessToken, downloadSource, releaseTag(version)) : ''
-  const connect = tokenReady ? connectCmd(os, serverURL, accessToken) : ''
+  const agentSpace = space?.trim() || DEFAULT_SPACE
+  const install = tokenReady ? installCmd(os, arch, serverURL, accessToken, agentSpace, downloadSource, releaseTag(version)) : ''
+  const connect = tokenReady ? connectCmd(os, serverURL, accessToken, agentSpace) : ''
 
   return (
     <div className="relative" ref={panelRef}>
