@@ -379,7 +379,8 @@ export function useChatSession() {
   // NOT rebuilt here — WatchEvents replay is the sole source of agent history
   // (it carries the complete message/tool/status stream); this only restores the
   // user/system conversation shell shown before the replay arrives. Scan-result
-  // cards are not messages and are rebuilt from the session's scan ids instead.
+  // cards are not messages: they arrive as an AOP extension, or are rebuilt from
+  // the session's scan ids when no extension was ever emitted for it.
   function buildTimelineFromMessages(msgs: ChatMessage[]): TimelineItem[] {
     const built: TimelineItem[] = []
     for (const msg of msgs) {
@@ -468,10 +469,12 @@ export function useChatSession() {
             for (const e of withResult) next.set(e.scanID, e.nodes!)
             return next
           })
-          // Scan extensions ride the live stream only — isReliableAOPEvent does
-          // not persist them — so a reload has no scan_complete row to replay.
-          // Rebuild one card per linked scan that still has SCO nodes, keyed
-          // like the live path so a late extension can't double-render it.
+          // A scan that finished while this session was already bound replays its
+          // persisted extension, so a card normally arrives from the stream. A
+          // session bound after the scan already finished never got one — the
+          // fan-out only runs once, at completion — and its card exists nowhere
+          // else. Rebuild one per linked scan that still has SCO nodes, keyed like
+          // the live path so a replayed extension can't double-render it.
           setTimelineItems((prev) => {
             const next = [...prev]
             for (const e of withResult) {

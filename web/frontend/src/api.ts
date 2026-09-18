@@ -56,9 +56,15 @@ export type { AgentListMetadata, AgentView, CommandSpec, ConfigView, DistributeC
 export type { Session as AOPSession } from '@cyber/aop';
 export { ScanStatus };
 
+// Binary framing, matching the AOP channel. The events these services return
+// carry google.protobuf.Any extensions whose type set is open — SessionHistory,
+// SessionScanEvent, the observe payloads, and whatever a future agent attaches.
+// JSON framing expands an Any by looking its type up in a client-side registry,
+// so one unregistered extension makes the entire response undecodable; binary
+// framing leaves the Any as {typeUrl, value} for the caller's own anyUnpack.
 const connectTransport = createConnectTransport({
   baseUrl: window.location.origin,
-  useBinaryFormat: false,
+  useBinaryFormat: true,
 })
 
 // One Cyber facade is initialized for the application. The generated service
