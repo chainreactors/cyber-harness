@@ -210,8 +210,12 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The session binds the scan at open time; that durable link — not a
+	// fabricated in-flight task — is what the completion fan-out resolves.
+	if err := store.LinkScanToSession(context.Background(), "session-scan", "scan-123"); err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(ServiceConfig{Store: store})
-	service.registerSessionTask("scan-123", "session-scan", "")
 	service.broadcastScanComplete("scan-123")
 
 	events, err := store.ListAOPEvents(context.Background(), "session-scan", 10)
@@ -232,6 +236,29 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	ids, err := store.SessionScanIDs(context.Background(), "session-scan")
 	if err != nil || len(ids) != 1 || ids[0] != "scan-123" {
 		t.Fatalf("session scan ids = %v, err = %v", ids, err)
+	}
+}
+
+func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "session-unbound")
+	service := NewService(ServiceConfig{Store: store})
+	// An in-flight task id is not a scan binding. The completion fan-out resolves
+	// the durable session_scans relation, so a stray task registration must not
+	// leak a result card into a session the scan was never bound to.
+	service.registerSessionTask("scan-stray", "session-unbound", "")
+	service.broadcastScanComplete("scan-stray")
+
+	events, err := store.ListAOPEvents(context.Background(), "session-unbound", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %+v, want none", events)
 	}
 }
 

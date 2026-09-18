@@ -591,6 +591,17 @@ func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]s
 	return ids, err
 }
 
+// ScanSessionIDs lists the sessions a scan is bound to. A session binds a scan
+// at open time (SessionBinding), so this is what a finishing scan needs to
+// address its result card; SessionScanIDs is the same relation read the other
+// way, from a session.
+func (s *SQLiteStore) ScanSessionIDs(ctx context.Context, scanID string) ([]string, error) {
+	var ids []string
+	err := s.orm.NewSelect().Model((*sessionScanModel)(nil)).Column("session_id").
+		Where("scan_id = ?", scanID).Scan(ctx, &ids)
+	return ids, err
+}
+
 func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error {
 	return s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		now := time.Now().UTC().Format(time.RFC3339Nano)

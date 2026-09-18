@@ -57,7 +57,7 @@ function aopExtension(event: AOPEvent): Record<string, unknown> | undefined {
   return undefined
 }
 
-export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking'
+export type TimelineItemKind = 'message' | 'scan_complete' | 'thinking'
 
 // ChatMessage is the flat render model the chat UI projects from the AOP event
 // log (listChatMessages returns raw EventDelivery records). It is a view model
@@ -123,7 +123,6 @@ export interface TimelineItem {
   message?: ChatMessage
   scanID?: string
   scanNodes?: SCONode[]
-  scanLines?: string[]
   agentName?: string
   content?: string
 }
@@ -379,9 +378,8 @@ export function useChatSession() {
   // Rebuild the platform timeline from persisted messages. Assistant content is
   // NOT rebuilt here — WatchEvents replay is the sole source of agent history
   // (it carries the complete message/tool/status stream); this only restores the
-  // platform artifacts the AOP stream doesn't render: scan-result cards
-  // (persisted as system markers) and the user/system conversation shell shown
-  // before the replay arrives.
+  // user/system conversation shell shown before the replay arrives. Scan-result
+  // cards are not messages and are rebuilt from the session's scan ids instead.
   function buildTimelineFromMessages(msgs: ChatMessage[]): TimelineItem[] {
     const built: TimelineItem[] = []
     for (const msg of msgs) {
@@ -468,6 +466,19 @@ export function useChatSession() {
           setScanResults((prev) => {
             const next = new Map(prev)
             for (const e of withResult) next.set(e.scanID, e.nodes!)
+            return next
+          })
+          // Scan extensions ride the live stream only — isReliableAOPEvent does
+          // not persist them — so a reload has no scan_complete row to replay.
+          // Rebuild one card per linked scan that still has SCO nodes, keyed
+          // like the live path so a late extension can't double-render it.
+          setTimelineItems((prev) => {
+            const next = [...prev]
+            for (const e of withResult) {
+              const id = `scanres-${e.scanID}`
+              if (next.some((item) => item.id === id)) continue
+              next.push({ id, kind: 'scan_complete', timestamp: Date.now(), scanID: e.scanID, scanNodes: e.nodes })
+            }
             return next
           })
         }

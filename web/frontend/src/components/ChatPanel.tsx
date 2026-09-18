@@ -59,15 +59,6 @@ const webUserAgent = 'cyber.web'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
-    case 'scan_started':
-    case 'scan_progress':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'scan_started',
-        data: { scanID: item.scanID || '', lines: item.scanLines || [] },
-      }
     case 'scan_complete':
       return {
         id: item.id,
@@ -395,10 +386,6 @@ function toViewerTimelineItem(
         role: 'thinking',
         content: item.content || '',
       }
-    case 'scan_started':
-    case 'scan_progress':
-      if (item.scanID && scanResults.has(item.scanID)) return null
-      return toExtensionItem(item)
     case 'scan_complete':
       return toExtensionItem(item)
     default:

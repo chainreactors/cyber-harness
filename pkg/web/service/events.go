@@ -196,24 +196,30 @@ func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, met
 	s.BroadcastAOPEvent(sessionID, event)
 }
 
+// broadcastScanComplete mirrors a finished scan into the AOP timeline of every
+// session bound to it, so a scan submitted over the scan RPC surfaces as a
+// result card in the chat that commissioned it. The binding is the durable
+// session_scans relation a session writes at open time (SessionBinding), not
+// the in-flight task map: a scan id is never a registered session task.
+// A session that binds after the scan already finished gets no live event and
+// rebuilds the card from its own scan ids on load instead.
 func (s *Service) broadcastScanComplete(scanID string) {
-	s.mu.Lock()
-	sid, ok := s.taskSessions[scanID]
-	s.mu.Unlock()
-	if !ok {
+	if s.store == nil {
 		return
 	}
-	if s.finishSessionTask(scanID) {
+	sessionIDs, err := s.store.ScanSessionIDs(context.Background(), scanID)
+	if err != nil || len(sessionIDs) == 0 {
 		return
 	}
-	_ = s.store.LinkScanToSession(context.Background(), sid, scanID)
 	value, err := anypb.New(&types.SessionScanEvent{ScanId: scanID, Status: types.ScanStatus_SCAN_STATUS_COMPLETED})
 	if err != nil {
 		return
 	}
-	s.BroadcastAOPEvent(sid, &aop.Event{
-		SessionId: sid,
-		Emitter:   "cyber.web",
-		Payload:   &aop.Event_Extension{Extension: value},
-	})
+	for _, sid := range sessionIDs {
+		s.BroadcastAOPEvent(sid, &aop.Event{
+			SessionId: sid,
+			Emitter:   "cyber.web",
+			Payload:   &aop.Event_Extension{Extension: value},
+		})
+	}
 }

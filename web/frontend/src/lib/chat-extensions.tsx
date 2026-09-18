@@ -1,29 +1,10 @@
-import { Activity, Bot, CheckCircle2 } from 'lucide-react'
+import { Bot, CheckCircle2 } from 'lucide-react'
 import { registerTimelineRenderer } from '@/viewer'
 import i18n from '../i18n'
 import type { SCONode } from '../api'
-import ScanProgressInline from '../components/chat/ScanProgressInline'
 import ScanSummaryCard from '../components/chat/ScanSummaryCard'
 
 export function registerChatExtensions() {
-  registerTimelineRenderer('scan_started', {
-    renderer: ({ item, context }) => {
-      const scanResults = context.scanResults as Map<string, SCONode[]> | undefined
-      return (
-        <ScanProgressInline
-          scanID={item.data.scanID as string}
-          lines={item.data.lines as string[] ?? []}
-          complete={scanResults?.has(item.data.scanID as string)}
-        />
-      )
-    },
-    mark: {
-      label: () => i18n.t('chat:scan'),
-      icon: Activity,
-      dotClass: 'border-blue-400 bg-blue-400',
-    },
-  })
-
   registerTimelineRenderer('scan_complete', {
     renderer: ({ item, context }) => {
       const scanID = item.data.scanID as string
