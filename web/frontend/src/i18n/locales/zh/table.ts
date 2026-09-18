@@ -21,4 +21,7 @@ export default {
   exportReport: '生成报告',
   selectAllRows: '全选筛选结果',
   selectRow: '选择第 {n} 行',
+  copyCell: '复制',
+  copiedCell: '已复制',
+  openLink: '打开链接',
 }

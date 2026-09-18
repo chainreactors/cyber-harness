@@ -11,6 +11,7 @@ const KEYS = [
   'search', 'searchField',
   'exportXlsx', 'exportCsv', 'exportReport',
   'selectAllRows', 'selectRow',
+  'copyCell', 'copiedCell', 'openLink',
 ] as const
 
 export function useTableLabels() {

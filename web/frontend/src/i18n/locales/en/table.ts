@@ -21,4 +21,7 @@ export default {
   exportReport: 'Generate report',
   selectAllRows: 'Select all filtered rows',
   selectRow: 'Select row {n}',
+  copyCell: 'Copy',
+  copiedCell: 'Copied',
+  openLink: 'Open link',
 }
