@@ -19,7 +19,7 @@ func TestDefaultCLIExcludesFullScannerCommands(t *testing.T) {
 	var cli cliOptions
 	parser := newCLIParser(&cli, 0)
 	for _, name := range []string{"katana", "passive"} {
-		if parser.Command.Find(name) != nil {
+		if parser.Find(name) != nil {
 			t.Errorf("standard CLI unexpectedly declares full-only command %q", name)
 		}
 	}
