@@ -22,7 +22,7 @@ make harness
 
 需要 Go 与完整应用构建、运行所需的原生依赖；缺失时直接失败，不跳过或替换实现。
 Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启动两个独立的
-`aiscan agent --transport stdio` 进程。每个场景有独立的配置、数据库与
+`aiscan agent --transport stdio` 进程，扫描场景启动独立的 Web Agent 和本地 HTTP 目标。每个场景有独立的配置、数据库与
 数据目录。无 LLM 场景仅继承操作系统及动态库加载所需环境变量。真实 LLM 场景
 只额外注入明确配置的 `CYBER_HARNESS_LLM_*`，不读取个人默认模型设置。
 
@@ -33,6 +33,7 @@ Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启�
 | `TestUserConfigurationAcrossCrashAndRestart` | 登录、跨客户端配置可见性、非法修改保持旧文件、错误后的有效保存、空白密钥保留、强制终止后恢复、重新编辑与登出再登录 |
 | `TestUserConcurrentProfileChanges` | 随机选择配置，三个独立客户端并发读取；检查每次读取是完整的旧/新状态、写入后全部客户端收敛、重启恢复最后一次提交 |
 | `TestUserStartupRecoveryAndConfirmedExit` | 错误 YAML 启动失败、用户修正文件后启动、保存、首次退出提示后二次确认、退出码 130、操作系统释放端口及数据库文件、再次启动恢复配置 |
+| `TestUserHubScanRequiresConnectedNode` | 无节点时明确拒绝且不创建扫描记录；外部 Agent 接入后完成真实 HTTP 目标扫描；节点退出后再次拒绝，已完成记录保持不变；无需 LLM |
 | `TestLiveLLMRecoveryAcrossRestart`（`live_llm`） | 真实模型响应、应用模型状态、漏填模型后的错误与重试、应用重启后从新客户端再次调用真实模型 |
 | `TestLiveLLMConcurrentClients`（`live_llm`） | 两个客户端并发请求真实模型，同时第三个客户端读取配置与状态，完成后登出再登录并再次调用模型 |
 | `TestLiveLLMMultiAgentIOAThreadAndIsolation`（`live_llm`） | 两个独立 AI 上下文经两个应用进程实际调用 IOA；随机任务、计算回复、节点定向与原消息引用、回执、完整线程读取、空间切换与隔离 |
@@ -48,7 +49,7 @@ Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启�
 当前 CLI 在二次退出确认后调用 `os.Exit(130)`；退出测试不能证明 App 的 defer 收尾执行。
 Web 长期服务也不受 `--timeout` 控制。两点按实际用户行为记录，不把强制退出称为优雅关闭。
 
-默认三个场景验证无 LLM 的 Web 配置工作流。两个 LLM 连接场景通过应用的 `TestLLM`
+默认场景验证无 LLM 的 Web 配置工作流与外部节点扫描。两个 LLM 连接场景通过应用的 `TestLLM`
 接口向真实 Provider 发送 `ping`，要求成功且回复非空，不匹配固定文本或用假模型替代。
 这两个场景有 6 次显式模型请求，另有 3 次应用启动健康检查；每次请求的
 输出上限由应用探测接口限制为 16 tokens，无测试级自动重试。服务失败和超时直接失败。

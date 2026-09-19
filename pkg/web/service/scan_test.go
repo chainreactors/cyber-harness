@@ -27,6 +27,72 @@ func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want types.Scan
 	return nil
 }
 
+func TestSubmitScanWithoutNodeRejectsBeforeCreatingRecord(t *testing.T) {
+	for _, withPool := range []bool{false, true} {
+		name := "nil-pool"
+		if withPool {
+			name = "empty-pool"
+		}
+		t.Run(name, func(t *testing.T) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			svc := NewService(ServiceConfig{Store: store})
+			if withPool {
+				svc.SetAgentPool(NewAgentPool(svc.Hub(), nil))
+			}
+			response, err := svc.api.Scans.SubmitScan(context.Background(), &types.SubmitScanRequest{
+				RequestId: "no-node", Target: "http://127.0.0.1:8080", Mode: "quick",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.RequestId != "no-node" || response.GetRejected().GetCode() != "FAILED_PRECONDITION" || response.GetRejected().GetMessage() != ErrScanUnavailable.Error() {
+				t.Fatalf("unexpected receipt: %v", response)
+			}
+			scans, err := svc.ListScans(context.Background())
+			if err != nil || len(scans) != 0 {
+				t.Fatalf("rejected scan persisted: scans=%v err=%v", scans, err)
+			}
+			// Invalid input must still be reported as an argument error.
+			response, err = svc.api.Scans.SubmitScan(context.Background(), &types.SubmitScanRequest{
+				RequestId: "bad-target", Target: "", Mode: "quick",
+			})
+			if err != nil || response.GetRejected().GetCode() != "INVALID_ARGUMENT" {
+				t.Fatalf("invalid target receipt=%v err=%v", response, err)
+			}
+		})
+	}
+}
+
+func TestQueuedScanLosingNodeFailsWithoutLocalFallback(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
+	pool := NewAgentPool(svc.Hub(), nil)
+	svc.SetAgentPool(pool)
+	agent, _ := newFakeAgent("departing-node", 1)
+	pool.register(agent)
+
+	// Hold the execution slot until the only node has disconnected.
+	svc.sem <- struct{}{}
+	scan, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false)
+	pool.unregister(agent)
+	<-svc.sem
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitScanStatus(t, store, scan.Id, types.ScanStatus_SCAN_STATUS_FAILED)
+	if failed.Error != ErrScanUnavailable.Error() {
+		t.Fatalf("node loss error = %q", failed.Error)
+	}
+}
+
 func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {

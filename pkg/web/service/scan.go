@@ -1,30 +1,25 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/url"
-	"os"
 	"runtime/debug"
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/commands"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
 )
 
 var (
+	ErrScanUnavailable   = managementapi.ErrScanUnavailable
 	ErrScanNotFound      = managementapi.ErrScanNotFound
 	ErrScanNotCancelable = managementapi.ErrScanNotCancelable
 )
@@ -56,6 +51,10 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 	}
 	if (verify || sniper || deep) && !s.aiAvailable() {
 		return nil, fmt.Errorf("selected analysis options require an LLM provider")
+	}
+
+	if s.agents == nil || s.agents.Count() == 0 {
+		return nil, ErrScanUnavailable
 	}
 
 	now := nowProto()
@@ -189,18 +188,17 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 
 	s.hub.BroadcastScan(managementapi.ScanStatusEvent(scanID, types.ScanStatus_SCAN_STATUS_RUNNING), false)
 
-	// Try agent dispatch first, fall back to local execution.
-	if s.agents != nil && s.agents.Count() > 0 {
-		s.runScanViaAgent(ctx, scan)
-		return
-	}
-	s.runScanLocally(ctx, scan)
+	// The Web hub delegates scans to nodes; it does not own scanning engines.
+	s.runScanViaAgent(ctx, scan)
 }
 
 func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
-	agent := s.agents.Pick()
+	var agent *remoteAgent
+	if s.agents != nil {
+		agent = s.agents.Pick()
+	}
 	if agent == nil {
-		_, _ = s.failScan(scan, "no agents available")
+		_, _ = s.failScan(scan, ErrScanUnavailable.Error())
 		return
 	}
 	s.mu.Lock()
@@ -248,36 +246,6 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
 	}
 	if progress := lastOutputLine(res.Output); progress != "" {
 		scan.Progress = progress
-	}
-
-	_, _ = s.completeScan(context.Background(), scan)
-}
-
-func (s *Service) runScanLocally(ctx context.Context, scan *types.Scan) {
-	ctx = operation.ContextWithInvocation(ctx, operation.Invocation{CallID: scan.Id, Emitter: "scan"})
-	streamWriter := &scanStreamWriter{
-		hub:    s.hub,
-		scanID: scan.Id,
-		store:  s.store,
-		scan:   scan,
-		ctx:    ctx,
-	}
-
-	args := scanArgsForScan(scan)
-	_, err := s.executeScan(ctx, args, streamWriter)
-	if err != nil {
-		s.finishScanContext(scan, ctx.Err())
-		if ctx.Err() == nil {
-			_, _ = s.failScan(scan, err.Error())
-		}
-		return
-	}
-	if streamWriter.scan != nil {
-		scan = streamWriter.scan
-	}
-	if ctx.Err() != nil {
-		s.finishScanContext(scan, ctx.Err())
-		return
 	}
 
 	_, _ = s.completeScan(context.Background(), scan)
@@ -339,83 +307,6 @@ func scanArgsForScan(scan *types.Scan) []string {
 		args = append(args, "--deep")
 	}
 	return args
-}
-
-func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, error) {
-	runtime, release := s.acquireRuntime()
-	defer release()
-	if runtime == nil || runtime.Bash() == nil {
-		return "", fmt.Errorf("cyber runtime is not ready")
-	}
-	bash := runtime.Bash()
-	var text strings.Builder
-	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), terminaltool.BashExecOptions{
-		OnOutput: func(data []byte) {
-			_, _ = text.Write(data)
-			if stream != nil {
-				_, _ = stream.Write(data)
-			}
-		},
-	}); err != nil {
-		return text.String(), err
-	}
-	return text.String(), nil
-}
-
-type scanStreamWriter struct {
-	hub    *Hub
-	scanID string
-	store  *SQLiteStore
-	scan   *types.Scan
-	ctx    context.Context
-	buf    []byte
-}
-
-func (w *scanStreamWriter) Write(p []byte) (int, error) {
-	if w.ctx != nil {
-		select {
-		case <-w.ctx.Done():
-			return 0, w.ctx.Err()
-		default:
-		}
-	}
-	w.buf = append(w.buf, p...)
-	for {
-		idx := bytes.IndexByte(w.buf, '\n')
-		if idx < 0 {
-			break
-		}
-		line := string(w.buf[:idx])
-		w.buf = w.buf[idx+1:]
-
-		line = output.StripANSI(line)
-		if line == "" {
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "[scan:%s] %s\n", w.scanID, line)
-
-		current, err := w.store.Get(context.Background(), w.scanID)
-		if err != nil {
-			return 0, err
-		}
-		if current.Status == types.ScanStatus_SCAN_STATUS_CANCELED {
-			return 0, context.Canceled
-		}
-		current.Progress = line
-		current.UpdatedAt = nowProto()
-		changed, err := w.store.TransitionScan(context.Background(), current, types.ScanStatus_SCAN_STATUS_RUNNING)
-		if err != nil {
-			return 0, err
-		}
-		if !changed {
-			return 0, context.Canceled
-		}
-		w.scan = current
-
-		w.hub.BroadcastScan(managementapi.ScanProgressEvent(w.scanID, line), false)
-	}
-	return len(p), nil
 }
 
 func lastOutputLine(s string) string {
