@@ -14,6 +14,16 @@ func TestFullScannerSet(t *testing.T) {
 	}
 }
 
+func TestFullCLIDeclaresFullScannerCommands(t *testing.T) {
+	var cli cliOptions
+	parser := newCLIParser(&cli, 0)
+	for _, name := range []string{"katana", "passive"} {
+		if parser.Command.Find(name) == nil {
+			t.Errorf("full CLI is missing command %q", name)
+		}
+	}
+}
+
 func TestFullManifestTags(t *testing.T) {
 	assertManifestTags(t, "FULL")
 }

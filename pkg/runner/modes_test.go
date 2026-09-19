@@ -129,3 +129,28 @@ func TestFilterScannerJSONLinesRemovesPTYProgress(t *testing.T) {
 		t.Fatalf("filtered JSON = %q, want %q", got, want)
 	}
 }
+
+func TestDirectScannerJSONOutputUsesCommandSpecificFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "scan json", args: []string{"scan", "--json"}, want: true},
+		{name: "spray json", args: []string{"spray", "-j"}, want: true},
+		{name: "neutron jsonl", args: []string{"neutron", "--jsonl"}, want: true},
+		{name: "proton json", args: []string{"proton", "--json"}, want: true},
+		{name: "gogo stdout jsonl", args: []string{"gogo", "-o", "jl"}, want: true},
+		{name: "gogo stdout jsonl equals", args: []string{"gogo", "--output=jsonl"}, want: true},
+		{name: "gogo previous results input", args: []string{"gogo", "-j", "previous.json"}, want: false},
+		{name: "zombie stdout json", args: []string{"zombie", "-o", "json"}, want: true},
+		{name: "curl request", args: []string{"curl", "--json", "{}", "http://127.0.0.1"}, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isDirectScannerJSONOutput(test.args); got != test.want {
+				t.Fatalf("isDirectScannerJSONOutput(%v) = %v, want %v", test.args, got, test.want)
+			}
+		})
+	}
+}
