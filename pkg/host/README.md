@@ -2,11 +2,11 @@
 
 `pkg/host` 负责 inline 进程内调用与 stdio 进程间通信。两种入口共用
 `Host.Handle` 和现有 `aop.NamespaceMux`，直接使用 `*aop.Envelope`。
-该包仅依赖 AOP、protobuf 和标准库，不构造 Agent、工具或产品 App。
+该包仅依赖 AOP、protobuf 和标准库，不构造 Agent、工具或应用 App。
 
 ## 使用
 
-应用在开始接收请求前，注册实际业务处理函数。现有产品提供
+应用在开始接收请求前，注册实际业务处理函数。现有 Profile 提供
 `session.Manager.RegisterNamespaces(mux)`；嵌入者也可直接调用 `mux.Register`。
 
 ```go
@@ -26,7 +26,7 @@ err = h.Serve(stream)
 ```
 
 可编译的最小 inline 示例见 [example_test.go](example_test.go)，真实子进程往返
-验证见 [process_test.go](process_test.go)。这两个示例均不调用模型或工具；产品进程的用户验收见 [harness](../../cmd/harness/README.md)。
+验证见 [process_test.go](process_test.go)。这两个示例均不调用模型或工具；应用进程的用户验收见 [harness](../../cmd/harness/README.md)。
 
 ## 唯一职责与状态所有权
 
@@ -35,7 +35,7 @@ err = h.Serve(stream)
 | `Host` | 通信 context、请求准入、在途分发、发送互斥、首个写入错误 |
 | `Stdio` | 行读取器和输出 writer；只编解码，不保存连接状态 |
 | `aop.NamespaceMux` | 每连接的协议路由表；注册带 owner，拥有 namespace context、执行准入和排空 |
-| 产品 Runtime | Session、Run、Inbox、业务 goroutine、事件订阅 |
+| Profile Runtime | Session、Run、Inbox、业务 goroutine、事件订阅 |
 
 Host 是一个实际需要维护连接状态的具体对象。它不持有额外发送对象，不提供
 中间传输层、依赖容器或另一套业务状态机。`Send` 接收现有的
@@ -43,7 +43,7 @@ Host 是一个实际需要维护连接状态的具体对象。它不持有额外
 所有写入错误只由 Host 保存，Stdio 不重复保存错误或给写入加锁。
 
 Web 使用已有 `pkg/web.Connection`，Node 使用已有连接循环和发送队列；它们已经
-拥有连接生命周期，因此不再套 Host。Node 直接调用产品公开的 core/command
+拥有连接生命周期，因此不再套 Host。Node 直接调用 Profile 公开的 core/command
 处理函数，复用同一份业务实现；不再靠可选接口断言选择控制入口，也不重复解码。
 Web/Node 的握手、错误码及 EOF 策略保持各自原有行为。
 
@@ -69,7 +69,7 @@ Web/Node 的握手、错误码及 EOF 策略保持各自原有行为。
 
 ## 边界守卫
 
-公开 inline 接入、产品 stdio 接线、真实子进程通信、异步响应、连接取消和
+公开 inline 接入、Profile stdio 接线、真实子进程通信、异步响应、连接取消和
 关闭隔离、并发发送与错误保留、Node 具体运行时接线回归，以及协议依赖边界检查。
 `queuedEnvelopeStream`、嵌套 Host、可选控制接口和 Stdio 重复状态均不保留。
 

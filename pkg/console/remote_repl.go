@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 
-	tmuxpkg "github.com/chainreactors/aiscan/agent/tmux"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	cfg "github.com/chainreactors/cyber/core/config"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
-	"github.com/chainreactors/utils/pty"
+	"github.com/chainreactors/utils/proc"
 )
 
 const MainREPLName = "main-repl"
@@ -23,17 +23,17 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
-	if rt == nil || rt.App() == nil {
+func StartPersistent(rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
+	if !rt.Configured() {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
-	manager := bashManager(rt.App().Bash)
+	manager := bashManager(rt.Bash())
 	if manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
 	ctx, cancel := context.WithCancel(rt.Context())
 	r := &REPL{cancel: cancel, done: make(chan struct{})}
-	session, err := rt.OpenSession(ctx, agentext.SessionOptions{ID: MainREPLName})
+	session, err := rt.OpenSession(ctx, agentsession.SessionOptions{ID: MainREPLName})
 	if err != nil {
 		cancel()
 		return nil, err
@@ -42,27 +42,26 @@ func StartPersistent(rt *agentext.Runtime, option *cfg.Option, bindings *console
 		option = &cfg.Option{}
 	}
 	control := rlterm.NewControl(true, 80, 24)
-	info, err := manager.CreateInteractiveFuncWithOptions(ctx, MainREPLName, "aiscan repl", pty.InteractiveOptions{
-		Timeout: 0, StripANSI: false, Resize: control.SetSize,
-	}, func(replCtx context.Context, input io.Reader, output io.Writer) error {
-		defer close(r.done)
-		defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
-		for {
-			err := runRemoteConsole(replCtx, rt, session, option, input, output, control, bindings)
-			if replCtx.Err() != nil {
-				return replCtx.Err()
+	// No timeout: the REPL lives as long as its context does.
+	_, err = manager.Start(ctx, proc.Spec{Name: MainREPLName, Kind: "repl", Command: "cyber repl"},
+		proc.IOFunc(func(replCtx context.Context, input io.Reader, output io.Writer) error {
+			defer close(r.done)
+			defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentsession.SessionCloseCompleted) }()
+			for {
+				err := runRemoteConsole(replCtx, rt, session, option, input, output, control, bindings)
+				if replCtx.Err() != nil {
+					return replCtx.Err()
+				}
+				if err != nil {
+					return err
+				}
 			}
-			if err != nil {
-				return err
-			}
-		}
-	})
+		}, func(cols, rows int) error { control.SetSize(cols, rows); return nil }))
 	if err != nil {
 		cancel()
-		_ = rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseError)
+		_ = rt.CloseSession(context.Background(), MainREPLName, agentsession.SessionCloseError)
 		return nil, err
 	}
-	manager.SetKind(info.ID, "repl")
 	return r, nil
 }
 
@@ -74,7 +73,7 @@ func (r *REPL) Close() {
 	<-r.done
 }
 
-func bashManager(bash *commands.BashTool) *tmuxpkg.Manager {
+func bashManager(bash *terminaltool.BashTool) *procbus.Manager {
 	if bash == nil {
 		return nil
 	}

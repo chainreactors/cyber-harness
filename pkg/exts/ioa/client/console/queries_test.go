@@ -10,10 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	clientext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	ioatools "github.com/chainreactors/cyber/tools/ioa"
 )
 
 func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
@@ -43,13 +44,10 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := clientext.New(ioatools.Config{
+	client := clientext.New(ioatools.Config{
 		URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true,
-	}, clientext.Services{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "client", Extension: client})
+	}, clientext.Dependencies{})
+	set, err := extension.New(hosttest.Capabilities(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +56,7 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	bindings := Bind(client.Runtime(), "", "")
+	bindings := Bind(client.Service(), "", "")
 	view := consoleapi.View{Out: &output, Err: &output, Table: func(title string, rows [][]string) { fmt.Fprintln(&output, title, rows) }}
 	arguments := map[string][]string{
 		"/spaces": {}, "/nodes": {}, "/messages": {"team"}, "/context": {"team", "message"},

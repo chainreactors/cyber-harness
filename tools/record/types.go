@@ -52,26 +52,26 @@ type SessionInfo struct {
 	Error       string     `json:"error,omitempty"`
 }
 
-type captureRequest struct {
+type CaptureRequest struct {
 	Target       string
 	WindowHandle uint64
 	PID          int64
 	FPS          int
 }
 
-type resolvedTarget struct {
+type ResolvedTarget struct {
 	Info   TargetInfo
 	Native any
 }
 
-type mediaInfo struct {
+type MediaInfo struct {
 	Width  int
 	Height int
 	Frames int64
 }
 
-type captureBackend interface {
-	Resolve(context.Context, captureRequest) (resolvedTarget, error)
-	Screenshot(context.Context, resolvedTarget) (image.Image, error)
-	Record(context.Context, resolvedTarget, string, int) (mediaInfo, error)
+type Backend interface {
+	Resolve(context.Context, CaptureRequest) (ResolvedTarget, error)
+	Screenshot(context.Context, ResolvedTarget) (image.Image, error)
+	Record(context.Context, ResolvedTarget, string, int) (MediaInfo, error)
 }

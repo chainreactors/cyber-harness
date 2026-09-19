@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	agentpkg "github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/truncate"
+	agentpkg "github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/truncate"
 )
 
 const (
@@ -27,13 +28,45 @@ type Config struct {
 	MaxRetries    int
 	ContextWindow int
 	Logger        telemetry.Logger
+	Prompts       prompt.Resolver
 }
 
+// Verdict is the evaluator's answer for one round. Pass ends the loop as a
+// success; when Pass is false, Continue is the evaluator's own call on whether
+// another round is still worth running. There is no fixed round budget the
+// verdict has to fit into — the loop keeps going while the evaluator asks for
+// it, so Continue=false is the ordinary way an unfinished goal stops.
 type Verdict struct {
 	Pass           bool   `json:"pass"`
+	Continue       bool   `json:"continue"`
 	Reason         string `json:"reason"`
 	Feedback       string `json:"feedback"`
 	InheritContext bool   `json:"inherit_context"`
+}
+
+// Round records a verdict the evaluator already returned. The loop feeds the
+// previous rounds back in so the evaluator can see whether its own feedback
+// moved anything, which is what makes an open-ended loop safe to run.
+type Round struct {
+	Number   int
+	Pass     bool
+	Reason   string
+	Feedback string
+}
+
+// Request is one evaluation: the goal, the trace of the round that just ran,
+// and the rounds that came before it.
+type Request struct {
+	Goal          string
+	Criteria      string
+	Messages      []*aop.Message
+	Output        string
+	Turns         int
+	ContextTokens int
+	Round         int
+	Ceiling       int
+	Guidance      string
+	History       []Round
 }
 
 type Evaluator struct {
@@ -53,13 +86,26 @@ func New(cfg Config) *Evaluator {
 	return &Evaluator{cfg: cfg}
 }
 
-func (e *Evaluator) Evaluate(ctx context.Context, goal, criteria string, messages []*aop.Message, output string, turns, contextTokens int) (*Verdict, error) {
-	trace := buildTrace(messages, output, turns, contextTokens, e.cfg.ContextWindow)
-	prompt := buildPrompt(goal, criteria, trace)
+func (e *Evaluator) Evaluate(ctx context.Context, req Request) (*Verdict, error) {
+	trace := buildTrace(req.Messages, req.Output, req.Turns, req.ContextTokens, e.cfg.ContextWindow)
+	if e.cfg.Prompts == nil {
+		return nil, fmt.Errorf("evaluator prompt resolver is nil")
+	}
+	input := prompt.Context{Evaluation: prompt.EvaluationContext{
+		Goal: req.Goal, Criteria: req.Criteria, Progress: buildProgress(req), Trace: trace,
+	}}
+	input.Target = prompt.EvaluatorSystem
+	systemResult := e.cfg.Prompts.Build(ctx, input)
+	input.Target = prompt.EvaluatorRequest
+	requestResult := e.cfg.Prompts.Build(ctx, input)
+	for _, diagnostic := range append(systemResult.Diagnostics, requestResult.Diagnostics...) {
+		e.cfg.Logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
+	}
+	requestPrompt := requestResult.Prompt
 
 	var lastErr error
 	for attempt := 0; attempt < e.cfg.MaxRetries; attempt++ {
-		v, err := e.call(ctx, prompt)
+		v, err := e.call(ctx, systemResult.Prompt, requestPrompt)
 		if err == nil {
 			return v, nil
 		}
@@ -76,27 +122,17 @@ func (e *Evaluator) Evaluate(ctx context.Context, goal, criteria string, message
 	return nil, fmt.Errorf("evaluate failed after %d attempts: %w", e.cfg.MaxRetries, lastErr)
 }
 
-const systemPrompt = `You are an evaluator. Call the "verdict" tool with your result. No text replies.
-
-Rules:
-- pass=true only if the task was fully achieved per criteria
-- feedback: actionable next step when pass=false
-- inherit_context decision based on context_usage% shown in trace:
-  - >80%: MUST set inherit_context=false (context nearly full, fresh start required)
-  - >50%: SHOULD set inherit_context=false unless critical intermediate state exists
-  - <=50%: default inherit_context=true
-- When inherit_context=false, feedback must be fully self-contained (include file paths, findings, variable names, prior progress)`
-
 var verdictTool = func() *aop.ToolDefinition {
 	schema, _ := aop.JSONValue(map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
 			"pass":            map[string]interface{}{"type": "boolean", "description": "task fully achieved"},
+			"continue":        map[string]interface{}{"type": "boolean", "description": "when pass=false, whether another round can still make progress"},
 			"reason":          map[string]interface{}{"type": "string", "description": "one-sentence summary"},
 			"feedback":        map[string]interface{}{"type": "string", "description": "next step if not pass; self-contained when inherit_context=false"},
 			"inherit_context": map[string]interface{}{"type": "boolean", "description": "false to discard conversation history for next round"},
 		},
-		"required": []string{"pass", "reason", "feedback", "inherit_context"},
+		"required": []string{"pass", "continue", "reason", "feedback", "inherit_context"},
 	})
 	return &aop.ToolDefinition{
 		Type:        "function",
@@ -106,7 +142,7 @@ var verdictTool = func() *aop.ToolDefinition {
 	}
 }()
 
-func (e *Evaluator) call(ctx context.Context, userPrompt string) (*Verdict, error) {
+func (e *Evaluator) call(ctx context.Context, systemPrompt, userPrompt string) (*Verdict, error) {
 	temp := float64(0)
 	resp, err := e.cfg.Provider.ChatCompletion(ctx, &provider.ChatCompletionRequest{
 		Model: e.cfg.Model,
@@ -137,13 +173,27 @@ func (e *Evaluator) call(ctx context.Context, userPrompt string) (*Verdict, erro
 	return nil, fmt.Errorf("model did not call verdict tool")
 }
 
-func buildPrompt(goal, criteria, trace string) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Goal\n%s\n\n", goal)
-	if criteria != "" {
-		fmt.Fprintf(&sb, "## Acceptance Criteria\n%s\n\n", criteria)
+// buildProgress shows the evaluator what its earlier rounds asked for and what
+// came back, so "no progress" is a judgement it can actually make.
+func buildProgress(req Request) string {
+	if req.Round <= 0 {
+		return ""
 	}
-	fmt.Fprintf(&sb, "## Execution Trace\n%s", trace)
+	var sb strings.Builder
+	if req.Guidance != "" {
+		fmt.Fprintf(&sb, "User guidance on how long to keep going: %s\n", truncate.Clip(req.Guidance, maxResultPreview))
+	}
+	if req.Ceiling > 0 {
+		fmt.Fprintf(&sb, "Round %d (hard ceiling %d, reached only if you never stop the loop)\n", req.Round, req.Ceiling)
+	} else {
+		fmt.Fprintf(&sb, "Round %d\n", req.Round)
+	}
+	for _, past := range req.History {
+		fmt.Fprintf(&sb, "  [round %d] pass=%v reason=%s\n", past.Number, past.Pass, truncate.Clip(past.Reason, maxResultPreview))
+		if past.Feedback != "" {
+			fmt.Fprintf(&sb, "    you asked for: %s\n", truncate.Clip(past.Feedback, maxResultPreview))
+		}
+	}
 	return sb.String()
 }
 

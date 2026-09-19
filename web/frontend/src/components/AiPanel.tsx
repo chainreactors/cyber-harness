@@ -17,7 +17,7 @@ export interface AiPanelProps {
  * The Cortex "AI 研判" panel — a Cortex-blue left-edged, ai-tinted box with a
  * mono eyebrow over an analysis body (markdown or text). The signature the
  * findings / asset views hand-rolled per call site (`border-l-4 border-l-ai
- * bg-ai/5` + `mono-label text-ai`). Kept aiscan-local because it leans on the
+ * bg-ai/5` + `mono-label text-ai`). Kept cyber-local because it leans on the
  * app-local `ai` role token, which isn't in the shared `@cyber/theme`.
  */
 export function AiPanel({ label, action, className, bodyClassName, children }: AiPanelProps) {

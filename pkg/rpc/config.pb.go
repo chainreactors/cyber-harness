@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,42 +25,42 @@ var File_rpc_config_proto protoreflect.FileDescriptor
 
 const file_rpc_config_proto_rawDesc = "" +
 	"\n" +
-	"\x10rpc/config.proto\x12\x11aiscan.rpc.config\x1a\x12types/config.proto2\x92\x04\n" +
-	"\rConfigService\x12N\n" +
-	"\tGetConfig\x12\x1f.aiscan.config.GetConfigRequest\x1a .aiscan.config.GetConfigResponse\x12W\n" +
-	"\fUpdateConfig\x12\".aiscan.config.UpdateConfigRequest\x1a#.aiscan.config.UpdateConfigResponse\x12`\n" +
-	"\x0fActivateProfile\x12%.aiscan.config.ActivateProfileRequest\x1a&.aiscan.config.ActivateProfileResponse\x12H\n" +
-	"\aTestLLM\x12\x1e.aiscan.config.LLMProbeRequest\x1a\x1d.aiscan.config.LLMProbeResult\x12M\n" +
+	"\x10rpc/config.proto\x12\x10cyber.rpc.config\x1a\x12types/config.proto2\x86\x04\n" +
+	"\rConfigService\x12L\n" +
+	"\tGetConfig\x12\x1e.cyber.config.GetConfigRequest\x1a\x1f.cyber.config.GetConfigResponse\x12U\n" +
+	"\fUpdateConfig\x12!.cyber.config.UpdateConfigRequest\x1a\".cyber.config.UpdateConfigResponse\x12^\n" +
+	"\x0fActivateProfile\x12$.cyber.config.ActivateProfileRequest\x1a%.cyber.config.ActivateProfileResponse\x12F\n" +
+	"\aTestLLM\x12\x1d.cyber.config.LLMProbeRequest\x1a\x1c.cyber.config.LLMProbeResult\x12K\n" +
 	"\n" +
-	"ListModels\x12\x1e.aiscan.config.LLMProbeRequest\x1a\x1f.aiscan.config.ListModelsResult\x12]\n" +
-	"\x0eTestConnection\x12$.aiscan.config.TestConnectionRequest\x1a%.aiscan.config.TestConnectionResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"ListModels\x12\x1d.cyber.config.LLMProbeRequest\x1a\x1e.cyber.config.ListModelsResult\x12[\n" +
+	"\x0eTestConnection\x12#.cyber.config.TestConnectionRequest\x1a$.cyber.config.TestConnectionResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_config_proto_goTypes = []any{
-	(*types.GetConfigRequest)(nil),        // 0: aiscan.config.GetConfigRequest
-	(*types.UpdateConfigRequest)(nil),     // 1: aiscan.config.UpdateConfigRequest
-	(*types.ActivateProfileRequest)(nil),  // 2: aiscan.config.ActivateProfileRequest
-	(*types.LLMProbeRequest)(nil),         // 3: aiscan.config.LLMProbeRequest
-	(*types.TestConnectionRequest)(nil),   // 4: aiscan.config.TestConnectionRequest
-	(*types.GetConfigResponse)(nil),       // 5: aiscan.config.GetConfigResponse
-	(*types.UpdateConfigResponse)(nil),    // 6: aiscan.config.UpdateConfigResponse
-	(*types.ActivateProfileResponse)(nil), // 7: aiscan.config.ActivateProfileResponse
-	(*types.LLMProbeResult)(nil),          // 8: aiscan.config.LLMProbeResult
-	(*types.ListModelsResult)(nil),        // 9: aiscan.config.ListModelsResult
-	(*types.TestConnectionResponse)(nil),  // 10: aiscan.config.TestConnectionResponse
+	(*types.GetConfigRequest)(nil),        // 0: cyber.config.GetConfigRequest
+	(*types.UpdateConfigRequest)(nil),     // 1: cyber.config.UpdateConfigRequest
+	(*types.ActivateProfileRequest)(nil),  // 2: cyber.config.ActivateProfileRequest
+	(*types.LLMProbeRequest)(nil),         // 3: cyber.config.LLMProbeRequest
+	(*types.TestConnectionRequest)(nil),   // 4: cyber.config.TestConnectionRequest
+	(*types.GetConfigResponse)(nil),       // 5: cyber.config.GetConfigResponse
+	(*types.UpdateConfigResponse)(nil),    // 6: cyber.config.UpdateConfigResponse
+	(*types.ActivateProfileResponse)(nil), // 7: cyber.config.ActivateProfileResponse
+	(*types.LLMProbeResult)(nil),          // 8: cyber.config.LLMProbeResult
+	(*types.ListModelsResult)(nil),        // 9: cyber.config.ListModelsResult
+	(*types.TestConnectionResponse)(nil),  // 10: cyber.config.TestConnectionResponse
 }
 var file_rpc_config_proto_depIdxs = []int32{
-	0,  // 0: aiscan.rpc.config.ConfigService.GetConfig:input_type -> aiscan.config.GetConfigRequest
-	1,  // 1: aiscan.rpc.config.ConfigService.UpdateConfig:input_type -> aiscan.config.UpdateConfigRequest
-	2,  // 2: aiscan.rpc.config.ConfigService.ActivateProfile:input_type -> aiscan.config.ActivateProfileRequest
-	3,  // 3: aiscan.rpc.config.ConfigService.TestLLM:input_type -> aiscan.config.LLMProbeRequest
-	3,  // 4: aiscan.rpc.config.ConfigService.ListModels:input_type -> aiscan.config.LLMProbeRequest
-	4,  // 5: aiscan.rpc.config.ConfigService.TestConnection:input_type -> aiscan.config.TestConnectionRequest
-	5,  // 6: aiscan.rpc.config.ConfigService.GetConfig:output_type -> aiscan.config.GetConfigResponse
-	6,  // 7: aiscan.rpc.config.ConfigService.UpdateConfig:output_type -> aiscan.config.UpdateConfigResponse
-	7,  // 8: aiscan.rpc.config.ConfigService.ActivateProfile:output_type -> aiscan.config.ActivateProfileResponse
-	8,  // 9: aiscan.rpc.config.ConfigService.TestLLM:output_type -> aiscan.config.LLMProbeResult
-	9,  // 10: aiscan.rpc.config.ConfigService.ListModels:output_type -> aiscan.config.ListModelsResult
-	10, // 11: aiscan.rpc.config.ConfigService.TestConnection:output_type -> aiscan.config.TestConnectionResponse
+	0,  // 0: cyber.rpc.config.ConfigService.GetConfig:input_type -> cyber.config.GetConfigRequest
+	1,  // 1: cyber.rpc.config.ConfigService.UpdateConfig:input_type -> cyber.config.UpdateConfigRequest
+	2,  // 2: cyber.rpc.config.ConfigService.ActivateProfile:input_type -> cyber.config.ActivateProfileRequest
+	3,  // 3: cyber.rpc.config.ConfigService.TestLLM:input_type -> cyber.config.LLMProbeRequest
+	3,  // 4: cyber.rpc.config.ConfigService.ListModels:input_type -> cyber.config.LLMProbeRequest
+	4,  // 5: cyber.rpc.config.ConfigService.TestConnection:input_type -> cyber.config.TestConnectionRequest
+	5,  // 6: cyber.rpc.config.ConfigService.GetConfig:output_type -> cyber.config.GetConfigResponse
+	6,  // 7: cyber.rpc.config.ConfigService.UpdateConfig:output_type -> cyber.config.UpdateConfigResponse
+	7,  // 8: cyber.rpc.config.ConfigService.ActivateProfile:output_type -> cyber.config.ActivateProfileResponse
+	8,  // 9: cyber.rpc.config.ConfigService.TestLLM:output_type -> cyber.config.LLMProbeResult
+	9,  // 10: cyber.rpc.config.ConfigService.ListModels:output_type -> cyber.config.ListModelsResult
+	10, // 11: cyber.rpc.config.ConfigService.TestConnection:output_type -> cyber.config.TestConnectionResponse
 	6,  // [6:12] is the sub-list for method output_type
 	0,  // [0:6] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name

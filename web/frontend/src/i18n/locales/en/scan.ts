@@ -36,10 +36,6 @@ export default {
   llm: 'LLM',
   offline: 'Offline',
 
-  // chat/ScanProgressInline
-  startingScan: 'Starting scan...',
-  scanLog: 'Scan progress log',
-
   // chat/ScanSummaryCard
   scanComplete: 'Scan Complete',
 

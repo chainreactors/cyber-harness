@@ -13,12 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/types"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/types"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
 )
@@ -38,7 +40,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			feed := make(chan protocols.Message)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "POST" && r.URL.Path == failurePath && failed.CompareAndSwap(false, true) {
-					http.Error(w, "temporary failure", 503)
+					http.Error(w, "temporary failure", http.StatusServiceUnavailable)
 					return
 				}
 				if strings.HasSuffix(r.URL.Path, "/sse") {
@@ -68,13 +70,10 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			}))
 			defer server.Close()
 			received := make(chan inbox.Message, 4)
-			adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Services{
+			adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Dependencies{
 				Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil },
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			set, err := extension.New(extension.Entry{ID: "ioa-client", Extension: adapter})
+			set, err := extension.New(hosttest.Capabilities(), promptext.New(), adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -134,10 +133,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 	server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "test-key")))
 	defer server.Close()
 	stream := events.New()
-	adapter, err := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Services{Events: stream})
-	if err != nil {
-		t.Fatal(err)
-	}
+	adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Dependencies{})
 	agent := extension.Func{CloseFunc: func(context.Context) error {
 		start := &aop.Event{SessionId: "child", Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentSessionId: "parent", ParentToolCallId: "spawn"}}}
 		setDelegation(t, start)
@@ -145,7 +141,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 		stream.Publish(&aop.Event{SessionId: "child", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
 		return nil
 	}}
-	set, err := extension.New(extension.Entry{ID: "ioa", Extension: adapter}, extension.Entry{ID: "agent", DependsOn: []string{"ioa"}, Extension: agent})
+	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +151,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.GetMessages(adapter.Runtime().ReceiveSpace(), "", 10)
+	messages, err := store.GetMessages(adapter.Service().ReceiveSpace(), "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,11 +174,8 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	}))
 	defer server.Close()
 	stream := events.New()
-	adapter, err := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Services{Events: stream})
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "ioa", Extension: adapter})
+	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{})
+	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +195,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	if err := set.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
 		t.Fatalf("close = %v", err)
 	}
-	if err := adapter.Runtime().WaitReady(t.Context()); err != nil {
+	if err := adapter.Service().WaitReady(t.Context()); err != nil {
 		t.Fatalf("resource was released prematurely: %v", err)
 	}
 	// Cancellation can be reported as an ordinary completed-output error.
@@ -217,4 +210,3 @@ func setDelegation(t *testing.T, event *aop.Event) {
 		t.Fatal(err)
 	}
 }
-

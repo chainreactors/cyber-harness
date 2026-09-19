@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 func textResult(text string) *aop.ToolResult {

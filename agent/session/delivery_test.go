@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/inbox"
 )
 
 func TestDeliveryGatesRoutingAndCapacity(t *testing.T) {
@@ -58,7 +58,7 @@ func TestDeliveryGatesRoutingAndCapacity(t *testing.T) {
 	if first.state.inbox.Len() != 1 {
 		t.Fatal("delivery escaped primary route")
 	}
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := rt.Deliver(t.Context(), message); !errors.Is(err, ErrUnavailable) {
@@ -84,7 +84,7 @@ func TestDeliveryAndShutdownShareAdmission(t *testing.T) {
 		}()
 	}
 	close(start)
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	callers.Wait()

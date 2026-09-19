@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 const connectionOutboundBuffer = 128

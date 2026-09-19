@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const baseURL = process.env.BASE_URL || `http://127.0.0.1:${process.env.AISCAN_E2E_PORT || '38080'}`;
+const baseURL = process.env.BASE_URL || `http://127.0.0.1:${process.env.CYBER_E2E_PORT || '38080'}`;
 const manageServer = !process.env.BASE_URL;
 
 export default defineConfig({

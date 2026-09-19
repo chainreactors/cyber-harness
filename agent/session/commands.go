@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	commands "github.com/chainreactors/aiscan/core/commandline"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -56,7 +56,7 @@ func validateCommands(values []Command) ([]Command, map[string]Command, error) {
 }
 
 // CommandSpecs projects the same declarations used for dispatch. Returned
-// protobufs are owned copies; callers cannot mutate the installed catalog.
+// protobufs are owned copies; callers cannot mutate the installed commands.
 func (rt *Runtime) CommandSpecs(remote bool) []*types.CommandSpec {
 	if rt == nil {
 		return nil
@@ -81,7 +81,7 @@ func builtinCommands() []Command {
 		return commandText(line, style, body).result, nil
 	}
 	return []Command{
-		{Spec: &types.CommandSpec{Name: "/help", Description: "Show runtime commands"}, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/help", Description: "查看运行时命令"}, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
 			var help strings.Builder
 			help.WriteString("Runtime commands:\n")
 			for _, spec := range s.baseState().runtime.CommandSpecs(false) {
@@ -97,25 +97,47 @@ func builtinCommands() []Command {
 			help.WriteString("  !<command>")
 			return text("/help", CommandPresentationPreformatted, help.String())
 		}},
-		{Spec: &types.CommandSpec{Name: "/status", Description: "Show Agent LLM, tool, scanner, and session health"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/status", Description: "查看 Agent 的 LLM、工具、扫描器和会话健康状态"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
 			return text("/status", CommandPresentationPreformatted, s.baseState().commands.statusText())
 		}},
-		{Spec: &types.CommandSpec{Name: "/clear", Description: "Clear the current Agent context"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/clear", Description: "清空当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			return s.rotateCommand(ctx, commands.JoinCommandLine("/clear", args))
 		}},
-		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "Compact the current Agent context"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "压缩当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			return s.rotateCommand(ctx, commands.JoinCommandLine("/compact", args))
 		}},
-		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|off]", Description: "Runtime eval"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|rounds <spec>|off]", Description: "运行时目标评估"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			state := s.baseState().commands
 			criteria := strings.TrimSpace(strings.Join(args, " "))
 			line := commands.JoinCommandLine("/eval", args)
+			// "rounds" sets how long the loop may keep going: a number is a hard
+			// ceiling, anything else is plain language the evaluator follows.
+			if len(args) > 0 && strings.EqualFold(args[0], "rounds") {
+				rounds := strings.TrimSpace(strings.Join(args[1:], " "))
+				switch rounds {
+				case "":
+					if state.evalRounds == "" {
+						return text(line, CommandPresentationPlain, "Eval rounds: auto (the evaluator decides when to stop)")
+					}
+					return text(line, CommandPresentationPlain, "Eval rounds: "+state.evalRounds)
+				case "off", "auto":
+					state.evalRounds = ""
+					return text(line, CommandPresentationPlain, "Eval rounds: auto (the evaluator decides when to stop)")
+				default:
+					state.evalRounds = rounds
+					return text(line, CommandPresentationPlain, "Eval rounds: "+rounds)
+				}
+			}
 			switch criteria {
 			case "":
 				if state.evalCriteria == "" {
 					return text(line, CommandPresentationPlain, "Goal evaluation: off")
 				}
-				return text(line, CommandPresentationPlain, "Goal evaluation: on\n  criteria: "+state.evalCriteria)
+				status := "Goal evaluation: on\n  criteria: " + state.evalCriteria
+				if state.evalRounds != "" {
+					status += "\n  rounds: " + state.evalRounds
+				}
+				return text(line, CommandPresentationPlain, status)
 			case "off":
 				state.evalCriteria = ""
 				return text(line, CommandPresentationPlain, "Goal evaluation disabled.")
@@ -124,7 +146,7 @@ func builtinCommands() []Command {
 				return text(line, CommandPresentationPlain, "Goal evaluation enabled: "+criteria)
 			}
 		}},
-		{Spec: &types.CommandSpec{Name: "/loop", Usage: "/loop [interval prompt|list|stop name]", Description: "Runtime loop"}, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/loop", Usage: "/loop [interval prompt|list|stop name]", Description: "运行时定时循环"}, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			line := commands.JoinCommandLine("/loop", args)
 			if len(args) == 0 {
 				args = []string{"list"}

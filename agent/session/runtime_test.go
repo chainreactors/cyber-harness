@@ -3,8 +3,10 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,19 +16,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/agent/tmux"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	coreoutput "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	terminalext "github.com/chainreactors/aiscan/pkg/exts/terminal"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	coreoutput "github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -37,11 +37,11 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	owner := newLoopExtension(lifecycleLoop(func(context.Context, agent.Config) (*agent.Result, error) {
 		panic("test loop failure")
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: owner})
+	set := hosttest.Set(t, owner)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	runtime.config.Loop = owner.Runtime()
+	runtime.agentConfig.Loop = owner.Runtime()
 	session, err := runtime.EnsureSession(SessionOptions{ID: "panic"})
 	if err != nil {
 		t.Fatal(err)
@@ -73,12 +73,12 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 }
 
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	application.App.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
+	application := apptest.NewState(t, nil, nil)
+	application.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
 	var once sync.Once
-	owner, err := New(Config{Application: testEnvironment(application.App), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	owner, err := New(Config{State: testEnvironment(application), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- struct{}{}
 		<-ctx.Done()
 		canceled <- struct{}{}
@@ -88,13 +88,13 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := harness.AppEntries(t, application)
+	entries := apptest.Entries(t, application)
 	var dependencyClosed atomic.Bool
-	entries = append(entries, extension.Entry{ID: "dependency", Extension: extension.Func{CloseFunc: func(context.Context) error {
+	entries = append(entries, extension.Func{CloseFunc: func(context.Context) error {
 		dependencyClosed.Store(true)
 		return nil
-	}}}, extension.Entry{ID: "agent", DependsOn: []string{"application.tool-registry", "dependency"}, Extension: owner})
-	set := harness.Set(t, entries...)
+	}}, owner)
+	set := hosttest.Set(t, entries...)
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	init, cancelInit := context.WithCancel(t.Context())
 	if err := set.Load(init); err != nil {
@@ -102,7 +102,7 @@ func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
 	}
 	cancelInit()
 	runtime := owner.Runtime()
-	runtime.config.Provider = &runtimeSemanticProvider{}
+	runtime.agentConfig.Provider = &runtimeSemanticProvider{}
 	session, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "owned"})
 	if err != nil {
 		t.Fatal(err)
@@ -170,12 +170,12 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := hosttest.Set(t, managed)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.config.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Runtime()
 	var ended atomic.Int32
 	sub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event.SessionId == "closing" && event.GetSessionEnded() != nil {
@@ -302,13 +302,13 @@ func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 		}
 	}))
 	defer healthy.Cancel()
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatalf("runtime close = %v", err)
 	}
 	if session.currentState() != nil || !state.inbox.Closed() {
 		t.Fatal("observer failure prevented resource cleanup")
 	}
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatalf("repeated runtime close = %v", err)
 	}
 	if completions.Load() != 1 {
@@ -316,11 +316,12 @@ func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 	}
 }
 
-func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testing.T) {
+func TestResourceCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testing.T) {
 	started, canceled := make(chan string, 2), make(chan string, 2)
 	release := make(chan struct{})
 	var unblock sync.Once
 	runtime := newBareRuntime(t, nil, &runtimeSemanticProvider{})
+	resource := &Resource{runtime: runtime}
 	managed := newLoopExtension(lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- config.SessionID
 		<-ctx.Done()
@@ -328,12 +329,12 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 		<-release
 		return nil, ctx.Err()
 	}))
-	set := harness.Set(t, extension.Entry{ID: "agent", Extension: managed})
+	set := hosttest.Set(t, managed)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.config.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Runtime()
 	var runs []*Run
 	for _, id := range []string{"first", "second"} {
 		session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: id})
@@ -355,7 +356,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 	}
 	deadline, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	if err := runtime.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
+	if err := resource.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close while loops are still draining: %v", err)
 	}
 	for range 2 {
@@ -371,7 +372,7 @@ func TestManagerCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testin
 			t.Fatalf("run result: %v", err)
 		}
 	}
-	if err := runtime.Close(t.Context()); err != nil {
+	if err := resource.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -385,13 +386,13 @@ type lifecycleOutput struct {
 	kinds []string
 }
 
-func loadTestApplication(t *testing.T, application *apppkg.Resource) *extension.Set {
-	return harness.AppLoad(t, t.Context(), application)
+func loadTestApplication(t *testing.T, application *apppkg.State) *extension.Set {
+	return apptest.Load(t, t.Context(), application)
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	rt, err := New(Config{Application: testEnvironment(a.App), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	a := apptest.NewState(t, nil, nil)
+	rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,9 +405,6 @@ func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
 	if err := rt.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
@@ -417,7 +415,7 @@ func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
 	rt.wg.Add(1)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := rt.Close(ctx); !errors.Is(err, context.Canceled) {
+	if err := rt.close(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Close error = %v, want context cancellation", err)
 	}
 	select {
@@ -426,7 +424,7 @@ func TestRuntimeCloseCanResumeWaitingAfterContextCancellation(t *testing.T) {
 	default:
 	}
 	rt.wg.Done()
-	if err := rt.Close(t.Context()); err != nil {
+	if err := rt.close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -444,30 +442,30 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
-	app := appResource.App
-	terminal, err := terminalext.New(app.Hooks, app.Tools.(*toolset.Registry), app.Commands, terminalext.Config{
-		Directory: t.TempDir(), Timeout: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	app.Bash = terminal.Bash()
-	entries := harness.AppEntries(t, appResource)
-	entries[1].Extension = terminal
-	appSet := harness.Set(t, entries...)
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
+	// The terminal owns the tool and publishes it; nothing parks it on the
+	// application for others to read, so the test borrows it too.
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		value, err := extension.Use[*terminaltool.BashTool](scope)
+		bash = value
+		return err
+	}}
+	appSet := hosttest.Set(t, append(apptest.Entries(t, app), borrow)...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bash := app.Bash
+	if bash == nil {
+		t.Fatal("the terminal published no tool")
+	}
 	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
-	rt, err := New(Config{Application: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	rt, err := New(Config{State: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rtSet := hosttest.Set(t, rt)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -478,23 +476,24 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// This work belongs to the terminal extension, not the Runtime or App.
+	// This work belongs to the terminal extension, not the Runtime or State.
 	// No shell or subprocess is used.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started := make(chan struct{})
-	info, err := bash.Manager().CreateFunc(ctx, "app-work", 0, func(ctx context.Context, _ io.Writer) error {
-		close(started)
-		<-ctx.Done()
-		return ctx.Err()
-	})
+	info, err := bash.Manager().Start(ctx, proc.Spec{Name: "app-work"},
+		proc.Func(func(ctx context.Context, _ io.Writer) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-started:
 	case <-ctx.Done():
-		t.Fatal("App work did not start")
+		t.Fatal("State work did not start")
 	}
 
 	_ = rtSet.Close(context.Background())
@@ -503,18 +502,18 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	if len(seen) == 0 || seen[len(seen)-1] != "session.ended" {
 		t.Fatalf("output detached before session end: %v", seen)
 	}
-	if current, ok := bash.Manager().Get(info.ID); !ok || current.State != tmux.StateRunning {
-		t.Fatalf("Runtime closed App-owned work: %+v, found=%v", current, ok)
+	if current, ok := bash.Manager().Get(info.ID); !ok || current.State != proc.StateRunning {
+		t.Fatalf("Runtime closed State-owned work: %+v, found=%v", current, ok)
 	}
 
 	_ = rtSet.Close(context.Background())
 	app.Publish(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Role: "user"}}})
 	if got := output.snapshot(); len(got) != len(seen) {
-		t.Fatalf("closed Runtime still receives App events: before=%v after=%v", seen, got)
+		t.Fatalf("closed Runtime still receives State events: before=%v after=%v", seen, got)
 	}
 
 	_ = appSet.Close(context.Background())
-	if current, ok := bash.Manager().Get(info.ID); ok && current.State == tmux.StateRunning {
+	if current, ok := bash.Manager().Get(info.ID); ok && current.State == proc.StateRunning {
 		t.Fatalf("terminal extension failed to stop owned work: %+v", current)
 	}
 }
@@ -619,7 +618,7 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	large := strings.Repeat("x", 4<<20)
 	oldID := root.ID()
 	runtime.app.Publish(&aop.Event{
-		SessionId: root.ID(), TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: root.ID(), TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
 	})
 	flushPersistenceOutput(t, output)
@@ -746,7 +745,7 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	option := &cfg.Option{MiscOptions: cfg.MiscOptions{OutputFile: path}}
 	provider := new(persistenceProvider)
 	_, runtime, output := newPersistenceRuntimeWithMode(t, option, provider, true)
-	runtime.config.Compaction = agent.CompactionSettings{KeepRecentTokens: 20, ReserveTokens: 64}
+	runtime.agentConfig.Compaction = agent.CompactionSettings{KeepRecentTokens: 20, ReserveTokens: 64}
 	long := strings.Repeat("history ", 120)
 	messages := []*aop.Message{
 		agent.TextMessage("user", long+"one"),
@@ -860,30 +859,32 @@ func assertRotationEvents(t *testing.T, events []*aop.Event, oldID, newID, reaso
 	}
 }
 
-func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.State, *Runtime, *telemetryext.Extension) {
 	return newPersistenceRuntimeWithMode(t, option, llm, false)
 }
 
-func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.State, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{Events: stream})
-	app := appResource.App
-	var dependencies []string
-	var entries []extension.Entry
+	appResource := apptest.NewState(t, telemetry.NopLogger(), stream)
+	app := appResource
+	var entries []extension.Extension
 	var output *telemetryext.Extension
 	if option.OutputFile != "" {
 		var outputErr error
-		output, outputErr = telemetryext.New(stream, telemetryext.Options{Path: option.OutputFile})
+		output, outputErr = telemetryext.New(telemetryext.Options{Path: option.OutputFile})
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
-		entries = append(entries, extension.Entry{ID: "output", Extension: output})
-		dependencies = append(dependencies, "output")
 	}
-	applicationEntries := harness.AppEntries(t, appResource, dependencies...)
+	applicationEntries := apptest.Entries(t, appResource)
 	entries = append(entries, applicationEntries...)
-	appSet := harness.Set(t, entries...)
+	// The recorder borrows the event stream, so it loads after whoever
+	// publishes it.
+	if output != nil {
+		entries = append(entries, output)
+	}
+	appSet := hosttest.Set(t, entries...)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -892,13 +893,13 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	if interactive {
 		primary = "main-repl"
 	}
-	runtimeResource, err := New(Config{Application: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}})
+	runtimeResource, err := New(Config{State: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
 	if err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
 	}
 
-	runtimeSet := harness.Set(t, extension.Entry{ID: "runtime", Extension: runtimeResource})
+	runtimeSet := hosttest.Set(t, runtimeResource)
 	if err := runtimeSet.Load(t.Context()); err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -945,18 +946,18 @@ func writePersistenceSessionForID(t *testing.T, path, sessionID string) {
 	t.Helper()
 	timestamp := timestamppb.New(time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC))
 	events := []*aop.Event{
-		{Id: "e-1", EmittedAt: timestamp, SessionId: sessionID, Emitter: "aiscan", Seq: 1, Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}},
-		{Id: "e-2", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "aiscan", Seq: 2, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("old user")}}}},
-		{Id: "e-3", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "aiscan", Seq: 3, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("old assistant")}}}},
-		{Id: "e-4", EmittedAt: timestamp, SessionId: sessionID, Emitter: "aiscan", Seq: 4, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}},
+		{Id: "e-1", EmittedAt: timestamp, SessionId: sessionID, Emitter: "cyber", Seq: 1, Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}},
+		{Id: "e-2", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "cyber", Seq: 2, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text("old user")}}}},
+		{Id: "e-3", EmittedAt: timestamp, SessionId: sessionID, TurnId: "old-turn", Emitter: "cyber", Seq: 3, Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-2", Role: "assistant", Content: []*aop.Content{aop.Text("old assistant")}}}},
+		{Id: "e-4", EmittedAt: timestamp, SessionId: sessionID, Emitter: "cyber", Seq: 4, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: "completed"}}},
 	}
 	_ = types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT})
 	bus := coreevents.New()
-	writer, err := telemetryext.New(bus, telemetryext.Options{Path: path})
+	writer, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := loadtelemetry(t, writer); err != nil {
+	if err := loadtelemetry(t, bus, writer); err != nil {
 		t.Fatal(err)
 	}
 	for _, event := range events {
@@ -985,20 +986,20 @@ func persistenceMessagesText(messages []*aop.Message) string {
 func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.jsonl")
 	bus := coreevents.New()
-	output, err := telemetryext.New(bus, telemetryext.Options{Path: path})
+	output, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{Events: bus})
-	applicationEntries := harness.AppEntries(t, a, "output")
-	aSet := harness.Set(t, append([]extension.Entry{{ID: "output", Extension: output}}, applicationEntries...)...)
+	a := apptest.NewState(t, nil, bus)
+	applicationEntries := apptest.Entries(t, a)
+	aSet := hosttest.Set(t, append(applicationEntries, output)...)
 	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
-	unsubscribe := a.App.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
@@ -1006,12 +1007,12 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer unsubscribe.Cancel()
 	var runtimes []*Extension
 	for range 2 {
-		rt, err := New(Config{Application: testEnvironment(a.App), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+		rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+		rtSet := hosttest.Set(t, rt)
 		if err := rtSet.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -1027,14 +1028,14 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := session.Command(context.Background(), "/status"); err != nil {
-		t.Fatalf("closing sibling runtime broke shared App: %v", err)
+		t.Fatalf("closing sibling runtime broke shared State: %v", err)
 	}
 	_ = runtimes[1].Close(context.Background())
 	if output.Path() == "" {
 		t.Fatal("session runtime closed application output")
 	}
 	last := &aop.Event{SessionId: "shared", Id: "after-runtimes"}
-	a.App.Publish(last)
+	a.Publish(last)
 	mu.Lock()
 	defer mu.Unlock()
 	var sequence uint64
@@ -1087,7 +1088,7 @@ func TestProviderSwapKeepsInFlightSnapshotAndUpdatesExistingSession(t *testing.T
 	}
 	provider, config := rt.app.ProviderState()
 	if next.callCount() != 1 || provider != next || config.Model != "new" {
-		t.Fatal("provider change did not reach App and existing session")
+		t.Fatal("provider change did not reach State and existing session")
 	}
 }
 

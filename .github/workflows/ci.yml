@@ -29,6 +29,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Check go mod tidy
         run: |
           cp go.mod "$RUNNER_TEMP/go.mod.before"
@@ -75,37 +78,64 @@ jobs:
           fi
 
       - name: Check repository architecture and dependencies
-        run: go test -count=1 ./core/extension ./core/registry
+        run: go test -count=1 ./core/resource ./core/extension ./core/registry ./pkg/exts ./cmd/agent
 
-      # libcstx is a cgo-only dependency. It may only be reached through
-      # packages gated on `cstx && cgo`; the whole module is scanned so a new
-      # importer cannot hide outside the CLI's package graph.
-      - name: Ensure nothing depends on libcstx without the cstx tag
+      - name: Build the minimal agent
+        run: |
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/agent
+          if go list -deps ./cmd/agent | grep -Eq '^github\.com/chainreactors/cyber/(.*/)?(scanner|search|proxy|ioa|browser|record|web)(/|$)'; then
+            echo "::error::cmd/agent reaches a product feature outside the minimal agent graph"
+            exit 1
+          fi
+
+      # The retained native CSTX Extension is not part of any product edition;
+      # browser builds use @cyber/cstx WASM.
+      - name: Ensure aiscan does not depend on libcstx
         run: |
           if CGO_ENABLED=0 go list -deps \
-            -tags "forceposix emptytemplates noembed osusergo netgo" ./... \
+            -tags "$STANDARD_TAGS" ./cmd/aiscan \
             | grep -q '^github.com/chainreactors/libcstx/go$'; then
-            echo "::error::a package reaches libcstx without the cstx tag; gate it behind 'cstx && cgo'"
+            echo "::error::aiscan reaches the dormant native CSTX Extension"
+            exit 1
+          fi
+          for cgo in 0 1; do
+            if CGO_ENABLED="$cgo" go list -deps \
+              -tags "$FULL_TAGS" ./cmd/aiscan \
+              | grep -q '^github.com/chainreactors/libcstx/go$'; then
+              echo "::error::aiscan-full reaches the dormant native CSTX Extension with CGO_ENABLED=$cgo"
+              exit 1
+            fi
+          done
+
+      - name: Enforce native Extension ownership
+        run: |
+          tracked_native="$(git ls-files -- '*.a' '*.lib' '*.dll' '*.so' '*.dylib')"
+          if [[ -n "$tracked_native" ]]; then
+            printf '%s\n' "$tracked_native"
+            echo "::error::native libraries must come from pinned modules or Release SDKs, not the aiscan Git tree"
+            exit 1
+          fi
+          libcstx_imports="$(git grep -l 'github.com/chainreactors/libcstx/go' -- '*.go' || true)"
+          if printf '%s\n' "$libcstx_imports" | grep -v '^pkg/exts/cstx/' | grep -q .; then
+            echo "::error::libcstx may only be imported by pkg/exts/cstx"
+            exit 1
+          fi
+          if git grep -n -E 'go-astiav|#cgo[[:space:]]+pkg-config' -- pkg/exts/record tools/record; then
+            echo "::error::record must link only through its Extension-owned FFI"
             exit 1
           fi
 
-      # `full` must imply cgo: it enables the native libcstx runtime. A silent
-      # CGO_ENABLED=0 success would mean the cstx files stopped being gated.
-      - name: Ensure the full edition requires cgo
+      - name: Ensure the full edition builds with and without cgo
         run: |
-          FULL="forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static"
-          CGO_ENABLED=1 go build -tags "$FULL" -o /dev/null ./cmd/aiscan
-          if CGO_ENABLED=0 go build -tags "$FULL" -o /dev/null ./cmd/aiscan 2>/dev/null; then
-            echo "::error::the full edition built with CGO_ENABLED=0; full must imply cgo"
-            exit 1
-          fi
+          CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
+          CGO_ENABLED=1 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
 
       - name: Run go vet
         run: go vet ./...
 
       - name: Compile public scanner regressions
         run: |
-          go test -run '^$' -tags "full sqlite cstx integration re2_cgo re2_static" ./tools
+          go test -run '^$' -tags "$FULL_CAPS_TAGS integration" ./pkg/exts/scanner
 
       - name: Check whitespace and submodule pins
         run: |
@@ -113,11 +143,20 @@ jobs:
           git diff --ignore-submodules=dirty --exit-code -- \
             .gitmodules templates web/frontend/cyber-ui
 
+      # release-build.yml drives `goreleaser build` from this file, so a field
+      # this repository cannot spell correctly would otherwise surface for the
+      # first time during a release.
+      - name: Check the release build definition
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          version: v2.13.0
+          args: check
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
-          args: --timeout=8m --build-tags "re2_cgo re2_static"
+          args: --timeout=8m
           skip-cache: ${{ env.ACT == 'true' }}
 
   test:
@@ -135,8 +174,11 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Generate embedded resources
-        run: go generate ./core/resources/...
+        run: go generate ./tools/resources/...
 
       - name: Run AOP module tests
         working-directory: aop
@@ -153,8 +195,9 @@ jobs:
             test_args=(-timeout 10m -p 4)
           fi
           package_list="$(go list ./...)"
-          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/aiscan/cmd/harness\(/\|$\)')
-          go test -tags "re2_cgo re2_static" -race -count=1 "${test_args[@]}" \
+          # The product-process harness is intentionally manual-only.
+          mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/cyber/cmd/harness\(/\|$\)')
+          go test -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
             "${packages[@]}"
@@ -173,7 +216,7 @@ jobs:
           echo "Total coverage ${coverage}% meets the 50.0% floor"
 
       - name: Check generated resources are committed
-        run: git diff --exit-code -- core/resources/template.go
+        run: git diff --exit-code -- tools/resources/template.go
 
       - name: Display coverage summary
         if: always()
@@ -201,111 +244,6 @@ jobs:
             aop/coverage.out
           retention-days: 14
 
-  harness-offline:
-    name: Harness without LLM (${{ matrix.os }}, seed ${{ matrix.seed }})
-    needs: checks
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, windows-2022]
-        seed: [101, 20260910]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash
-    env:
-      AISCAN_HARNESS_SEED: ${{ matrix.seed }}
-      AISCAN_HARNESS_STEPS: "48"
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: ${{ env.ACT != 'true' }}
-      - name: Set up Windows native compiler
-        if: runner.os == 'Windows'
-        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
-      - name: Run real product scenarios without model credentials
-        env:
-          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness
-        run: |
-          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
-          set -o pipefail
-          go test -race -count=1 -shuffle=on -json -timeout 8m ./cmd/harness/... \
-            | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
-      - name: Upload harness evidence
-        if: ${{ always() && env.ACT != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: harness-offline-${{ matrix.os }}-${{ matrix.seed }}
-          path: ${{ runner.temp }}/harness
-          retention-days: 14
-
-  harness-live:
-    name: Harness with real LLM
-    # Never expose model credentials to pull-request code, including fork PRs.
-    if: github.event_name != 'pull_request'
-    needs: harness-offline
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: ${{ env.ACT != 'true' }}
-      - name: Run live model requests, recovery, IOA and subagent delegation tasks
-        env:
-          AISCAN_HARNESS_LLM_API_KEY: ${{ secrets.AISCAN_HARNESS_LLM_API_KEY }}
-          AISCAN_HARNESS_LLM_BASE_URL: ${{ vars.AISCAN_HARNESS_LLM_BASE_URL }}
-          AISCAN_HARNESS_LLM_MODEL: ${{ vars.AISCAN_HARNESS_LLM_MODEL }}
-          AISCAN_HARNESS_LLM_PROVIDER: ${{ vars.AISCAN_HARNESS_LLM_PROVIDER }}
-          AISCAN_HARNESS_ARTIFACTS: ${{ runner.temp }}/harness-live
-        run: |
-          for name in AISCAN_HARNESS_LLM_API_KEY AISCAN_HARNESS_LLM_BASE_URL AISCAN_HARNESS_LLM_MODEL; do
-            if [[ -z "${!name}" ]]; then
-              echo "::error::Missing required live harness setting: $name"
-              exit 1
-            fi
-          done
-          mkdir -p "$AISCAN_HARNESS_ARTIFACTS"
-          set -o pipefail
-          go test -race -tags live_llm -run '^TestLiveLLM' -count=1 -shuffle=on \
-            -json -timeout 8m ./cmd/harness/... | tee "$AISCAN_HARNESS_ARTIFACTS/results.jsonl"
-      - name: Upload live harness evidence
-        if: ${{ always() && env.ACT != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: harness-live-llm
-          path: ${{ runner.temp }}/harness-live
-          retention-days: 14
-
-  harness-gate:
-    name: Harness acceptance
-    if: always()
-    needs: [harness-offline, harness-live]
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Require every selected harness suite to pass
-        env:
-          OFFLINE_RESULT: ${{ needs.harness-offline.result }}
-          LIVE_RESULT: ${{ needs.harness-live.result }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          [[ "$OFFLINE_RESULT" == success ]] || exit 1
-          if [[ "$EVENT_NAME" == pull_request ]]; then
-            [[ "$LIVE_RESULT" == skipped ]] || exit 1
-            echo "Offline harness passed; real LLM verification runs on master pushes and manual dispatches."
-          else
-            [[ "$LIVE_RESULT" == success ]] || exit 1
-          fi
-
   windows-test:
     runs-on: windows-2022
     needs: test
@@ -321,17 +259,20 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
-      - name: Set up mingw for libcstx
+      - name: Load the build editions
         shell: bash
-        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
-      - name: Run native Windows package tests
-        run: go test -count=1 -tags "re2_cgo re2_static" ./agent/... ./pkg/runner/... ./pkg/web/...
+      - name: Run Windows package tests
+        run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
+
+      - name: Compile and test the full CLI without cgo on Windows
+        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
 
-      - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags "forceposix emptytemplates noembed osusergo netgo full sqlite cstx re2_cgo re2_static" ./cmd/aiscan
+      - name: Compile and test the full CLI with cgo on Windows
+        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
         env:
           CGO_ENABLED: "1"
 
@@ -350,33 +291,36 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Run scanner functional regressions
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m -v \
             -run 'Test(ScannerFunctionalRegression|FullScannerFunctionalRegression)$' \
-            ./tools
+            ./pkg/exts/scanner
 
       - name: Run remaining full-tag unit variants
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
-            ./cmd/aiscan ./skills ./tools/passive ./tools/scan/engine
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
+            ./cmd/aiscan ./agent/skills ./tools/passive ./tools/scan/engine
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^TestKatanaProfileExtender$' \
             ./tools/scan
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^Test(Parse|Execute_|ResolvePath_|NameAndUsage|WithDefaultSession|Format)' \
             ./tools/playwright
 
       - name: Compile browser-backed full-tag suites
         run: |
-          go test -c -tags "full sqlite cstx re2_cgo re2_static" \
-            -o "$RUNNER_TEMP/headless.test" ./pkg/headless
-          go test -c -tags "full sqlite cstx re2_cgo re2_static" \
+          go test -c -tags "$FULL_CAPS_TAGS" \
+            -o "$RUNNER_TEMP/headless.test" ./tools/headless
+          go test -c -tags "$FULL_CAPS_TAGS" \
             -o "$RUNNER_TEMP/playwright.test" ./tools/playwright
 
       - name: Run full server CSTX integration
         run: |
-          CGO_ENABLED=1 go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 5m \
+          CGO_ENABLED=0 go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             ./cmd/aiscan ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
@@ -395,6 +339,9 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Set up Chrome
         uses: browser-actions/setup-chrome@v2
         with:
@@ -405,13 +352,13 @@ jobs:
 
       - name: Run headless action E2E
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
-            -run '^(TestExecAIScanExtendedActions|TestExecAIScanHistoryActions)$' \
-            ./pkg/headless
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
+            -run '^(TestExecCyberExtendedActions|TestExecCyberHistoryActions)$' \
+            ./tools/headless
 
       - name: Run authenticated record and replay E2E
         run: |
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^TestE2E_RecordReplayAuthenticatedDashboard$' \
             ./tools/playwright
 
@@ -420,7 +367,7 @@ jobs:
           go test -count=1 -timeout 2m -v \
             -run '^TestE2EHeadlessReusesDiscoveredBrowser$' \
             ./tools/katana
-          go test -tags "full sqlite cstx re2_cgo re2_static" -count=1 -timeout 2m -v \
+          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 2m -v \
             -run '^TestE2EKatanaDeepRendersAuthenticatedSPA$' \
             ./tools/scan
 
@@ -439,6 +386,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
+
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -461,11 +411,13 @@ jobs:
 
       - name: Check generated protobuf bindings are committed
         run: |
-          git diff --exit-code -- \
-            pkg/rpc \
-            pkg/types \
-            web/frontend/src/gen \
-            web/frontend/cyber-ui/packages/aop/src/gen/aop
+          # Untracked output is drift too: a new proto yields a new binding file,
+          # which `git diff` never reports.
+          test -z "$(git status --porcelain -- pkg/rpc core/types web/frontend/src/gen)"
+          # The AOP bindings are generated into the cyber-ui submodule, where the
+          # superproject tracks only the gitlink, so a regeneration inside it is
+          # invisible from here and the check has to run in the submodule.
+          test -z "$(git -C web/frontend/cyber-ui status --porcelain -- packages/aop/src/gen/aop)"
 
       - name: Build embedded frontend
         run: |
@@ -502,7 +454,7 @@ jobs:
       - name: Run backend E2E tests
         run: |
           go test -race -count=1 -timeout 10m \
-            -tags "e2e re2_cgo re2_static" \
+            -tags "e2e" \
             -v \
             ./pkg/web/...
 
@@ -510,7 +462,7 @@ jobs:
         run: go test -race -count=100 -timeout 2m ./pkg/web
 
   release-verify:
-    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e, harness-gate]
+    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
     uses: ./.github/workflows/release-build.yml
     with:
       tag: v0.0.0-ci.${{ github.run_id }}

@@ -3,41 +3,36 @@
 package console
 
 import (
-	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/commandline"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	"github.com/chainreactors/aiscan/pkg/types"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/core/extension"
+	cmdline "github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/console/api"
 	"github.com/spf13/cobra"
 )
 
-type Catalog interface {
-	CommandSpecs(bool) []*types.CommandSpec
-}
 type Extension struct {
-	target  api.Registrar
-	catalog Catalog
+	runtime *agentsession.Runtime
 }
 
-func New(target api.Registrar, catalog Catalog) (*Extension, error) {
-	if target == nil || catalog == nil {
-		return nil, fmt.Errorf("session presentation requires TUI registrar and session catalog")
-	}
-	return &Extension{target: target, catalog: catalog}, nil
-}
+func New() *Extension { return &Extension{} }
+
 func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	return e.target.Register(api.Contribution{Source: "session", Bindings: Bind(e.catalog)})
+	runtime, err := extension.Use[*agentsession.Runtime](scope)
+	if err != nil {
+		return err
+	}
+	e.runtime = runtime
+	return extension.Add(scope, bindings(runtime))
 }
-func (*Extension) Close(context.Context) error { return nil }
 
-// Bind snapshots the command catalog at installation. Runtime additions remain
+// bindings snapshots the runtime commands at installation. Runtime additions remain
 // available through the Session protocol; a TUI profile is a fixed installation.
-func Bind(catalog Catalog) *api.Bindings {
-	specs := catalog.CommandSpecs(false)
+func bindings(runtime *agentsession.Runtime) *api.Bindings {
+	specs := runtime.CommandSpecs(false)
 	return &api.Bindings{Commands: func(view api.View) []*cobra.Command {
 		var commands []*cobra.Command
 		for _, spec := range specs {
@@ -54,7 +49,7 @@ func Bind(catalog Catalog) *api.Bindings {
 					if view.Command == nil {
 						return fmt.Errorf("session command requires an attached terminal")
 					}
-					if err := view.Command(commandline.JoinCommandLine(name, args)); err != nil {
+					if err := view.Command(cmdline.JoinCommandLine(name, args)); err != nil {
 						return err
 					}
 					if name == "/status" && view.RefreshStatus != nil {

@@ -8,7 +8,7 @@ internal: true
 
 IOA provides shared message spaces for agent coordination through a single pseudo-command: `ioa` with `space`, `send`, and `read` subcommands.
 
-Each aiscan instance binds to one space. After joining, all send/read operations automatically target that space — no space ID needed.
+Each cyber instance binds to one space. After joining, all send/read operations automatically target that space — no space ID needed.
 
 The wire protocol (message envelope, typed content formats) is defined by the `chainreactors/ioa` module. Its protocol skills are loaded as internal skills — read them for exact message formats:
 
@@ -97,4 +97,4 @@ For the full commander/node self-organization protocol (objective broadcast, squ
 
 ## Scan collaboration
 
-In IOA collaboration mode, use `ioa send checkpoint` for collaboration reports. Publish verified findings using `aiscan://skills/aiscan/okf/runtime/ioa-finding.md`; keep local reports and their result IDs as the durable record.
+In IOA collaboration mode, use `ioa send checkpoint` for collaboration reports. Publish verified findings using `cyber://skills/cyber/okf/runtime/ioa-finding.md`; keep local reports and their result IDs as the durable record.

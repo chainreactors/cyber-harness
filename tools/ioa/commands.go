@@ -7,8 +7,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -48,7 +48,7 @@ func (root *rootCommand) commands() []commands.Command {
 	return []commands.Command{
 		{
 			Name: "ioa", Usage: root.Usage(),
-			DescriptionPath: "aiscan://skills/ioa/SKILL.md",
+			DescriptionPath: "cyber://skills/ioa/SKILL.md",
 			Run:             root.Run,
 		},
 	}
@@ -56,7 +56,7 @@ func (root *rootCommand) commands() []commands.Command {
 
 // rootCommand dispatches `ioa <space|send|read> ...`. send/read are delegated
 // to the ioa instance's client CLI (go-flags based) with the bound space
-// injected; space keeps aiscan's current-space binding semantics.
+// injected; space keeps cyber's current-space binding semantics.
 type rootCommand struct {
 	client   protocols.ClientAPI
 	binding  *spaceBinding
@@ -75,7 +75,7 @@ Subcommands:
   ioa read [--all] [--limit N] [--after id] [--message id] [--direction d] [--listen]
 
 The current space is injected as --space on send/read.
-Reference: aiscan://skills/ioa/SKILL.md`
+Reference: cyber://skills/ioa/SKILL.md`
 }
 
 func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
@@ -119,7 +119,7 @@ func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execu
 	return ioaclient.Dispatch(ctx, c.client, c.nodeName, opts, parser.Active, execution.Stdout)
 }
 
-// runSpace handles join (ioa CLI positional syntax) plus aiscan's
+// runSpace handles join (ioa CLI positional syntax) plus cyber's
 // binding-aware extras (list/nodes/topics).
 func (c *rootCommand) runSpace(ctx context.Context, execution *commands.Execution, args []string) error {
 	if len(args) > 0 {
@@ -217,7 +217,7 @@ func ensureNode(ctx context.Context, client protocols.ClientAPI, name string, me
 		return nil
 	}
 	if name == "" {
-		name = "aiscan-agent"
+		name = "cyber-agent"
 	}
 	if meta == nil {
 		meta = map[string]any{}

@@ -9,7 +9,7 @@ interface LanguageToggleProps {
 // Toggles the UI language between Chinese and English. Mirrors the icon-button
 // styling used by the header actions next to ThemeToggle.
 export default function LanguageToggle({ className }: LanguageToggleProps) {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation('app')
   const isZh = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().startsWith('zh')
   const next = isZh ? 'en' : 'zh'
 
@@ -21,7 +21,7 @@ export default function LanguageToggle({ className }: LanguageToggleProps) {
           variant="ghost"
           size="icon-xs"
           onClick={() => void i18n.changeLanguage(next)}
-          aria-label={isZh ? 'Switch to English' : '切换到中文'}
+          aria-label={isZh ? t('switchToEnglish') : t('switchToChinese')}
           className={cn('text-[11px] font-semibold text-muted-foreground', className)}
         >
           {isZh ? 'EN' : '中'}

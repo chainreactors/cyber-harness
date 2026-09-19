@@ -12,14 +12,15 @@ import (
 	"sync"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@ func (a *captureAddon) Responseheaders(f *mitmproxy.Flow) {
 			state.discard()
 			return
 		}
-		state.flow.Response = &traffic.Response{StatusCode: f.Response.StatusCode, Headers: traffic.PairsFromHTTP(f.Response.Header)}
+		state.flow.Response = &traffic.HttpResponse{StatusCode: int32(f.Response.StatusCode), Headers: traffic.HeadersFromHTTP(f.Response.Header)}
 		state.flow.ContentType = f.Response.Header.Get("Content-Type")
 	}
 }
@@ -274,15 +275,15 @@ type captureState struct {
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 	correlation := hub.resolveCorrelation(correlationTokenOf(f))
 	flow := Flow{
-		Timestamp: f.StartTime, Operation: correlation.operation, Invocation: correlation.invocation,
+		Flow: &traffic.Flow{Timestamp: timestamppb.New(f.StartTime)}, Operation: correlation.operation, Invocation: correlation.invocation,
 		cancel: correlation.cancel, release: correlation.finish,
 	}
 	if f.ConnContext != nil && f.ConnContext.ClientConn != nil {
 		flow.TLS = f.ConnContext.ClientConn.Tls
 	}
 	if f.Request != nil {
-		flow.ID = f.Id.String()
-		flow.Request = traffic.Request{Method: f.Request.Method, URL: f.Request.URL.String(), Protocol: f.Request.Proto, Headers: traffic.PairsFromHTTPWithHost(f.Request.Header, requestHost(f.Request))}
+		flow.Id = f.Id.String()
+		flow.Request = &traffic.HttpRequest{Method: f.Request.Method, Url: f.Request.URL.String(), Protocol: f.Request.Proto, Headers: traffic.HeadersFromHTTPWithHost(f.Request.Header, requestHost(f.Request))}
 		flow.Host = f.Request.URL.Hostname()
 	}
 	return &captureState{hub: hub, flow: flow}
@@ -335,8 +336,8 @@ func (s *captureState) finishCapture(err error, discard bool) {
 			body.Close()
 		}
 	}
-	if !s.flow.Timestamp.IsZero() {
-		s.flow.Duration = time.Since(s.flow.Timestamp)
+	if timestamp := s.flow.GetTimestamp(); timestamp != nil && timestamp.IsValid() {
+		s.flow.Duration = time.Since(timestamp.AsTime())
 	}
 	s.mu.Unlock()
 	s.completeCapture(err, discard)
@@ -379,7 +380,7 @@ func (s *captureState) completeCapture(err error, discard bool) {
 			flow.Request.Body = preview
 		} else {
 			if flow.Response == nil {
-				flow.Response = &traffic.Response{}
+				flow.Response = &traffic.HttpResponse{}
 			}
 			flow.Response.Body = preview
 		}
@@ -420,14 +421,15 @@ func appendPreview(dst, src []byte, max int) []byte {
 // Flow + FlowStore
 // ---------------------------------------------------------------------------
 
-// Flow is the hub's stored capture: the canonical exchange plus the hub-only
+// Flow is the hub's stored capture: the canonical traffic flow plus hub-only
 // metadata (attribution, timing, TLS) the mitm query verbs filter and format
 // on. Operation is the sole wire correlation authority.
 type Flow struct {
-	traffic.Exchange
+	// By pointer: a canonical Flow is a protobuf message, so copying one by
+	// value copies its internal mutex, and the store moves Flow constantly.
+	*traffic.Flow
 	Operation   *operationpb.Ref
 	Invocation  operation.Invocation
-	Timestamp   time.Time
 	Host        string
 	ContentType string
 	Duration    time.Duration
@@ -485,7 +487,7 @@ func formatFlowList(flows []Flow) string {
 		if idx := strings.Index(ct, ";"); idx > 0 {
 			ct = ct[:idx]
 		}
-		urlStr := f.Request.URL
+		urlStr := f.Request.Url
 		if len(urlStr) > 50 {
 			urlStr = urlStr[:47] + "..."
 		}
@@ -494,7 +496,7 @@ func formatFlowList(flows []Flow) string {
 			errMark = " ERR"
 		}
 		sb.WriteString(fmt.Sprintf("  %-6s %-6s %-4d %-50s %-14s %dms%s\n",
-			f.ID, f.Request.Method, statusCodeOf(&f), urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
+			f.Id, f.Request.Method, statusCodeOf(&f), urlStr, truncate(ct, 14), f.Duration.Milliseconds(), errMark))
 	}
 	return sb.String()
 }
@@ -504,15 +506,19 @@ func statusCodeOf(f *Flow) int {
 	if f.Response == nil {
 		return 0
 	}
-	return f.Response.StatusCode
+	return int(f.Response.StatusCode)
 }
 
 func formatFlowDetail(f *Flow) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("=== Flow #%s ===\n", f.ID))
+	sb.WriteString(fmt.Sprintf("=== Flow #%s ===\n", f.Id))
+	timestamp := time.Time{}
+	if f.Timestamp != nil && f.Timestamp.IsValid() {
+		timestamp = f.Timestamp.AsTime()
+	}
 	sb.WriteString(fmt.Sprintf("Time: %s  Method: %s  Status: %d  Duration: %dms  TLS: %v\n",
-		f.Timestamp.Format(time.RFC3339), f.Request.Method, statusCodeOf(f), f.Duration.Milliseconds(), f.TLS))
-	sb.WriteString(fmt.Sprintf("URL: %s\n", f.Request.URL))
+		timestamp.Format(time.RFC3339), f.Request.Method, statusCodeOf(f), f.Duration.Milliseconds(), f.TLS))
+	sb.WriteString(fmt.Sprintf("URL: %s\n", f.Request.Url))
 	if f.Error != "" {
 		sb.WriteString(fmt.Sprintf("Error: %s\n", f.Error))
 	}
@@ -558,7 +564,7 @@ func formatFlowAnalysis(flows []Flow) string {
 	sb.WriteString("\n\n")
 
 	for _, f := range flows {
-		sb.WriteString(fmt.Sprintf("#%s [%d] %s %s (%dms)\n", f.ID, statusCodeOf(&f), f.Request.Method, f.Request.URL, f.Duration.Milliseconds()))
+		sb.WriteString(fmt.Sprintf("#%s [%d] %s %s (%dms)\n", f.Id, statusCodeOf(&f), f.Request.Method, f.Request.Url, f.Duration.Milliseconds()))
 		if f.Error != "" {
 			sb.WriteString(fmt.Sprintf("  ERROR: %s\n", f.Error))
 		}
@@ -573,8 +579,10 @@ func formatFlowAnalysis(flows []Flow) string {
 	return sb.String()
 }
 
-func writeHeaders(sb *strings.Builder, headers []traffic.Pair) {
-	for _, p := range headers {
-		sb.WriteString(fmt.Sprintf("  %s: %s\n", p.Name, p.Value))
+func writeHeaders(sb *strings.Builder, headers []*traffic.Header) {
+	for _, header := range headers {
+		if header != nil {
+			sb.WriteString(fmt.Sprintf("  %s: %s\n", header.GetName(), header.GetValue()))
+		}
 	}
 }

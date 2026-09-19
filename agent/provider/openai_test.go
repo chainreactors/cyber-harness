@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 func TestMarshalOpenAIRequestAlwaysIncludesMessageContent(t *testing.T) {

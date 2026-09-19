@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	proto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -19,6 +19,7 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 	if !s.prepareAOPEvent(sessionID, event) {
 		return
 	}
+	recreated := s.sessionWasRecreated(sessionID, event)
 	var cursor int64
 	if s.store != nil {
 		storedCursor, persisted, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
@@ -34,6 +35,21 @@ func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 		cursor = storedCursor
 	}
 	s.broadcastAOPEvent(sessionID, event, cursor)
+	if recreated {
+		s.broadcastSystemMessage(sessionID, SysSessionContextReset, "The node recreated this session; the agent no longer has the earlier conversation in context.", nil)
+	}
+}
+
+// sessionWasRecreated reports that a SessionStarted event announces a session
+// the hub already holds durable history for. A node only recreates a session it
+// has lost from memory (restart or eviction); the transcript survives here, so
+// the agent silently resumes with an empty context unless the operator is told.
+func (s *Service) sessionWasRecreated(sessionID string, event *aop.Event) bool {
+	if s.store == nil || event.GetSessionStarted() == nil {
+		return false
+	}
+	maximum, err := s.store.MaxAOPEventSeq(context.Background(), sessionID)
+	return err == nil && maximum > 0
 }
 
 // PublishUserMessage records the operator input in the durable AOP timeline.
@@ -51,7 +67,7 @@ func (s *Service) PublishUserMessage(sessionID, turnID string, message *aop.Mess
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
 		SessionId: sessionID,
 		TurnId:    turnID,
-		Emitter:   "aiscan.web",
+		Emitter:   "cyber.web",
 		Payload:   &aop.Event_Message{Message: userMessage},
 	})
 }
@@ -119,10 +135,10 @@ func (s *Service) broadcastAOPEvent(sessionID string, event *aop.Event, cursor i
 // broadcastHubError emits a hub-originated failure as an AOP error event: the
 // code names a translatable template (mirrored under `sys.*` in the frontend
 // locales), message is the English fallback, and params feed i18n
-// interpolation via the aiscan.web extension.
+// interpolation via the cyber.web extension.
 func (s *Service) broadcastHubError(sessionID, code, message string, params map[string]any) {
 	event := &aop.Event{
-		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "cyber.web",
 		Payload: &aop.Event_Error{Error: &aop.ProtocolError{Code: code, Message: message}},
 	}
 	if len(params) > 0 {
@@ -136,7 +152,7 @@ func (s *Service) broadcastHubError(sessionID, code, message string, params map[
 func (s *Service) broadcastHubTurnEnded(sessionID, turnID, code, message string) {
 	ended := &aop.TurnEnded{StopReason: "error", Error: &aop.ProtocolError{Code: code, Message: message}}
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
-		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
+		SessionId: sessionID, TurnId: turnID, Emitter: "cyber.web",
 		Payload: &aop.Event_TurnEnded{TurnEnded: ended},
 	})
 }
@@ -156,7 +172,7 @@ func isReliableAOPEvent(event *aop.Event) bool {
 	return false
 }
 
-// runHubCommand executes a product-level slash command that needs hub state.
+// runHubCommand executes an application-level slash command that needs hub state.
 // name is the canonical catalog name without its leading slash. Agent-scope
 // commands never reach here; they fall through to the agent bridge.
 func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, params map[string]any) {
@@ -169,35 +185,41 @@ func (s *Service) broadcastSystemMessage(sessionID, code, fallback string, param
 
 func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, metadata *types.WebMessageMetadata) {
 	event := &aop.Event{
-		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "aiscan.web",
+		Id: generateID(), EmittedAt: timestamppb.Now(), SessionId: sessionID, Emitter: "cyber.web",
 		Payload: &aop.Event_Message{Message: &aop.Message{
 			Id: generateID(), Role: "system", Content: []*aop.Content{aop.Text(fallback)},
 		}},
 	}
-	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil) {
+	if metadata != nil && (metadata.GetCode() != "" || metadata.GetNodeId() != "" || metadata.GetParams() != nil || metadata.GetAgentList() != nil || metadata.GetCommands() != nil) {
 		_ = types.SetWebMessage(event, metadata)
 	}
 	s.BroadcastAOPEvent(sessionID, event)
 }
 
+// broadcastScanComplete mirrors a finished scan into the AOP timeline of every
+// session bound to it, so a scan submitted over the scan RPC surfaces as a
+// result card in the chat that commissioned it. The binding is the durable
+// session_scans relation a session writes at open time (SessionBinding), not
+// the in-flight task map: a scan id is never a registered session task.
+// A session that binds after the scan already finished gets no live event and
+// rebuilds the card from its own scan ids on load instead.
 func (s *Service) broadcastScanComplete(scanID string) {
-	s.mu.Lock()
-	sid, ok := s.taskSessions[scanID]
-	s.mu.Unlock()
-	if !ok {
+	if s.store == nil {
 		return
 	}
-	if s.finishSessionTask(scanID) {
+	sessionIDs, err := s.store.ScanSessionIDs(context.Background(), scanID)
+	if err != nil || len(sessionIDs) == 0 {
 		return
 	}
-	_ = s.store.LinkScanToSession(context.Background(), sid, scanID)
 	value, err := anypb.New(&types.SessionScanEvent{ScanId: scanID, Status: types.ScanStatus_SCAN_STATUS_COMPLETED})
 	if err != nil {
 		return
 	}
-	s.BroadcastAOPEvent(sid, &aop.Event{
-		SessionId: sid,
-		Emitter:   "aiscan.web",
-		Payload:   &aop.Event_Extension{Extension: value},
-	})
+	for _, sid := range sessionIDs {
+		s.BroadcastAOPEvent(sid, &aop.Event{
+			SessionId: sid,
+			Emitter:   "cyber.web",
+			Payload:   &aop.Event_Extension{Extension: value},
+		})
+	}
 }

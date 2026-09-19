@@ -1,11 +1,14 @@
+// Package provider adapts the LLM provider State to Extension lifecycle. It is
+// unrelated to declaration aggregation; CLI and Config register through typed
+// resource Points directly.
 package provider
 
 import (
 	"context"
-	"fmt"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
 type Extension struct {
@@ -15,17 +18,23 @@ type Extension struct {
 	logger  telemetry.Logger
 }
 
-func New(state *provider.State, config provider.StartupConfig, logger telemetry.Logger) (*Extension, error) {
-	if state == nil {
-		return nil, fmt.Errorf("provider state is required")
-	}
+func New(config provider.StartupConfig, logger telemetry.Logger) *Extension {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
 	config.Fallbacks = append([]provider.ProviderConfig(nil), config.Fallbacks...)
-	return &Extension{state: state, config: config, logger: logger}, nil
+	return &Extension{config: config, logger: logger}
 }
+
+// Load initializes the provider state the application owns. The state lives on
+// App rather than here because the console and the session runtime read it
+// directly; this extension only drives its startup and shutdown.
 func (e *Extension) Load(scope *extension.Scope) error {
+	application, err := extension.Use[*apppkg.State](scope)
+	if err != nil {
+		return err
+	}
+	e.state = &application.Providers
 	release, err := provider.Initialize(scope.Init(), e.state, e.config, e.logger)
 	e.release = release
 	return err

@@ -13,7 +13,7 @@ const NODES: Array<[number, number]> = [
 ]
 
 /**
- * The AIScan scope glyph — a monochrome take on the official radar-and-chain
+ * The Cyber scope glyph — a monochrome take on the official radar-and-chain
  * mark (web/assets/logo.svg): a range-ring radar ringed by eight agent nodes. Drawn
  * in a single tint via currentColor so callers colour it with text-* utilities
  * (e.g. text-ai, text-primary, text-muted-foreground). The full-colour, animated

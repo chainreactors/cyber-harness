@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

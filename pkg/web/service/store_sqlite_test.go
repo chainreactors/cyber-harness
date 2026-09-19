@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -63,75 +66,6 @@ func TestSQLiteStoreRejectsUnversionedSchema(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreRejectsLegacyRequestJournalSchema(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy-journal.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-		CREATE TABLE aop_request_journal (request_id TEXT PRIMARY KEY);
-		PRAGMA user_version = 1;
-	`); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
-	_ = db.Close()
-
-	if _, err := NewSQLiteStore(path); err == nil || !strings.Contains(err.Error(), "unsupported sqlite schema version 1") {
-		t.Fatalf("NewSQLiteStore() error = %v, want explicit legacy schema rejection", err)
-	}
-}
-
-func TestSQLiteStoreRejectsUnsupportedSchemaVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v3.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-		CREATE TABLE chat_sessions (
-			id TEXT PRIMARY KEY,
-			agent_id TEXT NOT NULL,
-			status TEXT NOT NULL,
-			session_proto BLOB NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);
-		CREATE INDEX idx_sessions_agent ON chat_sessions(agent_id);
-		PRAGMA user_version = 3;
-	`); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
-	_ = db.Close()
-
-	if _, err := NewSQLiteStore(path); err == nil {
-		t.Fatal("NewSQLiteStore() accepted an unsupported schema version")
-	}
-}
-
-func TestSQLiteStoreRejectsHistoricalSchemaVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "historical.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`
-		CREATE TABLE historical_data (id TEXT PRIMARY KEY);
-		PRAGMA user_version = 4;
-	`); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
-	_ = db.Close()
-
-	_ = db.Close()
-	if _, err := NewSQLiteStore(path); err == nil || !strings.Contains(err.Error(), "unsupported sqlite schema version") {
-		t.Fatalf("NewSQLiteStore() error = %v, want unsupported historical schema", err)
-	}
-}
-
 func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
 	if err != nil {
@@ -151,7 +85,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	assistant := &aop.Event{
-		Id: "e-message", EmittedAt: timestamppb.New(created.Add(time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Id: "e-message", EmittedAt: timestamppb.New(created.Add(time.Second)), SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{
 			Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("hi there")},
 		}},
@@ -161,7 +95,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 	}
 	// Deltas are streaming fragments and must never be persisted.
 	delta := &aop.Event{
-		Id: "e-delta", EmittedAt: timestamppb.New(created.Add(2 * time.Second)), SessionId: "s1", Emitter: "aiscan",
+		Id: "e-delta", EmittedAt: timestamppb.New(created.Add(2 * time.Second)), SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_MessageDelta{MessageDelta: &aop.MessageDelta{
 			MessageId: "m-1", ContentIndex: 0, Value: &aop.MessageDelta_Text{Text: "hi"},
 		}},
@@ -205,7 +139,7 @@ func TestSQLiteStoreAppendAOPEventIsIdempotentByEventID(t *testing.T) {
 	defer store.Close()
 	createStoredSession(t, store, "s1")
 	event := &aop.Event{
-		Id: "event-retry", SessionId: "s1", Emitter: "aiscan",
+		Id: "event-retry", SessionId: "s1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("once")}}},
 	}
 	firstCursor, firstPersisted, err := store.AppendAOPEvent(context.Background(), "s1", event)
@@ -286,25 +220,25 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 		Id: "scan-json", Target: "example.com", Mode: "deep",
 		Options: &types.ScanOptions{Verify: true, Sniper: true},
 		Status:  types.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
-		Report: "# report", Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
 
-	var raw, target, mode, status, progress, report string
+	var raw, target, mode, status, progress string
 	var verify, sniper, deep bool
 	if err := store.db.QueryRow(`
-		SELECT scan_json, target, mode, verify, sniper, deep, status, progress, report
+		SELECT scan_json, target, mode, verify, sniper, deep, status, progress
 		FROM scans WHERE id = ?`, scan.Id,
-	).Scan(&raw, &target, &mode, &verify, &sniper, &deep, &status, &progress, &report); err != nil {
+	).Scan(&raw, &target, &mode, &verify, &sniper, &deep, &status, &progress); err != nil {
 		t.Fatal(err)
 	}
 	if !json.Valid([]byte(raw)) {
 		t.Fatalf("scan_json is not JSON: %q", raw)
 	}
-	if target != scan.Target || mode != scan.Mode || status != scanStatusToDB(scan.Status) || progress != scan.Progress || report != scan.Report {
-		t.Fatalf("relational projection = target:%q mode:%q status:%q progress:%q report:%q", target, mode, status, progress, report)
+	if target != scan.Target || mode != scan.Mode || status != scanStatusToDB(scan.Status) || progress != scan.Progress {
+		t.Fatalf("relational projection = target:%q mode:%q status:%q progress:%q", target, mode, status, progress)
 	}
 	if !verify || !sniper || deep {
 		t.Fatalf("relational options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
@@ -318,65 +252,66 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreDoesNotDuplicateLargeReportInSnapshot(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "report-dedup.db"))
+func TestSQLiteStoreArtifactArchiveRoundTrip(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 
-	report := strings.Repeat("report-line\n", 4<<20/12)
-	scan := &types.Scan{
-		Id: "scan-report-dedup", Target: "example.com", Mode: "quick", Report: report,
-		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
-	}
-	if err := store.Create(context.Background(), scan); err != nil {
-		t.Fatal(err)
-	}
-	var snapshotBytes, reportBytes int
-	var raw string
-	if err := store.db.QueryRow(`SELECT scan_json, length(scan_json), length(report) FROM scans WHERE id = ?`, scan.Id).
-		Scan(&raw, &snapshotBytes, &reportBytes); err != nil {
-		t.Fatal(err)
-	}
-	if reportBytes != len(report) {
-		t.Fatalf("report column bytes = %d, want %d", reportBytes, len(report))
-	}
-	if strings.Contains(raw, "report-line") || snapshotBytes >= len(report) {
-		t.Fatalf("scan_json still duplicates the large report: snapshot_bytes=%d report_bytes=%d", snapshotBytes, reportBytes)
-	}
-	got, err := store.Get(context.Background(), scan.Id)
+	first := testArtifactEvent(t, "artifact-1")
+	second := testArtifactEvent(t, "artifact-2")
+	deliveries, err := store.SyncArtifactEvents(context.Background(), []*aop.Event{first, first, second}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Report != report {
-		t.Fatalf("Get() report bytes = %d, want %d", len(got.Report), len(report))
+	if len(deliveries) != 2 || deliveries[0].GetCursor() != "1" {
+		t.Fatalf("artifact deliveries = %+v", deliveries)
+	}
+	secondCursor, err := strconv.ParseInt(deliveries[1].GetCursor(), 10, 64)
+	if err != nil || secondCursor <= 1 {
+		t.Fatalf("second artifact cursor = %q, %v", deliveries[1].GetCursor(), err)
+	}
+	if !proto.Equal(deliveries[0].GetEvent(), first) || !proto.Equal(deliveries[1].GetEvent(), second) {
+		t.Fatal("artifact archive did not preserve the original events")
+	}
+	next, err := store.SyncArtifactEvents(context.Background(), nil, 1)
+	if err != nil || len(next) != 1 || next[0].GetEvent().GetId() != second.GetId() {
+		t.Fatalf("artifact archive resume = %+v, %v", next, err)
+	}
+	var rawCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM raw_artifacts`).Scan(&rawCount); err != nil || rawCount != 2 {
+		t.Fatalf("retained raw artifacts = %d, %v; want 2", rawCount, err)
 	}
 }
 
-func TestSQLiteStoreKeepsSCOObservationForEveryOperation(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "sco.db"))
+func TestSQLiteStoreArtifactArchiveUsesFixedPages(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifact-pages.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	events := make([]*aop.Event, artifactSyncBatch+1)
+	for index := range events {
+		events[index] = testArtifactEvent(t, fmt.Sprintf("artifact-%03d", index))
+	}
+	first, err := store.SyncArtifactEvents(context.Background(), events, 0)
+	if err != nil || len(first) != artifactSyncBatch {
+		t.Fatalf("first artifact page = %d, %v", len(first), err)
+	}
+	second, err := store.SyncArtifactEvents(context.Background(), nil, artifactSyncBatch)
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second artifact page = %d, %v", len(second), err)
+	}
+}
 
-	node := json.RawMessage(`{"cstx_id":"ip:127.0.0.1","cstx_type":"ip","ip":"127.0.0.1"}`)
-	for _, operationID := range []string{"scan-1", "scan-2"} {
-		if err := store.UpsertSCONodes(context.Background(), operationID, []json.RawMessage{node}); err != nil {
-			t.Fatal(err)
-		}
+func testArtifactEvent(t *testing.T, id string) *aop.Event {
+	t.Helper()
+	payload, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Data: []byte(`{"ip":"127.0.0.1"}`), MediaType: aop.JSONMediaType})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, operationID := range []string{"scan-1", "scan-2"} {
-		nodes, err := store.ListSCONodesByScanID(context.Background(), operationID, "", 10)
-		if err != nil || len(nodes) != 1 {
-			t.Fatalf("operation %s nodes = %d, err = %v; want 1", operationID, len(nodes), err)
-		}
-	}
-	var nodeCount int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sco_nodes`).Scan(&nodeCount); err != nil || nodeCount != 1 {
-		t.Fatalf("global SCO node count = %d, err = %v; want 1", nodeCount, err)
-	}
+	return &aop.Event{Id: id, EmittedAt: timestamppb.Now(), Payload: &aop.Event_Extension{Extension: payload}}
 }
 
 func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {

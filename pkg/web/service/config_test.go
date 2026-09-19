@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	configpkg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 	"sync"
 	"testing"
 	"time"
@@ -153,7 +153,7 @@ func TestSaveConfigBuildFailureKeepsCommittedConfigAndSkipsApply(t *testing.T) {
 	store := &transactionalConfigStore{cfg: configForModel("old-model")}
 	config := NewService(ServiceConfig{
 		ConfigStore: store,
-		BuildProfile: func(_ context.Context, prepared *PreparedConfig) (profile.Application, error) {
+		BuildProfile: func(_ context.Context, prepared *PreparedConfig) (profile.Profile, error) {
 			if got := activeModel(prepared.Config); got != "new-model" {
 				t.Fatalf("candidate model = %q", got)
 			}
@@ -181,7 +181,7 @@ func TestSaveConfigCommitFailureClosesCandidate(t *testing.T) {
 	candidate, _, candidateClosed := newRecordingProfile(t)
 	config := NewService(ServiceConfig{
 		ConfigStore: store,
-		BuildProfile: func(context.Context, *PreparedConfig) (profile.Application, error) {
+		BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) {
 			return candidate, nil
 		},
 	})
@@ -226,7 +226,7 @@ func TestSaveConfigBuildErrorClosesReturnedPartialCandidate(t *testing.T) {
 	store := &transactionalConfigStore{cfg: configForModel("old-model")}
 	config := NewService(ServiceConfig{
 		ConfigStore:  store,
-		BuildProfile: func(context.Context, *PreparedConfig) (profile.Application, error) { return candidate, want },
+		BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return candidate, want },
 	})
 	if _, err := config.SaveConfig(context.Background(), configForModel("new-model")); err == nil {
 		t.Fatal("build failure was lost")
@@ -245,7 +245,7 @@ func TestSaveConfigSerializesConcurrentCandidates(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	config := NewService(ServiceConfig{
 		ConfigStore: store,
-		BuildProfile: func(_ context.Context, prepared *PreparedConfig) (profile.Application, error) {
+		BuildProfile: func(_ context.Context, prepared *PreparedConfig) (profile.Profile, error) {
 			model := activeModel(prepared.Config)
 			entered <- model
 			if model == "first-model" {

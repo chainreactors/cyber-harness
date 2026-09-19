@@ -14,7 +14,7 @@ export default {
   members: 'Members',
   metadata: 'Metadata',
   noNodes: 'No IOA nodes connected',
-  noNodesHint: 'Connect an agent to the AIScan server to register its IOA node.',
+  noNodesHint: 'Connect an agent to the Cyber server to register its IOA node.',
   noSpaces: 'No IOA spaces yet',
   noSpacesHint: 'Spaces appear when agents join a collaboration context.',
   noMessages: 'No messages in this space',

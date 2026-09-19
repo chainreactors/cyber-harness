@@ -4,16 +4,18 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
+	"fmt"
 
-	"github.com/chainreactors/aiscan/agent/hooks"
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // The agent loop operates on AOP protos directly. Vendored JSON shapes live
@@ -76,6 +78,18 @@ type Loop interface {
 	Run(context.Context, Config) (*Result, error)
 }
 
+// NoLoop is the reasoning algorithm of a profile that selects sessions without
+// selecting reasoning. It exists so that "no loop" is a value a consumer can
+// borrow like any other, instead of a nil every consumer has to test for --
+// the same reason a host that routes nothing still publishes an endpoint.
+func NoLoop() Loop { return noLoop{} }
+
+type noLoop struct{}
+
+func (noLoop) Run(context.Context, Config) (*Result, error) {
+	return nil, fmt.Errorf("agent loop is not configured")
+}
+
 type ToolFlowDecision int
 
 const (
@@ -83,9 +97,8 @@ const (
 	ToolFlowTerminate
 )
 
-// SystemPromptFunc is called at the start of each turn to produce the system prompt.
-// Receives the current config context so it can adapt to active tools, model, etc.
-type SystemPromptFunc func(cfg *Config) string
+// SystemPromptFunc resolves the system prompt once at the start of a run.
+type SystemPromptFunc func(context.Context, *Config) (string, error)
 
 type ProviderEntry struct {
 	Provider Provider
@@ -104,6 +117,7 @@ type Config struct {
 	Model            string
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
+	PromptResolver   prompt.Resolver
 	Messages         []*aop.Message
 	MaxTokens        int
 	ContextWindow    int
@@ -130,7 +144,7 @@ type Config struct {
 	ParentSessionID  string
 	ParentToolCallID string
 	Delegation       *types.DelegationDetail
-	// AgentName tags emitted AOP events; defaults to "aiscan".
+	// AgentName tags emitted AOP events; defaults to "cyber".
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
 	// restored; Result.MessageCounter carries the final value for saving.
@@ -144,11 +158,18 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config          { c.Provider = p; return c }
-func (c Config) WithLoop(loop Loop) Config               { c.Loop = loop; return c }
-func (c Config) WithTools(t tool.Executor) Config        { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config               { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config        { c.SystemPrompt = s; return c }
+func (c Config) WithProvider(p Provider) Config   { c.Provider = p; return c }
+func (c Config) WithLoop(loop Loop) Config        { c.Loop = loop; return c }
+func (c Config) WithTools(t tool.Executor) Config { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config        { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config {
+	c.SystemPrompt, c.SystemPromptFn = s, nil
+	return c
+}
+func (c Config) WithSystemPromptFunc(fn SystemPromptFunc) Config {
+	c.SystemPrompt, c.SystemPromptFn = "", fn
+	return c
+}
 func (c Config) WithMessages(msgs []*aop.Message) Config { c.Messages = msgs; return c }
 func (c Config) WithStream(s bool) Config                { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config         { c.Inbox = ib; return c }
@@ -203,7 +224,7 @@ func (c Config) init() Config {
 		c.SessionID = randomID()
 	}
 	if c.AgentName == "" {
-		c.AgentName = "aiscan"
+		c.AgentName = "cyber"
 	}
 	if c.Tools == nil {
 		c.Tools = tool.EmptyExecutor()
@@ -233,8 +254,7 @@ func NewAgent(cfg Config) *Agent {
 	return &Agent{
 		Cfg: cfg,
 		state: State{
-			SystemPrompt: cfg.SystemPrompt,
-			Tools:        cfg.Tools,
+			Tools: cfg.Tools,
 		},
 	}
 }
@@ -254,7 +274,6 @@ type Result struct {
 }
 
 type State struct {
-	SystemPrompt string
 	Messages     []*aop.Message
 	Tools        tool.Executor
 	ErrorMessage string

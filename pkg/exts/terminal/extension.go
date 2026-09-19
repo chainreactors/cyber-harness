@@ -7,62 +7,39 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/cyber/core/egress"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type Config struct {
 	Environment    map[string]string
 	Directory      string
 	Timeout        int
-	Proxy          string
-	ProxyCA        string
-	Egress         func(context.Context) (string, string, func())
-	Containment    commands.ProcessContainment
+	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
-	// Tmux constructs the terminal command published by this extension. Nil
-	// selects the native command; product profiles may supply their own session
-	// ownership policy without replacing an already published registration.
-	Tmux func(*commands.BashTool) commands.Command
 	// HiddenCommands are control-only registry commands omitted from the Bash
 	// description and shell aliases.
 	HiddenCommands []string
 }
 type Extension struct {
-	mu                 sync.Mutex
-	tools              toolset.Registrar
-	commands           commands.Runtime
-	bash               *commands.BashTool
-	tmux               commands.Command
-	registered, closed bool
-	done               chan struct{}
+	mu     sync.Mutex
+	config Config
+	bash   *terminaltool.BashTool
+	closed bool
+	done   chan struct{}
 }
 
-func New(registry *hooks.Registry, tools toolset.Registrar, c commands.Runtime, config Config) (*Extension, error) {
-	if tools == nil || c == nil || config.Directory == "" {
-		return nil, fmt.Errorf("terminal requires commands and a working directory")
-	}
-	bash := commands.NewBashTool(config.Directory, config.Timeout, registry).
-		WithEnvironment(config.Environment).
-		WithScannerProxy(config.Proxy).
-		WithScannerProxyCA(config.ProxyCA).
-		WithProcessContainment(config.Containment).
-		WithForegroundTimeoutCeiling(config.MaximumTimeout)
-	bash.SetEgressResolver(config.Egress)
-	bash.EnableShellCommands(c)
-	bash.HideCommands(config.HiddenCommands...)
-	tmux := commands.NewTmuxCommand(bash)
-	if config.Tmux != nil {
-		tmux = config.Tmux(bash)
-	}
-	if tmux.Name != "tmux" || tmux.Run == nil {
-		return nil, fmt.Errorf("terminal tmux command must be named tmux and executable")
-	}
-	return &Extension{tools: tools, commands: c, bash: bash, tmux: tmux}, nil
-}
-func (m *Extension) Bash() *commands.BashTool { return m.bash }
+func New(config Config) *Extension { return &Extension{config: config} }
+
+// Load builds the tool here rather than in New because everything it needs --
+// the hook registry, the command executor, the egress endpoint -- is a
+// capability, and capabilities only exist once the graph is loading.
 func (m *Extension) Load(scope *extension.Scope) error {
 	ctx := scope.Init()
 	m.mu.Lock()
@@ -70,24 +47,57 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if m.closed {
 		return toolset.ErrUnavailable
 	}
-	if m.registered {
-		return nil
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := m.commands.Register("terminal", "terminal", m.tmux); err != nil {
+	if m.config.Directory == "" {
+		return fmt.Errorf("terminal requires a working directory")
+	}
+	registry, err := extension.Use[*hooks.Registry](scope)
+	if err != nil {
 		return err
 	}
-	if err := m.tools.Register("terminal", m.bash); err != nil {
+	executor, err := extension.Use[commands.Executor](scope)
+	if err != nil {
 		return err
 	}
-	m.registered = true
+	endpoint, err := extension.Use[egress.Endpoint](scope)
+	if err != nil {
+		return err
+	}
+
+	bash := terminaltool.NewBashTool(m.config.Directory, m.config.Timeout, registry).
+		WithEnvironment(m.config.Environment).
+		WithScannerProxy(endpoint.ProxyURL()).
+		WithScannerProxyCA(endpoint.CAPath()).
+		WithProcessContainment(m.config.Containment).
+		WithForegroundTimeoutCeiling(m.config.MaximumTimeout)
+	bash.SetEgressResolver(endpoint.Egress)
+	bash.EnableShellCommands(executor)
+	bash.HideCommands(m.config.HiddenCommands...)
+
+	m.bash = bash
+
+	if err := extension.Add[tool.Tool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[*terminaltool.BashTool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[procbus.Sessions](scope, bash.Manager()); err != nil {
+		return err
+	}
 	return nil
 }
 func (m *Extension) Close(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	if m.bash == nil {
+		// Load never got far enough to build the tool.
+		m.closed = true
 		m.mu.Unlock()
 		return nil
 	}

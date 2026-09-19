@@ -7,11 +7,11 @@ import (
 	"runtime/debug"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -87,7 +87,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 		if !startedAt.IsZero() {
 			result.DurationMs = uint64(endedAt.Sub(startedAt).Milliseconds())
 		}
-		if registry.Has(Completed.Kind) {
+		if Completed.Has(registry) {
 			corehooks.Notify(context.WithoutCancel(ctx), registry, Completed, Completion{
 				Lifecycle: Lifecycle{Operation: cloneCorrelation(correlation), StartedAt: startedAt, EndedAt: endedAt, Err: err},
 				Call:      proto.Clone(call).(*aop.ToolCall),
@@ -96,7 +96,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 		}
 	}()
 
-	if registry.Has(Before.Kind) {
+	if Before.Has(registry) {
 		admission, hookErr := Before.Emit(ctx, registry, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneCorrelation(correlation)})
 		if err = Check(admission, hookErr); err != nil {
 			return nil, err
@@ -107,7 +107,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 	}
 
 	startedAt = time.Now()
-	if registry.Has(Started.Kind) {
+	if Started.Has(registry) {
 		corehooks.Notify(ctx, registry, Started, CallEvent{Call: proto.Clone(call).(*aop.ToolCall), Operation: cloneCorrelation(correlation)})
 	}
 	if err = context.Cause(ctx); err != nil {
@@ -118,7 +118,7 @@ func Execute(ctx context.Context, registry *corehooks.Registry, name, arguments 
 	if result == nil {
 		result = &tool.Result{}
 	}
-	if registry.Has(After.Kind) {
+	if After.Has(registry) {
 		wasError, wasTerminate := result.IsError, result.Terminate
 		transformed := proto.Clone(result).(*tool.Result)
 		_, hookErr := After.Emit(ctx, registry, ResultEvent{

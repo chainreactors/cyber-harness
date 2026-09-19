@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	webstatic "github.com/chainreactors/aiscan/web"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	webstatic "github.com/chainreactors/cyber/web"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/gorilla/websocket"
@@ -122,24 +122,15 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 	}
 }
 
-type recordingArtifactProjector struct {
-	operationID string
-	artifact    *toolpb.Artifact
-}
-
-func (s *recordingArtifactProjector) ImportArtifact(_ context.Context, operationID string, artifact *toolpb.Artifact) (uint64, uint64, error) {
-	s.operationID = operationID
-	s.artifact = protobuf.Clone(artifact).(*toolpb.Artifact)
-	return 0, 0, nil
-}
-
-func (*recordingArtifactProjector) ArtifactTypes() []string { return nil }
-
 func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
-	projector := &recordingArtifactProjector{}
-	pool := NewAgentPool(NewHub(), projector)
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	pool := NewAgentPool(NewHub(), store)
 	raw := []byte(`{"ip":"127.0.0.1","port":"80"}`)
-	event := &aop.Event{SessionId: "session-1"}
+	event := &aop.Event{Id: "artifact-event-1", EmittedAt: timestamppb.Now(), SessionId: "session-1"}
 	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: raw, MediaType: aop.JSONMediaType})
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +143,12 @@ func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
 	}
 	pool.handleAgentEnvelope(&remoteAgent{nodeState: newNodeState()}, wrapMessage(t, generateID(), "call-gogo-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
 
-	if projector.operationID != "call-gogo-1" {
-		t.Fatalf("operation id = %q, want tool call id", projector.operationID)
+	deliveries, err := store.SyncArtifactEvents(context.Background(), nil, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if projector.artifact.Tool != "gogo" || string(projector.artifact.Data) != string(raw) {
-		t.Fatalf("forwarded artifact = %+v", projector.artifact)
+	if len(deliveries) != 1 || !protobuf.Equal(deliveries[0].GetEvent(), event) {
+		t.Fatalf("stored artifact events = %+v", deliveries)
 	}
 }
 
@@ -259,8 +251,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *AgentPool) {
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
-	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
-	mux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
+	mux.Handle(ApplicationWebSocketPath, svc.ApplicationWebSocketHandler())
+	mux.Handle(NodeWebSocketPath, svc.NodeWebSocketHandler())
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, pool
@@ -394,10 +386,9 @@ func TestDispatchToolCallPublishesSessionCallOnce(t *testing.T) {
 	pool.SetSessionLookup(probe)
 	remote := &remoteAgent{
 		nodeState: newNodeState(), nodeID: "agent-1",
-		sendCh: make(chan *aop.Envelope, 1), done: make(chan struct{}),
 	}
+	bindAgentQueue(remote, 1)
 	pool.register(remote)
-	defer close(remote.done)
 
 	if _, err := pool.DispatchToolCall("agent-1", "task-1", &aop.ToolCall{Name: "bash"}); err != nil {
 		t.Fatal(err)
@@ -475,7 +466,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Fatal("expected chat-capable agent")
 	}
 
-	options, err := anypb.New(&types.AgentRunOptions{EvalCriteria: "find at least one SQLi", EvalMaxRounds: 5})
+	options, err := anypb.New(&types.AgentRunOptions{EvalCriteria: "find at least one SQLi", EvalRounds: "dig deep, up to ten rounds"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +496,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 		t.Errorf("run = %+v", inbound)
 	}
 	gotOptions := new(types.AgentRunOptions)
-	if err := inbound.Extensions[0].UnmarshalTo(gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalMaxRounds != 5 {
+	if err := inbound.Extensions[0].UnmarshalTo(gotOptions); err != nil || gotOptions.EvalCriteria != "find at least one SQLi" || gotOptions.EvalRounds != "dig deep, up to ten rounds" {
 		t.Errorf("goal options = %+v, err=%v", gotOptions, err)
 	}
 	writeAgentEnvelope(t, conn, turnEndEnvelope(t, "task-goal", "sess-1", "completed"))
@@ -527,7 +518,7 @@ func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 
 	conn := dialAgentWithIdentity(t, srv, "upload-agent", []string{"scan"}, "node-upload-agent",
@@ -961,7 +952,7 @@ func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unus
 		}
 	})
 
-	srv := httptest.NewServer(newHandler(svc, nil, static, ""))
+	srv := httptest.NewServer(newHandler(svc, static))
 	t.Cleanup(srv.Close)
 	resp, err := http.Get(srv.URL + "/api/auth/session") //nolint:gosec // test-only local server
 	if err != nil {
@@ -1225,15 +1216,14 @@ func TestCancelTaskConvergesPendingTaskImmediately(t *testing.T) {
 			openSessions: make(map[string]struct{}), toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{}),
 		},
 		nodeID: "agent-1",
-		sendCh: make(chan *aop.Envelope, 1),
-		done:   make(chan struct{}),
 	}
+	sent := bindAgentQueue(remote, 1)
 	pool.agents[remote.nodeID] = remote
 
 	pool.CancelTask(remote.nodeID, "task-1", "session-1")
 
 	select {
-	case envelope := <-remote.sendCh:
+	case envelope := <-sent:
 		message, err := aop.Unwrap(envelope)
 		if err != nil {
 			t.Fatal(err)
@@ -1415,9 +1405,9 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 	service.SetAgentPool(pool)
 	remote := &remoteAgent{
 		nodeState: newNodeState(),
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 2),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	bindAgentQueue(remote, 2)
 	pool.agents[remote.nodeID] = remote
 	session, _ := store.GetSession(context.Background(), "session-1")
 	if session != nil {
@@ -1452,24 +1442,33 @@ func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
 	t.Fatal("disconnect terminal event was not persisted")
 }
 
-func newFakeAgent(nodeID string, buffer int) *remoteAgent {
-	return &remoteAgent{
-		nodeState: newNodeState(),
-		nodeID:    nodeID, name: nodeID, sendCh: make(chan *aop.Envelope, buffer),
-		done: make(chan struct{}),
+func bindAgentQueue(agent *remoteAgent, buffer int) chan *aop.Envelope {
+	queue := make(chan *aop.Envelope, buffer)
+	agent.send = func(envelope *aop.Envelope) error {
+		queue <- envelope
+		return nil
 	}
+	return queue
+}
+
+func newFakeAgent(nodeID string, buffer int) (*remoteAgent, chan *aop.Envelope) {
+	agent := &remoteAgent{
+		nodeState: newNodeState(),
+		nodeID:    nodeID, name: nodeID,
+	}
+	return agent, bindAgentQueue(agent, buffer)
 }
 
 func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
 	pool := NewAgentPool(nil, nil)
-	agent := newFakeAgent("agent", 1)
+	agent, sent := newFakeAgent("agent", 1)
 	pool.register(agent)
 	config := &types.DistributeConfig{Llm: &types.LLMConfig{ActiveProfile: "primary"}}
 
 	if n := pool.BroadcastConfigReload(config); n != 1 {
 		t.Fatalf("notified = %d, want 1", n)
 	}
-	envelope := <-agent.sendCh
+	envelope := <-sent
 	message, err := aop.Unwrap(envelope)
 	if err != nil {
 		t.Fatal(err)
@@ -1482,9 +1481,9 @@ func TestBroadcastConfigReloadUsesApplicationFIFO(t *testing.T) {
 
 func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 	pool := NewAgentPool(nil, nil)
-	agent := newFakeAgent("busy", 1)
+	agent, sent := newFakeAgent("busy", 1)
 	cancel := aop.MustWrap("cancel", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "task-1"}}})
-	agent.sendCh <- cancel
+	sent <- cancel
 	pool.register(agent)
 
 	done := make(chan int, 1)
@@ -1494,13 +1493,13 @@ func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 		t.Fatal("reload bypassed the full FIFO")
 	case <-time.After(50 * time.Millisecond):
 	}
-	if first := <-agent.sendCh; first.Id != "cancel" {
+	if first := <-sent; first.Id != "cancel" {
 		t.Fatalf("first envelope = %+v", first)
 	}
 	if notified := <-done; notified != 1 {
 		t.Fatalf("notified = %d", notified)
 	}
-	message, _ := aop.Unwrap(<-agent.sendCh)
+	message, _ := aop.Unwrap(<-sent)
 	if reload, ok := message.(*types.ReloadProtocolMessage); !ok || reload.GetRequest() == nil {
 		t.Fatalf("second message = %T", message)
 	}
@@ -1508,7 +1507,7 @@ func TestBroadcastConfigReloadWaitsInFIFOOrder(t *testing.T) {
 
 func TestHandleAgentStatusUpdate(t *testing.T) {
 	pool := NewAgentPool(nil, nil)
-	agent := newFakeAgent("n1", 1)
+	agent, _ := newFakeAgent("n1", 1)
 	agent.runtime = &aop.AgentRuntimeInfo{Pid: 4242, Hostname: "local-1"}
 	agent.status = &aop.AgentStatus{Provider: "anthropic", Model: "old-model"}
 	pool.register(agent)
@@ -1528,7 +1527,7 @@ func TestHandleAgentStatusUpdate(t *testing.T) {
 
 func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
 	pool := NewAgentPool(nil, nil)
-	agent := newFakeAgent("n1", 1)
+	agent, _ := newFakeAgent("n1", 1)
 	agent.status = &aop.AgentStatus{Provider: "openai", Model: "old-model"}
 	pool.register(agent)
 
@@ -1560,8 +1559,8 @@ func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	mux := http.NewServeMux()
-	mux.HandleFunc(ApplicationWebSocketPath, svc.HandleApplicationWebSocket)
-	mux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
+	mux.Handle(ApplicationWebSocketPath, svc.ApplicationWebSocketHandler())
+	mux.Handle(NodeWebSocketPath, svc.NodeWebSocketHandler())
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -1608,7 +1607,7 @@ func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
 // the same node stays pending.
 func TestCancelTaskIsolatesSiblingDispatch(t *testing.T) {
 	pool := NewAgentPool(nil, nil)
-	agent := newFakeAgent("agent-1", 4)
+	agent, sent := newFakeAgent("agent-1", 4)
 	pool.register(agent)
 
 	arguments, _ := aop.JSONValue(map[string]any{"command": "scan"})
@@ -1620,10 +1619,10 @@ func TestCancelTaskIsolatesSiblingDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-agent.sendCh // the two tool.call dispatches
-	<-agent.sendCh
+	<-sent // the two tool.call dispatches
+	<-sent
 
-	if err := pool.CancelTask("agent-1", "task-1"); err != nil {
+	if err := pool.CancelTask("agent-1", "task-1", ""); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -1647,7 +1646,7 @@ func TestCancelTaskIsolatesSiblingDispatch(t *testing.T) {
 		t.Fatalf("pending after cancel: task-1=%v task-2=%v", firstPending, secondPending)
 	}
 	select {
-	case envelope := <-agent.sendCh:
+	case envelope := <-sent:
 		message := unwrapEnvelope(t, envelope)
 		core, ok := message.(*aop.ProtocolMessage)
 		if !ok || core.GetCancelOperation().GetTargetId() != "task-1" {
@@ -1748,7 +1747,7 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 	svc := NewService(ServiceConfig{Store: store})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 
 	conn1 := dialAgent(t, srv, "bind-agent", []string{"scan"})

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 func normalizeDuration(seconds float64, required bool) (time.Duration, error) {
@@ -37,9 +37,9 @@ func normalizeDuration(seconds float64, required bool) (time.Duration, error) {
 	return duration, nil
 }
 
-func normalizeCaptureArgs(args Args) (captureRequest, error) {
+func normalizeCaptureArgs(args Args) (CaptureRequest, error) {
 	if args.PID > int64(^uint32(0)) {
-		return captureRequest{}, fmt.Errorf("pid exceeds the supported 32-bit process identifier range")
+		return CaptureRequest{}, fmt.Errorf("pid exceeds the supported 32-bit process identifier range")
 	}
 	target := strings.ToLower(strings.TrimSpace(args.Target))
 	if target == "" {
@@ -50,30 +50,30 @@ func normalizeCaptureArgs(args Args) (captureRequest, error) {
 		fps = defaultFPS
 	}
 	if fps < 1 || fps > 60 {
-		return captureRequest{}, fmt.Errorf("fps must be between 1 and 60")
+		return CaptureRequest{}, fmt.Errorf("fps must be between 1 and 60")
 	}
-	req := captureRequest{Target: target, PID: args.PID, FPS: fps}
+	req := CaptureRequest{Target: target, PID: args.PID, FPS: fps}
 	if strings.TrimSpace(args.WindowHandle) != "" {
 		value, err := strconv.ParseUint(strings.TrimSpace(args.WindowHandle), 0, 64)
 		if err != nil || value == 0 {
-			return captureRequest{}, fmt.Errorf("invalid window_handle %q", args.WindowHandle)
+			return CaptureRequest{}, fmt.Errorf("invalid window_handle %q", args.WindowHandle)
 		}
 		req.WindowHandle = value
 	}
 	switch target {
 	case "desktop":
 		if req.WindowHandle != 0 || req.PID != 0 {
-			return captureRequest{}, fmt.Errorf("window_handle and pid require target=window")
+			return CaptureRequest{}, fmt.Errorf("window_handle and pid require target=window")
 		}
 	case "window":
 		if req.WindowHandle != 0 && req.PID != 0 {
-			return captureRequest{}, fmt.Errorf("window_handle and pid are mutually exclusive")
+			return CaptureRequest{}, fmt.Errorf("window_handle and pid are mutually exclusive")
 		}
 		if req.WindowHandle == 0 && req.PID <= 0 {
-			return captureRequest{}, fmt.Errorf("target=window requires window_handle or pid")
+			return CaptureRequest{}, fmt.Errorf("target=window requires window_handle or pid")
 		}
 	default:
-		return captureRequest{}, fmt.Errorf("unsupported target %q", args.Target)
+		return CaptureRequest{}, fmt.Errorf("unsupported target %q", args.Target)
 	}
 	return req, nil
 }
@@ -82,7 +82,7 @@ func (t *Tool) outputPath(ctx context.Context, requested, base, ext string) (str
 	path := strings.TrimSpace(requested)
 	if path == "" {
 		if invocationDir := operation.InvocationFromContext(ctx).WorkDir; invocationDir != "" {
-			path = filepath.Join(invocationDir, ".aiscan", "record", base+ext)
+			path = filepath.Join(invocationDir, ".cyber", "record", base+ext)
 		} else {
 			path = filepath.Join(t.outputDir, base+ext)
 		}

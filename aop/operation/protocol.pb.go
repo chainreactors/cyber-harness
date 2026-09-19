@@ -563,7 +563,7 @@ const file_aop_operation_protocol_proto_rawDesc = "" +
 	"\x1bDECISION_ACTION_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DECISION_ACTION_ALLOW\x10\x01\x12\x18\n" +
 	"\x14DECISION_ACTION_DENY\x10\x02\x12\x1a\n" +
-	"\x16DECISION_ACTION_CANCEL\x10\x03B9Z7github.com/chainreactors/aiscan/aop/operation;operationb\x06proto3"
+	"\x16DECISION_ACTION_CANCEL\x10\x03B8Z6github.com/chainreactors/cyber/aop/operation;operationb\x06proto3"
 
 var (
 	file_aop_operation_protocol_proto_rawDescOnce sync.Once

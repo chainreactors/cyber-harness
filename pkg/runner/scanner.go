@@ -6,73 +6,66 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/pidlock"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/console"
-	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
-	"github.com/chainreactors/aiscan/skills"
-	"github.com/chainreactors/aiscan/tools/scan"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/console"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	"github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/tools/scan"
 )
 
-func DirectScannerRuntimeFeatures(rest []string) (apppkg.RuntimeFeatures, []string, error) {
-	return DirectScannerRuntimeFeaturesWithDefault(rest, cfg.DefaultVerify)
+type ScannerMode struct {
+	Provider profile.ProviderMode
+	Agent    bool
 }
 
-func DirectScannerRuntimeFeaturesWithDefault(rest []string, defaultVerify string) (apppkg.RuntimeFeatures, []string, error) {
+func ResolveScannerMode(rest []string, defaultVerify string) (ScannerMode, []string, error) {
 	if len(rest) == 0 {
-		return apppkg.RuntimeFeatures{}, nil, fmt.Errorf("missing scanner command")
+		return ScannerMode{}, nil, fmt.Errorf("missing scanner command")
 	}
 	if rest[0] != "scan" {
-		return apppkg.RuntimeFeatures{}, rest, nil
+		return ScannerMode{}, rest, nil
 	}
 	verifyMode, explicit := scannerVerifyMode(rest[1:], defaultVerify)
 	sniperEnabled := HasScannerFlag(rest[1:], "--sniper")
 	deepEnabled := HasScannerFlag(rest[1:], "--deep")
 	aiSkillRequested := sniperEnabled || deepEnabled
 
-	features := apppkg.RuntimeFeatures{}
+	mode := ScannerMode{}
 
 	if aiSkillRequested {
-		features.ProviderEnabled = true
-		features.ProviderOptional = false
-		features.AIEnabled = true
-		features.ScannerAI = true
+		mode.Provider = profile.ProviderRequired
+		mode.Agent = true
 	}
 
 	switch verifyMode {
 	case "auto":
-		features.ProviderEnabled = true
 		if !aiSkillRequested {
-			features.ProviderOptional = true
+			mode.Provider = profile.ProviderOptional
 		}
-		features.AIEnabled = true
-		features.ScannerAI = explicit || aiSkillRequested
-		return features, removeScannerFlag(rest, "--verify"), nil
+		mode.Agent = explicit || aiSkillRequested
+		return mode, removeScannerFlag(rest, "--verify"), nil
 	case "off":
 		if explicit {
-			return features, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
+			return mode, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
 		}
-		return features, rest, nil
+		return mode, rest, nil
 	case "low", "medium", "high", "critical":
-		features.ProviderEnabled = true
-		if !aiSkillRequested {
-			features.ProviderOptional = !explicit
+		if aiSkillRequested || explicit {
+			mode.Provider = profile.ProviderRequired
+		} else {
+			mode.Provider = profile.ProviderOptional
 		}
-		features.AIEnabled = true
-		features.ScannerAI = explicit || aiSkillRequested
-		return features, rest, nil
+		mode.Agent = explicit || aiSkillRequested
+		return mode, rest, nil
 	default:
 		if explicit {
-			return apppkg.RuntimeFeatures{}, nil, fmt.Errorf("invalid --verify value %q: expected auto, off, low, medium, high, or critical", verifyMode)
+			return ScannerMode{}, nil, fmt.Errorf("invalid --verify value %q: expected auto, off, low, medium, high, or critical", verifyMode)
 		}
-		return features, rest, nil
+		return mode, rest, nil
 	}
 }
 
@@ -107,7 +100,7 @@ func ShouldStreamScannerOutput(rest []string) bool {
 }
 
 func isDirectScannerJSONOutput(rest []string) bool {
-	if len(rest) == 0 || !edition.Catalog().CLIAvailable(rest[0]) {
+	if len(rest) == 0 || !scannerext.Available(rest[0]) {
 		return false
 	}
 	for _, arg := range rest[1:] {
@@ -186,57 +179,30 @@ func removeScannerFlag(args []string, flag string) []string {
 	return out
 }
 
-func runScannerWithAgent(ctx context.Context, option *cfg.Option, application *apppkg.App, scannerArgs []string, logger telemetry.Logger) error {
-	if provider, _ := application.ProviderState(); provider == nil {
+func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
+	if runtime == nil {
+		return fmt.Errorf("scanner Agent runtime is unavailable")
+	}
+	if provider, _ := runtime.ProviderState(); provider == nil {
 		return fmt.Errorf("--ai requires a configured LLM provider")
 	}
-	lock, err := pidlock.Acquire(pidlock.AgentPIDFilePath(), logger)
+	lock, err := acquirePIDLock(agentPIDFilePath(), logger)
 	if err != nil {
 		return err
 	}
 	defer lock.Release()
 
-	intent, err := resolveScannerIntent(option, application.Skills, scannerArgs[0])
+	intent, err := resolveScannerIntent(option, runtime.Skills(), scannerArgs[0])
 	if err != nil {
 		return err
 	}
-	loopResource, err := loopext.New(loopext.Config{Loop: agent.StandardLoop{}})
-	if err != nil { return err }
-	runtimeResource, err := agentext.New(agentext.Config{
-		Application: application, Option: option, Logger: logger,
-		Loop: loopResource.Runtime(),
-		PromptConfig: &agentext.PromptConfig{
-			Tools:            application.Tools,
-			ScannerDocs:      application.Commands.UsageDocs(),
-			Skills:           application.Skills.Skills,
-			ScannerAgentMode: true,
-			ScannerName:      scannerArgs[0],
-		},
-	})
-	if err != nil {
-		return err
-	}
-	runtime := runtimeResource.Runtime()
-	runtimeSet, err := extension.New(
-		extension.Entry{ID: "agent", Extension: loopResource},
-		extension.Entry{ID: "session", DependsOn: []string{"agent"}, Extension: runtimeResource},
-	)
-	if err != nil {
-		return err
-	}
-	if err := runtimeSet.Load(ctx); err != nil {
-		_ = runtimeSet.Close(context.Background())
-		return err
-	}
-	defer runtimeSet.Close(context.Background())
-
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentext.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
+	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {
 	var sections []string
-	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && edition.Catalog().CLIAvailable(command) {
+	if conceptURI := scan.ScannerConceptURI(command); conceptURI != "" && scannerext.Available(command) {
 		if body, ok, err := store.ReadVirtualBody(conceptURI); err == nil && ok && body != "" {
 			sections = append(sections, skills.FormatVirtualInvocation(command, conceptURI, body))
 		}
@@ -255,7 +221,7 @@ func resolveScannerIntent(option *cfg.Option, store *skills.Store, command strin
 	if intent == "" {
 		intent = "Process the scanner output according to the user's intent. If no specific intent is provided, briefly explain the important evidence in the output."
 	}
-	intent, err = cfg.ApplySelectedSkills(intent, scan.FilterAutoSkill(option.Skills, command), store)
+	intent, err = store.ApplySelected(intent, scan.FilterAutoSkill(option.Skills, command))
 	if err != nil {
 		return "", err
 	}

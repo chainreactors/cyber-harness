@@ -17,7 +17,6 @@ type scanModel struct {
 	Deep      bool   `bun:"deep,notnull"`
 	Status    string `bun:"status,notnull"`
 	Progress  string `bun:"progress,notnull"`
-	Report    string `bun:"report,notnull"`
 	Error     string `bun:"error,notnull"`
 	ScanJSON  string `bun:"scan_json,type:text,notnull"`
 	CreatedAt string `bun:"created_at,notnull"`
@@ -71,21 +70,11 @@ type requestLedgerModel struct {
 	CreatedAt    string `bun:"created_at,notnull"`
 }
 
-type scoNodeModel struct {
-	bun.BaseModel `bun:"table:sco_nodes,alias:node"`
+type rawArtifactModel struct {
+	bun.BaseModel `bun:"table:raw_artifacts,alias:artifact"`
 
-	CSTXID    string `bun:"cstx_id,pk"`
-	CSTXType  string `bun:"cstx_type,notnull"`
-	Data      string `bun:"data,type:text,notnull"`
-	CreatedAt string `bun:"created_at,notnull"`
-	UpdatedAt string `bun:"updated_at,notnull"`
-}
-
-type scoObservationModel struct {
-	bun.BaseModel `bun:"table:sco_observations,alias:observation"`
-
-	OperationID string        `bun:"operation_id,pk"`
-	CSTXID      string        `bun:"cstx_id,pk"`
-	ObservedAt  string        `bun:"observed_at,notnull"`
-	Node        *scoNodeModel `bun:"rel:belongs-to,join:cstx_id=cstx_id,on_delete:cascade"`
+	Cursor     int64  `bun:"cursor,pk,autoincrement"`
+	EventID    string `bun:"event_id,notnull,unique"`
+	EventProto []byte `bun:"event_proto,type:blob,notnull"`
+	CreatedAt  string `bun:"created_at,notnull"`
 }

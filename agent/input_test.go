@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 // pngBytes is a minimal PNG header so http.DetectContentType sniffs image/png.

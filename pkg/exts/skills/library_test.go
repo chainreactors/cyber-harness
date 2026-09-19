@@ -2,7 +2,7 @@ package skills
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/core/extension"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,10 +23,10 @@ func TestLibrariesUseTheirProfileDirectories(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(resource.Store().Skills) != 0 {
+		if len(resource.Store().All()) != 0 {
 			t.Fatal("constructor loaded skills")
 		}
-		set, err := extension.New(extension.Entry{ID: "skills", Extension: resource})
+		set, err := extension.New(resource)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,5 +48,38 @@ func TestLibrariesUseTheirProfileDirectories(t *testing.T) {
 	}
 	if _, found := libraries[1].Store().ByName("one"); found {
 		t.Fatal("first profile contaminated second")
+	}
+}
+
+func TestLibraryExcludesNamedSkills(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, ".agent", "skills", "local", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: local\ndescription: fixture\n---\nbody"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	library, err := NewLibrary(LibraryConfig{Directory: directory, Exclude: []string{"cyber"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := extension.New(library)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := set.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := library.Store().ByName("cyber"); found {
+		t.Fatal("excluded embedded skill is visible")
+	}
+	if _, found := library.Store().ByName("local"); !found {
+		t.Fatal("non-excluded local skill is missing")
 	}
 }

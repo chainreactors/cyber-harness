@@ -5,50 +5,64 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
-const defaultMaxEvalRounds = 3
+// defaultRoundCeiling is a runaway backstop, not a budget. The evaluator ends
+// the loop by returning Continue=false, which is how a normal goal finishes;
+// the ceiling only catches a loop that would otherwise never say stop.
+const defaultRoundCeiling = 20
+
+// maxConsecutiveEvalErrors bounds the one case the evaluator cannot stop
+// itself: if the judge call keeps failing there is no verdict to act on, so the
+// loop gives up instead of re-running the agent against a dead evaluator.
+const maxConsecutiveEvalErrors = 3
 
 type EvalLoopConfig struct {
-	Evaluator     *Evaluator
-	MaxEvalRounds int
-	Goal          string
-	Criteria      string
-	TurnID        string
-	InitialInput  *aop.Message
+	Evaluator *Evaluator
+	// Budget bounds the loop: its Ceiling is the hard backstop (zero takes
+	// defaultRoundCeiling), its Guidance is the user's own words about how long
+	// to keep going, which only the evaluator can act on. Reaching the ceiling
+	// means the evaluator never stopped on its own — a warning, not a normal exit.
+	Budget       Budget
+	Goal         string
+	Criteria     string
+	TurnID       string
+	InitialInput *aop.Message
 }
 
-// NewLoopConfig builds an EvalLoopConfig around a fresh Evaluator. A
-// maxRounds of zero (or negative) defers to RunWithEval's default.
-func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal, criteria string, maxRounds int) EvalLoopConfig {
-	return newLoopConfig(p, model, logger, goal, agent.TextInput(goal), criteria, maxRounds)
+// NewLoopConfig builds an EvalLoopConfig around a fresh Evaluator. The rounds
+// spec is a number, natural language, or empty for the default ceiling; see
+// ParseBudget.
+func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, goal, criteria, rounds string) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, prompts, goal, agent.TextInput(goal), criteria, rounds)
 }
 
 // NewLoopConfigWithInput preserves transport controls and multimodal parts on
 // the first evaluation round. Boundaries that already published the user input
 // use this constructor so the original multimodal input is preserved in Goal mode.
-func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, input *aop.Message, criteria string, maxRounds int) EvalLoopConfig {
-	return newLoopConfig(p, model, logger, strings.TrimSpace(provider.MessageText(input)), input, criteria, maxRounds)
+func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, input *aop.Message, criteria, rounds string) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, prompts, strings.TrimSpace(provider.MessageText(input)), input, criteria, rounds)
 }
 
-func newLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal string, input *aop.Message, criteria string, maxRounds int) EvalLoopConfig {
+func newLoopConfig(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, goal string, input *aop.Message, criteria, rounds string) EvalLoopConfig {
 	return EvalLoopConfig{
-		Evaluator:     New(Config{Provider: p, Model: model, Logger: logger}),
-		MaxEvalRounds: maxRounds,
-		Goal:          goal,
-		Criteria:      criteria,
-		InitialInput:  input,
+		Evaluator:    New(Config{Provider: p, Model: model, Logger: logger, Prompts: prompts}),
+		Budget:       ParseBudget(rounds),
+		Goal:         goal,
+		Criteria:     criteria,
+		InitialInput: input,
 	}
 }
 
 func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts ...agent.RunOption) (*agent.Result, *Verdict, error) {
-	if cfg.MaxEvalRounds <= 0 {
-		cfg.MaxEvalRounds = defaultMaxEvalRounds
+	if cfg.Budget.Ceiling <= 0 {
+		cfg.Budget.Ceiling = defaultRoundCeiling
 	}
 	var (
 		totalUsage *aop.TokenUsage
@@ -79,8 +93,12 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 	if input == nil {
 		return nil, nil, fmt.Errorf("evaluation initial input is required")
 	}
-	var lastVerdict *Verdict
-	for round := 1; round <= cfg.MaxEvalRounds; round++ {
+	var (
+		lastVerdict *Verdict
+		history     []Round
+		evalErrors  int
+	)
+	for round := 1; round <= cfg.Budget.Ceiling; round++ {
 		result, err := a.Run(ctx, input, opts...)
 		if result != nil {
 			totalTurns += result.Turns
@@ -99,34 +117,53 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 			return finish(result), lastVerdict, result.Err
 		}
 
-		a.EmitStatus(types.EvalStateStart, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0))}, cfg.TurnID)
+		a.EmitStatus(types.EvalStateStart, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(cfg.Budget.Ceiling)}, cfg.TurnID)
 
-		verdict, evalErr := cfg.Evaluator.Evaluate(
-			ctx, cfg.Goal, cfg.Criteria,
-			result.Messages, result.Output, result.Turns, result.ContextTokens,
-		)
+		verdict, evalErr := cfg.Evaluator.Evaluate(ctx, Request{
+			Goal:          cfg.Goal,
+			Criteria:      cfg.Criteria,
+			Messages:      result.Messages,
+			Output:        result.Output,
+			Turns:         result.Turns,
+			ContextTokens: result.ContextTokens,
+			Round:         round,
+			Ceiling:       cfg.Budget.Ceiling,
+			Guidance:      cfg.Budget.Guidance,
+			History:       history,
+		})
 
 		if evalErr != nil {
+			evalErrors++
 			cfg.Evaluator.cfg.Logger.Warnf("evaluate error (round %d): %s", round, evalErr)
-			a.EmitStatus(types.EvalStateError, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Error: evalErr.Error()}, cfg.TurnID)
-			if round == cfg.MaxEvalRounds {
+			a.EmitStatus(types.EvalStateError, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(cfg.Budget.Ceiling), Error: evalErr.Error()}, cfg.TurnID)
+			if evalErrors >= maxConsecutiveEvalErrors || round == cfg.Budget.Ceiling {
 				return finish(result), lastVerdict, evalErr
 			}
 			feedback := fmt.Sprintf("Evaluation could not determine if the task is complete. Original criteria: %s. Please review your work and continue if the goal is not yet fully achieved.", cfg.Criteria)
 			input = agent.TextInput(feedback)
 			continue
 		}
+		evalErrors = 0
 
 		lastVerdict = verdict
-		a.EmitStatus(types.EvalStateEnd, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(max(cfg.MaxEvalRounds, 0)), Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
-		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v inherit_context=%v reason=%q", round, verdict.Pass, verdict.InheritContext, verdict.Reason)
+		a.EmitStatus(types.EvalStateEnd, &types.EvalDetail{Round: uint32(round), MaxRounds: uint32(cfg.Budget.Ceiling), Pass: verdict.Pass, Reason: verdict.Reason}, cfg.TurnID)
+		cfg.Evaluator.cfg.Logger.Importantf("evaluate round %d: pass=%v continue=%v inherit_context=%v reason=%q", round, verdict.Pass, verdict.Continue, verdict.InheritContext, verdict.Reason)
 
 		if verdict.Pass {
 			return finish(result), verdict, nil
 		}
-		if round == cfg.MaxEvalRounds {
+		// The evaluator, not a round counter, decides when an unfinished goal is
+		// done being worked on.
+		if !verdict.Continue {
+			cfg.Evaluator.cfg.Logger.Importantf("evaluate: stopping after round %d, evaluator sees no further progress: %s", round, verdict.Reason)
 			return finish(result), verdict, nil
 		}
+		if round == cfg.Budget.Ceiling {
+			cfg.Evaluator.cfg.Logger.Warnf("evaluate: round ceiling %d reached while the evaluator still wanted another round: %s", cfg.Budget.Ceiling, verdict.Reason)
+			return finish(result), verdict, nil
+		}
+
+		history = append(history, Round{Number: round, Pass: verdict.Pass, Reason: verdict.Reason, Feedback: verdict.Feedback})
 
 		feedback := verdict.Feedback
 		if feedback == "" {
@@ -136,8 +173,10 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 		if !verdict.InheritContext {
 			cfg.Evaluator.cfg.Logger.Importantf("evaluate: compacting context (round %d)", round)
 			if _, err := a.Compact(ctx, agent.CompactConfig{
-				Provider: cfg.Evaluator.cfg.Provider,
-				Model:    cfg.Evaluator.cfg.Model,
+				Provider:       cfg.Evaluator.cfg.Provider,
+				Model:          cfg.Evaluator.cfg.Model,
+				PromptResolver: cfg.Evaluator.cfg.Prompts,
+				Logger:         cfg.Evaluator.cfg.Logger,
 			}); err != nil {
 				cfg.Evaluator.cfg.Logger.Warnf("compact failed, falling back to reset: %s", err)
 				a.Reset()

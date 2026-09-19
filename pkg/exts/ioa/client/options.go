@@ -2,9 +2,8 @@ package client
 
 import (
 	"fmt"
-	"github.com/chainreactors/aiscan/core/capability"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	cfg "github.com/chainreactors/cyber/core/config"
+	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"
 	"strings"
@@ -24,7 +23,7 @@ type Options struct {
 }
 
 func Section() cfg.Section {
-	return cfg.Section{Key: ConfigKey, Aliases: []string{"ioa"}, New: func() any { return &Options{URL: DefaultURL, Space: DefaultSpace} }, Secrets: []string{"token"}, Validate: func(v any) error {
+	return cfg.Section{Key: ConfigKey, New: func() any { return &Options{URL: DefaultURL, Space: DefaultSpace} }, Secrets: []string{"token"}, Validate: func(v any) error {
 		value := v.(*Options)
 		if value.URL != "" {
 			u, err := url.Parse(value.URL)
@@ -35,6 +34,7 @@ func Section() cfg.Section {
 		return nil
 	}}
 }
+
 func ReadOptions(option *cfg.Option) (Options, error) {
 	value := Options{URL: DefaultURL, Space: DefaultSpace}
 	if option == nil {
@@ -46,7 +46,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 		decoded, err = cfg.Get[*Options](option.Resolved, ConfigKey)
 	} else {
 		registry := cfg.NewSections()
-		if err = registry.Register(ConfigKey, Section()); err != nil {
+		if _, err = registry.Add(Section()); err != nil {
 			return Options{}, err
 		}
 		raw, decodeErr := registry.Decode(ConfigKey, option.Extensions[ConfigKey])
@@ -74,7 +74,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 type localIdentity struct{ ref protocols.NodeRef }
 
 func (i localIdentity) IOABinding() protocols.IdentityBinding {
-	return protocols.IdentityBinding{Namespace: "aiscan.memory", Subject: i.ref.URI()}
+	return protocols.IdentityBinding{Namespace: "cyber.memory", Subject: i.ref.URI()}
 }
 func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	value, err := ReadOptions(option)
@@ -84,17 +84,25 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	if value.URL == "" {
 		return nil, nil
 	}
-	return &service.Config{URL: value.URL, NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "aiscan"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://aiscan"}}}, nil
+	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
 }
-func Preamble(config service.Config) string {
-	if config.Space == "" {
-		return ""
+
+// accessKeyURL folds the configured credential into the endpoint as userinfo.
+// The credential is the IOA server access key — that is what the `--server-token`
+// flag, the Web "Access Token" field and the `ioa serve` mirror all mean — and
+// the SDK reads an access key only from URL userinfo. Handing the same string to
+// NewClientWithToken instead sends it verbatim as a bearer token, which the
+// server rejects: access keys are accepted by POST /auth/register alone, and the
+// token that registration issues is what the remaining endpoints want.
+func accessKeyURL(endpoint, token string) string {
+	if token == "" {
+		return endpoint
 	}
-	return "IOA collaboration space: " + config.Space
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return endpoint
+	}
+	parsed.User = url.User(token)
+	return parsed.String()
 }
-
-func Descriptor() capability.Descriptor {
-	return capability.Descriptor{ID: "ioa", Kind: capability.KindService, Group: "ioa"}
-}
-
 func FlagGroup() cfg.FlagGroup { return cfg.FlagGroup{Name: "IOA client", Options: &Options{}} }

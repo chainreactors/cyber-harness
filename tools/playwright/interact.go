@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/headless"
+	"github.com/chainreactors/cyber/tools/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"

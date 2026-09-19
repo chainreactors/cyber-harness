@@ -22,28 +22,107 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Process carries the facts that exist only for a session backed by an
+// operating system process. It is absent for an in-process unit, so a reader
+// can tell "no exit code exists" from "exited zero" instead of showing a
+// meaningless 0.
+type Process struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Pid           int32                  `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	ExitCode      int32                  `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Signal        string                 `protobuf:"bytes,3,opt,name=signal,proto3" json:"signal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Process) Reset() {
+	*x = Process{}
+	mi := &file_aop_pty_protocol_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Process) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Process) ProtoMessage() {}
+
+func (x *Process) ProtoReflect() protoreflect.Message {
+	mi := &file_aop_pty_protocol_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Process.ProtoReflect.Descriptor instead.
+func (*Process) Descriptor() ([]byte, []int) {
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Process) GetPid() int32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *Process) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *Process) GetSignal() string {
+	if x != nil {
+		return x.Signal
+	}
+	return ""
+}
+
 type Session struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Kind           string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
-	Name           string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Command        string                 `protobuf:"bytes,4,opt,name=command,proto3" json:"command,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Kind    string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	Name    string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Command string                 `protobuf:"bytes,4,opt,name=command,proto3" json:"command,omitempty"`
+	// Deprecated: read process.pid. Still populated for existing clients, and 0
+	// for a session with no operating system process.
 	Pid            int32                  `protobuf:"varint,5,opt,name=pid,proto3" json:"pid,omitempty"`
 	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	LastActivityAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_activity_at,json=lastActivityAt,proto3" json:"last_activity_at,omitempty"`
 	EndedAt        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
 	ActivitySeq    int64                  `protobuf:"varint,9,opt,name=activity_seq,json=activitySeq,proto3" json:"activity_seq,omitempty"`
 	OutputBytes    int64                  `protobuf:"varint,10,opt,name=output_bytes,json=outputBytes,proto3" json:"output_bytes,omitempty"`
-	ExitCode       int32                  `protobuf:"varint,11,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	State          string                 `protobuf:"bytes,12,opt,name=state,proto3" json:"state,omitempty"`
-	KillCause      string                 `protobuf:"bytes,13,opt,name=kill_cause,json=killCause,proto3" json:"kill_cause,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Deprecated: read process.exit_code.
+	ExitCode int32  `protobuf:"varint,11,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	State    string `protobuf:"bytes,12,opt,name=state,proto3" json:"state,omitempty"`
+	// kill_cause carries why the session left its active states. It is set for
+	// every terminal state, not only for kills.
+	KillCause string `protobuf:"bytes,13,opt,name=kill_cause,json=killCause,proto3" json:"kill_cause,omitempty"`
+	// shape is the mechanism behind the session: tty, pipe, func or extern. It
+	// is fixed at creation and tells a reader which optional detail to expect;
+	// kind, by contrast, is a mutable label the opener chooses.
+	Shape string `protobuf:"bytes,14,opt,name=shape,proto3" json:"shape,omitempty"`
+	// ready_at is when a session that declared a readiness probe began serving.
+	// It is unset for a session that was usable as soon as it started.
+	ReadyAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=ready_at,json=readyAt,proto3" json:"ready_at,omitempty"`
+	// process is present if and only if an operating system process backs this
+	// session.
+	Process       *Process `protobuf:"bytes,16,opt,name=process,proto3" json:"process,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[0]
+	mi := &file_aop_pty_protocol_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -55,7 +134,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[0]
+	mi := &file_aop_pty_protocol_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -68,7 +147,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{0}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Session) GetId() string {
@@ -162,6 +241,27 @@ func (x *Session) GetKillCause() string {
 	return ""
 }
 
+func (x *Session) GetShape() string {
+	if x != nil {
+		return x.Shape
+	}
+	return ""
+}
+
+func (x *Session) GetReadyAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReadyAt
+	}
+	return nil
+}
+
+func (x *Session) GetProcess() *Process {
+	if x != nil {
+		return x.Process
+	}
+	return nil
+}
+
 type Open struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StreamId      string                 `protobuf:"bytes,1,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
@@ -179,7 +279,7 @@ type Open struct {
 
 func (x *Open) Reset() {
 	*x = Open{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[1]
+	mi := &file_aop_pty_protocol_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -191,7 +291,7 @@ func (x *Open) String() string {
 func (*Open) ProtoMessage() {}
 
 func (x *Open) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[1]
+	mi := &file_aop_pty_protocol_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -204,7 +304,7 @@ func (x *Open) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Open.ProtoReflect.Descriptor instead.
 func (*Open) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{1}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Open) GetStreamId() string {
@@ -280,7 +380,7 @@ type Opened struct {
 
 func (x *Opened) Reset() {
 	*x = Opened{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[2]
+	mi := &file_aop_pty_protocol_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -292,7 +392,7 @@ func (x *Opened) String() string {
 func (*Opened) ProtoMessage() {}
 
 func (x *Opened) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[2]
+	mi := &file_aop_pty_protocol_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -305,7 +405,7 @@ func (x *Opened) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Opened.ProtoReflect.Descriptor instead.
 func (*Opened) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{2}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Opened) GetStreamId() string {
@@ -332,7 +432,7 @@ type Input struct {
 
 func (x *Input) Reset() {
 	*x = Input{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[3]
+	mi := &file_aop_pty_protocol_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +444,7 @@ func (x *Input) String() string {
 func (*Input) ProtoMessage() {}
 
 func (x *Input) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[3]
+	mi := &file_aop_pty_protocol_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +457,7 @@ func (x *Input) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Input.ProtoReflect.Descriptor instead.
 func (*Input) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{3}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Input) GetStreamId() string {
@@ -385,7 +485,7 @@ type Output struct {
 
 func (x *Output) Reset() {
 	*x = Output{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[4]
+	mi := &file_aop_pty_protocol_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +497,7 @@ func (x *Output) String() string {
 func (*Output) ProtoMessage() {}
 
 func (x *Output) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[4]
+	mi := &file_aop_pty_protocol_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +510,7 @@ func (x *Output) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Output.ProtoReflect.Descriptor instead.
 func (*Output) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{4}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Output) GetStreamId() string {
@@ -445,7 +545,7 @@ type Resize struct {
 
 func (x *Resize) Reset() {
 	*x = Resize{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[5]
+	mi := &file_aop_pty_protocol_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +557,7 @@ func (x *Resize) String() string {
 func (*Resize) ProtoMessage() {}
 
 func (x *Resize) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[5]
+	mi := &file_aop_pty_protocol_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +570,7 @@ func (x *Resize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Resize.ProtoReflect.Descriptor instead.
 func (*Resize) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{5}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Resize) GetStreamId() string {
@@ -504,7 +604,7 @@ type List struct {
 
 func (x *List) Reset() {
 	*x = List{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[6]
+	mi := &file_aop_pty_protocol_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -516,7 +616,7 @@ func (x *List) String() string {
 func (*List) ProtoMessage() {}
 
 func (x *List) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[6]
+	mi := &file_aop_pty_protocol_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -529,7 +629,7 @@ func (x *List) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use List.ProtoReflect.Descriptor instead.
 func (*List) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{6}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *List) GetStreamId() string {
@@ -556,7 +656,7 @@ type Sessions struct {
 
 func (x *Sessions) Reset() {
 	*x = Sessions{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[7]
+	mi := &file_aop_pty_protocol_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +668,7 @@ func (x *Sessions) String() string {
 func (*Sessions) ProtoMessage() {}
 
 func (x *Sessions) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[7]
+	mi := &file_aop_pty_protocol_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +681,7 @@ func (x *Sessions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Sessions.ProtoReflect.Descriptor instead.
 func (*Sessions) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{7}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Sessions) GetStreamId() string {
@@ -610,7 +710,7 @@ type Attach struct {
 
 func (x *Attach) Reset() {
 	*x = Attach{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[8]
+	mi := &file_aop_pty_protocol_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +722,7 @@ func (x *Attach) String() string {
 func (*Attach) ProtoMessage() {}
 
 func (x *Attach) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[8]
+	mi := &file_aop_pty_protocol_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +735,7 @@ func (x *Attach) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attach.ProtoReflect.Descriptor instead.
 func (*Attach) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{8}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Attach) GetStreamId() string {
@@ -676,7 +776,7 @@ type Attached struct {
 
 func (x *Attached) Reset() {
 	*x = Attached{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[9]
+	mi := &file_aop_pty_protocol_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +788,7 @@ func (x *Attached) String() string {
 func (*Attached) ProtoMessage() {}
 
 func (x *Attached) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[9]
+	mi := &file_aop_pty_protocol_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +801,7 @@ func (x *Attached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attached.ProtoReflect.Descriptor instead.
 func (*Attached) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{9}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Attached) GetStreamId() string {
@@ -727,7 +827,7 @@ type Detach struct {
 
 func (x *Detach) Reset() {
 	*x = Detach{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[10]
+	mi := &file_aop_pty_protocol_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -739,7 +839,7 @@ func (x *Detach) String() string {
 func (*Detach) ProtoMessage() {}
 
 func (x *Detach) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[10]
+	mi := &file_aop_pty_protocol_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -752,7 +852,7 @@ func (x *Detach) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Detach.ProtoReflect.Descriptor instead.
 func (*Detach) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{10}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Detach) GetStreamId() string {
@@ -771,7 +871,7 @@ type Detached struct {
 
 func (x *Detached) Reset() {
 	*x = Detached{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[11]
+	mi := &file_aop_pty_protocol_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -783,7 +883,7 @@ func (x *Detached) String() string {
 func (*Detached) ProtoMessage() {}
 
 func (x *Detached) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[11]
+	mi := &file_aop_pty_protocol_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -796,7 +896,7 @@ func (x *Detached) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Detached.ProtoReflect.Descriptor instead.
 func (*Detached) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{11}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Detached) GetStreamId() string {
@@ -815,7 +915,7 @@ type Kill struct {
 
 func (x *Kill) Reset() {
 	*x = Kill{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[12]
+	mi := &file_aop_pty_protocol_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -827,7 +927,7 @@ func (x *Kill) String() string {
 func (*Kill) ProtoMessage() {}
 
 func (x *Kill) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[12]
+	mi := &file_aop_pty_protocol_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -840,7 +940,7 @@ func (x *Kill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Kill.ProtoReflect.Descriptor instead.
 func (*Kill) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{12}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Kill) GetStreamId() string {
@@ -859,7 +959,7 @@ type Close struct {
 
 func (x *Close) Reset() {
 	*x = Close{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[13]
+	mi := &file_aop_pty_protocol_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +971,7 @@ func (x *Close) String() string {
 func (*Close) ProtoMessage() {}
 
 func (x *Close) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[13]
+	mi := &file_aop_pty_protocol_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +984,7 @@ func (x *Close) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Close.ProtoReflect.Descriptor instead.
 func (*Close) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{13}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Close) GetStreamId() string {
@@ -904,7 +1004,7 @@ type Closed struct {
 
 func (x *Closed) Reset() {
 	*x = Closed{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[14]
+	mi := &file_aop_pty_protocol_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -916,7 +1016,7 @@ func (x *Closed) String() string {
 func (*Closed) ProtoMessage() {}
 
 func (x *Closed) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[14]
+	mi := &file_aop_pty_protocol_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -929,7 +1029,7 @@ func (x *Closed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Closed.ProtoReflect.Descriptor instead.
 func (*Closed) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{14}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Closed) GetStreamId() string {
@@ -956,7 +1056,7 @@ type State struct {
 
 func (x *State) Reset() {
 	*x = State{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[15]
+	mi := &file_aop_pty_protocol_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -968,7 +1068,7 @@ func (x *State) String() string {
 func (*State) ProtoMessage() {}
 
 func (x *State) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[15]
+	mi := &file_aop_pty_protocol_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -981,7 +1081,7 @@ func (x *State) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use State.ProtoReflect.Descriptor instead.
 func (*State) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{15}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *State) GetStreamId() string {
@@ -1008,7 +1108,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[16]
+	mi := &file_aop_pty_protocol_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1120,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[16]
+	mi := &file_aop_pty_protocol_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1133,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{16}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Error) GetStreamId() string {
@@ -1077,7 +1177,7 @@ type ProtocolMessage struct {
 
 func (x *ProtocolMessage) Reset() {
 	*x = ProtocolMessage{}
-	mi := &file_aop_pty_protocol_proto_msgTypes[17]
+	mi := &file_aop_pty_protocol_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1089,7 +1189,7 @@ func (x *ProtocolMessage) String() string {
 func (*ProtocolMessage) ProtoMessage() {}
 
 func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_aop_pty_protocol_proto_msgTypes[17]
+	mi := &file_aop_pty_protocol_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1102,7 +1202,7 @@ func (x *ProtocolMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolMessage.ProtoReflect.Descriptor instead.
 func (*ProtocolMessage) Descriptor() ([]byte, []int) {
-	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{17}
+	return file_aop_pty_protocol_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ProtocolMessage) GetMessage() isProtocolMessage_Message {
@@ -1360,7 +1460,11 @@ var File_aop_pty_protocol_proto protoreflect.FileDescriptor
 
 const file_aop_pty_protocol_proto_rawDesc = "" +
 	"\n" +
-	"\x16aop/pty/protocol.proto\x12\aaop.pty\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbd\x03\n" +
+	"\x16aop/pty/protocol.proto\x12\aaop.pty\x1a\x1fgoogle/protobuf/timestamp.proto\"P\n" +
+	"\aProcess\x12\x10\n" +
+	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x1b\n" +
+	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
+	"\x06signal\x18\x03 \x01(\tR\x06signal\"\xb6\x04\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
@@ -1377,7 +1481,10 @@ const file_aop_pty_protocol_proto_rawDesc = "" +
 	"\texit_code\x18\v \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05state\x18\f \x01(\tR\x05state\x12\x1d\n" +
 	"\n" +
-	"kill_cause\x18\r \x01(\tR\tkillCause\"\xd8\x01\n" +
+	"kill_cause\x18\r \x01(\tR\tkillCause\x12\x14\n" +
+	"\x05shape\x18\x0e \x01(\tR\x05shape\x125\n" +
+	"\bready_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\areadyAt\x12*\n" +
+	"\aprocess\x18\x10 \x01(\v2\x10.aop.pty.ProcessR\aprocess\"\xd8\x01\n" +
 	"\x04Open\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x12\n" +
@@ -1452,7 +1559,7 @@ const file_aop_pty_protocol_proto_rawDesc = "" +
 	"\bdetached\x18\x17 \x01(\v2\x11.aop.pty.DetachedH\x00R\bdetached\x12#\n" +
 	"\x04kill\x18\x18 \x01(\v2\r.aop.pty.KillH\x00R\x04kill\x12)\n" +
 	"\x06closed\x18\x19 \x01(\v2\x0f.aop.pty.ClosedH\x00R\x06closedB\t\n" +
-	"\amessageB-Z+github.com/chainreactors/aiscan/aop/pty;ptyb\x06proto3"
+	"\amessageB,Z*github.com/chainreactors/cyber/aop/pty;ptyb\x06proto3"
 
 var (
 	file_aop_pty_protocol_proto_rawDescOnce sync.Once
@@ -1466,58 +1573,61 @@ func file_aop_pty_protocol_proto_rawDescGZIP() []byte {
 	return file_aop_pty_protocol_proto_rawDescData
 }
 
-var file_aop_pty_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_aop_pty_protocol_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_aop_pty_protocol_proto_goTypes = []any{
-	(*Session)(nil),               // 0: aop.pty.Session
-	(*Open)(nil),                  // 1: aop.pty.Open
-	(*Opened)(nil),                // 2: aop.pty.Opened
-	(*Input)(nil),                 // 3: aop.pty.Input
-	(*Output)(nil),                // 4: aop.pty.Output
-	(*Resize)(nil),                // 5: aop.pty.Resize
-	(*List)(nil),                  // 6: aop.pty.List
-	(*Sessions)(nil),              // 7: aop.pty.Sessions
-	(*Attach)(nil),                // 8: aop.pty.Attach
-	(*Attached)(nil),              // 9: aop.pty.Attached
-	(*Detach)(nil),                // 10: aop.pty.Detach
-	(*Detached)(nil),              // 11: aop.pty.Detached
-	(*Kill)(nil),                  // 12: aop.pty.Kill
-	(*Close)(nil),                 // 13: aop.pty.Close
-	(*Closed)(nil),                // 14: aop.pty.Closed
-	(*State)(nil),                 // 15: aop.pty.State
-	(*Error)(nil),                 // 16: aop.pty.Error
-	(*ProtocolMessage)(nil),       // 17: aop.pty.ProtocolMessage
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*Process)(nil),               // 0: aop.pty.Process
+	(*Session)(nil),               // 1: aop.pty.Session
+	(*Open)(nil),                  // 2: aop.pty.Open
+	(*Opened)(nil),                // 3: aop.pty.Opened
+	(*Input)(nil),                 // 4: aop.pty.Input
+	(*Output)(nil),                // 5: aop.pty.Output
+	(*Resize)(nil),                // 6: aop.pty.Resize
+	(*List)(nil),                  // 7: aop.pty.List
+	(*Sessions)(nil),              // 8: aop.pty.Sessions
+	(*Attach)(nil),                // 9: aop.pty.Attach
+	(*Attached)(nil),              // 10: aop.pty.Attached
+	(*Detach)(nil),                // 11: aop.pty.Detach
+	(*Detached)(nil),              // 12: aop.pty.Detached
+	(*Kill)(nil),                  // 13: aop.pty.Kill
+	(*Close)(nil),                 // 14: aop.pty.Close
+	(*Closed)(nil),                // 15: aop.pty.Closed
+	(*State)(nil),                 // 16: aop.pty.State
+	(*Error)(nil),                 // 17: aop.pty.Error
+	(*ProtocolMessage)(nil),       // 18: aop.pty.ProtocolMessage
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
 }
 var file_aop_pty_protocol_proto_depIdxs = []int32{
-	18, // 0: aop.pty.Session.started_at:type_name -> google.protobuf.Timestamp
-	18, // 1: aop.pty.Session.last_activity_at:type_name -> google.protobuf.Timestamp
-	18, // 2: aop.pty.Session.ended_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: aop.pty.Opened.session:type_name -> aop.pty.Session
-	0,  // 4: aop.pty.Sessions.sessions:type_name -> aop.pty.Session
-	0,  // 5: aop.pty.Attached.session:type_name -> aop.pty.Session
-	0,  // 6: aop.pty.Closed.session:type_name -> aop.pty.Session
-	0,  // 7: aop.pty.State.session:type_name -> aop.pty.Session
-	1,  // 8: aop.pty.ProtocolMessage.open:type_name -> aop.pty.Open
-	3,  // 9: aop.pty.ProtocolMessage.input:type_name -> aop.pty.Input
-	4,  // 10: aop.pty.ProtocolMessage.output:type_name -> aop.pty.Output
-	5,  // 11: aop.pty.ProtocolMessage.resize:type_name -> aop.pty.Resize
-	6,  // 12: aop.pty.ProtocolMessage.list:type_name -> aop.pty.List
-	7,  // 13: aop.pty.ProtocolMessage.sessions:type_name -> aop.pty.Sessions
-	8,  // 14: aop.pty.ProtocolMessage.attach:type_name -> aop.pty.Attach
-	10, // 15: aop.pty.ProtocolMessage.detach:type_name -> aop.pty.Detach
-	13, // 16: aop.pty.ProtocolMessage.close:type_name -> aop.pty.Close
-	15, // 17: aop.pty.ProtocolMessage.state:type_name -> aop.pty.State
-	16, // 18: aop.pty.ProtocolMessage.error:type_name -> aop.pty.Error
-	2,  // 19: aop.pty.ProtocolMessage.opened:type_name -> aop.pty.Opened
-	9,  // 20: aop.pty.ProtocolMessage.attached:type_name -> aop.pty.Attached
-	11, // 21: aop.pty.ProtocolMessage.detached:type_name -> aop.pty.Detached
-	12, // 22: aop.pty.ProtocolMessage.kill:type_name -> aop.pty.Kill
-	14, // 23: aop.pty.ProtocolMessage.closed:type_name -> aop.pty.Closed
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	19, // 0: aop.pty.Session.started_at:type_name -> google.protobuf.Timestamp
+	19, // 1: aop.pty.Session.last_activity_at:type_name -> google.protobuf.Timestamp
+	19, // 2: aop.pty.Session.ended_at:type_name -> google.protobuf.Timestamp
+	19, // 3: aop.pty.Session.ready_at:type_name -> google.protobuf.Timestamp
+	0,  // 4: aop.pty.Session.process:type_name -> aop.pty.Process
+	1,  // 5: aop.pty.Opened.session:type_name -> aop.pty.Session
+	1,  // 6: aop.pty.Sessions.sessions:type_name -> aop.pty.Session
+	1,  // 7: aop.pty.Attached.session:type_name -> aop.pty.Session
+	1,  // 8: aop.pty.Closed.session:type_name -> aop.pty.Session
+	1,  // 9: aop.pty.State.session:type_name -> aop.pty.Session
+	2,  // 10: aop.pty.ProtocolMessage.open:type_name -> aop.pty.Open
+	4,  // 11: aop.pty.ProtocolMessage.input:type_name -> aop.pty.Input
+	5,  // 12: aop.pty.ProtocolMessage.output:type_name -> aop.pty.Output
+	6,  // 13: aop.pty.ProtocolMessage.resize:type_name -> aop.pty.Resize
+	7,  // 14: aop.pty.ProtocolMessage.list:type_name -> aop.pty.List
+	8,  // 15: aop.pty.ProtocolMessage.sessions:type_name -> aop.pty.Sessions
+	9,  // 16: aop.pty.ProtocolMessage.attach:type_name -> aop.pty.Attach
+	11, // 17: aop.pty.ProtocolMessage.detach:type_name -> aop.pty.Detach
+	14, // 18: aop.pty.ProtocolMessage.close:type_name -> aop.pty.Close
+	16, // 19: aop.pty.ProtocolMessage.state:type_name -> aop.pty.State
+	17, // 20: aop.pty.ProtocolMessage.error:type_name -> aop.pty.Error
+	3,  // 21: aop.pty.ProtocolMessage.opened:type_name -> aop.pty.Opened
+	10, // 22: aop.pty.ProtocolMessage.attached:type_name -> aop.pty.Attached
+	12, // 23: aop.pty.ProtocolMessage.detached:type_name -> aop.pty.Detached
+	13, // 24: aop.pty.ProtocolMessage.kill:type_name -> aop.pty.Kill
+	15, // 25: aop.pty.ProtocolMessage.closed:type_name -> aop.pty.Closed
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_aop_pty_protocol_proto_init() }
@@ -1525,7 +1635,7 @@ func file_aop_pty_protocol_proto_init() {
 	if File_aop_pty_protocol_proto != nil {
 		return
 	}
-	file_aop_pty_protocol_proto_msgTypes[17].OneofWrappers = []any{
+	file_aop_pty_protocol_proto_msgTypes[18].OneofWrappers = []any{
 		(*ProtocolMessage_Open)(nil),
 		(*ProtocolMessage_Input)(nil),
 		(*ProtocolMessage_Output)(nil),
@@ -1549,7 +1659,7 @@ func file_aop_pty_protocol_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aop_pty_protocol_proto_rawDesc), len(file_aop_pty_protocol_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -2,9 +2,9 @@ package cli
 
 import (
 	"context"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	hostcli "github.com/chainreactors/aiscan/pkg/cli"
-	server "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
+	cfg "github.com/chainreactors/cyber/core/config"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	flags "github.com/jessevdk/go-flags"
 	"testing"
 )

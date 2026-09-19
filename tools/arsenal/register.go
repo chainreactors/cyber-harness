@@ -1,7 +1,7 @@
 package arsenal
 
 import (
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func NewCommand(directory string) (commands.Command, error) {
@@ -11,7 +11,7 @@ func NewCommand(directory string) (commands.Command, error) {
 	}
 	return commands.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/arsenal.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/arsenal.md",
 		Run:             cmd.Run,
 	}, nil
 }

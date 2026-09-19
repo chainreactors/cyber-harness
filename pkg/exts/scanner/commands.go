@@ -6,55 +6,74 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/truncate"
-	app "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	toolimpl "github.com/chainreactors/aiscan/tools"
-	curltools "github.com/chainreactors/aiscan/tools/curl"
-	gotools "github.com/chainreactors/aiscan/tools/gogo"
-	neutrontools "github.com/chainreactors/aiscan/tools/neutron"
-	protontools "github.com/chainreactors/aiscan/tools/proton"
-	"github.com/chainreactors/aiscan/tools/scan"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
-	spraytools "github.com/chainreactors/aiscan/tools/spray"
-	zombietools "github.com/chainreactors/aiscan/tools/zombie"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/skills"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/core/truncate"
+	app "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	curltools "github.com/chainreactors/cyber/tools/curl"
+	gotools "github.com/chainreactors/cyber/tools/gogo"
+	neutrontools "github.com/chainreactors/cyber/tools/neutron"
+	protontools "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/resources"
+	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/cyber/tools/scan/engine"
+	searchtools "github.com/chainreactors/cyber/tools/search"
+	spraytools "github.com/chainreactors/cyber/tools/spray"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	zombietools "github.com/chainreactors/cyber/tools/zombie"
+	"github.com/chainreactors/sdk/pkg/association"
 )
 
-func buildScannerCommands(application *app.App, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+// borrowed is what the scanner reaches for that other extensions own. It is
+// named so the call below reads as a list of capabilities rather than a run of
+// positional arguments.
+type borrowed struct {
+	application *app.State
+	tools       tool.Executor
+	commands    commands.Executor
+	bash        *terminaltool.BashTool
+	skills      *skills.Store
+	prompts     prompt.Resolver
+}
+
+func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+	application := borrow.application
 	var scannerResources *resources.Set
 	if engineSet != nil {
 		scannerResources = engineSet.Resources
 	}
 
-	options := editionScanOptions()
+	var options []scan.Option
 	model, providerConfig := application.ProviderState()
-	if config.Scanner.AIEnabled && model != nil {
+	if model != nil {
 		if loop == nil {
 			return nil, fmt.Errorf("scanner agent loop must be supplied by the profile")
 		}
 		parent := agent.NewAgent(agent.Config{
-			Loop:          loop,
-			Provider:      model,
-			Tools:         application.Tools,
-			Model:         providerConfig.Model,
-			MaxTokens:     providerConfig.MaxTokens,
-			ContextWindow: providerConfig.ContextWindow,
-			Logger:        logger,
-			Bus:           application,
+			Loop:           loop,
+			Provider:       model,
+			Tools:          borrow.tools,
+			Model:          providerConfig.Model,
+			MaxTokens:      providerConfig.MaxTokens,
+			ContextWindow:  providerConfig.ContextWindow,
+			Logger:         logger,
+			Bus:            application,
+			PromptResolver: borrow.prompts,
 		})
 		options = append(options,
 			scan.WithParent(parent),
 			scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-				return collectDeepBrowserArtifacts(ctx, application.Commands, application.Bash, targetURL, logger)
+				return collectDeepBrowserArtifacts(ctx, borrow.commands, borrow.bash, targetURL, logger)
 			}),
 		)
-		if application.Skills != nil {
+		if borrow.skills != nil {
 			options = append(options, scan.WithSkillReader(func(name string) string {
-				content, ok, err := application.Skills.ReadVirtual("aiscan://skills/scan/" + name + ".md")
+				content, ok, err := borrow.skills.ReadVirtual("cyber://skills/scan/" + name + ".md")
 				if !ok || err != nil {
 					return ""
 				}
@@ -64,62 +83,60 @@ func buildScannerCommands(application *app.App, engineSet *engine.Set, config Co
 	}
 	options = append(options, scan.WithLogger(logger))
 
-	plan := config.Capabilities.Select(capability.Options{Groups: []string{"scanner"}})
 	var values []commands.Command
-	if plan.Has("curl") {
-		values = append(values, curltools.NewCommand(logger, proxyURL, application))
+	values = append(values, curltools.NewCommand(logger, proxyURL, application))
+	if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("gogo unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("gogo") {
-		if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("gogo unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := neutrontools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("neutron unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("neutron") {
-		if command, err := neutrontools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("neutron unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := spraytools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("spray unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("spray") {
-		if command, err := spraytools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("spray unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	if command, err := zombietools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
+		logger.Warnf("zombie unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("zombie") {
-		if command, err := zombietools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-			logger.Warnf("zombie unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
+	values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
+	// cyberhub searches the fingerprint and POC index this extension builds, so
+	// it is contributed by its owner. A nil index is not an empty one: the
+	// command says how to configure the resources instead of reporting no hits.
+	var index *association.Index
+	if engineSet != nil {
+		index = engineSet.Index
 	}
-	if plan.Has("proton") {
-		values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
+	cyberhub := searchtools.NewCyberhubSearch(index)
+	values = append(values, commands.Command{
+		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
+		Run:             cyberhub.Run,
+	})
+	if command, err := newScanCommand(engineSet, options, proxyURL, application); err != nil {
+		logger.Warnf("scan unavailable: %v", err)
+	} else {
+		values = append(values, command)
 	}
-	if plan.Has("scan") {
-		if command, err := toolimpl.NewScanCommand(engineSet, options, proxyURL, application); err != nil {
-			logger.Warnf("scan unavailable: %v", err)
-		} else {
-			values = append(values, command)
-		}
-	}
-	editionCommands, err := editionScannerCommands(application, plan, engineSet, logger, proxyURL)
+	manifestCommands, err := manifestScannerCommands(application, engineSet, logger, proxyURL)
 	if err != nil {
 		return nil, err
 	}
-	return append(values, editionCommands...), nil
+	return append(values, manifestCommands...), nil
 }
 
-func executeRegistryCommand(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, commandLine string, timeout time.Duration) (string, error) {
+func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
 	}
 	var output strings.Builder
-	execution, err := bash.RunForeground(ctx, commandLine, commands.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, commandLine, terminaltool.BashExecOptions{
 		Timeout: timeout,
 		OnOutput: func(data []byte) {
 			_, _ = output.Write(data)
@@ -132,8 +149,8 @@ func executeRegistryCommand(ctx context.Context, registry commands.Runtime, bash
 	if !retained && execution.ID != "" {
 		return output.String(), fmt.Errorf("command session %s is no longer available", execution.ID)
 	}
-	if info.ExitCode != 0 {
-		return output.String(), fmt.Errorf("command exited with code %d", info.ExitCode)
+	if info.ExitStatus() != 0 {
+		return output.String(), fmt.Errorf("command exited with code %d", info.ExitStatus())
 	}
 	return output.String(), nil
 }
@@ -173,7 +190,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Runtime, bash *commands.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
+func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}
@@ -240,4 +257,23 @@ func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Runtime,
 		"\n\n[deep browser truncated: showing %d/%d lines (%s of %s)]",
 		artifact.OutputLines, artifact.TotalLines, truncate.FormatSize(artifact.OutputBytes), truncate.FormatSize(artifact.TotalBytes),
 	), nil
+}
+
+func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (commands.Command, error) {
+	if engines == nil || engines.Gogo == nil || engines.Spray == nil {
+		return commands.Command{}, fmt.Errorf("scan engines are unavailable")
+	}
+	scanOptions := append([]scan.Option(nil), options...)
+	if proxy != "" {
+		scanOptions = append(scanOptions, scan.WithProxy(proxy))
+	}
+	if events != nil {
+		scanOptions = append(scanOptions, scan.WithEvents(events))
+	}
+	impl := scan.New(engines, scanOptions...)
+	return commands.Command{
+		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
+		DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
+		Run:             impl.Run,
+	}, nil
 }

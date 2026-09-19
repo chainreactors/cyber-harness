@@ -1,55 +1,34 @@
 # Extension 生命周期
 
-`core/extension` 只依赖 Go 标准库。依赖通过构造参数传递；`Entry.DependsOn` 只表达启动和关闭顺序。
+`core/extension` 管理一个固定、线性的 Extension 列表：
 
 ```go
 type Extension interface {
     Load(*Scope) error
-    Close(context.Context) error
 }
 
-type Entry struct {
-    ID string
-    DependsOn []string
-    Extension Extension
-}
+set, err := extension.New(first, second, third)
 ```
 
-`Set.New` 校验固定依赖图，无业务副作用。`Set.Load(context.Context)` 是装配入口，为每个启动的 Entry 创建独立 Scope，再按拓扑调用 Extension.Load；它不是第二套 Extension 接口。构造和 Entry 不支持 Factory、服务定位或运行时替换。实例不得重复归属不同 Entry/Set，也不得传入带类型的 nil。跨 Set 的实例占用在 Load 时原子取得，完全关闭后释放，因此只构造但未加载的候选图不会污染进程状态。
+没有 Entry、Extension ID、DependsOn、DAG、Service 表或运行时实例替换。构造参数表达业务
+依赖，声明顺序就是加载顺序，关闭顺序固定相反。只有真正持有后台工作或打开资源的插件才
+额外实现 `Close(context.Context) error`；纯资源贡献插件不需要空的 Close 方法。
 
-`Scope` 只有两个上下文访问器：
+`Scope` 提供初始化 context、生命周期 context 和 typed resource Registry。
+`extension.Define[T]` 定义一个资源 Point，`extension.Add[T]` 注册一个原子批次；两者产生的
+handle 都归 Scope 所有，并在 `Extension.Close` 前逆序撤销。
 
-- `Init()`：仅限制初始化。初始化返回后取消它不会结束 Extension 寿命。
-- `Lifetime()`：关闭该 Extension 时取消，不从初始化 context 继承业务值。
+`Set.Load` 仅在全部 Extension 成功后发布 Active。加载失败会逆序回滚，包括失败 Extension
+已经创建的 Scope handles。成功加载后冻结新资源类型，但已有 Point 仍可接受运行时贡献。
 
-Scope 没有 ID/Ref、Root/Runtime/Session 枚举、父子树、Provide/Require、通用事件总线或公开 Close。注册批次的唯一性由固定 Registry 自身保证，不再生成 owner token。业务资源的归属由装配决定。
+`Set.Close` 开始即取消发布，然后对每个 Extension 执行：取消 Lifetime、撤销 handles、调用
+Close。普通清理错误会被收集并继续；`ErrCloseIncomplete` 会保留当前 Extension 及其更早的
+依赖，以便调用方使用新 context 重试。取消或超时统一视为未完成关闭。
 
-Set 串行执行生命周期，等待锁可以取消。`Set.Active()` 是完整图唯一的发布门：仅在全部
-Entry 加载成功后为 true，Close 请求一开始即变为 false，并发 Close 不会让尚在 Load 的图
-重新发布。初始化 context 就是调用方传给 Set.Load 的
-context，只能在 Load 内使用；若它在加载期间取消，Set 会封存并逆序回滚本次开始初始化的
-实例（包括失败实例）。回滚沿用该 context；未完成清理须使用新的 Close context 重试。
+Load/Close panic 会转成错误，不越过 Set 边界。带类型的 nil Extension 在构造时拒绝。
 
-关闭顺序：取消当前节点寿命 → Extension.Close 排空并释放资源 → 关闭依赖。Scope 不接管资源或注册。固定声明由 Profile 独占的 Registry 整体持有；订阅和后台工作由实际所有者在 Close 中清理。
-
-Set 会把 Extension.Close 返回的 `context.Canceled` 或 `context.DeadlineExceeded` 统一标记为
-`ErrCloseIncomplete`；适配器只返回原始 context 错误，不重复编码宿主策略。Close 的其他返回值区分资源状态：
-
-- nil：回收完成。
-- 普通错误：回收完成但刷新等操作失败；报告错误，继续释放依赖，不重复调用该实例。
-- 包含 `ErrCloseIncomplete`：仍有资源或工作；保留实例及其依赖，无关实例继续关闭，之后可以重试。
-
-Extension 的 Load/Close panic 不会越过 Set：Load panic 转为启动失败并触发逆序回滚；Close
-panic 转为可重试的未完成关闭，依赖继续受保护。
-
-Service Provider/Consumer 元数据由 Profile 在构造阶段校验；运行时服务表按 Profile
-隔离并在发布前 Seal。领域类型不进入 `core/extension`，只通过 typed Service contract
-声明。完整插件装配约定见 [系统架构](../../docs/architecture.md)。
-
-典型验证：
+完整资源与插件约定见 [系统架构](../../docs/architecture.md)。典型验证：
 
 ```text
-go test -mod=readonly -race ./core/extension ./core/registry ./pkg/profile ./cmd/runner
+go test -race ./core/resource ./core/extension ./core/registry
 ```
-
-覆盖依赖校验、服务契约、启动回滚、关闭重试、资源排空、初始化与寿命取消分离和生命周期 panic。

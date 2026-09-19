@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils"
 	"github.com/chainreactors/utils/parsers"
@@ -50,7 +50,7 @@ func newCollector(inputs []string, stream io.Writer, streamColor, debug bool) *c
 	}
 }
 
-func (c *collector) Observe(pe pipelineEvent) {
+func (c *collector) Observe(pe pipeline.Observation[event]) {
 	accepted := pe.Action == pipeline.ActionAccept
 
 	var traceEntry string
@@ -215,7 +215,7 @@ func newStatsCollector(inputs int) *statsCollector {
 	}
 }
 
-func (s *statsCollector) Observe(event pipelineEvent) {
+func (s *statsCollector) Observe(event pipeline.Observation[event]) {
 	switch event.Action {
 	case pipeline.ActionAccept:
 		if event.Event.Kind == eventStats {

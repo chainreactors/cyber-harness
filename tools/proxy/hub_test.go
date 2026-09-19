@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // newTestHub starts a hub (capture or relay) with an isolated CA dir and returns
@@ -231,7 +231,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 	}
 	first := store.Query(QueryOpts{Last: 1})
 	if len(first) == 1 {
-		out := runMitm(t, store, hub, "flow", first[0].ID)
+		out := runMitm(t, store, hub, "flow", first[0].Id)
 		if !strings.Contains(out, "Request Headers") {
 			t.Errorf("flow detail missing headers: %q", out)
 		}

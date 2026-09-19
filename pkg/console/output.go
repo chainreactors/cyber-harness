@@ -9,14 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/core/util"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/truncate"
+	types "github.com/chainreactors/cyber/core/types"
 	"golang.org/x/term"
 )
 
@@ -738,7 +737,7 @@ func (o *AgentOutput) coloredElapsed(started time.Time) string {
 		return ""
 	}
 	d := time.Since(started)
-	text := "· " + util.FormatDuration(d)
+	text := "· " + truncate.FormatDuration(d)
 	switch {
 	case d > 30*time.Second:
 		return o.color.Wrap(text, output.ANSIRed)
@@ -812,7 +811,7 @@ func (o *AgentOutput) agentEnd(data *aop.TurnEnded) {
 		if provider.UsageTotalTokens(o.totalUsage) > 0 {
 			parts = append(parts, formatTokenUsage(o.totalUsage))
 		}
-		parts = append(parts, util.FormatDuration(elapsed))
+		parts = append(parts, truncate.FormatDuration(elapsed))
 		if data.Error != nil {
 			parts = append(parts, fmt.Sprintf("err=%q", data.Error.Message))
 		}

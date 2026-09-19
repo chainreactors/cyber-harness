@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/proto"
 )
 

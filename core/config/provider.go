@@ -2,7 +2,7 @@ package config
 
 import "strings"
 
-// Wire protocols aiscan speaks to LLM endpoints.
+// Wire protocols cyber speaks to LLM endpoints.
 const (
 	ProviderOpenAI    = "openai"
 	ProviderAnthropic = "anthropic"

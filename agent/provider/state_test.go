@@ -2,13 +2,24 @@ package provider
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestInitializeRejectsUnknownStartupMode(t *testing.T) {
+	var state State
+	err := state.initialize(t.Context(), StartupConfig{Mode: StartupMode(99)}, telemetry.NopLogger())
+	if err == nil {
+		t.Fatal("unknown provider startup mode was accepted")
+	}
+	if current, config := state.Current(); current != nil || config != (ProviderConfig{}) {
+		t.Fatalf("invalid mode changed provider state: %v, %+v", current, config)
+	}
+}
 
 type borrowedStateProvider struct{ closed bool }
 

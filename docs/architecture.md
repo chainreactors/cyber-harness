@@ -1,161 +1,61 @@
-# Cyber Harness 架构
+# 架构概览
 
-Cyber Harness 可以脱离 Agent 作为 Go 工具库或 AOP ToolNode 使用；内置 Agent 只是一个
-Profile。系统采用分层 Plugin/Extension 组合：Profile 选择 Provider、Consumer 和贡献者，
-`core/extension` 只负责生命周期、依赖拓扑和类型化 Service contract。
+[文档首页](README.md) · 前置：[基本概念](concepts.md) · 开发：[构建应用](development.md)
 
-## 组合与关闭
+cyber-harness 的核心结构是宿主、扩展组合和执行运行时。宿主接收输入并管理应用寿命；扩展组合提供运行需要的能力；运行时使用这些能力推进任务。安全扫描器、Web 和 IOA 位于这套结构之上，形成 aiscan 发行版。
 
-`cmd/aiscan` 与 `cmd/runner` 为每个独立运行时声明固定的 Extension 图和唯一的
-`core/extension.Set`。Web 的 IOA Server 属于宿主图，寿命独立于可替换的应用 Profile。可复用 host 通过 `pkg/profile.Application` 访问命令入口的具体组合；
-具体 Profile 直接持有 Set，不另设 Assembly 包装。
-`aiscanProfile` 位于 `cmd/aiscan`，显式发布 App、Runtime 与 Proxy 能力。Profile 先解析
-Service Provider/Consumer，再构造唯一的 `extension.Set`；`DependsOn` 只表达资源寿命。
-共享包不包含任何具体产品 Profile。
+## 应用结构
 
 ```mermaid
-flowchart TB
-    OUTPUT[telemetry]
-    OBSERVE[Observe]
-    RESOURCES[Proxy / IOA / capability Extensions]
-    APP[App state]
-    COMMANDS[Command Registry]
-    TOOLS[Tool Registry]
-    AGENT[Agent Runtime / external entry]
-    OUTPUT --> OBSERVE --> RESOURCES --> APP --> COMMANDS --> TOOLS --> AGENT
+flowchart TD
+    Host[CLI / Console / Web / 嵌入式宿主] --> Composition[发行版组合与生命周期]
+    Composition --> Runtime[Agent 与 Session]
+    Composition --> Capabilities[工具 / 命令 / 知识 / Provider]
+    Runtime --> Capabilities
+    Capabilities --> Business[扫描引擎 / 文件 / 终端 / 网络]
+    Runtime --> Events[AOP 事实流]
+    Business --> Events
+    Events --> Presentation[展示 / 记录 / 传输]
 ```
 
-关闭顺序反向执行：入口停止，两个 Registry 拒绝新工作、取消并 drain，资源 Extension
-随后释放。Close 返回 `ErrCloseIncomplete` 时保留依赖，重试继续原关闭过程。具体入口负责
-构造能力并声明 Entries；App 只提供产品访问面，不选择扩展，也不创建嵌套 Set。
+`agent/` 提供模型循环和会话机制，`core/` 提供资源、hooks、操作关联和事件等基础设施。业务实现多位于 `tools/`，对应扩展在 `pkg/exts/` 中将实现接入资源与生命周期。
 
-## Plugin 与 Extension
+`pkg/base` 返回有序的基础扩展；`pkg/aiscan` 加入扫描器、代理和其他产品能力；`cmd/aiscan` 解析配置并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
 
-### EventBus 是 Core 的唯一事件原语
+## 装配与生命周期
 
-`core/eventbus` 只提供泛型 `Bus[T]`、`Subscription[T]`、同步观察和有界异步消费。
-它不认识 AOP、Protobuf、DTO、Sink、JSONL 或任何产品事件模型。事件编号、Envelope、
-观测投影和持久化均由 Extension 通过选择具体的 `T` 实现。消费者直接实现回调并使用
-`Subscription.Flush/Close` 完成排空，不再引入第二套 Sink 生命周期。
+宿主先选择扩展，构造一个线性的 `extension.Set`，再加载它。较早的扩展定义贡献点或发布共享能力，较晚的扩展贡献内容或借用能力。例如工具注册表接收多个工具实现，同时向 Session 提供统一的执行接口。
 
-`signals` 负责 Hook；AOP 事件发布、`observe` 投影和 `telemetry` 持久化是可选 Extension，
-它们共享 Profile 内的 typed EventBus，但任何一个都不是 Core 的隐式默认实现。
+加载顺序显式写在组合代码中，关闭按相反顺序进行。扩展撤销自己的注册，排空自己持有的工作，最后释放对其他能力的借用。因此 Session 结束执行时，仍然可以使用尚未关闭的工具与事件设施。加载失败会回滚，关闭超时则保留未回收资源供重试。
 
-每个机制由三个角色组成：Service Definition 定义 typed contract，Provider Extension
-发布实现，Consumer Extension 通过构造期解析使用它。静态 `Descriptor` 声明
-`Provides`、`Requires`、`Optional`、flags 和 config；运行时 `Registrar` 只允许向基础
-Extension 提供的 Extension Point 注册贡献。
+[扩展组合](architecture/composition.md)详细说明贡献与借用、加载顺序、关闭阶段和能力所有权。这里的线性组合与扫描流水线的任务图分属不同层次。
 
-基础注册点包括：
+## Agent 与 Session
 
-| Extension | 注册点/服务 |
-| --- | --- |
-| `settings` | flags、config、CLI metadata |
-| `signals` | Hook Registry、AOP Event Stream |
-| `harness` | Tool Registrar、Native Command Registrar |
-| `tui` | REPL、renderer、completion、status |
-| `agent` | Agent Loop provider |
-| `session` | Session service 与 Session command catalog |
-| `provider` | LLM provider/adapter routes |
-| `skills` | Skill provider/catalog |
-| `web` | HTTP route/middleware |
-| `ioa` | IOA namespace、连接和展示贡献 |
+Session 持有对话状态和输入队列，一次外部提交形成一次 Turn。Agent 的标准循环在执行过程中多次请求模型：准备上下文、调用 Provider、执行工具、追加结果，直到满足结束条件。目标评估位于循环外层，可以根据验收反馈再次执行。
 
-Provider 只能在自己的 Extension 生命周期内注册和撤销；Registrar 封存后发布只读快照。
-Extension 组合变化通过重建 Profile 完成，避免运行中替换已有 Session、Agent 或 Host。
+后台命令、子 Agent 和协作消息通过 Inbox 回到运行时。活跃的后台生产者使循环能够等待尚未返回的结果；上下文增长则由压缩策略处理。Session、模型轮次和后台工作各自有明确的状态，避免将网络连接的寿命直接当作任务寿命。
 
-当前 Extension 清单：
+具体推进、并发与收尾见 [Agent 运行时](architecture/runtime.md)，模型请求内容的构造见[上下文与知识](architecture/context.md)。
 
-| Extension | 作用 |
-| --- | --- |
-| `agent` | Agent Loop admission、取消和 drain |
-| `session` | Session manager、历史、协议和 Session command catalog |
-| `settings` | flags/config/CLI 静态声明收集 |
-| `signals` | Hook Registry 与 AOP Event Stream |
-| `harness` | Tool 与 Native Command 基础设施 |
-| `tui` | REPL、补全、状态和 renderer 注册点 |
-| `files` | 文件系统与文件工具 |
-| `terminal` | Bash、PTY 和进程能力 |
-| `scanner` | Scanner engine 与扫描命令/工具 |
-| `search` | Web search 工具与命令 |
-| `proxy` | Proxy Hub、流量捕获和 HTTP 事件 |
-| `provider` | LLM Provider 状态和切换 |
-| `skills` | Skill 目录、加载和 Catalog |
-| `observe` | Hook 到 AOP observation 的转换 |
-| `telemetry` | AOP Event 持久化输出 |
-| `ioa/client`、`ioa/server` | IOA client/server 连接与协议能力 |
-| `session/console`、`ioa/client/console` | 向 TUI 注册 REPL 展示贡献 |
-| `arsenal`、`browser`、`record`、`web` | 对应的可选资源、浏览器、录制和 Web 能力 |
+## 执行环境
 
-## 可选能力的声明边界
+模型调用经过 Tool Registry；其中 `bash` 将命令路由到 Command Registry 或外部 shell。内置函数、PTY 进程和管道进程统一纳入工作单元管理，但保留各自的能力差异。代理扩展发布共享出口，使内置工具和支持代理环境变量的外部程序使用相同的网络路由。
 
-配置、CLI、Console 展示、探测和 HTTP 路由均可由 Extension 提供声明或 Registrar。
-`settings` 在 Extension Load 前收集 flags/config；`harness`、`signals`、`tui`、`web`
-等基础 Extension 在 Load 时开放各自 Point，贡献者随后注册实现。配置节装入
-`Option.Extensions` / protobuf `extensions`，通用层不按扩展名称选择实现。
+执行链上的 hooks 提供准入、结果处理与观察，operation 传递调用关联及取消信息。领域实现依赖这些明确的边界，不需要知道任务来自哪个界面。详细过程见[执行环境](architecture/execution.md)。
 
-IOA 只有独立的 client/server 两个扩展。通用 Profile 不再暴露 IOA Reader，Node 只转发产品
-贡献的 capability 和完整状态快照，通用 skills 不包含 IOA 内容。具体装配与兼容说明见
-[IOA](ioa.md)。启动声明、资源生命周期和运行中的业务能力不互相冒充。
+## 事件与数据
 
-## 两类执行运行时
+AOP Event 记录消息、工具调用、结果和生命周期等事实。终端、持久化输出和 Web 可以消费同一事实流，展示不必重新实现任务执行。hooks 用于执行中的控制，事件用于记录事实，二者具有不同的失败和调用语义。
 
-`pkg/toolset.Registry` 服务 Agent Tool：JSON Schema、字符串 JSON 参数和结构化结果。
-`pkg/commands.Registry` 服务 Bash 原生命令：argv、环境、stdio 和 PTY。它们不是同一
-领域，但都委托 `core/registry.Store[T]` 管理 collecting、active、draining、closed。
+扫描原生产物以 Artifact 形式保存。当前 Web 路径由 Go 归档原始事件，浏览器使用 CSTX WASM 生成规范化资产视图。CLI 的历史文件保存 Event，而跨连接传输使用 Envelope；恢复历史、消费实时事件和查询资产不是同一个操作。完整说明见[事件与持久化](architecture/data.md)。
 
-`Registry` 表示可执行实例；`Catalog` 仅表示静态描述或协议投影。Skill 是 prompt/知识，
-没有直接执行协议，也不并入 Tool 或 Command。
+## 宿主与协议
 
-## 控制与事实
+Go 宿主直接持有组合和 Session Runtime。跨进程宿主通过 AOP 发送请求、订阅事件和取消操作；Web 另有 ConnectRPC 管理面处理配置、历史及节点查询。IOA 则提供独立的消息协作空间。
 
-`core/hooks` 提供 typed 控制点和观察点；`core/operation` 提供执行身份、父子 operation
-和取消。执行前控制可以拒绝或取消，执行后观察不能修改事实。策略 Extension 直接将准入
-结果发布为 typed `operation.Decision`；Observe 不反向参与准入，也不代替策略发布决策。
+宿主拥有监听和连接，运行时拥有执行状态，协议适配负责传输与错误映射。这些边界使本地 CLI、Web 和远程节点能够复用既有执行机制。接入实现见[宿主集成](developer/hosting.md)，线协议与迁移状态见[协议架构](protocol-architecture.md)。
 
-`core/events.Stream` 统一补全 AOP Event 的 ID、时间和序号。生产者调用 `Publish`，同步
-投影调用 `Observe`，有界持久化调用 `Consume`。`pkg/exts/observe` 把选中的
-Tool、Command、Process、File、HTTP hook 转成 typed AOP Event，`pkg/exts/telemetry`
-将同一 Stream 异步、可排空地写入 JSONL。Console、Web、Node 和 stdio 只订阅事件流。
+## 源码阅读
 
-CLI 中 `--observe` 只选择观测种类，`-o/--output` 只选择 AOP JSONL 持久化位置；
-`--output-format=text|json|stream-json` 只控制一次性 Agent 的 stdout。`-f/--file` 仅是
-`--view` 的渲染目标，`--resume` 只读历史，三者不会互相隐式启用。
-
-文件访问直接来自 `tools/files` 的真实 IO 边界；进程事件来自 `pkg/commands` 的真实启动与
-退出边界；HTTP 事件在 Proxy FlowStore 完成提交后产生。它们通过
-`aop.operation.Ref` 关联，不复制另一套 tool ID 或日志消息。
-
-## Agent、Session 与入口
-
-`agent/` 只依赖 Provider 和 `tool.Executor`。`pkg/exts/agent.Extension` 拥有 Agent Loop
-生命周期；`pkg/exts/session.Extension` 独立拥有 Session service，并借用已解析的 Loop。
-两者发布的 Runtime 都不暴露 Load/Close。每个 Session 使用已加载 App 的能力。Hook 控制动作，Inbox
-增加后续上下文，Cancel 停止工作，Event 记录事实，四者不互相替代。
-
-`pkg/host` 只拥有 inline/stdio 通信；Console、Web 和 Node 是并列入口，不包装或关闭
-App/Profile 的资源。
-
-## 包职责
-
-| 位置 | 责任 |
-| --- | --- |
-| `core/extension` | 固定图、Service contract 与资源关闭顺序 |
-| `core/registry` | 命名执行能力的准入与 drain |
-| `core/hooks` / `core/operation` / `core/events` | 执行控制、身份、事实流 |
-| `pkg/exts/*` | 具体 Extension 所有者 |
-| `pkg/toolset` / `pkg/commands` | 两类领域 Registry |
-| `tools/*` | 原始能力实现 |
-| `agent/` | Agent loop |
-| `pkg/app` | 产品状态与访问面 |
-| `pkg/profile` | 产品 Application/Factory/Request 契约 |
-| `cmd/aiscan`、`cmd/runner` | 各可执行产品的具体 Profile 与唯一组合根 |
-| `pkg/exts/agent` | Agent Loop 生命周期适配 |
-| `pkg/exts/session` | Session service 生命周期适配 |
-
-文件能力只有 `pkg/exts/files` 一个扩展，底层位于 `tools/files`。无 Agent 的
-`cmd/runner` 的文件组合直接暴露 `tool.Executor`，其底层依赖闭包不包含 App、Session、Console、
-Web 或 Node。代理行为位于 `tools/proxy`；`pkg/exts/proxy.Extension` 将唯一 Hub 适配到 Set，
-连接级 Traffic handler 直接由连接自己的 `NamespaceMux` 管理。Extension 组合变化通过整体
-Profile 换代完成；Provider 配置更新按 Run 快照隔离，活跃 Run 保留原 Provider。
-
+从 [base.New](../pkg/base/base.go)、[aiscan 的能力选择](../pkg/aiscan/extensions.go)和 [Profile](../pkg/aiscan/profile.go)可以读到完整装配顺序。随后沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进所调用的工具。各专题末尾提供对应实现与测试入口。

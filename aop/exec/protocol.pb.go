@@ -378,7 +378,7 @@ const file_aop_exec_protocol_proto_rawDesc = "" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
-	"\rSTREAM_STDERR\x10\x02B/Z-github.com/chainreactors/aiscan/aop/exec;execb\x06proto3"
+	"\rSTREAM_STDERR\x10\x02B.Z,github.com/chainreactors/cyber/aop/exec;execb\x06proto3"
 
 var (
 	file_aop_exec_protocol_proto_rawDescOnce sync.Once

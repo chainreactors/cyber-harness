@@ -5,18 +5,25 @@ import (
 	"fmt"
 	"strings"
 
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
 
-// LoadDistributeConfigYAML parses an aiscan.yaml file into the canonical proto
+// LoadDistributeConfigYAML parses an cyber.yaml file into the canonical proto
 // representation. It bridges YAML's snake-case keys with the proto message.
 func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("unmarshal yaml: %w", err)
 	}
+	return LoadDistributeConfigDocument(raw)
+}
+
+// LoadDistributeConfigDocument maps an already decoded cyber.yaml document onto
+// the canonical proto representation. Applications whose configuration is wider
+// than the proto drop their own keys before calling this.
+func LoadDistributeConfigDocument(raw map[string]any) (*types.DistributeConfig, error) {
 	jsonData, err := json.Marshal(raw)
 	if err != nil {
 		return nil, fmt.Errorf("convert yaml to json: %w", err)
@@ -29,11 +36,13 @@ func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 }
 
 // MarshalDistributeConfigYAML serializes the canonical proto config to YAML.
+// Proto field names are used so the result stays readable by the flags-backed
+// loader, which matches on the Option schema's snake-case keys.
 func MarshalDistributeConfigYAML(pb *types.DistributeConfig) ([]byte, error) {
 	if pb == nil {
 		return nil, nil
 	}
-	jsonData, err := protojson.Marshal(pb)
+	jsonData, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(pb)
 	if err != nil {
 		return nil, err
 	}

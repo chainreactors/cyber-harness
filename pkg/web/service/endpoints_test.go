@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
-	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
-	webext "github.com/chainreactors/aiscan/pkg/exts/web"
-	"github.com/chainreactors/aiscan/pkg/probe"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,26 +16,43 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	web "github.com/chainreactors/aiscan/pkg/web"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	web "github.com/chainreactors/cyber/pkg/web"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...string) *web.Handler {
-	handler, err := web.NewHandler(service.Auth(), static, webext.Routes(service)...)
+func newHandler(service web.Service, static http.Handler) *web.Handler {
+	handler, err := web.NewHandler(service.Auth(), static, loadedRoutes(service)...)
 	if err != nil {
 		panic(err)
 	}
 	return handler
 }
 
-func registerConnectServices(mux *http.ServeMux, _ string, service web.Service) {
-	for _, route := range webext.Routes(service) {
+func registerConnectServices(mux *http.ServeMux, service web.Service) {
+	for _, route := range loadedRoutes(service) {
 		mux.Handle(route.Pattern, route.Handler)
 	}
+}
+
+func loadedRoutes(service web.Service) []web.Route {
+	routes := webext.New(service)
+	set, err := extension.New(routes)
+	if err != nil {
+		panic(err)
+	}
+	if err := set.Load(context.Background()); err != nil {
+		panic(err)
+	}
+	result := routes.Routes()
+	if err := set.Close(context.Background()); err != nil {
+		panic(err)
+	}
+	return result
 }
 
 func newAccessKeyAuth(key string) func(http.Handler) http.Handler {
@@ -50,7 +68,7 @@ func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	service := NewService(ServiceConfig{})
 	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
-	server := httptest.NewServer(newHandler(service, nil, nil, ""))
+	server := httptest.NewServer(newHandler(service, nil))
 	t.Cleanup(func() {
 		server.Close()
 		service.Close(context.Background())
@@ -113,7 +131,7 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -142,13 +160,18 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 }
 
 func TestHandlerTestConnRouting(t *testing.T) {
-	probes := probe.New()
-	if err := probes.Register("scanner", "cyberhub", scannerprobe.Cyberhub); err != nil {
+	sections := configpkg.NewSections()
+	resources := resource.New()
+	if _, err := resource.Define[configpkg.Connection](resources, sections.ConnectionPoint()); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Probes: probes}})
+	if err := scannerext.Declare(resources); err != nil {
+		t.Fatal(err)
+	}
+	resources.Freeze()
+	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Sections: sections}})
 	defer svc.Close(context.Background())
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
 
@@ -188,7 +211,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -247,13 +270,13 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
 	nodeMux := http.NewServeMux()
-	nodeMux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
+	nodeMux.Handle(NodeWebSocketPath, service.NodeWebSocketHandler())
 	nodeServer := httptest.NewServer(nodeMux)
 	defer nodeServer.Close()
 

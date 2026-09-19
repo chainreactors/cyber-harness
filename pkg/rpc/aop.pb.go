@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,17 +25,17 @@ var File_rpc_aop_proto protoreflect.FileDescriptor
 
 const file_rpc_aop_proto_rawDesc = "" +
 	"\n" +
-	"\rrpc/aop.proto\x12\x0eaiscan.rpc.aop\x1a\x12aop/envelope.proto29\n" +
+	"\rrpc/aop.proto\x12\rcyber.rpc.aop\x1a\x12aop/envelope.proto29\n" +
 	"\n" +
 	"AOPService\x12+\n" +
-	"\aConnect\x12\r.aop.Envelope\x1a\r.aop.Envelope(\x010\x01B-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"\aConnect\x12\r.aop.Envelope\x1a\r.aop.Envelope(\x010\x01B,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_aop_proto_goTypes = []any{
 	(*aop.Envelope)(nil), // 0: aop.Envelope
 }
 var file_rpc_aop_proto_depIdxs = []int32{
-	0, // 0: aiscan.rpc.aop.AOPService.Connect:input_type -> aop.Envelope
-	0, // 1: aiscan.rpc.aop.AOPService.Connect:output_type -> aop.Envelope
+	0, // 0: cyber.rpc.aop.AOPService.Connect:input_type -> aop.Envelope
+	0, // 1: cyber.rpc.aop.AOPService.Connect:output_type -> aop.Envelope
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

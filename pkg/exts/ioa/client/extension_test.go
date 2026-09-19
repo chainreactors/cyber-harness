@@ -6,44 +6,32 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
-func TestCommandSelectionRequiresRegistry(t *testing.T) {
-	if _, err := New(service.Config{RegisterCommands: true}, Services{}); err == nil {
-		t.Fatal("accepted IOA command publication without a registry")
+func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
+	adapter := New(service.Config{}, Dependencies{})
+	svc := adapter.Service()
+	if _, ok := any(svc).(interface{ Close(context.Context) error }); ok {
+		t.Fatal("IOA service exposes Close")
 	}
-	if _, err := New(service.Config{}, Services{}); err != nil {
-		t.Fatalf("dormant IOA service requires no registry: %v", err)
-	}
-}
-func TestRuntimeHandleDoesNotExposeLifecycle(t *testing.T) {
-	adapter, err := New(service.Config{}, Services{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime := adapter.Runtime()
-	if _, ok := any(runtime).(interface{ Close(context.Context) error }); ok {
-		t.Fatal("IOA runtime exposes Close")
-	}
-	if _, ok := any(runtime).(interface{ Start(context.Context) error }); ok {
-		t.Fatal("IOA runtime exposes Start")
+	if _, ok := any(svc).(interface{ Start(context.Context) error }); ok {
+		t.Fatal("IOA service exposes Start")
 	}
 }
 
 func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
-	registry := commands.NewRegistry(nil)
-	ioa, err := New(service.Config{URL: server.URL, RegisterCommands: true}, Services{Commands: registry})
-	if err != nil {
-		t.Fatal(err)
-	}
+	registry := commands.NewRegistry()
+	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
 	set, err := extension.New(
-		extension.Entry{ID: "ioa", Extension: ioa},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"ioa"}, Extension: registry},
+		hosttest.Capabilities(),
+		registry,
+		ioa,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -61,4 +49,3 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 		t.Fatal("closed composition still published IOA commands")
 	}
 }
-

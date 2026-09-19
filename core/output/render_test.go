@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -135,7 +135,7 @@ func renderEvent(event *aop.Event) *aop.Event {
 	}
 	event.SessionId = "session-1"
 	event.TurnId = "turn-1"
-	event.Emitter = "aiscan"
+	event.Emitter = "cyber"
 	event.EmittedAt = timestamppb.New(time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC))
 	return event
 }

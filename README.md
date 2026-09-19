@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="web/assets/logo.svg" width="180" alt="aiscan logo">
-  <h1 align="center">aiscan</h1>
-  <p align="center">AI-driven single-binary pentest agent with a built-in multi-engine arsenal, ready to go</p>
+  <img src="web/assets/logo.svg" width="180" alt="cyber logo">
+  <h1 align="center">cyber-harness</h1>
+  <p align="center">An everything-is-an-extension agent harness for cybersecurity</p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/v/release/chainreactors/aiscan?style=flat-square&color=00E59B" alt="Release"></a>
-  <a href="https://github.com/chainreactors/aiscan/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/aiscan/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/chainreactors/aiscan/releases"><img src="https://img.shields.io/github/downloads/chainreactors/aiscan/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
-  <a href="https://github.com/chainreactors/aiscan/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
-  <a href="https://github.com/chainreactors/aiscan/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/aiscan?style=flat-square&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/releases"><img src="https://img.shields.io/github/v/release/chainreactors/cyber-harness?style=flat-square&color=00E59B" alt="Release"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/chainreactors/cyber-harness/ci.yml?branch=master&style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/releases"><img src="https://img.shields.io/github/downloads/chainreactors/cyber-harness/total?style=flat-square&color=00B4D8" alt="Downloads"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+  <a href="https://github.com/chainreactors/cyber-harness/stargazers"><img src="https://img.shields.io/github/stars/chainreactors/cyber-harness?style=flat-square&color=yellow" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -18,247 +18,71 @@
 
 ---
 
-**aiscan** combines LLM agents with traditional security scanning engines. Three modes: **Scan** (deterministic pipeline, optional AI assist), **Agent** (natural-language autonomous assessment), **IOA** (multi-agent distributed collaboration).
+cyber-harness is an agent runtime for cybersecurity. Model reasoning, tool execution, knowledge, observation, and collaboration are assembled through the same extension lifecycle. Use the reference distribution or compose the capabilities your own Go application needs.
 
-> **Use only on explicitly authorized targets. Unauthorized use is illegal.**
+`aiscan` packages the agent, core scanners, proxy routing, skills, and IOA collaboration. `aiscan-full` adds the Web workbench, browser automation, passive recon, and deep crawling.
 
-## Quick Start
+> Use only on explicitly authorized targets.
 
-```bash
-# No LLM needed — one-line scan
-aiscan scan -i 192.168.1.0/24
+## Start here
 
-# With LLM — one-line agent
-aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
-  -p "scan targets and check for high-risk vulnerabilities" -i 192.168.1.0/24
-```
+Download the matching `aiscan` or `aiscan-full` archive from [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest), extract it, and add the executable to PATH. See [Getting started (中文)](docs/getting-started.md) for installation, PowerShell configuration, and a complete first run.
 
-## Install
+```sh
+# With an LLM configured: run a local task and save its events
+aiscan agent -p "Read the current directory and explain its structure; do not modify files" -o first-run.jsonl
 
-### Download Binary
+# Run a deterministic scan against your own local lab, without AI verification
+aiscan scan -i http://127.0.0.1:3000 --verify=off
 
-From [GitHub Releases](https://github.com/chainreactors/aiscan/releases/latest):
-
-| Edition | Description |
-| --- | --- |
-| **aiscan** | Standard — scan/agent/gogo/spray/zombie/neutron/proton/arsenal |
-| **aiscan-full** | Full — adds Web, playwright, passive recon, and katana |
-
-| OS | Arch | Standard | Full |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
-
-```bash
-# Linux
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_linux_amd64.zip
-unzip aiscan_linux_amd64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# macOS Apple Silicon
-curl -LO https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_darwin_arm64.zip
-unzip aiscan_darwin_arm64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/aiscan/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
-Expand-Archive .\aiscan.zip -DestinationPath .
-.\aiscan.exe --version
-```
-
-### Web Console (Full Edition)
-
-The Web console is included in `aiscan-full`. It starts the browser UI and an
-embedded local agent by default. Open `http://127.0.0.1:8080` and enter the
-access key printed at startup:
-
-```bash
+# Full edition: start the Web workbench and sign in with the printed access key
 aiscan-full web
 ```
 
-To listen on the network with a fixed access key:
+The agent lets the model choose tool calls. The scan pipeline chooses work through rules and scan events, with optional AI stages. Both use the same underlying tool infrastructure.
 
-```bash
-aiscan-full web --addr 0.0.0.0:8080 --token change-me
-```
+## Configure a model
 
-Run the Web console as a hub without an embedded agent, then connect agents
-from this or other hosts:
-
-```bash
-# Hub
-aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent
-
-# Remote node
-aiscan agent --server-url http://change-me@server.example:8080 --node-name worker-01
-```
-
-The Web console stores sessions, scans, assets, findings, and configuration in
-`aiscan-web.db` by default. Use `--db <path>` to select another SQLite file.
-
-### Build from Source
-
-```bash
-git clone https://github.com/chainreactors/aiscan.git && cd aiscan
-
-make                                                       # standard edition
-make runner                                                # tag-free remote tool runner
-make full                                                  # frontend + full edition
-```
-
-The standalone agent executable is no longer a maintained build or release
-target. The single AIScan product entry is `cmd/aiscan`. `make full` requires Node.js/npm and a
-working CGO toolchain; it builds the frontend first so the latest `web/static`
-assets are embedded into the binary. The native `record` tool is not included
-in the default full build; SDK and tool developers can build it explicitly with
-`make record`, as described in [docs/record.md](docs/record.md).
-
-```bash
-make web WEB_ADDR=127.0.0.1:18081 WEB_TOKEN=local-dev    # full build + Web UI
-```
-
-On Windows amd64, `make` and `make full` use the bundled static RE2 backend
-and statically link the MinGW runtime, producing a single executable without
-RE2, Abseil, libstdc++, libgcc, or winpthread DLLs.
-
----
-
-## Features
-
-### Design
-
-- **Single-file distribution** — bundled engines need no separate runtime install; OS graphics and system libraries still apply
-- **Minimal agent core** — composable ~160-line loop; tools, retries, evaluation are plugged in, not hardcoded
-- **Extension architecture** — tools use explicit registration and profile composition; heavy dependencies (playwright, katana) are compile-time optional
-- **Embedded skills** — each tool carries its own usage docs and tactical guidance, loaded by the agent on demand
-- **Scan + Agent unified** — the same engines drive both the deterministic pipeline and the autonomous agent
-
-### Scan — Deterministic Pipeline
-
-- Multi-stage auto-chaining: port discovery → web probing → weak credentials → POC detection — no LLM required
-- Optional AI-driven result verification, public CVE correlation, and dynamic testing
-- Quick mode for fast exposure mapping, full mode for deep crawl and extended coverage
-
-### Agent — Autonomous Security Assessment
-
-- Natural language tasks — the agent plans, scans, analyzes, and reports autonomously
-- Goal evaluation — an independent evaluator judges task completion and drives automatic retry
-- Interactive REPL with direct command execution
-- Multiple provider profiles with explicit manual switching
-
-### [IOA](https://github.com/chainreactors/ioa) — Multi-Agent Collaboration
-
-- Shared message spaces for distributed agent coordination
-- Worker mode for persistent task listening
-- Built-in IOA server with token authentication
-- See: [Design](https://github.com/chainreactors/ioa/blob/main/docs/design.md) | [CLI](https://github.com/chainreactors/ioa/blob/main/docs/cli.md) | [Extension](https://github.com/chainreactors/ioa/blob/main/docs/extension.md)
-
-### Built-in Toolset
-
-**Scanners**
-- [gogo](https://github.com/chainreactors/gogo) — port, service, and banner discovery
-- [spray](https://github.com/chainreactors/spray) — web probing, fingerprinting, path fuzzing
-- [zombie](https://github.com/chainreactors/zombie) — credential testing
-- [neutron](https://github.com/chainreactors/neutron) — template-based POC execution
-- [proton](https://github.com/chainreactors/proton) — sensitive information scanning (API keys, tokens, credentials, secrets)
-- [cyberhub](https://github.com/chainreactors/fingers) — fingerprint and POC association query
-
-**Browser & Recon** (full edition)
-- playwright — headless Chromium sessions, screenshots, network capture
-- katana — web crawler with standard/headless/hybrid engines
-- passive — cyberspace search (FOFA, Hunter, Shodan)
-
-**Optional SDK tools**
-- record — native desktop/window screenshots and H.264/MP4 recording (Windows and Linux X11)
-
-**Utilities**
-- tmux — background task sessions with incremental output delivery
-- arsenal — security tool package manager ([crtm](https://github.com/chainreactors/crtm)), one-command install
-- proxy — multi-protocol proxy chain (trojan/vless/anytls/hy2/ss)
-- web_search / fetch — CVE search and URL fetching
-
----
-
-## Usage
-
-### Scan Mode
-
-```bash
-aiscan scan -i 192.168.1.0/24                                    # quick scan
-aiscan scan -i 192.168.1.0/24 --mode full                        # full scan
-aiscan scan -i http://target.example --verify=high --sniper       # AI-enhanced
-aiscan scan -i http://target.example --mode full --deep --report  # full + deep + report
-```
-
-### Agent Mode
-
-```bash
-# One-shot task
-aiscan agent -p "scan and find web vulnerabilities" -i 192.168.1.0/24
-
-# With goal evaluation
-aiscan agent -p "full scan" -i http://target.example -e "find all open ports with service fingerprints"
-
-# Interactive REPL
-aiscan agent
-```
-
-### IOA Mode
-
-```bash
-# Start IOA server
-aiscan ioa serve --ioa-url http://0.0.0.0:8765
-
-# Start IOA worker
-aiscan agent --ioa-url http://127.0.0.1:8765 --space pentest-project \
-  -p "scan assigned targets and report findings"
-```
-
-### LLM Configuration
-
-```bash
-# Environment variable
-export OPENAI_API_KEY="sk-..."
-
-# CLI arguments
-aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
-```
-
-Config file `aiscan.yaml`:
+Create `cyber.yaml` in your working directory:
 
 ```yaml
 llm:
   provider: openai
-  api_key: sk-...
-  model: gpt-4o
-  context_window: 128000   # Set explicitly for custom model IDs
-  max_tokens: 16384        # Maximum output per response
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
 ```
 
-`context_window` is a literal token count: use `128000`, not `128K`. Values below 8192 are accepted, but the Web UI warns that they may be too small. The request output limit is dynamically clamped to the remaining context: `min(max_tokens, context_window - current_context - 4096)`. If no output space remains, AIScan returns a clear error instead of sending a one-token request. Automatic compaction starts as the context approaches the configured window.
-
----
+Set `OPENAI_API_KEY` to your credential. For Anthropic-compatible services, use `provider: anthropic` and the corresponding settings. See the [configuration reference](docs/reference.md) for protocols, profiles, and precedence.
 
 ## Documentation
 
-| Doc | Description |
-| --- | --- |
-| [Scan Mode](docs/scan.md) | Pipeline, AI enhancements, output formats |
-| [Agent Mode](docs/agent.md) | Toolset, Goal Evaluation, REPL |
-| [IOA](docs/ioa.md) | Multi-agent architecture, Space/Node/Message model |
-| [Record Tool](docs/record.md) | Desktop/window capture, platform support, native builds |
-| [Reference](docs/reference.md) | Configuration, providers, flags, scanner usage, FAQ |
-| [v1.0.0 Guide](docs/v1.0.0.md) | Stable API baseline, removed pre-v1 interfaces, release profiles |
-| [Changelog](docs/changelog.md) | Version history |
+Start at the [documentation home](docs/README.md). Detailed documentation is maintained in Chinese and describes the current source; use the matching Git tag for a release.
+
+[Concepts](docs/concepts.md) introduces the harness, models, tools, sessions, and knowledge, without requiring Go experience.
+
+The [user guide](docs/user/README.md) progresses from installation and a first task to sessions, tools, Skills, scanning, and collaboration.
+
+The [developer guide](docs/development.md) builds an application in Go, starting with a runnable tool and then an embedded session, extensions, and host integration.
+
+[Architecture](docs/architecture.md) explains composition and lifetime, the Agent loop, execution, context, and data flow. Configuration and API details remain in the [reference](docs/reference.md).
+
+## Build and embed
+
+```sh
+git clone --recurse-submodules https://github.com/chainreactors/cyber-harness.git
+cd cyber-harness
+make          # standard distribution
+make agent    # minimal local agent
+make full     # frontend + full distribution
+```
+
+Use the Go version declared in [go.mod](go.mod). Full builds also need Node.js/npm; standard and full builds use CGO_ENABLED=0. Build tags are defined in [editions.env](editions.env); native recording requires CGO and is a separate [record build](docs/record.md).
+
+For custom distributions, call `base.New(config)`, append your extensions, and pass them to `extension.New`. The host owns Load/Close. Use `pkg/aiscan.New` to embed the reference distribution. See the runnable [custom example](examples/custom) and the [extension development guide](docs/development.md).
 
 ## Contributing
 
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/xxx`)
-3. Commit your changes (`git commit -m 'feat: add xxx'`)
-4. Push to the branch (`git push origin feature/xxx`)
-5. Create a Pull Request
+Read the [development guide](docs/development.md) and [documentation standards](docs/maintaining-docs.md). Describe the behavior change, affected entry points, and validation in your PR. Update the relevant guide or reference with behavior changes.
 
 ## Disclaimer
 
@@ -276,12 +100,7 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 
 - [chainreactors](https://github.com/chainreactors) — Organization
 - [IOA](https://github.com/chainreactors/ioa) — Internet of Agents
-- [gogo](https://github.com/chainreactors/gogo) — Port & service discovery
-- [spray](https://github.com/chainreactors/spray) — Web probing & fingerprinting
-- [zombie](https://github.com/chainreactors/zombie) — Credential testing
-- [neutron](https://github.com/chainreactors/neutron) — Template-based POC engine
-- [fingers](https://github.com/chainreactors/fingers) — Fingerprint rule engine
-- [sdk](https://github.com/chainreactors/sdk) — Scanner SDK (gogo/spray/zombie core)
+- [sdk](https://github.com/chainreactors/sdk) — Scanner SDK
 - [proxyclient](https://github.com/chainreactors/proxyclient) — Multi-protocol proxy client
 - [crtm](https://github.com/chainreactors/crtm) — Security tool package registry
 - [utils](https://github.com/chainreactors/utils) — Shared utilities & PTY manager
@@ -290,12 +109,7 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 ---
 
 <p align="center">
-  <a href="https://star-history.com/#chainreactors/aiscan&Date">
-    <img src="https://api.star-history.com/svg?repos=chainreactors/aiscan&type=Date" alt="Star History" width="600">
+  <a href="https://star-history.com/#chainreactors/cyber-harness&Date">
+    <img src="https://api.star-history.com/svg?repos=chainreactors/cyber-harness&type=Date" alt="Star History" width="600">
   </a>
 </p>
-
-
-### Extension architecture
-
-The plugin host is `core/extension.Set`. Product adapters live under `pkg/exts`; raw tool implementations stay under `tools`, and agent loop code stays under `agent`. A Set activates the tool and command registries only after every contributor loads, then drains calls before closing resources.

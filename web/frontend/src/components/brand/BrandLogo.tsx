@@ -16,11 +16,11 @@ const NODES: Array<[number, number]> = [
 ]
 
 /**
- * The AIScan brand logo — the official "RADAR-CHAIN" mark: a range-ring radar
+ * The Cyber brand logo — the official "RADAR-CHAIN" mark: a range-ring radar
  * with a live sweep, ringed by eight chain-linked agent nodes (the chainreactors
  * chain). Full brand colour (crimson → red) and animated; this is the headline
  * mark. For small monochrome/tintable glyphs (chat markers, idle hero) use
- * BrandMark instead. Mirrors web/assets/logo.svg. See [[aiscan-web-redesign-direction]].
+ * BrandMark instead. Mirrors web/assets/logo.svg. See [[cyber-web-redesign-direction]].
  */
 export default function BrandLogo({ size = 28, className, animated = true }: BrandLogoProps) {
   // Unique gradient ids per instance so multiple logos on a page never cross-wire

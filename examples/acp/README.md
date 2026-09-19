@@ -1,6 +1,6 @@
-# Go 接入 aiscan
+# Go 接入 cyber
 
-本目录提供两个可运行的 Go client，分别对应 aiscan 的实时功能组和管理功能组。
+本目录提供两个可运行的 Go client，分别对应 cyber 的实时功能组和管理功能组。
 
 | 示例 | 功能组 | 用途 |
 |------|--------|------|
@@ -160,7 +160,7 @@ client.ListEvents(ctx, connect.NewRequest(&aop.ListEventsRequest{
 Application WebSocket 示例：
 
 ```text
-github.com/chainreactors/aiscan/aop
+github.com/chainreactors/cyber/aop
 github.com/gorilla/websocket
 google.golang.org/protobuf
 ```
@@ -169,8 +169,8 @@ ConnectRPC 示例还需要：
 
 ```text
 connectrpc.com/connect
-github.com/chainreactors/aiscan/pkg/rpc
-github.com/chainreactors/aiscan/pkg/types
+github.com/chainreactors/cyber/pkg/rpc
+github.com/chainreactors/cyber/core/types
 ```
 
 ## 5. 测试

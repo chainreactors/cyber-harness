@@ -7,7 +7,7 @@
 package traffic
 
 import (
-	operation "github.com/chainreactors/aiscan/aop/operation"
+	operation "github.com/chainreactors/cyber/aop/operation"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1194,7 +1194,7 @@ const file_aop_traffic_protocol_proto_rawDesc = "" +
 	"\x16ROUTING_MODE_SUBSCRIBE\x10\x03\x12\x15\n" +
 	"\x11ROUTING_MODE_AUTO\x10\x04\x12\x17\n" +
 	"\x13ROUTING_MODE_SWITCH\x10\x05\x12\x16\n" +
-	"\x12ROUTING_MODE_CLEAR\x10\x06B5Z3github.com/chainreactors/aiscan/aop/traffic;trafficb\x06proto3"
+	"\x12ROUTING_MODE_CLEAR\x10\x06B4Z2github.com/chainreactors/cyber/aop/traffic;trafficb\x06proto3"
 
 var (
 	file_aop_traffic_protocol_proto_rawDescOnce sync.Once

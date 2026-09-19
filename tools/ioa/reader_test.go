@@ -23,7 +23,7 @@ func TestReaderLifetime(t *testing.T) {
 	defer server.Close()
 	resource := New(Config{URL: server.URL}, nil)
 	defer resource.Close(context.Background())
-	reader := resource.Runtime
+	reader := resource.Service
 	if _, err := reader.ListSpaces(t.Context()); err == nil {
 		t.Fatal("query before Load succeeded")
 	}

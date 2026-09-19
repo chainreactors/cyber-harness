@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 func TestRetryOnTransientError(t *testing.T) {
@@ -215,7 +215,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	_, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
-		newAOPEmitter(coreevents.New(), "aiscan", "test-session", "", "", nil, 0),
+		newAOPEmitter(coreevents.New(), "cyber", "test-session", "", "", nil, 0),
 		telemetry.NopLogger(),
 		1,
 		"m-1",

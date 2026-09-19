@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/resources"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	protoncmd "github.com/chainreactors/aiscan/tools/proton"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	protoncmd "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/resources"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 // ---------------------------------------------------------------------------
@@ -22,19 +22,19 @@ import (
 
 // e2eBash creates a BashTool with the proton pseudo-command registered,
 // wired through the full tmux.Manager pipe infrastructure.
-func e2eBash(t *testing.T) (*commands.BashTool, string) {
+func e2eBash(t *testing.T) (*terminaltool.BashTool, string) {
 	t.Helper()
 	dir := t.TempDir()
 
 	rs := &resources.Set{}
-	registry := harness.Commands(t, "scanner", protoncmd.NewCommand(dir, rs, nil, "", nil))
+	registry := hosttest.Commands(t, protoncmd.NewCommand(dir, rs, nil, "", nil))
 
-	bash := commands.NewBashTool(dir, 30, nil)
+	bash := terminaltool.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)
 	return bash, dir
 }
 
-func run(t *testing.T, bash *commands.BashTool, cmd string) string {
+func run(t *testing.T, bash *terminaltool.BashTool, cmd string) string {
 	t.Helper()
 	data, _ := json.Marshal(map[string]string{"command": cmd})
 	res, err := bash.Execute(context.Background(), string(data))

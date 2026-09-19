@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )

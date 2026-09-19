@@ -5,23 +5,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
-	commands := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
-	instance, err := New(nil, tools, commands, Config{Directory: t.TempDir(), Timeout: 5})
-	if err != nil {
-		t.Fatal(err)
-	}
+	commands := commands.NewRegistry()
+	tools := toolset.NewRegistry()
+	instance := New(Config{Directory: t.TempDir(), Timeout: 5})
 	set, err := extension.New(
-		extension.Entry{ID: "terminal", Extension: instance},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"terminal"}, Extension: commands},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+		hosttest.Capabilities(),
+		commands,
+		tools,
+		instance,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -29,44 +29,57 @@ func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTool(tools, "bash") || !commands.Has("tmux") {
-		t.Fatal("terminal instance did not publish bash and tmux")
+	if !hasTool(tools, "bash") {
+		t.Fatal("terminal instance did not publish bash")
+	}
+	if commands.Has("tmux") {
+		t.Fatal("terminal published tmux; that belongs to the tmux extension")
 	}
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if hasTool(tools, "bash") || commands.Has("tmux") {
+	if hasTool(tools, "bash") {
 		t.Fatal("terminal instance left registrations published after close")
 	}
 }
 
-func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
-	commandRegistry := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
+func TestExtensionHidesControlCommandsAndLetsAHostOwnTmux(t *testing.T) {
+	commandRegistry := commands.NewRegistry()
+	tools := toolset.NewRegistry()
 	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return commandRegistry.Register("test", "control", commands.Command{
+		return extension.Add(scope, commands.Command{
 			Name: "proxy",
 			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
 		})
 	}}
-	custom := commands.Command{
-		Name: "tmux",
-		Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
-	}
-	instance, err := New(nil, tools, commandRegistry, Config{
+	// tmux is an ordinary contributed command now, so a host that wants its own
+	// session policy contributes one instead of handing this extension a
+	// callback. Nothing here has to know the name is special.
+	custom := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		return extension.Add(scope, commands.Command{
+			Name: "tmux",
+			Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
+		})
+	}}
+	instance := New(Config{
 		Directory:      t.TempDir(),
 		Timeout:        5,
 		HiddenCommands: []string{"proxy"},
-		Tmux:           func(*commands.BashTool) commands.Command { return custom },
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		bash, err = extension.Use[*terminaltool.BashTool](scope)
+		return err
+	}}
 	set, err := extension.New(
-		extension.Entry{ID: "control", Extension: control},
-		extension.Entry{ID: "terminal", Extension: instance},
-		extension.Entry{ID: "command-registry", DependsOn: []string{"control", "terminal"}, Extension: commandRegistry},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
+		hosttest.Capabilities(),
+		commandRegistry,
+		tools,
+		control,
+		instance,
+		custom,
+		borrow,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +90,7 @@ func TestExtensionPublishesProfileTmuxAndHidesControlCommands(t *testing.T) {
 	if got := commandRegistry.Names(); len(got) != 2 || got[0] != "proxy" || got[1] != "tmux" {
 		t.Fatalf("published commands = %v", got)
 	}
-	description := instance.Bash().Description()
+	description := bash.Description()
 	if strings.Contains(description, "proxy") || !strings.Contains(description, "tmux") {
 		t.Fatalf("bash description did not apply visibility policy: %q", description)
 	}

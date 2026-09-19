@@ -11,10 +11,10 @@ import (
 	"strings"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -46,10 +46,7 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(events *coreevents.Stream, options Options) (*Extension, error) {
-	if events == nil {
-		return nil, fmt.Errorf("event output requires an AOP event stream")
-	}
+func New(options Options) (*Extension, error) {
 	if strings.TrimSpace(options.Path) == "" {
 		return nil, fmt.Errorf("event output path is required")
 	}
@@ -59,7 +56,7 @@ func New(events *coreevents.Stream, options Options) (*Extension, error) {
 	if options.MaxBytes <= 0 {
 		options.MaxBytes = defaultBytes
 	}
-	return &Extension{events: events, options: options}, nil
+	return &Extension{options: options}, nil
 }
 
 func open(path string) (*os.File, string, error) {
@@ -91,6 +88,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
+	stream, err := extension.Use[*coreevents.Stream](scope)
+	if err != nil {
+		return err
+	}
+	e.events = stream
 	file, path, err := open(e.options.Path)
 	if err != nil {
 		return err
@@ -213,4 +215,3 @@ func (e *Extension) Close(ctx context.Context) error {
 }
 
 var _ coreevents.Consumer = (*Extension)(nil)
-

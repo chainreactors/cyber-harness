@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 // toolsFor constructs the four basic tools owned by the files extension.

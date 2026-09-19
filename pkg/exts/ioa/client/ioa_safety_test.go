@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
+	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
 	ioaclient "github.com/chainreactors/ioa/client"
 )
 

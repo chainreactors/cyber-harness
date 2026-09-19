@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 func TestStorageConfigValidation(t *testing.T) {
@@ -27,6 +27,18 @@ func TestStorageConfigValidation(t *testing.T) {
 	c, err := (cfg.TrafficOptions{}).Normalize()
 	if err != nil || c.BodyStorage != "none" || c.BodyMaxBytes != maxBodyCaptureBytes {
 		t.Fatalf("%+v, %v", c, err)
+	}
+}
+
+func TestFlowMetadataAllowsMissingRequest(t *testing.T) {
+	flow := Flow{Flow: &traffic.Flow{Id: "incomplete"}}
+	if size := flowMetadataSize(flow); size <= 0 {
+		t.Fatalf("flowMetadataSize() = %d", size)
+	}
+	store := NewFlowStore(1)
+	stored := store.Add(flow)
+	if stored.Request == nil {
+		t.Fatal("stored request was not normalized")
 	}
 }
 
@@ -59,7 +71,7 @@ func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
 		t.Fatalf("flows=%d", len(flows))
 	}
 	f := flows[0]
-	if hub.store.files[f.ID][1] >= 0 || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
+	if hub.store.files[f.Id][1] >= 0 || len(f.Response.Body) != maxBodySnip || f.Complete || !strings.Contains(f.Error, "preview only") {
 		t.Fatalf("unexpected preview: %+v", f)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "capture")); !os.IsNotExist(err) {
@@ -143,7 +155,7 @@ func TestTrafficMetadataIndexContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
 	if err := s.SetBodyDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	s.Add(Flow{Exchange: traffic.Exchange{Request: traffic.Request{Body: []byte("private-body")}}})
+	s.Add(Flow{Flow: &traffic.Flow{Request: &traffic.HttpRequest{Body: []byte("private-body")}}})
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +178,8 @@ func TestMissingBodyIsReportedAsIncomplete(t *testing.T) {
 	if err := os.WriteFile(path, []byte("body"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	f := addTestBody(t, s, Flow{Exchange: traffic.Exchange{Complete: true, Response: &traffic.Response{StatusCode: 200}}}, path)
-	if err := os.Remove(s.bodyPath(f.ID, 1)); err != nil {
+	f := addTestBody(t, s, Flow{Flow: &traffic.Flow{Complete: true, Request: &traffic.HttpRequest{}, Response: &traffic.HttpResponse{StatusCode: 200}}}, path)
+	if err := os.Remove(s.bodyPath(f.Id, 1)); err != nil {
 		t.Fatal(err)
 	}
 	wire := s.flowToProto(&f)

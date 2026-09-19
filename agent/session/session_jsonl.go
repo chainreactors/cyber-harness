@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/output"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/output"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 

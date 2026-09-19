@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/hooks"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/hooks"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
 
@@ -177,7 +177,7 @@ func (h *ProxyHub) captureMatches(flow Flow) bool {
 	if f.Host != "" && !strings.Contains(strings.ToLower(flow.Host), strings.ToLower(f.Host)) {
 		return false
 	}
-	if f.Status != "" && (flow.Response == nil || !matchStatus(flow.Response.StatusCode, f.Status)) {
+	if f.Status != "" && (flow.Response == nil || !matchStatus(int(flow.Response.StatusCode), f.Status)) {
 		return false
 	}
 	if f.CType != "" && !strings.Contains(strings.ToLower(flow.ContentType), strings.ToLower(f.CType)) {

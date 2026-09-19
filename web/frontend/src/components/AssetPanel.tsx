@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, Import, RefreshCw, Upload } from 'lucide-react'
-import { listSCONodes, getSupportedArtifacts, importSCOData } from '../api'
+import { getSupportedCSTXArtifacts, importCSTXArtifact, listSCONodes } from '../lib/cstx-runtime'
 import type { SCONode } from '@cyber/cstx-easm'
 import { CSTXTable } from '@cyber/cstx'
 import { CstxImportDialog, type ImportFileEntry, type ArtifactOption } from '@cyber/cstx'
@@ -15,12 +15,15 @@ import {
   TabsTrigger,
 } from '@cyber/ui'
 import { cn } from '@cyber/theme'
+import { useTableLabels } from '../i18n/useTableLabels'
 import { ToolDrawer } from './layout/ToolDrawer'
 
 interface AssetPanelProps {
   open: boolean
   onClose: () => void
   onSendToChat?: (text: string) => void
+  /** Fired after the asset pool is mutated so app-level caches can refresh. */
+  onChanged?: () => void
 }
 
 const EXCLUDE_COLUMNS = [
@@ -72,10 +75,6 @@ function formatRowsForChat(rows: Record<string, unknown>[]): string {
   return lines.join('\n')
 }
 
-const BATCH_ACTIONS = [
-  { id: 'sendToChat', label: 'Send to Chat', icon: 'MessageSquare' },
-]
-
 const TYPE_ORDER = ['ip', 'cidr', 'domain', 'port', 'app', 'url', 'framework', 'endpoint', 'vuln']
 
 function compareAssetTypes(left: string, right: string) {
@@ -89,8 +88,9 @@ function compareAssetTypes(left: string, right: string) {
   return left.localeCompare(right)
 }
 
-export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelProps) {
+export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: AssetPanelProps) {
   const { t } = useTranslation('assets')
+  const tableLabels = useTableLabels()
   const importLabels = useMemo(() => ({
     title: t('importDialog.title'),
     description: t('importDialog.description'),
@@ -133,6 +133,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
     cancel: t('importDialog.cancel'),
     submit: t('importDialog.submit'),
     submitting: t('importDialog.submitting'),
+    submitFailed: t('importDialog.submitFailed', { message: '{{message}}' }),
   }), [t])
   const [nodes, setNodes] = useState<SCONode[]>([])
   const [loading, setLoading] = useState(false)
@@ -174,7 +175,7 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   const loadArtifacts = useCallback(async () => {
     setArtifactsLoading(true)
     try {
-      const arts = await getSupportedArtifacts()
+      const arts = await getSupportedCSTXArtifacts()
       setArtifactOptions((arts ?? []).map((a) => ({ value: a, label: a })))
     } catch { /* non-critical */ }
     finally { setArtifactsLoading(false) }
@@ -187,6 +188,14 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   useEffect(() => {
     if ((importOpen || dragOver) && artifactOptions.length === 0) void loadArtifacts()
   }, [importOpen, dragOver, artifactOptions.length, loadArtifacts])
+
+  // The table renders the selection count next to the button, so the button
+  // itself carries only the verb. It has to be rebuilt per locale, not a module
+  // constant, or the zh build shows an English label.
+  const batchActions = useMemo(
+    () => [{ id: 'sendToChat', label: t('sendToChat'), icon: 'MessageSquare' }],
+    [t],
+  )
 
   const rows = useMemo(() => nodes.map(flattenSCO), [nodes])
   const typeCounts = useMemo(() => {
@@ -224,11 +233,17 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
   }, [onSendToChat, onClose])
 
   const handleImportSubmit = useCallback(async (entries: ImportFileEntry[]) => {
+    let written = 0
     for (const entry of entries) {
-      await importSCOData(entry.file, entry.artifactType)
+      written += await importCSTXArtifact(entry.file, entry.artifactType)
     }
     void load()
-  }, [load])
+    onChanged?.()
+    // The backend accepts the upload and reports zero nodes when the parser
+    // recognizes nothing. Closing the dialog then would look like a successful
+    // import of nothing, so keep it open with the reason.
+    if (written === 0) throw new Error(t('importDialog.importedNothing'))
+  }, [load, onChanged, t])
 
   return (
     <>
@@ -269,6 +284,10 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
           onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOver(true) },
           onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) },
           onDrop: handleDrop,
+          // The import dialog is modal, so its focus trap reads as an outside
+          // interaction to this non-modal Sheet and dismisses the panel out from
+          // under the dialog. While the dialog is up, the drawer stays put.
+          onInteractOutside: (e: Event) => { if (importOpen) e.preventDefault() },
         }}
         bodyClassName="flex flex-col"
       >
@@ -348,7 +367,8 @@ export default function AssetPanel({ open, onClose, onSendToChat }: AssetPanelPr
                     sparseMinColumns: 8,
                     columnsExclude: EXCLUDE_COLUMNS,
                     paginationMode: 'client',
-                    batchActions: BATCH_ACTIONS,
+                    batchActions,
+                    i18n: tableLabels,
                   }}
                   onAction={handleAction}
                 />

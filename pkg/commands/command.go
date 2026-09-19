@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	coreregistry "github.com/chainreactors/aiscan/core/registry"
- "github.com/chainreactors/aiscan/core/commandline"
+	coreregistry "github.com/chainreactors/cyber/core/registry"
 )
 
 var (
@@ -19,14 +18,18 @@ var (
 // Command is an immutable native command declaration. Its dependencies are
 // captured by Run when the owning extension is constructed.
 type Command struct {
-	Name            string
-	Usage           string
+	Name  string
+	Usage string
+	// QuickReference is the command's inline reference in the system prompt. A
+	// command that declares none is listed by its Usage summary line, so a Usage
+	// that opens with the generated "Usage:" header has to declare one.
 	QuickReference  string
 	DescriptionPath string
 	Run             func(context.Context, *Execution) (any, error)
 }
 
-func stripShellSyntax(tokens []string) ([]string, error) {
+// StripShellSyntax rejects shell constructs a pseudo-command cannot honor.
+func StripShellSyntax(tokens []string) ([]string, error) {
 	clean := make([]string, 0, len(tokens))
 	for _, token := range tokens {
 		if token == "|" || token == "||" {
@@ -68,7 +71,8 @@ func isFileRedirection(token string) bool {
 	return false
 }
 
-func normalizeNoColor(name string, args []string) []string {
+// NormalizeNoColor appends --no-color to scanner invocations that paint a terminal.
+func NormalizeNoColor(name string, args []string) []string {
 	if name != "scan" {
 		return args
 	}
@@ -79,6 +83,3 @@ func normalizeNoColor(name string, args []string) []string {
 	}
 	return append(args, "--no-color")
 }
-
-func SplitCommandLine(input string) ([]string, error) { return commandline.SplitCommandLine(input) }
-func JoinCommandLine(name string, args []string) string { return commandline.JoinCommandLine(name, args) }

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 func TestServiceReturnsCommandDeclarationsWithoutOwningARegistry(t *testing.T) {

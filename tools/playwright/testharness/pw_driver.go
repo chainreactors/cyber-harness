@@ -23,8 +23,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/playwright"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/playwright"
 )
 
 type request struct {

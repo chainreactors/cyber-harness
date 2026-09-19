@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
 	"io"
 	"net/http"
 	"net/http/httptest"

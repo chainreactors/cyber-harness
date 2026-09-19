@@ -19,7 +19,7 @@ def test_wait_for_url_immediate(test_server, pw_page, pw_driver):
     pw_page.goto(page2)
     assert "page2.html" in pw_page.url
 
-    # aiscan — navigate to page2, then wait-for-url "page2" should match immediately
+    # cyber — navigate to page2, then wait-for-url "page2" should match immediately
     pw_driver.execute("open", page1, "--session", "wurl-t", "--timeout", "10")
     pw_driver.execute("click", "wurl-t", "#link-page2")
     # page has navigated to page2; now wait-for-url should match immediately
@@ -37,7 +37,7 @@ def test_wait_for_request_via_timed_fetch(test_server, pw_page, pw_driver):
     with pw_page.expect_request("**/api/data"):
         pw_page.click("#fetch-btn")
 
-    # aiscan — schedule a fetch via setTimeout, then wait-for-request
+    # cyber — schedule a fetch via setTimeout, then wait-for-request
     pw_driver.execute("open", url, "--session", "wreq-t", "--timeout", "10")
     # Schedule fetch to fire after 200ms
     pw_driver.execute(
@@ -58,7 +58,7 @@ def test_wait_for_response_via_timed_fetch(test_server, pw_page, pw_driver):
     with pw_page.expect_response("**/api/data"):
         pw_page.click("#fetch-btn")
 
-    # aiscan
+    # cyber
     pw_driver.execute("open", url, "--session", "wrsp-t", "--timeout", "10")
     pw_driver.execute(
         "evaluate", "wrsp-t",

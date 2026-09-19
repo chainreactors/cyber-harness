@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -181,7 +181,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	}
 	s.mu.Unlock()
 	s.BroadcastAOPEvent(sessionID, &aop.Event{
-		SessionId: sessionID, TurnId: turnID, Emitter: "aiscan.web",
+		SessionId: sessionID, TurnId: turnID, Emitter: "cyber.web",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "canceled"}},
 	})
 	return nil
@@ -225,7 +225,7 @@ func (s *Service) Upload(ctx context.Context, sessionID, filename string, data [
 			map[string]any{"filename": filename, "path": result.Path})
 		return result, nil
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(nodeID, taskID)
+		_ = s.agents.CancelTask(nodeID, taskID, "")
 		return nil, ctx.Err()
 	}
 }

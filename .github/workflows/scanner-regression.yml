@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     env:
-      AISCAN_INTEGRATION: '1'
+      CYBER_INTEGRATION: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -30,9 +30,12 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
+      - name: Load the build editions
+        run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
+
       - name: Run bounded public scanner regressions
         run: |
-          go test -tags "full sqlite cstx integration re2_cgo re2_static" -count=1 -timeout 8m -v \
+          go test -tags "$FULL_CAPS_TAGS integration" -count=1 -timeout 8m -v \
             -run 'Test(ScannerPublicIntegration|FullScannerPublicIntegration)$' \
             ./tools
 

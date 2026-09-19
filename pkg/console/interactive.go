@@ -15,26 +15,26 @@ import (
 	"time"
 
 	"github.com/carapace-sh/carapace"
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	outputpkg "github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	"github.com/chainreactors/tui/console"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/spf13/cobra"
 )
 
 const agentPromptCommandName = "__prompt"
-const agentConsoleInterruptCommandName = "aiscan-interrupt"
-const agentConsoleCtrlCCommandName = "aiscan-ctrl-c"
-const agentConsoleToggleVerbosityCommandName = "aiscan-toggle-verbosity"
+const agentConsoleInterruptCommandName = "cyber-interrupt"
+const agentConsoleCtrlCCommandName = "cyber-ctrl-c"
+const agentConsoleToggleVerbosityCommandName = "cyber-toggle-verbosity"
 const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 
 // Some terminal applications leave focus reporting or Windows Terminal's
@@ -42,7 +42,7 @@ const agentConsoleEscapeSequenceWait = 10 * time.Millisecond
 // remain active, ordinary keys can arrive as strings such as
 // "\x1b[191;53;47;1;0;1_" and leak into the editable line. Reset them at the
 // application boundary before every read rather than teaching the shared
-// readline package about an aiscan-specific terminal lifecycle.
+// readline package about an cyber-specific terminal lifecycle.
 const agentConsoleResetInputModes = "\x1b[?1004l\x1b[?9001l"
 
 var errAgentConsoleExit = errors.New("agent console exit")
@@ -50,9 +50,9 @@ var errAgentConsoleExit = errors.New("agent console exit")
 type AgentConsole struct {
 	ctx            context.Context
 	option         *cfg.Option
-	runtime        *agentext.Runtime
+	runtime        *agentsession.Runtime
 	bindings       *consoleapi.Bindings
-	session        *agentext.Session
+	session        *agentsession.Session
 	console        *console.Console
 	terminal       *rlterm.Terminal
 	menu           *console.Menu
@@ -86,7 +86,7 @@ type AgentConsole struct {
 	pendingExit          atomic.Bool
 }
 
-func newAgentConsole(ctx context.Context, rt *agentext.Runtime, session *agentext.Session, option *cfg.Option, t *rlterm.Terminal, bindings *consoleapi.Bindings) *AgentConsole {
+func newAgentConsole(ctx context.Context, rt *agentsession.Runtime, session *agentsession.Session, option *cfg.Option, t *rlterm.Terminal, bindings *consoleapi.Bindings) *AgentConsole {
 	if option == nil {
 		option = &cfg.Option{}
 	}
@@ -410,18 +410,14 @@ func agentComposerPrompt(output *AgentOutput, bridge *readlineConsoleBridge) str
 }
 
 func (r *AgentConsole) fastInputEnabled() bool {
-	isTerminal := false
-	if r != nil && r.terminal != nil && r.terminal.Control != nil {
-		isTerminal = r.terminal.Control.IsTerminal()
-	}
 	mode := ""
 	if r != nil && r.option != nil {
 		mode = r.option.REPLMode
 	}
-	return fastInputEnabledForMode(mode, isTerminal)
+	return fastInputEnabledForMode(mode)
 }
 
-func fastInputEnabledForMode(mode string, _ bool) bool {
+func fastInputEnabledForMode(mode string) bool {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	switch mode {
 	case "rich", "readline", "console":
@@ -651,12 +647,12 @@ func (r *AgentConsole) forceExit() {
 }
 
 func (r *AgentConsole) renderProviders() string {
-	_, pc := r.runtime.App().ProviderState()
+	_, pc := r.runtime.ProviderState()
 	if pc.Provider == "" {
 		return "\n  No providers configured.\n\n"
 	}
 	rows := []helpRow{{Command: "#1  " + pc.Provider, Detail: pc.Model + "  ● active"}}
-	for i, p := range r.runtime.App().Providers.Fallbacks() {
+	for i, p := range r.runtime.ProviderFallbacks() {
 		rows = append(rows, helpRow{Command: fmt.Sprintf("#%d  %s", i+2, p.Provider.Name()), Detail: p.Model + "  ○ configured"})
 	}
 	return r.renderPanel("providers", renderHelpRows(rows, r.output.color.Enabled), r.output.color.Enabled)
@@ -1049,10 +1045,10 @@ func (r *AgentConsole) applyProviderConfig(pc agent.ProviderConfig) (agent.Provi
 }
 
 func (r *AgentConsole) pseudoCommandNames() []string {
-	if r.runtime.App().Commands == nil {
+	if r.runtime.CommandRegistry() == nil {
 		return nil
 	}
-	return r.runtime.App().Commands.Names()
+	return r.runtime.CommandRegistry().Names()
 }
 
 func splitArgs(args []string) []string {
@@ -1123,6 +1119,6 @@ func (r *AgentConsole) providerConfig() agent.ProviderConfig {
 	if r == nil || r.runtime == nil {
 		return agent.ProviderConfig{}
 	}
-	_, pc := r.runtime.App().ProviderState()
+	_, pc := r.runtime.ProviderState()
 	return pc
 }

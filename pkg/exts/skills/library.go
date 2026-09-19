@@ -1,19 +1,17 @@
 package skills
 
 import (
-	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/capability"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent/skills"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/resource"
 	"path/filepath"
 )
 
 type LibraryConfig struct {
 	Directory string
 	Paths     []string
-	Catalog   capability.Catalog
-	Bundles   []skills.Bundle
+	Exclude   []string
 }
 type Library struct {
 	config LibraryConfig
@@ -25,7 +23,7 @@ func NewLibrary(config LibraryConfig) (*Library, error) {
 		return nil, fmt.Errorf("skills directory must be absolute")
 	}
 	config.Paths = append([]string(nil), config.Paths...)
-	config.Bundles = append([]skills.Bundle(nil), config.Bundles...)
+	config.Exclude = append([]string(nil), config.Exclude...)
 	return &Library{config: config, store: skills.NewStore(nil)}, nil
 }
 func (e *Library) Store() *skills.Store { return e.store }
@@ -33,10 +31,29 @@ func (e *Library) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	loaded, _ := skills.LoadFrom(e.config.Directory, e.config.Paths, e.config.Catalog, e.config.Bundles...)
-	*e.store = *loaded
+	if err := extension.Provide[*skills.Store](scope, e.store); err != nil {
+		return err
+	}
+	loaded, diagnostics := skills.LoadFrom(e.config.Directory, e.config.Paths)
+	values := loaded.All()
+	if len(e.config.Exclude) > 0 {
+		excluded := make(map[string]bool, len(e.config.Exclude))
+		for _, name := range e.config.Exclude {
+			excluded[name] = true
+		}
+		filtered := values[:0]
+		for _, value := range values {
+			if !excluded[value.Name] {
+				filtered = append(filtered, value)
+			}
+		}
+		values = filtered
+	}
+	e.store.Replace(values, diagnostics)
+	if err := extension.Define[skills.Bundle](scope, e.store); err != nil {
+		return err
+	}
 	return scope.Init().Err()
 }
 
-// Skill data is immutable after profile initialization and has no open handles.
-func (e *Library) Close(context.Context) error { return nil }
+var _ resource.Point[skills.Bundle] = (*skills.Store)(nil)

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 type OpenAIProvider struct {

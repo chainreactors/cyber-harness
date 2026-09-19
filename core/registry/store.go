@@ -1,6 +1,5 @@
-// Package registry provides the sealed named registry shared by concrete
-// capability runtimes. It owns publication state and execution admission, but
-// knows nothing about tools, commands, dependency injection, or scope trees.
+// Package registry provides the concurrent named store used by concrete
+// resource Points. It owns publication and per-batch execution draining.
 package registry
 
 import (
@@ -9,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/chainreactors/cyber/core/resource"
 )
 
 var (
@@ -27,92 +28,82 @@ const (
 	closed
 )
 
-// Value is one immutable named contribution.
 type Value[T any] struct {
 	Name  string
 	Value T
 }
 
-// Entry is a published value with its registration metadata.
 type Entry[T any] struct {
-	Source string
-	Name   string
-	Group  string
-	Value  T
+	Name  string
+	Value T
+	batch *batch
 }
 
-// Store is a fixed-composition named registry. Register is allowed only before
-// Activate. Close rejects new acquisitions, cancels accepted calls, and waits
-// for every acquired lease to be released before discarding declarations.
-type Store[T any] struct {
-	mu       sync.Mutex
-	entries  map[string]Entry[T]
-	order    []string
-	groups   map[string][]string
-	state    state
+type batch struct {
+	names    []string
+	closing  bool
 	inflight int
-	nextCall uint64
-	calls    map[uint64]context.CancelFunc
+	calls    map[*call]struct{}
 	done     chan struct{}
+}
+
+type call struct{ cancel context.CancelFunc }
+
+type Store[T any] struct {
+	mu      sync.Mutex
+	entries map[string]Entry[T]
+	order   []string
+	state   state
+	batches map[*batch]struct{}
 }
 
 func New[T any]() *Store[T] {
 	return &Store[T]{
 		entries: make(map[string]Entry[T]),
-		groups:  make(map[string][]string),
-		calls:   make(map[uint64]context.CancelFunc),
-		done:    make(chan struct{}),
+		batches: make(map[*batch]struct{}),
 	}
 }
 
-// Register atomically adds one batch. The optional returned function retracts
-// that batch before activation. Fixed Profile registries discard this handle
-// and retain declarations until the whole registry closes or is discarded.
-func (s *Store[T]) Register(source, group string, values ...Value[T]) (func(), error) {
-	if s == nil || strings.TrimSpace(source) == "" || len(values) == 0 {
+// Add atomically publishes one batch. It is valid both before and after
+// activation; reads remain hidden until Activate.
+func (s *Store[T]) Add(values ...Value[T]) (resource.Handle, error) {
+	if s == nil || len(values) == 0 {
 		return nil, ErrInvalid
 	}
 	names := make([]string, 0, len(values))
-	pending := make(map[string]T, len(values))
+	pending := make(map[string]Value[T], len(values))
 	for _, value := range values {
 		name := strings.TrimSpace(value.Name)
 		if name == "" || name != value.Name {
 			return nil, ErrInvalid
 		}
 		if _, exists := pending[name]; exists {
-			return nil, fmt.Errorf("%w: %s (source %s repeated in batch)", ErrDuplicate, name, source)
+			return nil, fmt.Errorf("%w: %s repeated in batch", ErrDuplicate, name)
 		}
-		pending[name] = value.Value
+		pending[name] = value
 		names = append(names, name)
 	}
 
 	s.mu.Lock()
-	if s.state != collecting {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.state == draining || s.state == closed {
 		return nil, ErrUnavailable
 	}
 	for _, name := range names {
-		if previous, exists := s.entries[name]; exists {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("%w: %s (sources %s and %s)", ErrDuplicate, name, previous.Source, source)
+		if _, exists := s.entries[name]; exists {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, name)
 		}
 	}
+	b := &batch{names: names, calls: make(map[*call]struct{}), done: make(chan struct{})}
+	s.batches[b] = struct{}{}
 	for _, name := range names {
-		s.entries[name] = Entry[T]{Source: source, Name: name, Group: group, Value: pending[name]}
+		value := pending[name]
+		s.entries[name] = Entry[T]{Name: name, Value: value.Value, batch: b}
 		s.order = append(s.order, name)
-		if group != "" {
-			s.groups[group] = append(s.groups[group], name)
-		}
 	}
-	s.mu.Unlock()
-
-	var once sync.Once
-	return func() {
-		once.Do(func() { s.retract(names) })
-	}, nil
+	return &batchHandle[T]{store: s, batch: b}, nil
 }
 
-// Activate seals registration and publishes the collected values.
 func (s *Store[T]) Activate(ctx context.Context) error {
 	if s == nil {
 		return ErrUnavailable
@@ -132,7 +123,6 @@ func (s *Store[T]) Activate(ctx context.Context) error {
 	return nil
 }
 
-// Get returns one published entry.
 func (s *Store[T]) Get(name string) (Entry[T], bool) {
 	var zero Entry[T]
 	if s == nil {
@@ -144,10 +134,10 @@ func (s *Store[T]) Get(name string) (Entry[T], bool) {
 		return zero, false
 	}
 	entry, exists := s.entries[name]
+	entry.batch = nil
 	return entry, exists
 }
 
-// Entries returns the published entries in registration order.
 func (s *Store[T]) Entries() []Entry[T] {
 	if s == nil {
 		return nil
@@ -160,6 +150,7 @@ func (s *Store[T]) Entries() []Entry[T] {
 	result := make([]Entry[T], 0, len(s.order))
 	for _, name := range s.order {
 		if entry, exists := s.entries[name]; exists {
+			entry.batch = nil
 			result = append(result, entry)
 		}
 	}
@@ -167,31 +158,14 @@ func (s *Store[T]) Entries() []Entry[T] {
 }
 
 func (s *Store[T]) Names() []string {
-	if s == nil {
-		return nil
+	entries := s.Entries()
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state != active {
-		return nil
-	}
-	return append([]string(nil), s.order...)
+	return names
 }
 
-func (s *Store[T]) GroupNames(group string) []string {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state != active {
-		return nil
-	}
-	return append([]string(nil), s.groups[group]...)
-}
-
-// Acquire admits one execution and returns a context canceled when either the
-// caller or registry stops. release is idempotent and must be called.
 func (s *Store[T]) Acquire(ctx context.Context, name string) (Entry[T], context.Context, func(), error) {
 	var zero Entry[T]
 	if s == nil {
@@ -210,15 +184,16 @@ func (s *Store[T]) Acquire(ctx context.Context, name string) (Entry[T], context.
 		return zero, nil, nil, ErrUnavailable
 	}
 	entry, exists := s.entries[name]
-	if !exists {
+	if !exists || entry.batch.closing {
 		s.mu.Unlock()
 		return zero, nil, nil, fmt.Errorf("%w: %s", ErrUnknown, name)
 	}
-	s.inflight++
-	call, cancel := context.WithCancel(ctx)
-	s.nextCall++
-	callID := s.nextCall
-	s.calls[callID] = cancel
+	b := entry.batch
+	b.inflight++
+	callContext, cancel := context.WithCancel(ctx)
+	activeCall := &call{cancel: cancel}
+	b.calls[activeCall] = struct{}{}
+	entry.batch = nil
 	s.mu.Unlock()
 
 	var once sync.Once
@@ -226,19 +201,17 @@ func (s *Store[T]) Acquire(ctx context.Context, name string) (Entry[T], context.
 		once.Do(func() {
 			cancel()
 			s.mu.Lock()
-			delete(s.calls, callID)
-			s.inflight--
-			if s.state == draining && s.inflight == 0 {
-				close(s.done)
+			delete(b.calls, activeCall)
+			b.inflight--
+			if b.closing && b.inflight == 0 {
+				close(b.done)
 			}
 			s.mu.Unlock()
 		})
 	}
-	return entry, call, release, nil
+	return entry, callContext, release, nil
 }
 
-// Close seals admission, cancels accepted calls, and drains them. A timeout
-// leaves the store draining so a later Close can finish safely.
 func (s *Store[T]) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -247,60 +220,73 @@ func (s *Store[T]) Close(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	s.mu.Lock()
-	switch s.state {
-	case closed:
+	if s.state == closed {
 		s.mu.Unlock()
 		return nil
-	case collecting, active:
-		s.state = draining
-		if s.inflight == 0 {
-			close(s.done)
-		}
 	}
-	cancels := make([]context.CancelFunc, 0, len(s.calls))
-	for _, cancel := range s.calls {
-		cancels = append(cancels, cancel)
+	s.state = draining
+	batches := make([]*batch, 0, len(s.batches))
+	for b := range s.batches {
+		s.beginCloseLocked(b)
+		batches = append(batches, b)
 	}
 	s.mu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
-	}
-
-	select {
-	case <-s.done:
-		s.mu.Lock()
-		s.state = closed
-		s.entries = nil
-		s.order = nil
-		s.groups = nil
-		s.calls = nil
-		s.mu.Unlock()
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (s *Store[T]) retract(names []string) {
-	if s == nil {
-		return
+	for _, b := range batches {
+		if err := waitBatch(ctx, b); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state == active {
-		// Active registries are immutable. Dependency ordering closes the
-		// registry before contributor scopes are stopped.
+	s.state = closed
+	s.entries, s.order, s.batches = nil, nil, nil
+	s.mu.Unlock()
+	return nil
+}
+
+type batchHandle[T any] struct {
+	mu     sync.Mutex
+	store  *Store[T]
+	batch  *batch
+	closed bool
+}
+
+func (h *batchHandle[T]) Close(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	h.store.mu.Lock()
+	h.store.beginCloseLocked(h.batch)
+	h.store.mu.Unlock()
+	if err := waitBatch(ctx, h.batch); err != nil {
+		return err
+	}
+	h.store.mu.Lock()
+	delete(h.store.batches, h.batch)
+	h.store.mu.Unlock()
+	h.closed = true
+	return nil
+}
+
+func (s *Store[T]) beginCloseLocked(b *batch) {
+	if b.closing {
 		return
 	}
-	removed := make(map[string]bool, len(names))
-	for _, name := range names {
-		if _, exists := s.entries[name]; exists {
+	b.closing = true
+	removed := make(map[string]bool, len(b.names))
+	for _, name := range b.names {
+		entry, exists := s.entries[name]
+		if exists && entry.batch == b {
 			delete(s.entries, name)
 			removed[name] = true
 		}
-	}
-	if len(removed) == 0 {
-		return
 	}
 	order := s.order[:0]
 	for _, name := range s.order {
@@ -309,17 +295,19 @@ func (s *Store[T]) retract(names []string) {
 		}
 	}
 	s.order = order
-	for group, names := range s.groups {
-		kept := names[:0]
-		for _, name := range names {
-			if !removed[name] {
-				kept = append(kept, name)
-			}
-		}
-		if len(kept) == 0 {
-			delete(s.groups, group)
-		} else {
-			s.groups[group] = kept
-		}
+	for activeCall := range b.calls {
+		activeCall.cancel()
+	}
+	if b.inflight == 0 {
+		close(b.done)
+	}
+}
+
+func waitBatch(ctx context.Context, b *batch) error {
+	select {
+	case <-b.done:
+		return nil
+	case <-ctx.Done():
+		return errors.Join(resource.ErrCloseIncomplete, ctx.Err())
 	}
 }

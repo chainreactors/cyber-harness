@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestCloseCancelsAndWaitsForDispatch(t *testing.T) {
-	entered, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	entered, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	mux := testMux(t, func(ctx context.Context, _ *aop.Envelope, _ proto.Message, _ aop.SendFunc) error {
 		close(entered)
 		<-ctx.Done()
-		close(cancelled)
+		close(canceled)
 		<-release
 		return ctx.Err()
 	})
@@ -30,7 +30,7 @@ func TestCloseCancelsAndWaitsForDispatch(t *testing.T) {
 	closed := make(chan struct{})
 	go func() { h.Close(); close(closed) }()
 	select {
-	case <-cancelled:
+	case <-canceled:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close did not cancel dispatch")
 	}

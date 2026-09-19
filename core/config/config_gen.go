@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-const configFileHeader = `# aiscan 配置文件
+const configFileHeader = `# cyber 配置文件
 #
-# 运行时: aiscan 自动加载 ./aiscan.yaml 或 <二进制所在目录>/aiscan.yaml
-# 优先级: CLI > AIScan/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
-# 生成:   aiscan --init
+# 运行时: cyber 自动加载 ./cyber.yaml 或 <二进制所在目录>/cyber.yaml
+# 优先级: CLI > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
+# 生成:   cyber --init
 #
 # 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
 #
@@ -40,19 +40,11 @@ const configFileHeader = `# aiscan 配置文件
 
 `
 
-const configFileTail = `# 以下仅 build.sh 使用
-build:
-  osarch: ""
-  tags: ""
-  output: dist
-`
-
 func generateDefaultConfig() string {
 	var b strings.Builder
 	b.WriteString(configFileHeader)
 	b.WriteString(generateFromStruct(reflect.TypeOf(Option{}), reflect.ValueOf(Option{}), 0))
 	b.WriteString("\n")
-	b.WriteString(configFileTail)
 	return b.String()
 }
 
@@ -71,6 +63,11 @@ func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
 		groupTag := field.Tag.Get("group")
 		descTag := field.Tag.Get("description")
 		defaultTag := field.Tag.Get("default")
+		if defaultTag == "" {
+			// go-flags rejects `default` on bool flags, so a pointer bool that
+			// resolves to true when unset spells its generated value here.
+			defaultTag = field.Tag.Get("init_default")
+		}
 		optionalTag := field.Tag.Get("config_optional") == "true"
 
 		fieldType := field.Type

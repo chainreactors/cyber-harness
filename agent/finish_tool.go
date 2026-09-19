@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 type FinishTool struct{}

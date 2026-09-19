@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
-import { ScanStatus, SessionScanEventSchema, WebMessageMetadataSchema } from '../aiscan-proto'
+import { ScanStatus, SessionScanEventSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { usePolling } from './usePolling'
 import {
   cancelChatSession,
@@ -13,18 +13,18 @@ import {
   listAgents,
   listChatMessages,
   listChatSessions,
-  listSCONodes,
   resetChatSession,
   sendChatMessage,
   subscribeAOPEvents,
 } from '../api'
 import type { AgentView, AOPEvent, AOPSession, EventDelivery, SCONode, SessionRecord } from '../api'
+import { listSCONodes, syncCSTXArtifacts } from '../lib/cstx-runtime'
 import {
   isRootPath,
   parseRoute,
   setSessionRoute,
   type RouteMode,
-} from '../lib/scan-route'
+} from '../lib/route'
 
 // safeUUID() only exists in secure contexts (HTTPS or localhost).
 // When the UI is served over plain HTTP on a LAN/public IP it is undefined,
@@ -57,12 +57,12 @@ function aopExtension(event: AOPEvent): Record<string, unknown> | undefined {
   return undefined
 }
 
-export type TimelineItemKind = 'message' | 'scan_started' | 'scan_progress' | 'scan_complete' | 'thinking'
+export type TimelineItemKind = 'message' | 'scan_complete' | 'thinking'
 
 // ChatMessage is the flat render model the chat UI projects from the AOP event
 // log (listChatMessages returns raw EventDelivery records). It is a view model
 // owned by this hook, not an API wire type — the wire truth is aop.Event +
-// EventDelivery + the aiscan.web extension.
+// EventDelivery + the cyber.web extension.
 export interface ChatMessage {
   id: string
   session_id: string
@@ -123,7 +123,6 @@ export interface TimelineItem {
   message?: ChatMessage
   scanID?: string
   scanNodes?: SCONode[]
-  scanLines?: string[]
   agentName?: string
   content?: string
 }
@@ -353,20 +352,21 @@ export function useChatSession() {
           setTimelineItems((previous) => previous.some((item) => item.id === timelineID)
             ? previous
             : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
-          // A completed scan's result is the SCO node set persisted under its
-          // scan_id — load it so the timeline card can render.
-          void listSCONodes({ scanId: scan.scanId, limit: 2000 }).then((nodes) => {
+          // A completed scan's result is the local CSTX node set associated
+          // with its scan id; load it so the timeline card can render.
+          void syncCSTXArtifacts().then(() => listSCONodes({ scanId: scan.scanId, limit: 2000 })).then((nodes) => {
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
-          }).catch(() => {})        } catch {
-          // Ignore malformed product extensions; the AOP stream remains usable.
+          }).catch(() => {})
+        } catch {
+          // Ignore malformed application extensions; the AOP stream remains usable.
         }
         break
       }
       case 'error': {
         const data = event.payload.value
         // Hub-originated failures carry a translatable code plus i18n params
-        // in the aiscan.web extension; agent errors are plain text.
+        // in the cyber.web extension; agent errors are plain text.
         const params = aopExtension(event)?.params as Record<string, unknown> | undefined
         if (data.code) setError(t(`sys.${data.code}`, { ...(params || {}), defaultValue: data.message || '' }))
         else setError(String(data.message ?? 'Agent error'))
@@ -379,9 +379,9 @@ export function useChatSession() {
   // Rebuild the platform timeline from persisted messages. Assistant content is
   // NOT rebuilt here — WatchEvents replay is the sole source of agent history
   // (it carries the complete message/tool/status stream); this only restores the
-  // platform artifacts the AOP stream doesn't render: scan-result cards
-  // (persisted as system markers) and the user/system conversation shell shown
-  // before the replay arrives.
+  // user/system conversation shell shown before the replay arrives. Scan-result
+  // cards are not messages: they arrive as an AOP extension, or are rebuilt from
+  // the session's scan ids when no extension was ever emitted for it.
   function buildTimelineFromMessages(msgs: ChatMessage[]): TimelineItem[] {
     const built: TimelineItem[] = []
     for (const msg of msgs) {
@@ -446,9 +446,9 @@ export function useChatSession() {
       const session = await getChatSession(id)
       if (activation !== activationRef.current) return
       if (session.scanIds.length) {
-        // Fetch every linked scan's SCO nodes at once instead of awaiting them
-        // one after another — a session with N scans used to cost N serial
-        // round-trips before its results deck filled in.
+		await syncCSTXArtifacts()
+		if (activation !== activationRef.current) return
+        // Read every linked scan's CSTX nodes together after the archive sync.
         const loaded = await Promise.all(
           session.scanIds.map(async (scanID) => {
             try {
@@ -468,6 +468,21 @@ export function useChatSession() {
           setScanResults((prev) => {
             const next = new Map(prev)
             for (const e of withResult) next.set(e.scanID, e.nodes!)
+            return next
+          })
+          // A scan that finished while this session was already bound replays its
+          // persisted extension, so a card normally arrives from the stream. A
+          // session bound after the scan already finished never got one — the
+          // fan-out only runs once, at completion — and its card exists nowhere
+          // else. Rebuild one per linked scan that still has SCO nodes, keyed like
+          // the live path so a replayed extension can't double-render it.
+          setTimelineItems((prev) => {
+            const next = [...prev]
+            for (const e of withResult) {
+              const id = `scanres-${e.scanID}`
+              if (next.some((item) => item.id === id)) continue
+              next.push({ id, kind: 'scan_complete', timestamp: Date.now(), scanID: e.scanID, scanNodes: e.nodes })
+            }
             return next
           })
         }
@@ -510,7 +525,7 @@ export function useChatSession() {
     }
   }
 
-  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) {
+  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) {
     const sessionID = activeSessionRef.current
     if (!sessionID) return
     const trimmed = content.trim()
@@ -723,15 +738,17 @@ export function useChatSession() {
       const route = parseRoute(window.location.pathname)
       if (route.kind === 'session') {
         void activateSession(route.id, 'none')
-      } else if (route.kind === 'scan') {
-        // This hook owns session routes; the scan deck (and its routes) are gone.
         return
-      } else if (isRootPath(window.location.pathname)) {
-        activationRef.current++
-        closeSubscription()
-        resetSessionState()
-        setActiveSessionID(null)
       }
+      // Any other path is a retired route (for example a /scans/<id> bookmark).
+      // Nothing renders it, so show the session list and normalize the URL.
+      if (!isRootPath(window.location.pathname)) {
+        window.history.replaceState({}, '', '/')
+      }
+      activationRef.current++
+      closeSubscription()
+      resetSessionState()
+      setActiveSessionID(null)
     }
     applyRoute()
     window.addEventListener('popstate', applyRoute)

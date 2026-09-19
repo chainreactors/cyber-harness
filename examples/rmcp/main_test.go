@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"

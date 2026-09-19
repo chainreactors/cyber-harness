@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	cfg "github.com/chainreactors/cyber/core/config"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
@@ -16,8 +16,8 @@ import (
 // attach replays buffered bytes, which can re-execute stale cursor state and
 // corrupt native scrollback. Persistent remote REPLs continue to use the PTY;
 // the ephemeral local console binds directly to the process terminal.
-func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) error {
-	if rt == nil || rt.App() == nil {
+func AttachLocalREPL(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) error {
+	if !rt.Configured() {
 		return fmt.Errorf("local repl requires an agent runtime")
 	}
 	if ctx == nil {
@@ -27,11 +27,11 @@ func AttachLocalREPL(ctx context.Context, rt *agentext.Runtime, option *cfg.Opti
 	stop := context.AfterFunc(rt.Context(), cancel)
 	defer stop()
 	defer cancel()
-	sess, err := rt.OpenSession(ctx, agentext.SessionOptions{ID: MainREPLName})
+	sess, err := rt.OpenSession(ctx, agentsession.SessionOptions{ID: MainREPLName})
 	if err != nil {
 		return err
 	}
-	defer rt.CloseSession(context.Background(), MainREPLName, agentext.SessionCloseCompleted)
+	defer func() { _ = rt.CloseSession(context.Background(), MainREPLName, agentsession.SessionCloseCompleted) }()
 	if option == nil {
 		option = &cfg.Option{}
 	}

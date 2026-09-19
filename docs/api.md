@@ -1,13 +1,15 @@
-# aiscan 外部接入 API
+# cyber 外部接入 API
 
-本文档描述外部程序集成 aiscan 时使用的两组 API。
+[文档首页](README.md) · 教程：[外部接入](integration.md) · 架构：[协议边界](protocol-architecture.md)
+
+本文档描述外部程序集成 cyber 时使用的两组 API。
 
 | 功能组 | 传输 | 语义 |
 |--------|------|------|
 | Application WebSocket | 双向、长连接、二进制 protobuf | Session/Turn 生命周期和实时事件流 |
-| ConnectRPC | unary 请求/响应 | 会话历史、扫描、配置、Agent、系统状态和 SCO 管理 |
+| ConnectRPC | unary 请求/响应 | 会话历史、扫描、配置、Agent、系统状态和原始 Artifact 归档同步 |
 
-第三方语言的 protobuf 生成和接入流程见 [integration.md](integration.md)。Go 可运行示例见 [`examples/acp/README.md`](../examples/acp/README.md)。字段级自动生成文档见 [api/aop.md](api/aop.md) 和 [api/rpc.md](api/rpc.md)。
+第三方语言的 protobuf 生成和接入流程见 [integration.md](integration.md)。Go 可运行示例见 [`examples/acp/README.md`](../examples/acp/README.md)。字段级参考以 proto 源码为准，需要时按 [api/README.md](api/README.md) 的步骤生成文档。
 
 ## 功能边界
 
@@ -25,7 +27,7 @@
 - 重置或删除 session
 - 提交、查询和取消扫描
 - 查询或更新配置
-- 查询 Agent、系统状态和 SCO 数据
+- 查询 Agent、系统状态和同步原始 Artifact 归档；规范化资产视图在浏览器生成
 
 `SessionService/ListEvents` 只返回已持久化历史，不替代 WebSocket `WatchEvents`。
 
@@ -45,12 +47,12 @@ Upgrade: websocket
 | `https://host` | `wss://host/api/aop/application/ws` |
 
 - 外部 client 使用 Bearer token。
-- 浏览器登录后也可以使用 `aiscan_session` cookie。
+- 浏览器登录后也可以使用 `cyber_session` cookie。
 - 鉴权失败时 upgrade 返回 HTTP 401。
 - `aiscan web` 未指定 `--token` 时会自动生成 access key，而不是关闭鉴权。
 - Application Endpoint 不需要握手消息。首个 envelope 如果包含 `AgentHello`，会返回 `WRONG_ENDPOINT`。
 
-每个 WebSocket message 必须是 BinaryMessage，内容为一个序列化的 `aop.Envelope`。文本 JSON frame 不属于 aiscan Application WebSocket wire format。
+每个 WebSocket message 必须是 BinaryMessage，内容为一个序列化的 `aop.Envelope`。文本 JSON frame 不属于 cyber Application WebSocket wire format。
 
 ### 2. Envelope
 
@@ -179,7 +181,7 @@ Envelope{
 | `input` | 通常是 | 用户 `Message`；`continue_session=true` 时允许没有内容 |
 | `continue_session` | 否 | 继续已有 agent 上下文，不发布新的用户消息 |
 | `max_turns` | 否 | 本次执行允许的最大内部 Turn 数 |
-| `extensions` | 否 | AIScan 或其他 namespace 的请求扩展 |
+| `extensions` | 否 | Cyber 或其他 namespace 的请求扩展 |
 
 普通自然语言输入：
 
@@ -285,7 +287,7 @@ Event 公共字段：
 | `error` | `code`, `message`, `retryable` | 非终止或附加业务错误 |
 | `status` | `state` | 运行状态 |
 | `provider_frame` | provider 原始 frame | 仅在启用相关策略时出现 |
-| `extension` | `Any` | 产品自定义主 payload |
+| `extension` | `Any` | 应用自定义主 payload |
 
 #### MessageDelta
 
@@ -388,7 +390,7 @@ go run ./examples/acp/client --server http://127.0.0.1:8080 --token demo --node 
 
 ### 1. 定位
 
-本节的 ConnectRPC 指 aiscan 的 unary 管理服务。它与 Application WebSocket 使用相同的 server base URL 和 access key，但解决不同的问题。
+本节的 ConnectRPC 指 cyber 的 unary 管理服务。它与 Application WebSocket 使用相同的 server base URL 和 access key，但解决不同的问题。
 
 > `AOPService.Connect` 是 Application 协议的双向流投影，不属于 unary 管理功能组。普通 Web/ACP client 应优先使用 `/api/aop/application/ws`；本节重点描述管理 RPC。
 
@@ -425,8 +427,8 @@ response, err := client.ListSessions(ctx, request)
 HTTP procedure 示例：
 
 ```text
-/aiscan.rpc.chat.SessionService/ListSessions
-/aiscan.rpc.chat.SessionService/ListEvents
+/cyber.rpc.chat.SessionService/ListSessions
+/cyber.rpc.chat.SessionService/ListEvents
 ```
 
 #### ScanService
@@ -437,7 +439,6 @@ HTTP procedure 示例：
 | `GetScan` | 查询扫描 |
 | `ListScans` | 查询扫描列表 |
 | `CancelScan` | 取消扫描 |
-| `GetScanReport` | 获取扫描报告 |
 
 #### ConfigService
 
@@ -462,18 +463,17 @@ HTTP procedure 示例：
 |--------|------|
 | `GetStatus` | 查询系统状态 |
 
-#### SCOService
+#### ArtifactService
 
 | Method | 用途 |
 |--------|------|
-| `ListNodes` | 查询 SCO nodes |
-| `GetNode` | 查询单个 SCO node |
-| `GetStats` | 查询 SCO 统计 |
-| `DeleteNodes` | 删除 SCO nodes |
-| `ImportNodes` | 导入结构化 nodes |
-| `ListArtifacts` | 查询支持的 artifact 类型 |
+| `SyncArtifacts` | 追加浏览器导入的原始 Artifact events，并按 cursor 读取归档事件 |
 
-完整字段见 [api/rpc.md](api/rpc.md)。
+`SyncArtifactsRequest` 只有 `after_cursor` 和可选的 `artifacts`；响应是
+`aop.EventDelivery` 列表。服务端固定按 100 条分页，不接收或返回 CSTX node、
+处理完成状态或额外 Artifact DTO。
+
+完整字段见 `proto/rpc/*.proto`。
 
 ### 4. Session 管理字段
 
@@ -560,17 +560,17 @@ Application/AOP schema：
 web/frontend/cyber-ui/packages/aop/proto/aop/*.proto
 ```
 
-ConnectRPC service 和 AIScan 类型：
+ConnectRPC service 和 Cyber 类型：
 
 ```text
 proto/rpc/*.proto
 proto/types/*.proto
 ```
 
-自动生成的字段参考：
+字段参考来源：
 
-- [api/aop.md](api/aop.md)
-- [api/rpc.md](api/rpc.md)
+- Application WebSocket：`web/frontend/cyber-ui/packages/aop/proto/aop/**`
+- 管理平面：`proto/rpc/*.proto`、`proto/types/*.proto`
 
 ### 2. 只生成 Application WebSocket 消息
 

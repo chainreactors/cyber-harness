@@ -1,18 +1,19 @@
 syntax = "proto3";
 
-package aiscan.config;
+package cyber.config;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/chainreactors/aiscan/pkg/types;types";
+option go_package = "github.com/chainreactors/cyber/core/types;types";
 
 message DistributeConfig {
+	reserved 6;
+	reserved "ioa";
   LLMConfig llm = 1;
   CyberhubConfig cyberhub = 2;
   ReconConfig recon = 3;
   ScanConfig scan = 4;
   SearchConfig search = 5;
-  IOAConfig ioa = 6;
   AgentConfig agent = 7;
   map<string, google.protobuf.Struct> extensions = 8;
   NodeConfig node = 9;
@@ -64,13 +65,6 @@ message SearchConfig {
   string tavily_keys = 1;
 }
 
-message IOAConfig {
-  string url = 1;
-  string token = 2;
-  string node_name = 3;
-  string space = 4;
-}
-
 message AgentConfig {
   repeated string tools = 1;
   int32 timeout = 2;
@@ -113,14 +107,9 @@ message ReconView {
 
 message SearchView { bool tavily_keys_configured = 1; }
 
-message IOAView {
-  string url = 1;
-  bool token_configured = 2;
-  string node_name = 3;
-  string space = 4;
-}
-
 message ConfigView {
+	reserved 8;
+	reserved "ioa";
   string path = 1;
   bool loaded = 2;
   LLMView llm = 3;
@@ -128,7 +117,6 @@ message ConfigView {
   ReconView recon = 5;
   ScanConfig scan = 6;
   SearchView search = 7;
-  IOAView ioa = 8;
   AgentConfig agent = 9;
   map<string, ExtensionView> extensions = 10;
 }

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/neutron/operators"
 	neutronhttp "github.com/chainreactors/neutron/protocols/http"
 	"github.com/chainreactors/neutron/templates"

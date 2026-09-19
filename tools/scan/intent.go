@@ -43,5 +43,5 @@ func ScannerConceptURI(command string) string {
 	if ScannerSkillName(command) == "" {
 		return ""
 	}
-	return "aiscan://skills/aiscan/okf/easm/" + command + ".md"
+	return "cyber://skills/cyber/okf/easm/" + command + ".md"
 }

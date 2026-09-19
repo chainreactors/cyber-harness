@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -47,7 +47,7 @@ func (s *Service) SaveConfig(ctx context.Context, config *types.DistributeConfig
 
 // closePending runs under configGate. A failed drain keeps the candidate owned.
 func (s *Service) closePending(ctx context.Context) error {
-	if profile.IsNil(s.pending) {
+	if s.pending == nil {
 		return nil
 	}
 	err := s.pending.Close(ctx)
@@ -92,16 +92,16 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 	// Candidate cleanup has its own budget: the request may already be canceled.
 	// An unfinished candidate remains owned here for Close or the next Save.
 	defer func() {
-		if !profile.IsNil(s.pending) {
+		if s.pending != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			resultErr = errors.Join(resultErr, s.closePending(cleanupCtx))
 		}
 	}()
-	var next profile.Application
+	var next profile.Profile
 	if s.buildProfile != nil {
 		next, err = s.buildProfile(ctx, prepared)
-		if !profile.IsNil(next) {
+		if next != nil {
 			s.appMu.Lock()
 			_, owned := s.profiles[next]
 			s.appMu.Unlock()
@@ -109,16 +109,16 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 				return nil, errors.Join(err, fmt.Errorf("profile builder returned an already owned profile"))
 			}
 		}
-		if !profile.IsNil(next) {
+		if next != nil {
 			s.pending = next
 		}
 		if err != nil {
-			return nil, managementapi.NewError(managementapi.CodeFailedPrecondition, fmt.Errorf("reload aiscan runtime: %w", err))
+			return nil, managementapi.NewError(managementapi.CodeFailedPrecondition, fmt.Errorf("reload cyber runtime: %w", err))
 		}
-		if profile.IsNil(next) {
-			return nil, fmt.Errorf("reload aiscan runtime returned no app")
+		if next == nil {
+			return nil, fmt.Errorf("reload cyber runtime returned no app")
 		}
-		if _, err := next.App(); err != nil {
+		if _, err := next.State(); err != nil {
 			return nil, fmt.Errorf("config candidate is not ready: %w", err)
 		}
 	}
@@ -126,7 +126,7 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		return nil, err
 	}
 	committed = true
-	if !profile.IsNil(next) {
+	if next != nil {
 		if err := s.swapProfile(next); err != nil {
 			return nil, fmt.Errorf("config committed but activation failed: %w", err)
 		}

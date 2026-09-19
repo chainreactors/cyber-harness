@@ -12,13 +12,13 @@ def test_set_extra_headers(test_server, pw_page, pw_driver):
     headers = json.loads(body)
     assert headers.get("X-Custom-Test") == "pw-val-123" or headers.get("x-custom-test") == "pw-val-123"
 
-    # aiscan
+    # cyber
     pw_driver.execute("open", url, "--session", "hdr-t", "--timeout", "10")
     pw_driver.execute(
         "set-extra-headers", "hdr-t",
-        '{"X-Custom-Test":"aiscan-val-456"}'
+        '{"X-Custom-Test":"cyber-val-456"}'
     )
     pw_driver.execute("reload", "hdr-t")
     out = pw_driver.execute("inner-text", "hdr-t", "body")
-    assert "aiscan-val-456" in out
+    assert "cyber-val-456" in out
     pw_driver.execute("close", "hdr-t")

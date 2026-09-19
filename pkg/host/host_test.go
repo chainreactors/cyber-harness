@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -24,7 +24,7 @@ func testHost(t *testing.T, mux *aop.NamespaceMux) *Host {
 func testMux(t *testing.T, handler aop.NamespaceHandler) *aop.NamespaceMux {
 	t.Helper()
 	mux := aop.NewNamespaceMux(t.Context())
-	if err := mux.Register("test", &aop.ProtocolMessage{}, handler); err != nil {
+	if err := mux.Register(&aop.ProtocolMessage{}, handler); err != nil {
 		t.Fatal(err)
 	}
 	return mux
@@ -163,13 +163,13 @@ func TestCancellationPreventsDispatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	mux := aop.NewNamespaceMux(ctx)
-	if err := mux.Register("test", &aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
-		t.Fatal("cancelled request dispatched")
+	if err := mux.Register(&aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, proto.Message, aop.SendFunc) error {
+		t.Fatal("canceled request dispatched")
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	request := aop.MustWrap("cancelled", "", &aop.ProtocolMessage{})
+	request := aop.MustWrap("canceled", "", &aop.ProtocolMessage{})
 	if err := testHost(t, mux).Handle(request, func(*aop.Envelope) error { t.Fatal("unexpected send"); return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}

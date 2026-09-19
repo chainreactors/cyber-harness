@@ -13,15 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	hostcli "github.com/chainreactors/aiscan/pkg/cli"
-	"github.com/chainreactors/aiscan/pkg/edition"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	settings "github.com/chainreactors/aiscan/pkg/exts/settings"
-	"github.com/chainreactors/aiscan/pkg/runner"
-	transportpkg "github.com/chainreactors/aiscan/pkg/transport"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	"github.com/chainreactors/cyber/pkg/runner"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -29,19 +26,16 @@ const runModeWeb cfg.RunMode = "web"
 
 func cliCommandSummary() string {
 	base := "agent, web, serve"
-	summaries := edition.Catalog().Summaries()
+	summaries := scannerext.Names()
 	if len(summaries) == 0 {
 		return base
 	}
 	return base + ", " + strings.Join(summaries, ", ")
 }
 
-// webServeFunc is set via init() in web_full.go (full build only).
-var webServeFunc func(ctx context.Context, option, explicitOption *cfg.Option, web webCommand, logger telemetry.Logger) error
-
 type webCommand struct {
 	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
-	DB                 string `long:"db" default:"aiscan-web.db" description:"SQLite database path"`
+	DB                 string `long:"db" default:"cyber-web.db" description:"SQLite database path"`
 	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
 	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
 	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
@@ -80,7 +74,7 @@ type parsedCLI struct {
 	Help        bool
 }
 
-func aiscan() {
+func cyber() {
 	parsed, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
@@ -94,7 +88,7 @@ func aiscan() {
 		return
 	}
 	if option.InitConfig {
-		if err := os.WriteFile(cfg.DefaultConfigName, []byte(productDefaultConfig()), 0o644); err != nil {
+		if err := os.WriteFile(cfg.DefaultConfigName, []byte(defaultConfig()), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
@@ -121,7 +115,7 @@ func aiscan() {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
-	if err := applyProductIdentity(&option); err != nil {
+	if err := applyIdentity(&option); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
@@ -156,22 +150,18 @@ func aiscan() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := transportpkg.Run(ctx, aiscanProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := runAgentTransport(ctx, newCyberProfileFromRequest, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
 		}
 	case runModeWeb:
-		if webServeFunc == nil {
-			fmt.Fprintln(os.Stderr, "error: web server not available (requires full build)")
-			os.Exit(1)
-		}
-		if err := webServeFunc(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
+		if err := serveWeb(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
 			logger.Errorf("web server failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, aiscanProfileFactory, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runner.RunDirectScannerMode(ctx, newCyberProfileFromRequest, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}
@@ -190,7 +180,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
 				option := cfg.Option{MiscOptions: cli.MiscOptions}
-				finalizeProductOptions(&option, nil)
+				finalizeOptions(&option, nil)
 				option.Timeout = 3600
 				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
 				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
@@ -209,9 +199,16 @@ func parseCLI(args []string) (parsedCLI, error) {
 	option := buildOption(&cli, parser)
 	action := cli.registry.Selected()
 	option.Extensions = cli.registry.Values()
-	finalizeProductOptions(&option, action)
+	finalizeOptions(&option, action)
 	if cli.Timeout > 0 {
 		option.Timeout = cli.Timeout
+	}
+	if option.Timeout <= 0 {
+		// Commands that own their options through the extension registry (the IOA
+		// queries, for one) never receive AgentOptions, so nothing else supplies
+		// this default. A zero deadline would cancel the context before the
+		// command runs.
+		option.Timeout = 3600
 	}
 	if err := validateOutputFlags(&option); err != nil {
 		return parsedCLI{}, err
@@ -259,7 +256,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	}
 
 	option := cfg.Option{MiscOptions: cli.MiscOptions}
-	finalizeProductOptions(&option, nil)
+	finalizeOptions(&option, nil)
 	mergeManualScannerOptions(&option, manual)
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
@@ -406,18 +403,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
 	cli.registry = hostcli.New(parser)
-	if err := declareProductCLI(cli.registry); err != nil {
-		panic(err)
-	}
-	// Session flags are inert declarations installed before Parse/WriteHelp.
-	// Runtime Session loading is not part of command-line discovery.
-	settingsExt, err := settings.New([]settings.Declaration{agentext.Declaration(&cli.Agent.AgentOptions)})
-	if err != nil {
-		panic(err)
-	}
-	if err := settingsExt.Declare(cli.registry); err != nil {
-		panic(fmt.Sprintf("invalid session flag declaration: %v", err))
-	}
+	declareResources(cli.registry, &cli.Agent.AgentOptions)
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}
@@ -440,7 +426,7 @@ Examples:
   aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan web --addr 0.0.0.0:8080
-  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(edition.Catalog().UsageLines(), "\n"))
+  aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(scannerext.UsageLines(), "\n"))
 	return parser
 }
 
@@ -596,7 +582,7 @@ func argsAfterCommand(args []string, command string) []string {
 }
 
 func isScannerCommandName(name string) bool {
-	return edition.Catalog().CLIAvailable(name)
+	return scannerext.Available(name)
 }
 
 func selectedMode(parser *goflags.Parser) cfg.RunMode {
@@ -610,7 +596,7 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	case "web":
 		return runModeWeb
 	default:
-		if edition.Catalog().CLIAvailable(active.Name) {
+		if scannerext.Available(active.Name) {
 			return cfg.RunModeScanner
 		}
 	}
@@ -622,7 +608,7 @@ func selectedScanner(parser *goflags.Parser) string {
 	if active == nil {
 		return ""
 	}
-	if edition.Catalog().CLIAvailable(active.Name) {
+	if scannerext.Available(active.Name) {
 		return active.Name
 	}
 	return ""
@@ -643,7 +629,7 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 				continue
 			}
 			// scan owns --ai and --json as native scanner flags. Root forms
-			// before the command remain AIScan options; forms after the command
+			// before the command remain Cyber options; forms after the command
 			// must reach the scan command unchanged.
 			if scannerName == "scan" && (key == "--ai" || key == "--json") {
 				break

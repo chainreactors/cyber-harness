@@ -6,35 +6,34 @@ import (
 	"encoding/hex"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
-	observe "github.com/chainreactors/aiscan/pkg/exts/observe"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/files"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	observe "github.com/chainreactors/cyber/pkg/exts/observe"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 	hookRegistry := hooks.New()
 	stream := coreevents.New()
-	observer, err := observe.New(hookRegistry, stream, observe.Options{Kinds: []observe.Kind{observe.Tools, observe.Files}})
+	observer, err := observe.New(observe.Options{Kinds: []observe.Kind{observe.Tools, observe.Files}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := toolset.NewRegistry(hookRegistry)
-	fileTools, err := fileext.New(registry, hookRegistry, files.Config{Directory: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+	registry := toolset.NewRegistry()
+	fileTools := fileext.New(files.Config{Directory: t.TempDir()})
 	set, err := extension.New(
-		extension.Entry{ID: "observe", Extension: observer},
-		extension.Entry{ID: "files", DependsOn: []string{"observe"}, Extension: fileTools},
-		extension.Entry{ID: "tools", DependsOn: []string{"files"}, Extension: registry},
+		extension.Provided[*hooks.Registry](hookRegistry),
+		extension.Provided[*coreevents.Stream](stream),
+		registry,
+		observer,
+		fileTools,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -98,15 +97,11 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 }
 
 func TestObserveRejectsInvalidSelection(t *testing.T) {
-	stream := coreevents.New()
-	if _, err := observe.New(hooks.New(), stream, observe.Options{Kinds: []observe.Kind{"unknown"}}); err == nil {
+	if _, err := observe.New(observe.Options{Kinds: []observe.Kind{"unknown"}}); err == nil {
 		t.Fatal("accepted unknown observation kind")
 	}
-	if _, err := observe.New(hooks.New(), stream, observe.Options{Kinds: []observe.Kind{observe.Files, observe.Files}}); err == nil {
+	if _, err := observe.New(observe.Options{Kinds: []observe.Kind{observe.Files, observe.Files}}); err == nil {
 		t.Fatal("accepted duplicate observation kind")
-	}
-	if _, err := observe.New(nil, stream, observe.Options{}); err == nil {
-		t.Fatal("accepted missing hook registry")
 	}
 	if err := (*observe.Extension)(nil).Close(context.Background()); err != nil {
 		t.Fatal(err)

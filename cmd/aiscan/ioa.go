@@ -9,14 +9,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	hostcli "github.com/chainreactors/aiscan/pkg/cli"
-	clientext "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
-	presentation "github.com/chainreactors/aiscan/pkg/exts/ioa/client/console"
-	serverext "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
-	service "github.com/chainreactors/aiscan/tools/ioa/server"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	presentation "github.com/chainreactors/cyber/pkg/exts/ioa/client/console"
+	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	ioatools "github.com/chainreactors/cyber/tools/ioa"
+	service "github.com/chainreactors/cyber/tools/ioa/server"
 )
 
 // The query CLI owns a client-only graph with no Agent, inbox, or event output.
@@ -30,11 +30,8 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 		return err
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
-	client, err := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "aiscan-cli", AutoRegister: autoRegister}, clientext.Services{Logger: env.Logger})
-	if err != nil {
-		return err
-	}
-	set, err := extension.New(extension.Entry{ID: ioaID, Extension: client})
+	client := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, clientext.Dependencies{Logger: env.Logger})
+	set, err := extension.New(client)
 	if err != nil {
 		return err
 	}
@@ -46,19 +43,19 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 	}
 	switch mode {
 	case "spaces":
-		return presentation.RunIOASpaces(ctx, client.Runtime(), &output, env.Out, env.Err)
+		return presentation.RunIOASpaces(ctx, client.Service(), &output, env.Out, env.Err)
 	case "nodes":
-		return presentation.RunIOANodes(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOANodes(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "messages":
 		if args.Space == "" {
 			return fmt.Errorf("space is required")
 		}
-		return presentation.RunIOAMessages(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOAMessages(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "context":
 		if args.Space == "" || args.MessageID == "" {
 			return fmt.Errorf("space and message ID are required")
 		}
-		return presentation.RunIOAContext(ctx, client.Runtime(), &output, args, env.Out, env.Err)
+		return presentation.RunIOAContext(ctx, client.Service(), &output, args, env.Out, env.Err)
 	}
 	return fmt.Errorf("unknown query %s", mode)
 }
@@ -73,7 +70,7 @@ func runIOAServe(ctx context.Context, option serverext.Options, logger telemetry
 		return fmt.Errorf("invalid IOA listen URL")
 	}
 	server := serverext.New(service.Config{AccessKey: option.Token, MCP: true})
-	set, err := extension.New(extension.Entry{ID: "ioa-server", Extension: server})
+	set, err := extension.New(server)
 	if err != nil {
 		return err
 	}

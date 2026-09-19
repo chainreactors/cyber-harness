@@ -1,80 +1,30 @@
 package app
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/events"
 )
 
-func TestNewRequiresProfileDependencies(t *testing.T) {
-	for _, missing := range []string{"hooks", "events", "command registry", "tool registry"} {
-		t.Run(missing, func(t *testing.T) {
-			hookRegistry := hooks.New()
-			deps := AppServices{
-				Hooks: hookRegistry, Events: events.New(),
-				Commands: commands.NewRegistry(hookRegistry), Tools: toolset.NewRegistry(hookRegistry),
-			}
-			switch missing {
-			case "hooks":
-				deps.Hooks = nil
-			case "events":
-				deps.Events = nil
-			case "command registry":
-				deps.Commands = nil
-			case "tool registry":
-				deps.Tools = nil
-			}
-			resource, err := New(Config{}, deps)
-			if resource != nil || err == nil || !strings.Contains(err.Error(), missing) {
-				t.Fatalf("New without %s = %v, %v", missing, resource, err)
-			}
-		})
+// State owns the event stream it publishes on; there is nothing else to check,
+// because it borrows nothing. Every other part a host once handed it is now a
+// capability its owner publishes.
+func TestNewRequiresAnEventStream(t *testing.T) {
+	application, err := New(nil, nil)
+	if application != nil || err == nil || !strings.Contains(err.Error(), "event stream") {
+		t.Fatalf("New without a stream = %v, %v", application, err)
 	}
-}
 
-func TestAppCloseDoesNotCloseBorrowedRegistries(t *testing.T) {
-	hookRegistry := hooks.New()
-	cmds, tools := commands.NewRegistry(hookRegistry), toolset.NewRegistry(hookRegistry)
-	if err := cmds.Register("test", "test", commands.Command{
-		Name: "ping", Run: func(context.Context, *commands.Execution) (any, error) { return "pong", nil },
-	}); err != nil {
-		t.Fatal(err)
-	}
-	resource, err := New(Config{SkipEngines: true}, AppServices{
-		Hooks: hookRegistry, Events: events.New(), Commands: cmds, Tools: tools,
-	})
+	stream := events.New()
+	application, err = New(nil, stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := testSet(t,
-		extension.Entry{ID: "app", Extension: resource},
-		extension.Entry{ID: "commands", DependsOn: []string{"app"}, Extension: cmds},
-		extension.Entry{ID: "tools", DependsOn: []string{"app"}, Extension: tools},
-	)
-	if err := set.Load(t.Context()); err != nil {
-		t.Fatal(err)
+	if application.Events() != stream {
+		t.Error("the application publishes on a stream its host does not own")
 	}
-	// Isolate the App boundary: closing it must not dispose borrowed objects.
-	if err := resource.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if result, err := cmds.Execute(t.Context(), "ping", &commands.Execution{}); err != nil || result != "pong" {
-		t.Fatalf("borrowed command registry = %v, %v", result, err)
-	}
-	if _, err := tools.ExecuteTool(t.Context(), "missing", "{}"); !errors.Is(err, toolset.ErrUnknown) {
-		t.Fatalf("borrowed tool registry lost admission: %v", err)
-	}
-	if err := set.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tools.ExecuteTool(t.Context(), "missing", "{}"); !errors.Is(err, toolset.ErrUnavailable) {
-		t.Fatalf("owning Set did not close registry: %v", err)
+	if application.Logger() == nil || application.Progress == nil {
+		t.Error("the application is missing what it owns")
 	}
 }

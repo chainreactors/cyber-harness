@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
 const (
@@ -22,7 +22,7 @@ type Auth interface {
 	RegisterRoutes(*http.ServeMux)
 }
 
-// Service is the single transport-facing abstraction for AIScan Web. The root
+// Service is the single transport-facing abstraction for Cyber Web. The root
 // package owns only this contract and transport mechanisms; business runtime,
 // persistence, agents and authentication live in pkg/web/service.
 type Service interface {

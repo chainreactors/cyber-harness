@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -35,7 +35,7 @@ func (rt *Runtime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop
 	for _, extension := range req.Extensions {
 		if extension != nil && extension.MessageIs(options) {
 			if err := extension.UnmarshalTo(options); err != nil {
-				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid AIScan run options: "+err.Error())}
+				response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("INVALID_ARGUMENT", "invalid Cyber run options: "+err.Error())}
 				return response
 			}
 			break
@@ -47,7 +47,7 @@ func (rt *Runtime) RunAOPTurn(ctx context.Context, req *aop.RunTurnRequest) *aop
 	}
 	_, err := rt.RunSession(ctx, req.SessionId, RunInput{
 		TurnID: req.TurnId, Message: message, Continue: req.ContinueSession,
-		MaxTurns: int(req.MaxTurns), EvalCriteria: options.EvalCriteria, EvalMaxRounds: int(options.EvalMaxRounds),
+		MaxTurns: int(req.MaxTurns), EvalCriteria: options.EvalCriteria, EvalRounds: options.EvalRounds,
 	})
 	if err != nil {
 		response.Outcome = &aop.RunTurnResponse_Rejected{Rejected: rejection("FAILED_PRECONDITION", err.Error())}
@@ -85,19 +85,16 @@ func (rt *Runtime) CloseAOPSession(ctx context.Context, req *aop.CloseSessionReq
 	return response
 }
 
-// RegisterNamespaces binds the existing session and command handlers to a
-// caller-owned mux. Call once during assembly, before using the communication Host.
-func (rt *Runtime) RegisterNamespaces(mux *aop.NamespaceMux) error {
-	if rt == nil || mux == nil {
-		return fmt.Errorf("runtime and namespace mux are required")
+// NamespaceBindings publishes the protocols implemented by this runtime. The
+// profile's typed namespace registry installs them on each connection.
+func (rt *Runtime) NamespaceBindings() []aop.Binding {
+	if rt == nil {
+		return nil
 	}
-	if err := mux.Register("runtime", &aop.ProtocolMessage{}, rt.HandleCoreNamespace); err != nil {
-		return err
+	return []aop.Binding{
+		aop.Shared(&aop.ProtocolMessage{}, rt.HandleCoreNamespace),
+		aop.Shared(&types.CommandProtocolMessage{}, rt.HandleCommandNamespace),
 	}
-	if err := mux.Register("runtime", &types.CommandProtocolMessage{}, rt.HandleCommandNamespace); err != nil {
-		return err
-	}
-	return nil
 }
 
 // HandleCoreNamespace implements session control for all existing transports.
@@ -121,7 +118,7 @@ func (rt *Runtime) HandleCoreNamespace(ctx context.Context, envelope *aop.Envelo
 	}
 }
 
-// HandleCommandNamespace implements the existing product command namespace.
+// HandleCommandNamespace implements the existing command namespace.
 func (rt *Runtime) HandleCommandNamespace(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, send aop.SendFunc) error {
 	value, ok := message.(*types.CommandProtocolMessage)
 	if !ok {

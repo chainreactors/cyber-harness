@@ -11,18 +11,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/evaluator"
-	inboxpkg "github.com/chainreactors/aiscan/agent/inbox"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	toolpkg "github.com/chainreactors/aiscan/core/tool"
-	providerpkg "github.com/chainreactors/aiscan/agent/provider"
-	commands "github.com/chainreactors/aiscan/core/commandline"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/evaluator"
+	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
+	providerpkg "github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/skills"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	toolpkg "github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -55,13 +56,13 @@ const (
 )
 
 type RunInput struct {
-	TurnID        string
-	Message       *aop.Message
-	Content       []*aop.Content
-	MaxTurns      int
-	EvalCriteria  string
-	EvalMaxRounds int
-	Continue      bool
+	TurnID       string
+	Message      *aop.Message
+	Content      []*aop.Content
+	MaxTurns     int
+	EvalCriteria string
+	EvalRounds   string
+	Continue     bool
 
 	automatic bool
 }
@@ -124,8 +125,8 @@ type commandOutcome struct {
 	err    error
 }
 
-// Session lifecycle payloads belong to this extension; App only stamps and publishes events.
-func emitSessionStarted(application *Environment, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+// Session lifecycle payloads belong to this extension; State only stamps and publishes events.
+func emitSessionStarted(application *apppkg.State, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
 		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
@@ -133,7 +134,7 @@ func emitSessionStarted(application *Environment, sessionID, agentName string, s
 	application.Publish(event)
 }
 
-func emitSessionEnded(application *Environment, sessionID, agentName, reason string) {
+func emitSessionEnded(application *apppkg.State, sessionID, agentName, reason string) {
 	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
@@ -152,6 +153,7 @@ func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr
 type commandSession struct {
 	state        *sessionState
 	evalCriteria string
+	evalRounds   string
 }
 
 func (s *commandSession) execute(ctx context.Context, input string) commandOutcome {
@@ -200,8 +202,9 @@ func (s *commandSession) statusText() string {
 	rt := s.state.runtime
 	rt.mu.RLock()
 	app := rt.app
-	provider := rt.config.Provider
-	model := rt.config.Model
+	tools, commandRegistry, store := rt.tools, rt.commandRegistry, rt.skills
+	provider := rt.agentConfig.Provider
+	model := rt.agentConfig.Model
 	providerConfig := agent.ProviderConfig{}
 	if app != nil {
 		_, providerConfig = app.ProviderState()
@@ -237,7 +240,7 @@ func (s *commandSession) statusText() string {
 
 	llmState := "not configured"
 	if app != nil {
-		health := app.LLMHealth()
+		health := app.ProviderHealth()
 		switch health.State {
 		case providerpkg.HealthReady:
 			llmState = "ready"
@@ -263,12 +266,10 @@ func (s *commandSession) statusText() string {
 	toolState := "unavailable"
 	toolNames := []string(nil)
 	commandNames := []string(nil)
-	scannerState := "unavailable"
-	scannerNames := []string(nil)
 	skillState := "not loaded"
 	if app != nil {
-		if app.Tools != nil {
-			for _, definition := range app.Tools.ToolDefinitions() {
+		if tools != nil {
+			for _, definition := range tools.ToolDefinitions() {
 				if definition != nil && strings.TrimSpace(definition.Name) != "" {
 					toolNames = append(toolNames, definition.Name)
 				}
@@ -277,21 +278,19 @@ func (s *commandSession) statusText() string {
 				toolState = "ready"
 			}
 		}
-		if app.Commands != nil {
-			commandNames = app.Commands.Names()
-			scannerNames = app.Commands.GroupNames("scanner")
+		if commandRegistry != nil {
+			commandNames = commandRegistry.Names()
 		}
-		scannerState = app.ScannerState()
-		if app.Skills != nil {
+		if store != nil {
 			visible := 0
-			for _, skill := range app.Skills.Skills {
+			for _, skill := range store.All() {
 				if strings.TrimSpace(skill.Name) != "" && !skill.Internal {
 					visible++
 				}
 			}
 			skillState = fmt.Sprintf("ready (%d loaded)", visible)
-			if len(app.Skills.Diagnostics) > 0 {
-				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(app.Skills.Diagnostics))
+			if diagnostics := store.Diagnostics(); len(diagnostics) > 0 {
+				skillState = fmt.Sprintf("degraded (%d loaded, %d diagnostics)", visible, len(diagnostics))
 			}
 		}
 	}
@@ -300,15 +299,15 @@ func (s *commandSession) statusText() string {
 	if names := summarizeStatusNames(toolNames, 12); names != "" {
 		toolDetail += " · " + names
 	}
-	scannerDetail := scannerState
-	if names := summarizeStatusNames(scannerNames, 12); names != "" {
-		scannerDetail += fmt.Sprintf(" (%d) · %s", len(scannerNames), names)
-	}
 	commandDetail := summarizeStatusNames(commandNames, 16)
 	if commandDetail == "" {
 		commandDetail = "-"
 	}
 
+	messages := 0
+	if s.state.agent != nil {
+		messages = len(s.state.agent.MessagesSnapshot())
+	}
 	return strings.Join([]string{
 		fmt.Sprintf("Session: %s", s.state.id),
 		fmt.Sprintf("Agent: %s", s.state.agentName),
@@ -318,9 +317,8 @@ func (s *commandSession) statusText() string {
 		fmt.Sprintf("Limits: context=%d · max_output=%d · timeout=%ds", contextWindow, maxTokens, timeout),
 		fmt.Sprintf("Tools: %s", toolDetail),
 		fmt.Sprintf("Commands: %s", commandDetail),
-		fmt.Sprintf("Scanners: %s", scannerDetail),
 		fmt.Sprintf("Skills: %s", skillState),
-		fmt.Sprintf("Messages: %d", len(s.state.agent.MessagesSnapshot())),
+		fmt.Sprintf("Messages: %d", messages),
 	}, "\n")
 }
 
@@ -362,9 +360,9 @@ func statusOneLine(value string, limit int) string {
 
 func (s *commandSession) executeBash(ctx context.Context, line, command string) commandOutcome {
 	if command == "" {
-		return commandOutcome{err: fmt.Errorf("command is required after !")}
+		return commandOutcome{err: fmt.Errorf("command is required after the ! prefix")}
 	}
-	bash := s.state.runtime.app.Bash
+	bash := s.state.runtime.bash
 	if bash == nil {
 		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
 	}
@@ -509,7 +507,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		agentName = rt.nodeName
 	}
 	if agentName == "" {
-		agentName = "aiscan"
+		agentName = "cyber"
 	}
 
 	rt.mu.Lock()
@@ -527,9 +525,8 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	cancel := func() { stopLifetime(); cancelSession() }
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 	mailbox := &sessionMailbox{base: baseInbox}
-	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.config.Logger)
-	agentCfg := rt.config.
-		WithSystemPrompt(rt.systemPrompt).
+	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.agentConfig.Logger)
+	agentCfg := rt.agentConfig.
 		WithStream(true).
 		WithInbox(mailbox).
 		WithSessionID(id).
@@ -571,7 +568,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		historyMode = types.SessionHistory_MODE_SNAPSHOT
 	}
 	emitSessionStarted(rt.app, id, agentName, &aop.SessionStarted{
-		Model: rt.config.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
+		Model: rt.agentConfig.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	}, historyMode)
 	if options.HistorySnapshot && len(options.Messages) > 0 {
 		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
@@ -716,7 +713,7 @@ func (rt *Runtime) Observe(observer coreevents.Observer) *eventbus.Subscription[
 	return rt.app.ObserveEvents(observer)
 }
 
-// Publish publishes an already-formed runtime event through the App-owned
+// Publish publishes an already-formed runtime event through the State-owned
 // AOP bus, applying the same timestamp and sequence stamping as agent events.
 func (rt *Runtime) Publish(event *aop.Event) {
 	if rt == nil || rt.app == nil || event == nil {
@@ -922,7 +919,9 @@ func (s *Session) rotateCommand(ctx context.Context, line string) (*types.Comman
 	case "/compact":
 		messages := state.agent.MessagesSnapshot()
 		if len(messages) < 4 {
-			return commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).").result, nil
+			outcome := commandText(line, CommandPresentationPlain, "Nothing to compact (too few messages).")
+			state.emitCommandResult(outcome.result)
+			return outcome.result, nil
 		}
 		values, err := commands.SplitCommandLine(line)
 		if err != nil {
@@ -1160,6 +1159,9 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	if input.EvalCriteria == "" {
 		input.EvalCriteria = s.commands.evalCriteria
 	}
+	if input.EvalRounds == "" {
+		input.EvalRounds = s.commands.evalRounds
+	}
 	message := input.Message
 	if message == nil {
 		message = &aop.Message{Role: "user", Content: input.Content}
@@ -1170,11 +1172,11 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 		message.Role = "user"
 	}
 	if len(message.Content) == 1 && message.Content[0].GetText() != nil {
-		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.app.Skills)
+		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.skills)
 	}
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalMaxRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, s.runtime.agentConfig.PromptResolver, message, input.EvalCriteria, input.EvalRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
@@ -1288,7 +1290,7 @@ func (rt *Runtime) runSession(session *sessionState) {
 
 func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 	event := &aop.Event{SessionId: s.id, Emitter: s.agentName, Payload: &aop.Event_Message{Message: &aop.Message{
-		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
+		Id: s.runtime.nextCommandResultID(), Role: "assistant", Content: result.GetContent(),
 	}}}
 	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
 	s.runtime.app.Publish(event)
@@ -1364,6 +1366,16 @@ func (rt *Runtime) nextRuntimeID(prefix string) string {
 	return id
 }
 
+// A command result is a durable transcript entry, but the runtime counter it
+// used to be named after restarts at one with the node process. The hub keeps
+// every earlier result, so after a reconnect two different results share a
+// message id and any reader that identifies messages by id — the web transcript
+// does — overwrites one with the other. Stamp the emission time into the id so
+// it stays unique across restarts, the way rotated session ids already do.
+func (rt *Runtime) nextCommandResultID() string {
+	return rt.nextRuntimeID(fmt.Sprintf("command-%d", time.Now().UnixNano()))
+}
+
 func (rt *Runtime) nextContinuationID(logicalID string) string {
 	return logicalID + "-" + rt.nextRuntimeID(fmt.Sprintf("session-%d", time.Now().UnixNano()))
 }
@@ -1397,5 +1409,5 @@ func (rt *Runtime) unregisterRun(run *Run) {
 func (rt *Runtime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return rt.config.Provider, rt.config.Model, rt.config.Logger
+	return rt.agentConfig.Provider, rt.agentConfig.Model, rt.agentConfig.Logger
 }

@@ -9,10 +9,10 @@ import (
 	yamldrv "github.com/gookit/config/v2/yaml"
 )
 
-const DefaultConfigName = "aiscan.yaml"
+const DefaultConfigName = "cyber.yaml"
 
 func newConfigLoader() *gkcfg.Config {
-	c := gkcfg.New("aiscan")
+	c := gkcfg.New("cyber")
 	c.WithOptions(func(opt *gkcfg.Options) {
 		opt.DecoderConfig.TagName = "config"
 		opt.ParseDefault = true
@@ -26,6 +26,21 @@ func LoadConfig(filename string, v interface{}) error {
 	if err := c.LoadFilesByFormat(gkcfg.Yaml, filename); err != nil {
 		return err
 	}
+	return decodeConfig(c, v)
+}
+
+// LoadConfigBytes parses configuration bytes with the same flags-backed loader
+// used for files, so callers that hold the content rather than a path still
+// validate against the Option schema instead of a projection of it.
+func LoadConfigBytes(data []byte, v interface{}) error {
+	c := newConfigLoader()
+	if err := c.LoadSources(gkcfg.Yaml, data); err != nil {
+		return err
+	}
+	return decodeConfig(c, v)
+}
+
+func decodeConfig(c *gkcfg.Config, v interface{}) error {
 	if err := c.Decode(v); err != nil {
 		return err
 	}

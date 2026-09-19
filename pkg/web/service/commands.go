@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // Stable system-message codes mirrored by the frontend i18n catalog.
@@ -19,6 +19,8 @@ const (
 	SysNoAgentsConnected = "no_agents_connected"
 	SysAgentsList        = "agents_list"
 	SysAgentNotConnected = "agent_not_connected"
+	SysSessionContextReset = "session_context_reset"
+	SysHelp                = "help"
 )
 
 func (s *Service) runHubCommand(sessionID, name, args string) {
@@ -48,25 +50,30 @@ func parseCommand(content string) (cmd, args string, ok bool) {
 }
 
 // handleHelpCommand renders the merged "/" command catalog (hub-scope plus the
-// bound agent's reported agent-scope commands) as a system message. Broadcast
-// with an empty code so the frontend shows this dynamic, already-localized text
-// verbatim instead of translating it.
+// bound agent's reported agent-scope commands) as a system message. The catalog
+// travels as metadata and the frontend renders it from its own description
+// strings; the body here is only the fallback for a client that does not know
+// this code, so it stays language-neutral and description-free.
 func (s *Service) handleHelpCommand(sessionID string) {
+	menu := s.SessionMenu(sessionID)
+	s.broadcastSystemMessageMetadata(sessionID, helpFallback(menu), &types.WebMessageMetadata{
+		Code:     SysHelp,
+		Commands: menu,
+	})
+}
+
+func helpFallback(menu []*types.CommandSpec) string {
 	var b strings.Builder
 	b.WriteString("**Commands**\n")
-	for _, c := range s.SessionMenu(sessionID) {
-		syntax := c.Usage
+	for _, c := range menu {
+		syntax := c.GetUsage()
 		if syntax == "" {
-			syntax = c.Name
+			syntax = c.GetName()
 		}
-		if c.Description != "" {
-			fmt.Fprintf(&b, "- `%s` — %s\n", syntax, c.Description)
-		} else {
-			fmt.Fprintf(&b, "- `%s`\n", syntax)
-		}
+		fmt.Fprintf(&b, "- `%s`\n", syntax)
 	}
-	b.WriteString("\n`!<command>` 直接在 agent 上执行 shell/伪命令;其他文本作为对话发送给 agent。")
-	s.broadcastSystemMessage(sessionID, "", b.String(), nil)
+	b.WriteString("\n`!<command>` runs a shell or pseudo command directly on the agent; any other text is sent to the agent as conversation.")
+	return b.String()
 }
 
 // SessionMenu is the web "/" command catalog for a session: the hub-scope
@@ -87,16 +94,16 @@ func (s *Service) SessionMenu(sessionID string) []*types.CommandSpec {
 		// This is the web's offline menu, not an executable terminal console.
 		agentSpecs = []*types.CommandSpec{
 			{Name: "/help", Description: "查看命令面板"},
-			{Name: "/status", Description: "查看模型、渲染模式、Server 和 skills"},
-			{Name: "/clear", Description: "清空当前会话上下文"},
+			{Name: "/status", Description: "查看 Agent 的 LLM、工具、扫描器和会话健康状态"},
+			{Name: "/clear", Description: "清空当前 Agent 上下文"},
 			{Name: "/resume", Description: "恢复已保存会话 (/resume 选择，/resume <path|#index>)"},
-			{Name: "/compact", Description: "压缩当前会话上下文 (/compact [focus instructions])"},
+			{Name: "/compact", Description: "压缩当前 Agent 上下文 (/compact [focus instructions])"},
 			{Name: "/provider", Description: "查看/管理 LLM provider 配置"},
 			{Name: "/model", Description: "查看/切换当前 provider 的模型"},
-			{Name: "/spaces", Description: "List all spaces"},
-			{Name: "/messages", Description: "List start messages in a space"},
-			{Name: "/context", Description: "View message thread/context"},
-			{Name: "/nodes", Description: "List nodes (optionally scoped to a space)"},
+			{Name: "/spaces", Description: "列出所有 space"},
+			{Name: "/messages", Description: "列出 space 中的起始消息"},
+			{Name: "/context", Description: "查看消息线程/上下文"},
+			{Name: "/nodes", Description: "列出节点（可限定 space）"},
 		}
 	}
 	return append(hubSpecs, agentSpecs...)
@@ -236,7 +243,10 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 			return
 		}
 		if res.Err != "" {
-			s.broadcastHubError(sessionID, "", res.Err, nil)
+			// The agent's error text is a raw Go string ("context canceled" and
+			// friends). Code it so the client frames it in the reader's language
+			// instead of rendering the string bare.
+			s.broadcastHubError(sessionID, "command_failed", res.Err, map[string]any{"error": res.Err})
 		}
 	}()
 	return taskID, nil

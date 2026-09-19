@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/truncate"
+	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 	"github.com/ysmood/gson"

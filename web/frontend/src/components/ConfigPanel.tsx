@@ -2,8 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Plus, Settings, Trash2, Zap } from 'lucide-react'
 import { create } from '@bufbuild/protobuf'
-import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../aiscan-proto'
-import { getConfigStatus, saveConfig, testLLM, testConn, listLLMModels } from '../api'
+import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../cyber-proto'
+import { getConfigStatus, llmConfigured, saveConfig, testLLM, testConn, listLLMModels } from '../api'
 import type { ConfigView, ConnectionCheck, DistributeConfig, LLMProbeResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, ResultLine } from '@cyber/ui'
 import { cn } from '@cyber/theme'
@@ -65,7 +65,14 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
     },
     scan: { verify: form.scan.verify },
     search: { tavilyKeys: form.search.tavily_keys },
-    ioa: { url: form.ioa.url, token: form.ioa.token, nodeName: form.ioa.node_name, space: form.ioa.space },
+    extensions: {
+      'ioa.client': {
+        url: form.ioa.url,
+        token: form.ioa.token,
+        node_name: form.ioa.node_name,
+        space: form.ioa.space,
+      },
+    },
     agent: { tools: form.agent.tools, timeout: form.agent.timeout },
   })
 }
@@ -104,8 +111,8 @@ const LLM_PROVIDER_PRESETS: { value: string; label: string; protocol: LLMProtoco
   { value: 'custom-anthropic', label: '', protocol: 'anthropic', baseUrl: '' },
 ]
 
-function emptyForm(): ConfigFormState {
-  const profile = blankLLMProfile('default')
+function emptyForm(name: string): ConfigFormState {
+  const profile = blankLLMProfile('default', name)
   return {
     llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
@@ -118,7 +125,9 @@ function emptyForm(): ConfigFormState {
 }
 
 function statusToForm(cs: ConfigView): ConfigFormState {
-  const active = cs.llm?.active
+	const active = cs.llm?.active
+	const ioa = cs.extensions['ioa.client']
+	const ioaValues = ioa?.values ?? {}
   const profiles: LLMProfileForm[] = cs.llm?.providers.length
     ? cs.llm.providers.map(profile => ({
         id: profile.id,
@@ -155,13 +164,18 @@ function statusToForm(cs: ConfigView): ConfigFormState {
     recon: { fofa_key: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
     scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
-    ioa: { url: cs.ioa?.url || '', token: '', node_name: cs.ioa?.nodeName || '', space: cs.ioa?.space || '' },
+    ioa: {
+      url: typeof ioaValues.url === 'string' ? ioaValues.url : '',
+      token: '',
+      node_name: typeof ioaValues.node_name === 'string' ? ioaValues.node_name : '',
+      space: typeof ioaValues.space === 'string' ? ioaValues.space : '',
+    },
     agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0 },
   }
 }
 
-function blankLLMProfile(id = `llm-${Date.now()}`): LLMProfileForm {
-  return { id, name: 'New LLM', provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
+function blankLLMProfile(id: string, name: string): LLMProfileForm {
+  return { id, name, provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', model: '', proxy: '' }
 }
 
 function providerPresetValue(profile: LLMProfileForm): string {
@@ -195,8 +209,8 @@ function sectionStatus(
   const tag = (name: string, ok: boolean) => ({ key: name, label: `${name} ${ok ? t('configured') : t('notConfigured')}`, ok })
   switch (tab) {
     case 'llm':
-      const configured = !!(status?.llmAvailable && status.llmModel?.trim())
-      return [{ key: 'llm', label: configured ? t('llmConfigured') : t('llmNotConfigured'), ok: configured }]
+      const ok = llmConfigured(status)
+      return [{ key: 'llm', label: ok ? t('llmConfigured') : t('llmNotConfigured'), ok }]
     case 'cyberhub':
       return [tag('Cyberhub', !!(cs?.cyberhub?.url && cs?.cyberhub?.keyConfigured))]
     case 'recon':
@@ -206,8 +220,10 @@ function sectionStatus(
       ]
     case 'search':
       return [tag('Tavily', !!cs?.search?.tavilyKeysConfigured)]
-    case 'ioa':
-      return [tag('Server', !!(cs?.ioa?.url && cs?.ioa?.tokenConfigured))]
+    case 'ioa': {
+      const ioa = cs?.extensions['ioa.client']
+      return [tag('Server', !!(ioa?.values?.url && ioa.configuredSecrets.includes('token')))]
+    }
     default:
       return [] // scan, agent — local only
   }
@@ -216,7 +232,7 @@ function sectionStatus(
 export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPanelProps) {
   const { t } = useTranslation('config')
   const [cs, setCs] = useState<ConfigView | null>(null)
-  const [form, setForm] = useState<ConfigFormState>(emptyForm)
+  const [form, setForm] = useState<ConfigFormState>(() => emptyForm(t('newProfileName')))
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -298,7 +314,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
                 {sectionStatus(activeTab, cs, status, t).map((b) => (
                   <Badge key={b.key} variant={b.ok ? 'success' : 'warning'} className="text-xs">{b.label}</Badge>
                 ))}
-                <Badge variant={cs?.loaded ? 'success' : 'warning'} className="text-xs">{cs?.loaded ? t('configLoaded') : t('configMissing')}</Badge>
+                <Badge variant={cs?.loaded ? 'success' : 'warning'} className="text-xs">{cs?.loaded ? t('configLoaded') : t('configFromFlags')}</Badge>
               </div>
               <div className="min-h-[12rem]">
                 {activeTab === 'llm' && (
@@ -403,7 +419,7 @@ function LLMTab({
   }
 
   const addProfile = () => {
-    const next = blankLLMProfile()
+    const next = blankLLMProfile(`llm-${Date.now()}`, t('newProfileName'))
     setForm(current => ({ ...current, llm: { ...current.llm, providers: [...current.llm.providers, next] } }))
     onSelectProfile(next.id)
     setModels([])
@@ -613,7 +629,7 @@ function LLMTab({
         {result && (
           <ResultLine ok={result.ok} title={result.ok ? undefined : result.error}>
             {result.ok
-              ? <>{t('testOk')} · {t('testLatency')} {result.latencyMs}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
+              ? <>{t('testOk')} · {t('testLatency')} {String(result.latencyMs)}ms{result.reply ? ` · ${t('testReply')}: ${result.reply}` : ''}</>
               : <>{t('testFailed')}: {result.error}</>}
           </ResultLine>
         )}
@@ -694,10 +710,10 @@ function IOATab({ form, setForm, cs }: TabProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('ioaServerUrl')}><Input value={form.ioa.url} onChange={(e) => u('url', e.target.value)} placeholder="http://host:port" /></Field>
-      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.ioa?.tokenConfigured ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
+      <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.extensions['ioa.client']?.configuredSecrets.includes('token') ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
       <Field label={t('nodeName')}><Input value={form.ioa.node_name} onChange={(e) => u('node_name', e.target.value)} placeholder={t('autoRegisterNode')} /></Field>
       <Field label={t('space')}><Input value={form.ioa.space} onChange={(e) => u('space', e.target.value)} placeholder="default" /></Field>
-      <ConnTest section="ioa" form={form} />
+		<ConnTest section="ioa.client" form={form} />
     </div>
   )
 }
@@ -740,7 +756,7 @@ function ProbePulse({ className }: { className?: string }) {
 // one result row per external dependency probed (Recon returns FOFA + Hunter).
 // The whole form is sent so unsaved edits are tested; blank secrets fall back to
 // the stored values on the server.
-function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa'; form: ConfigFormState }) {
+function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa.client'; form: ConfigFormState }) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
   const [checks, setChecks] = useState<ConnectionCheck[] | null>(null)
@@ -784,7 +800,7 @@ function ConnCheckRow({ check }: { check: ConnectionCheck }) {
   return (
     <ResultLine ok={check.ok} title={check.ok ? undefined : check.error}>
       {check.ok
-        ? <>{label} · {t('testOk')} · {t('testLatency')} {check.latencyMs}ms{check.detail ? ` · ${check.detail}` : ''}</>
+        ? <>{label} · {t('testOk')} · {t('testLatency')} {String(check.latencyMs)}ms{check.detail ? ` · ${check.detail}` : ''}</>
         : <>{label} · {t('testFailed')}: {check.error}</>}
     </ResultLine>
   )

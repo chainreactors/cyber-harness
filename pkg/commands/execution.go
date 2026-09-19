@@ -5,8 +5,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent/tmux"
-	"github.com/chainreactors/utils/pty"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/utils/proc"
 )
 
 // Execution contains one invocation's arguments, streams and command details.
@@ -26,7 +26,7 @@ type Execution struct {
 
 	Details any
 
-	manager *tmux.Manager
+	manager *procbus.Manager
 	mu      sync.RWMutex
 	// idReady closes after the execution receives either its manager-assigned
 	// session ID or its in-process call ID. A built-in command may start before
@@ -41,10 +41,10 @@ type Execution struct {
 	processOnce   sync.Once
 }
 
-// bindProcessControl connects the local operation cancellation scope to the
+// BindProcessControl connects the local operation cancellation scope to the
 // actual managed session. These handles stay process-local and never enter tool
 // arguments or the AOP protocol.
-func (e *Execution) bindProcessControl(ctx context.Context, cancel context.CancelCauseFunc, detachParent func() bool, releaseEgress func()) {
+func (e *Execution) BindProcessControl(ctx context.Context, cancel context.CancelCauseFunc, detachParent func() bool, releaseEgress func()) {
 	if e == nil {
 		return
 	}
@@ -70,7 +70,9 @@ func (e *Execution) DetachParent() bool {
 	return stop == nil || stop()
 }
 
-func (e *Execution) finishProcess(cause error) {
+// FinishProcess releases the process control handles bound earlier and wakes
+// WaitProcessCompletion with the final cause.
+func (e *Execution) FinishProcess(cause error) {
 	if e == nil {
 		return
 	}
@@ -130,7 +132,8 @@ func (e *Execution) WaitProcessCompletion(ctx context.Context) error {
 	}
 }
 
-func newExecution(manager *tmux.Manager, command string, args []string, dir string, env []string) *Execution {
+// NewExecution builds the invocation record handed to Command.Run.
+func NewExecution(manager *procbus.Manager, command string, args []string, dir string, env []string) *Execution {
 	return &Execution{
 		Command: command,
 		Args:    append([]string(nil), args...),
@@ -144,7 +147,9 @@ func newExecution(manager *tmux.Manager, command string, args []string, dir stri
 	}
 }
 
-func (e *Execution) bindID(id string) {
+// BindID publishes the manager session ID or the in-process call ID and
+// releases any waiter blocked on ID readiness. The first binding wins.
+func (e *Execution) BindID(id string) {
 	e.mu.Lock()
 	if e.ID != "" {
 		e.mu.Unlock()
@@ -182,7 +187,9 @@ func (e *Execution) waitID(ctx context.Context) (string, error) {
 	}
 }
 
-func (e *Execution) setIO(stdin io.Reader, stdout, stderr io.Writer) {
+// SetIO attaches the invocation's streams once the terminal decides how to
+// present them.
+func (e *Execution) SetIO(stdin io.Reader, stdout, stderr io.Writer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Stdin = stdin
@@ -190,7 +197,8 @@ func (e *Execution) setIO(stdin io.Reader, stdout, stderr io.Writer) {
 	e.Stderr = stderr
 }
 
-func (e *Execution) setDetails(details any) {
+// SetDetails attaches the terminal-owned command detail payload.
+func (e *Execution) SetDetails(details any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Details = details
@@ -198,15 +206,15 @@ func (e *Execution) setDetails(details any) {
 
 // Session returns the manager's current native snapshot. false means there is
 // no retained terminal session; a call ID alone does not imply a process.
-func (e *Execution) Session() (pty.Info, bool) {
+func (e *Execution) Session() (proc.Info, bool) {
 	if e == nil {
-		return pty.Info{}, false
+		return proc.Info{}, false
 	}
 	e.mu.RLock()
 	id := e.ID
 	e.mu.RUnlock()
 	if id == "" || e.manager == nil {
-		return pty.Info{}, false
+		return proc.Info{}, false
 	}
 	return e.manager.Get(id)
 }

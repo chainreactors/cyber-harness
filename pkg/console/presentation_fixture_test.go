@@ -2,22 +2,26 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	sessionconsole "github.com/chainreactors/aiscan/pkg/exts/session/console"
-	tuiext "github.com/chainreactors/aiscan/pkg/exts/tui"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
+	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	"testing"
 )
 
-// Tests install the same provider/contributor path as a product profile.
-func testSessionBindings(t *testing.T, catalog sessionconsole.Catalog) *api.Bindings {
+// Tests install the same provider/contributor path as a Profile.
+func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()
-	contribution, err := sessionconsole.New(tui.Registrar(), catalog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "tui", Extension: tui}, extension.Entry{ID: "session.repl", DependsOn: []string{"tui"}, Extension: contribution})
+	contribution := sessionconsole.New()
+	var registry *api.Registry
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		registry, err = extension.Use[*api.Registry](scope)
+		return err
+	}}
+	set, err := extension.New(extension.Provided[*agentsession.Runtime](runtime), tui, contribution, borrow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,5 +33,5 @@ func testSessionBindings(t *testing.T, catalog sessionconsole.Catalog) *api.Bind
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return tui.Bindings()
+	return registry.Bindings()
 }

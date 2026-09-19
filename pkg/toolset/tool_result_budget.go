@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 // Tool results feed the model context, so their budget is set by what the model

@@ -9,7 +9,7 @@ import (
 type envLookup func(string) (string, bool)
 
 // ResolveRuntimeConfig resolves parsed configuration with environment and defaults.
-func ResolveRuntimeConfig(option *Option, _ bool) (string, error) {
+func ResolveRuntimeConfig(option *Option) (string, error) {
 	explicit := *option
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
@@ -45,17 +45,17 @@ func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
 
 func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	providerExplicit := strings.TrimSpace(explicit.Provider) != ""
-	if v := firstEnv(lookup, "AISCAN_PROVIDER"); v != "" && !providerExplicit {
+	if v := firstEnv(lookup, "CYBER_PROVIDER"); v != "" && !providerExplicit {
 		option.Provider = v
 	}
 	if option.Provider == "" && !providerExplicit {
 		option.Provider = firstEnv(lookup, "LLM_PROVIDER")
 	}
 
-	// AISCAN_BASE_URL is aiscan's own namespace: an intentional override that wins
+	// CYBER_BASE_URL is cyber's own namespace: an intentional override that wins
 	// over a base URL set in the config file (CLI --base-url wins via the explicit gate).
 	if strings.TrimSpace(explicit.BaseURL) == "" {
-		if v := firstEnv(lookup, "AISCAN_BASE_URL"); v != "" {
+		if v := firstEnv(lookup, "CYBER_BASE_URL"); v != "" {
 			option.BaseURL = v
 		} else if strings.TrimSpace(option.BaseURL) == "" {
 			option.BaseURL = firstEnv(lookup, "LLM_BASE_URL")
@@ -69,7 +69,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// Provider-scoped base-URL envs (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, …) are
 	// commonly injected by the surrounding environment for *other* tools — e.g.
 	// Claude-Code-style gateways export ANTHROPIC_BASE_URL. Treat them as a fallback
-	// only: they must not silently override a base URL the user configured for aiscan
+	// only: they must not silently override a base URL the user configured for cyber
 	// (config file / Settings UI). Apply only when nothing else set one. Mirrors the
 	// model handling below so a hub-launched agent that inherits the hub's env still
 	// honors the Settings-saved base URL.
@@ -79,11 +79,11 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 		}
 	}
 
-	// AISCAN_MODEL is aiscan's own namespace: an intentional
+	// CYBER_MODEL is cyber's own namespace: an intentional
 	// override that still wins over a model set in the config file (CLI --model
 	// wins over it via the explicit gate).
 	if strings.TrimSpace(explicit.Model) == "" {
-		if v := firstEnv(lookup, "AISCAN_MODEL"); v != "" {
+		if v := firstEnv(lookup, "CYBER_MODEL"); v != "" {
 			option.Model = v
 		} else if strings.TrimSpace(option.Model) == "" {
 			option.Model = firstEnv(lookup, "LLM_MODEL")
@@ -92,7 +92,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// Provider-scoped model envs (ANTHROPIC_MODEL, OPENAI_MODEL, …) are commonly
 	// injected by the surrounding environment for *other* tools — e.g. Claude-Code
 	// style gateways export ANTHROPIC_MODEL. Treat them as a fallback only: they
-	// must not silently override a model the user configured for aiscan (config
+	// must not silently override a model the user configured for cyber (config
 	// file / Settings UI or --model). Apply only when nothing else set a model.
 	if strings.TrimSpace(option.Model) == "" {
 		if v := providerModelEnv(selectedProvider, lookup); v != "" {
@@ -100,10 +100,10 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 		}
 	}
 
-	// AISCAN_API_KEY is aiscan's own namespace: an intentional override that wins
+	// CYBER_API_KEY is cyber's own namespace: an intentional override that wins
 	// over a key set in the config file (CLI --api-key wins via the explicit gate).
 	if strings.TrimSpace(explicit.APIKey) == "" {
-		if v := firstEnv(lookup, "AISCAN_API_KEY"); v != "" {
+		if v := firstEnv(lookup, "CYBER_API_KEY"); v != "" {
 			option.APIKey = v
 		} else if strings.TrimSpace(option.APIKey) == "" {
 			option.APIKey = firstEnv(lookup, "LLM_API_KEY")
@@ -111,7 +111,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	}
 	// Provider-scoped key envs (ANTHROPIC_API_KEY, OPENAI_API_KEY) are commonly
 	// present for *other* tools. Treat them as a fallback only so they never override
-	// a key the user configured for aiscan (config file / Settings UI). Apply only
+	// a key the user configured for cyber (config file / Settings UI). Apply only
 	// when nothing else set one — same rationale as base URL and model above.
 	if strings.TrimSpace(option.APIKey) == "" {
 		if v := providerAPIKeyEnv(selectedProvider, lookup); v != "" {
@@ -120,7 +120,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	}
 
 	if strings.TrimSpace(explicit.LLMProxy) == "" {
-		if v := firstEnv(lookup, "AISCAN_LLM_PROXY"); v != "" {
+		if v := firstEnv(lookup, "CYBER_LLM_PROXY"); v != "" {
 			option.LLMProxy = v
 		}
 	}
@@ -128,22 +128,22 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 
 func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.CyberhubURL) == "" {
-		if v := firstEnv(lookup, "AISCAN_CYBERHUB_URL"); v != "" {
+		if v := firstEnv(lookup, "CYBER_CYBERHUB_URL"); v != "" {
 			option.CyberhubURL = v
 		}
 	}
 	if strings.TrimSpace(explicit.CyberhubKey) == "" {
-		if v := firstEnv(lookup, "AISCAN_CYBERHUB_KEY"); v != "" {
+		if v := firstEnv(lookup, "CYBER_CYBERHUB_KEY"); v != "" {
 			option.CyberhubKey = v
 		}
 	}
 	if strings.TrimSpace(explicit.CyberhubMode) == "" {
-		if v := firstEnv(lookup, "AISCAN_CYBERHUB_MODE"); v != "" {
+		if v := firstEnv(lookup, "CYBER_CYBERHUB_MODE"); v != "" {
 			option.CyberhubMode = v
 		}
 	}
 	if strings.TrimSpace(explicit.Proxy) == "" {
-		if v := firstEnv(lookup, "AISCAN_PROXY"); v != "" {
+		if v := firstEnv(lookup, "CYBER_PROXY"); v != "" {
 			option.Proxy = v
 		}
 	}
@@ -175,15 +175,15 @@ func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
 
 func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if strings.TrimSpace(explicit.DataDir) == "" {
-		if v := firstEnv(lookup, "AISCAN_DATA_DIR"); v != "" {
+		if v := firstEnv(lookup, "CYBER_DATA_DIR"); v != "" {
 			option.DataDir = v
 		}
 	}
 	if strings.TrimSpace(explicit.RenderMode) == "" {
-		option.RenderMode = firstEnv(lookup, "AISCAN_RENDER")
+		option.RenderMode = firstEnv(lookup, "CYBER_RENDER")
 	}
 	if strings.TrimSpace(explicit.REPLMode) == "" {
-		option.REPLMode = firstEnv(lookup, "AISCAN_REPL")
+		option.REPLMode = firstEnv(lookup, "CYBER_REPL")
 	}
 	if strings.TrimSpace(explicit.PlaywrightSession) == "" {
 		option.PlaywrightSession = firstEnv(lookup, "PLAYWRIGHT_CLI_SESSION")

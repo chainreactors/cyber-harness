@@ -3,23 +3,24 @@ package provider
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/core/extension"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"testing"
 )
 
 func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
-	var first, second provider.State
+	var second provider.State
 	second.Set(nil, provider.ProviderConfig{Model: "other"})
-	resource, err := New(&first, provider.StartupConfig{Enabled: true, Optional: true, Config: provider.ProviderConfig{Provider: "unsupported"}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Health().Error != "" {
+	application := &apppkg.State{}
+	resource := New(provider.StartupConfig{Mode: provider.StartupOptional, Config: provider.ProviderConfig{Provider: "unsupported"}}, nil)
+	if application.Providers.Health().Error != "" {
 		t.Fatal("constructor initialized provider")
 	}
+	first := &application.Providers
 	failure := errors.New("later extension failed")
-	set, err := extension.New(extension.Entry{ID: "provider", Extension: resource}, extension.Entry{ID: "later", DependsOn: []string{"provider"}, Extension: extension.Func{LoadFunc: func(*extension.Scope) error { return failure }}})
+	set, err := extension.New(extension.Provided[*apppkg.State](application), resource,
+		extension.Func{LoadFunc: func(*extension.Scope) error { return failure }})
 	if err != nil {
 		t.Fatal(err)
 	}

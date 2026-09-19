@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/tui/readline/inputrc"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -94,7 +94,7 @@ func TestAgentConsoleArgsForLineBangCommand(t *testing.T) {
 
 func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	if _, err := executeAndWait(repl, "!printf DIRECT_OK"); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestAgentConsoleBangCommandTerminatesOutputLine(t *testing.T) {
 }
 
 func TestAgentReadlineBackspaceBindings(t *testing.T) {
-	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.Config.GetBool("menu-complete-display-prefix") {
 		t.Fatal("menu-complete-display-prefix should stay enabled so completion replaces the typed prefix")
@@ -133,7 +133,7 @@ func TestAgentReadlineBackspaceBindings(t *testing.T) {
 }
 
 func TestAgentReadlinePendingBracketedPaste(t *testing.T) {
-	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.HandleBracketedPastePending("[200~demo_reqresp\x1b[201~") {
 		t.Fatal("pending bracketed paste was not handled")
@@ -144,7 +144,7 @@ func TestAgentReadlinePendingBracketedPaste(t *testing.T) {
 }
 
 func TestAgentReadlinePendingMultilinePasteReference(t *testing.T) {
-	repl := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, io.Discard, io.Discard)
 	shell := repl.console.Shell()
 	if !shell.HandleBracketedPastePending("[200~alpha\nbeta\x1b[201~") {
 		t.Fatal("pending bracketed paste was not handled")
@@ -192,7 +192,7 @@ func TestSplitCompletionPath(t *testing.T) {
 func TestReadlineDoesNotSuppressLiveStatusWhileTaskRuns(t *testing.T) {
 	var stdout, stderr syncedBuffer
 	p := &gateProvider{release: make(chan struct{})}
-	repl := newTestConsole(t, &cfg.Option{}, p, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, p, &stdout, &stderr)
 	if err := repl.submitPrompt("hello", false); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestReadlineDoesNotSuppressLiveStatusWhileTaskRuns(t *testing.T) {
 func TestAgentConsoleRotatesSessionAfterRuntimeResumeAndClear(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.jsonl")
 	var stdout, stderr bytes.Buffer
-	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	handle := repl.session
 	previousID := handle.ID()
 	writeConsoleSession(t, path, "test", time.Now(), agent.TextMessage("user", "history"))
@@ -230,7 +230,7 @@ func TestAgentConsoleRotatesSessionAfterRuntimeResumeAndClear(t *testing.T) {
 
 func TestAgentConsoleCtrlCWarnsAndClearsInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	repl.console.Shell().Line().Set([]rune("exit")...)
 
 	repl.handleCtrlC()
@@ -268,7 +268,7 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	option := &cfg.Option{}
-	repl := newTestConsole(t, option, nil, &stdout, &stderr)
+	repl, _ := newTestConsole(t, option, nil, &stdout, &stderr)
 	repl.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "openai", BaseURL: srv.URL + "/v1", APIKey: "sk-test", Model: "model-a"})
 	session := repl.session
 
@@ -312,7 +312,7 @@ func TestAgentConsoleResumeLoadsSessionMessages(t *testing.T) {
 	)
 	var stdout, stderr bytes.Buffer
 	prov := &captureConsoleProvider{}
-	repl := newTestConsole(t, &cfg.Option{}, prov, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, prov, &stdout, &stderr)
 
 	if _, err := executeAndWait(repl, "/resume "+path); err != nil {
 		t.Fatalf("/resume: %v\nstderr=%s", err, stderr.String())
@@ -383,7 +383,7 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 	writeConsoleSession(t, newPath, "new-model", time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC), agent.TextMessage("user", "new message"))
 
 	var stdout, stderr bytes.Buffer
-	repl := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	repl, _ := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	repl.sessionDir = dir
 
 	if _, err := executeAndWait(repl, "/resume list"); err != nil {
@@ -410,7 +410,7 @@ func TestAgentConsoleResumeListsAndSelectsSession(t *testing.T) {
 func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, messages ...*aop.Message) {
 	t.Helper()
 	events := []*aop.Event{{
-		Id: "e-1", SessionId: "console-session", Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+		Id: "e-1", SessionId: "console-session", Emitter: "cyber", EmittedAt: timestamppb.New(updatedAt),
 		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: model}},
 	}}
 	if err := types.SetSessionHistory(events[0], &types.SessionHistory{Mode: types.SessionHistory_MODE_INHERIT}); err != nil {
@@ -420,7 +420,7 @@ func writeConsoleSession(t *testing.T, path, model string, updatedAt time.Time, 
 		message.Id = fmt.Sprintf("m-%d", i+1)
 		events = append(events, &aop.Event{
 			Id: fmt.Sprintf("e-%d", i+2), SessionId: "console-session", TurnId: "turn-1",
-			Emitter: "aiscan", EmittedAt: timestamppb.New(updatedAt),
+			Emitter: "cyber", EmittedAt: timestamppb.New(updatedAt),
 			Payload: &aop.Event_Message{Message: message},
 		})
 	}

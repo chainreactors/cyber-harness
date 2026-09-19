@@ -1,27 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, CircleX, Loader2, Wrench } from 'lucide-react'
 import { EasmResultFromNodes, type SCONode } from '@cyber/cstx-easm'
 import { Badge, DisclosureCard } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ToolCallDisplay, formatArgs, stripAnsiControl, summarizeArgs } from '@/viewer'
-import { listSCONodes } from '../../api'
-
-const SCANNER_COMMANDS = new Set(['gogo', 'spray', 'zombie', 'neutron', 'katana', 'proton', 'scan'])
-
-function scannerCommand(toolName: string, toolArgs: string): string | undefined {
-  const direct = toolName.trim().toLowerCase()
-  if (SCANNER_COMMANDS.has(direct)) return direct
-  if (direct !== 'bash') return undefined
-  try {
-    const parsed = JSON.parse(toolArgs) as Record<string, unknown>
-    const command = typeof parsed.command === 'string' ? parsed.command.trim() : ''
-    const first = command.split(/\s+/, 1)[0]?.toLowerCase() || ''
-    return SCANNER_COMMANDS.has(first) ? first : undefined
-  } catch {
-    return undefined
-  }
-}
+import { listSCONodes, subscribeCSTXChanges } from '../../lib/cstx-runtime'
 
 export interface ScannerToolCallProps {
   id: string
@@ -41,25 +25,43 @@ export default function ScannerToolCall({
   error = false,
 }: ScannerToolCallProps) {
   const { t } = useTranslation('scan')
-  const command = useMemo(() => scannerCommand(toolName, toolArgs), [toolName, toolArgs])
+  const { t: tChat } = useTranslation('chat')
   const [nodes, setNodes] = useState<SCONode[] | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!command || !id || pending || error) return
+    if (!id || pending || error) {
+      setNodes(null)
+      return
+    }
     let disposed = false
-    setLoading(true)
-    void listSCONodes({ scanId: id }).then((value) => {
-      if (!disposed) setNodes(value.length > 0 ? value : null)
-    }).catch(() => {
-      if (!disposed) setNodes(null)
-    }).finally(() => {
-      if (!disposed) setLoading(false)
-    })
-    return () => { disposed = true }
-  }, [command, error, id, pending])
+    const load = () => {
+      setLoading(true)
+      void listSCONodes({ scanId: id }).then((value) => {
+        if (!disposed) setNodes(value.length > 0 ? value : null)
+      }).catch(() => {
+        if (!disposed) setNodes(null)
+      }).finally(() => {
+        if (!disposed) setLoading(false)
+      })
+    }
+    const unsubscribe = subscribeCSTXChanges(load)
+    load()
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [error, id, pending])
 
-  if (!command) {
+  const labels = {
+    arguments: tChat('toolCard.arguments'),
+    result: tChat('toolCard.result'),
+    failed: tChat('toolCard.failed'),
+    running: tChat('toolCard.running'),
+    completed: tChat('toolCard.completed'),
+  }
+
+  if (!nodes || nodes.length === 0) {
     return (
       <ToolCallDisplay
         toolName={toolName}
@@ -67,6 +69,7 @@ export default function ScannerToolCall({
         result={result}
         pending={pending}
         error={error}
+        labels={labels}
       />
     )
   }
@@ -91,10 +94,10 @@ export default function ScannerToolCall({
         <>
           <Wrench className={cn('h-3.5 w-3.5 shrink-0', error ? 'text-destructive' : pending ? 'text-warning' : 'text-muted-foreground')} />
           <Badge variant="outline" size="sm" className="shrink-0 bg-muted/40 font-mono font-medium text-foreground">
-            {command}
+            {toolName}
           </Badge>
           <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground" title={summary || formattedArgs}>
-            {summary || (error ? 'failed' : pending ? 'running' : 'completed')}
+            {summary || (error ? labels.failed : pending ? labels.running : labels.completed)}
           </span>
           {nodes && nodes.length > 0 && (
             <Badge variant="muted" size="sm" className="shrink-0 rounded-full font-mono tabular-nums">
@@ -118,13 +121,13 @@ export default function ScannerToolCall({
         {loading && (
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Loading structured results...</span>
+            <span>{tChat('toolCard.loadingResults')}</span>
           </div>
         )}
         {toolArgs && (
           <details className="border-t border-border">
             <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              Arguments
+              {labels.arguments}
             </summary>
             <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-xs text-muted-foreground">
               {formattedArgs}
@@ -134,7 +137,7 @@ export default function ScannerToolCall({
         {displayResult !== undefined && (
           <details className="border-t border-border" open={!nodes && !loading}>
             <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              Raw Output
+              {tChat('toolCard.rawOutput')}
             </summary>
             <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-xs text-muted-foreground">
               {displayResult}

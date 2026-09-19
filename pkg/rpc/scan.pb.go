@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,41 +25,36 @@ var File_rpc_scan_proto protoreflect.FileDescriptor
 
 const file_rpc_scan_proto_rawDesc = "" +
 	"\n" +
-	"\x0erpc/scan.proto\x12\x0faiscan.rpc.scan\x1a\x10types/scan.proto2\x95\x03\n" +
-	"\vScanService\x12M\n" +
+	"\x0erpc/scan.proto\x12\x0ecyber.rpc.scan\x1a\x10types/scan.proto2\xb5\x02\n" +
+	"\vScanService\x12K\n" +
 	"\n" +
-	"SubmitScan\x12\x1e.aiscan.scan.SubmitScanRequest\x1a\x1f.aiscan.scan.SubmitScanResponse\x12D\n" +
-	"\aGetScan\x12\x1b.aiscan.scan.GetScanRequest\x1a\x1c.aiscan.scan.GetScanResponse\x12J\n" +
-	"\tListScans\x12\x1d.aiscan.scan.ListScansRequest\x1a\x1e.aiscan.scan.ListScansResponse\x12M\n" +
+	"SubmitScan\x12\x1d.cyber.scan.SubmitScanRequest\x1a\x1e.cyber.scan.SubmitScanResponse\x12B\n" +
+	"\aGetScan\x12\x1a.cyber.scan.GetScanRequest\x1a\x1b.cyber.scan.GetScanResponse\x12H\n" +
+	"\tListScans\x12\x1c.cyber.scan.ListScansRequest\x1a\x1d.cyber.scan.ListScansResponse\x12K\n" +
 	"\n" +
-	"CancelScan\x12\x1e.aiscan.scan.CancelScanRequest\x1a\x1f.aiscan.scan.CancelScanResponse\x12V\n" +
-	"\rGetScanReport\x12!.aiscan.scan.GetScanReportRequest\x1a\".aiscan.scan.GetScanReportResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"CancelScan\x12\x1d.cyber.scan.CancelScanRequest\x1a\x1e.cyber.scan.CancelScanResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_scan_proto_goTypes = []any{
-	(*types.SubmitScanRequest)(nil),     // 0: aiscan.scan.SubmitScanRequest
-	(*types.GetScanRequest)(nil),        // 1: aiscan.scan.GetScanRequest
-	(*types.ListScansRequest)(nil),      // 2: aiscan.scan.ListScansRequest
-	(*types.CancelScanRequest)(nil),     // 3: aiscan.scan.CancelScanRequest
-	(*types.GetScanReportRequest)(nil),  // 4: aiscan.scan.GetScanReportRequest
-	(*types.SubmitScanResponse)(nil),    // 5: aiscan.scan.SubmitScanResponse
-	(*types.GetScanResponse)(nil),       // 6: aiscan.scan.GetScanResponse
-	(*types.ListScansResponse)(nil),     // 7: aiscan.scan.ListScansResponse
-	(*types.CancelScanResponse)(nil),    // 8: aiscan.scan.CancelScanResponse
-	(*types.GetScanReportResponse)(nil), // 9: aiscan.scan.GetScanReportResponse
+	(*types.SubmitScanRequest)(nil),  // 0: cyber.scan.SubmitScanRequest
+	(*types.GetScanRequest)(nil),     // 1: cyber.scan.GetScanRequest
+	(*types.ListScansRequest)(nil),   // 2: cyber.scan.ListScansRequest
+	(*types.CancelScanRequest)(nil),  // 3: cyber.scan.CancelScanRequest
+	(*types.SubmitScanResponse)(nil), // 4: cyber.scan.SubmitScanResponse
+	(*types.GetScanResponse)(nil),    // 5: cyber.scan.GetScanResponse
+	(*types.ListScansResponse)(nil),  // 6: cyber.scan.ListScansResponse
+	(*types.CancelScanResponse)(nil), // 7: cyber.scan.CancelScanResponse
 }
 var file_rpc_scan_proto_depIdxs = []int32{
-	0, // 0: aiscan.rpc.scan.ScanService.SubmitScan:input_type -> aiscan.scan.SubmitScanRequest
-	1, // 1: aiscan.rpc.scan.ScanService.GetScan:input_type -> aiscan.scan.GetScanRequest
-	2, // 2: aiscan.rpc.scan.ScanService.ListScans:input_type -> aiscan.scan.ListScansRequest
-	3, // 3: aiscan.rpc.scan.ScanService.CancelScan:input_type -> aiscan.scan.CancelScanRequest
-	4, // 4: aiscan.rpc.scan.ScanService.GetScanReport:input_type -> aiscan.scan.GetScanReportRequest
-	5, // 5: aiscan.rpc.scan.ScanService.SubmitScan:output_type -> aiscan.scan.SubmitScanResponse
-	6, // 6: aiscan.rpc.scan.ScanService.GetScan:output_type -> aiscan.scan.GetScanResponse
-	7, // 7: aiscan.rpc.scan.ScanService.ListScans:output_type -> aiscan.scan.ListScansResponse
-	8, // 8: aiscan.rpc.scan.ScanService.CancelScan:output_type -> aiscan.scan.CancelScanResponse
-	9, // 9: aiscan.rpc.scan.ScanService.GetScanReport:output_type -> aiscan.scan.GetScanReportResponse
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
+	0, // 0: cyber.rpc.scan.ScanService.SubmitScan:input_type -> cyber.scan.SubmitScanRequest
+	1, // 1: cyber.rpc.scan.ScanService.GetScan:input_type -> cyber.scan.GetScanRequest
+	2, // 2: cyber.rpc.scan.ScanService.ListScans:input_type -> cyber.scan.ListScansRequest
+	3, // 3: cyber.rpc.scan.ScanService.CancelScan:input_type -> cyber.scan.CancelScanRequest
+	4, // 4: cyber.rpc.scan.ScanService.SubmitScan:output_type -> cyber.scan.SubmitScanResponse
+	5, // 5: cyber.rpc.scan.ScanService.GetScan:output_type -> cyber.scan.GetScanResponse
+	6, // 6: cyber.rpc.scan.ScanService.ListScans:output_type -> cyber.scan.ListScansResponse
+	7, // 7: cyber.rpc.scan.ScanService.CancelScan:output_type -> cyber.scan.CancelScanResponse
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name

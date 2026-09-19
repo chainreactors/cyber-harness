@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -6,19 +7,19 @@ import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 
 const host = '127.0.0.1'
-const webPort = Number(process.env.AISCAN_E2E_PORT || 38080)
+const webPort = Number(process.env.CYBER_E2E_PORT || 38080)
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
-const workDir = await mkdtemp(join(tmpdir(), 'aiscan-web-e2e-'))
-const binary = join(workDir, process.platform === 'win32' ? 'aiscan-e2e.exe' : 'aiscan-e2e')
+const workDir = await mkdtemp(join(tmpdir(), 'cyber-web-e2e-'))
+const binary = join(workDir, process.platform === 'win32' ? 'cyber-e2e.exe' : 'cyber-e2e')
 
 const externalLLM = {
-  baseURL: process.env.AISCAN_E2E_LLM_BASE_URL?.trim() || '',
-  apiKey: process.env.AISCAN_E2E_LLM_API_KEY?.trim() || '',
-  model: process.env.AISCAN_E2E_LLM_MODEL?.trim() || '',
+  baseURL: process.env.CYBER_E2E_LLM_BASE_URL?.trim() || '',
+  apiKey: process.env.CYBER_E2E_LLM_API_KEY?.trim() || '',
+  model: process.env.CYBER_E2E_LLM_MODEL?.trim() || '',
 }
 const externalLLMValues = Object.values(externalLLM).filter(Boolean).length
 if (externalLLMValues > 0 && externalLLMValues < 3) {
-  throw new Error('AISCAN_E2E_LLM_BASE_URL, AISCAN_E2E_LLM_API_KEY and AISCAN_E2E_LLM_MODEL must be set together')
+  throw new Error('CYBER_E2E_LLM_BASE_URL, CYBER_E2E_LLM_API_KEY and CYBER_E2E_LLM_MODEL must be set together')
 }
 
 let llmBaseURL = externalLLM.baseURL
@@ -81,7 +82,7 @@ if (externalLLMValues === 0) {
   llmModel = 'deepseek-chat'
 }
 
-const configPath = join(workDir, 'aiscan.yaml')
+const configPath = join(workDir, 'cyber.yaml')
 await writeFile(configPath, `llm:
   active_profile: e2e
   providers:
@@ -106,15 +107,33 @@ if (frontendBuild.status !== 0) {
   process.exit(frontendBuild.status ?? 1)
 }
 
+// The full edition's tags and cgo setting come from editions.env, the same file
+// used by the Makefile and CI. The capability set omits the base policy tags so
+// this E2E binary embeds its resource templates.
+const editions = new Map()
+for (const line of readFileSync(join(root, 'editions.env'), 'utf8').split('\n')) {
+  const entry = line.trim()
+  if (!entry || entry.startsWith('#')) continue
+  const separator = entry.indexOf('=')
+  if (separator < 0) continue
+  editions.set(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim())
+}
+const editionValue = (key) => {
+  const value = editions.get(key)
+  if (!value) throw new Error(`editions.env does not declare ${key}`)
+  return value
+}
+
 const build = spawnSync('go', [
   'build',
-  '-tags', 'full',
-  '-ldflags', '-X github.com/chainreactors/aiscan/core/config.Version=1.0.0-rc1',
+  '-tags', editionValue('FULL_CAPS_TAGS'),
+  '-ldflags', '-X github.com/chainreactors/cyber/core/config.Version=1.0.0-rc1',
   '-o', binary,
   './cmd/aiscan',
 ], {
   cwd: root,
   stdio: 'inherit',
+  env: { ...process.env, CGO_ENABLED: editionValue('FULL_CGO') },
 })
 if (build.status !== 0) {
   mockLLM?.close()
@@ -127,7 +146,7 @@ const child = spawn(binary, [
   '--data-dir', join(workDir, 'data'),
   'web',
   '--addr', `${host}:${webPort}`,
-  '--db', join(workDir, 'aiscan-web.db'),
+  '--db', join(workDir, 'cyber-web.db'),
   '--token', 'test-token',
 ], {
   cwd: root,
@@ -165,7 +184,7 @@ async function launchRemoteAgent() {
   })
   agentChild.once('exit', (code, signal) => {
     if (!shuttingDown) {
-      console.error(`AIScan E2E agent exited early (code=${code}, signal=${signal})`)
+      console.error(`Cyber E2E agent exited early (code=${code}, signal=${signal})`)
       void shutdown(code ?? 1)
     }
   })
@@ -189,7 +208,7 @@ child.once('error', (error) => {
 })
 child.once('exit', (code, signal) => {
   if (!shuttingDown) {
-    console.error(`AIScan E2E server exited early (code=${code}, signal=${signal})`)
+    console.error(`Cyber E2E server exited early (code=${code}, signal=${signal})`)
     void shutdown(code ?? 1)
   }
 })

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
+	"github.com/chainreactors/cyber/agent/inbox"
 )
 
 func TestLoopSchedulerProducerLifecycle(t *testing.T) {

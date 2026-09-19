@@ -1,7 +1,7 @@
 id: test-form-extract
 info:
   name: Form Input Extraction
-  author: aiscan
+  author: cyber
   severity: info
   description: Extract form action and input fields
 

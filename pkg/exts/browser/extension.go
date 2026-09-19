@@ -8,16 +8,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/playwright"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/playwright"
 )
 
 // Extension owns the browser command registration and the browser processes
 // opened by that command. The profile owns the command registry.
 type Extension struct {
 	mu             sync.Mutex
-	registry       commands.Runtime
 	workDir        string
 	defaultSession string
 	command        *playwright.Command
@@ -28,11 +27,11 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry commands.Runtime, workDir, defaultSession string) (*Extension, error) {
-	if registry == nil || strings.TrimSpace(workDir) == "" {
-		return nil, fmt.Errorf("browser extension requires a command registry and working directory")
+func New(workDir, defaultSession string) (*Extension, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return nil, fmt.Errorf("browser extension requires a working directory")
 	}
-	return &Extension{registry: registry, workDir: workDir, defaultSession: defaultSession}, nil
+	return &Extension{workDir: workDir, defaultSession: defaultSession}, nil
 }
 
 func (m *Extension) Load(scope *extension.Scope) error {
@@ -49,9 +48,9 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
-	if err := m.registry.Register("browser", "browser", commands.Command{
+	if err := extension.Add(scope, commands.Command{
 		Name: command.Name(), Usage: command.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/easm/playwright.md",
+		DescriptionPath: "cyber://skills/cyber/okf/easm/playwright.md",
 		Run:             command.Run,
 	}); err != nil {
 		command.Close()

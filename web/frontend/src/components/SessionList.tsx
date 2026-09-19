@@ -225,6 +225,7 @@ export default function SessionList({
 
 function SidebarPreferences({ expanded }: { expanded: boolean }) {
   const { isDark, toggle } = useTheme()
+  const { t } = useTranslation('sidebar')
 
   return (
     <div className={cn(
@@ -235,7 +236,13 @@ function SidebarPreferences({ expanded }: { expanded: boolean }) {
     )}>
       <LanguageToggle />
       <div data-sidebar-theme-toggle>
-        <ThemeToggle isDark={isDark} onToggle={toggle} size="sm" />
+        <ThemeToggle
+          isDark={isDark}
+          onToggle={toggle}
+          size="sm"
+          toLightLabel={t('switchToLight')}
+          toDarkLabel={t('switchToDark')}
+        />
       </div>
     </div>
   )

@@ -7,33 +7,31 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	service "github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/skills"
+	"github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
 // DeliverFunc may reject calls outside its receiver's lifetime. It does not
 // lend ownership of the receiver to IOA.
 type DeliverFunc func(context.Context, inbox.Message) error
 
-// Services are the runtime contracts consumed by the IOA client extension.
-// They are supplied by the profile's extension service table.
-type Services struct {
-	Commands commands.Runtime
-	Events   *events.Stream
-	Deliver  DeliverFunc
-	Logger   telemetry.Logger
+type Dependencies struct {
+	Deliver DeliverFunc
+	Logger  telemetry.Logger
+	Skills  []skills.Bundle
 }
 
 type Extension struct {
 	resource      *service.Resource
 	config        service.Config
-	deps          Services
+	deps          Dependencies
 	sub           *eventbus.Subscription[*aop.Event]
 	receiveCancel context.CancelFunc
 	sendCancel    context.CancelFunc
@@ -43,48 +41,65 @@ type Extension struct {
 	outputErr     error
 }
 
-func New(config service.Config, deps Services) (*Extension, error) {
-	if config.RegisterCommands && deps.Commands == nil {
-		return nil, fmt.Errorf("IOA command registration requires a command registry")
-	}
+func New(config service.Config, deps Dependencies) *Extension {
 	if deps.Logger == nil {
 		deps.Logger = telemetry.NopLogger()
 	}
-	return &Extension{resource: service.New(config, deps.Logger), config: config, deps: deps}, nil
+	return &Extension{resource: service.New(config, deps.Logger), config: config, deps: deps}
 }
 
-func (e *Extension) Runtime() *service.Runtime {
+func (e *Extension) Service() *service.Service {
 	if e == nil || e.resource == nil {
 		return nil
 	}
-	return e.resource.Runtime
+	return e.resource.Service
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
+	if e.config.Space != "" {
+		space := e.config.Space
+		if err := extension.Add(scope, prompt.Contribution{
+			Name: "ioa.collaboration.prompt", Targets: []prompt.Target{prompt.MainSystem},
+			Apply: func(_ context.Context, document *prompt.Document, _ prompt.Context) error {
+				return document.After(prompt.SectionIdentity, "ioa.collaboration", prompt.Static("IOA collaboration space: "+space))
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	if len(e.deps.Skills) > 0 {
+		if err := extension.Add(scope, e.deps.Skills...); err != nil {
+			return err
+		}
+	}
 	if err := e.resource.Start(scope.Init()); err != nil {
 		return err
 	}
 	if e.config.RegisterCommands {
 		if values := e.resource.Commands(); len(values) > 0 {
-			if err := e.deps.Commands.Register("ioa.client", "ioa", values...); err != nil {
+			if err := extension.Add(scope, values...); err != nil {
 				return err
 			}
 		}
 	}
-	rt := e.Runtime()
+	rt := e.Service()
 	client := e.resource.Client()
 	if client == nil {
 		return nil
 	}
 	receiveCtx, receiveCancel := context.WithCancel(scope.Lifetime())
 	e.receiveCancel = receiveCancel
-	if e.deps.Events != nil && e.config.Space != "" {
+	stream, err := extension.Use[*events.Stream](scope)
+	if err != nil {
+		return err
+	}
+	if e.config.Space != "" {
 		// Output survives Scope cancellation to drain Agent termination events.
 		// Close owns this context and joins the consumer before releasing resources.
 		sendCtx, cancel := context.WithCancel(context.Background())
 		e.sendCancel = cancel
 		var err error
-		e.sub, err = consumeHandoff(e.deps.Events, newHandoff(sendCtx, client, e.config.Space, e.deps.Logger, func(err error) {
+		e.sub, err = consumeHandoff(stream, newHandoff(sendCtx, client, e.config.Space, e.deps.Logger, func(err error) {
 			e.outputMu.Lock()
 			// This records an output failure, not incomplete resource cleanup.
 			// Do not unwrap a canceled send into Set's Close retry policy.
@@ -154,7 +169,7 @@ func (e *Extension) Close(ctx context.Context) error {
 			}
 			return err
 		}
-		e.Runtime().ReportDropped(e.sub.Dropped())
+		e.Service().ReportDropped(e.sub.Dropped())
 		outputErr = e.sub.Err()
 		if dropped := e.sub.Dropped(); dropped > 0 {
 			outputErr = errors.Join(outputErr, fmt.Errorf("IOA output incomplete: %d events dropped", dropped))

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	"github.com/projectdiscovery/katana/pkg/engine"
 	"github.com/projectdiscovery/katana/pkg/engine/headless"
 	"github.com/projectdiscovery/katana/pkg/engine/standard"
@@ -20,7 +20,7 @@ import (
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"
 	"github.com/projectdiscovery/katana/pkg/utils/queue"
 
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
 )
 
 const (
@@ -28,51 +28,47 @@ const (
 	capKatanaDeep  = "katana_deep"
 )
 
-func KatanaOptions() []Option {
-	return []Option{
-		WithProfileExtenders(func(mode string, p *profile) {
-			switch mode {
-			case scanModeQuick:
-				p.Capabilities[capKatanaCrawl] = struct{}{}
-				if p.CrawlDepth > 1 {
-					p.CrawlDepth = 1
-				}
-			case scanModeFull:
-				p.Capabilities[capKatanaCrawl] = struct{}{}
-				p.Capabilities[capKatanaDeep] = struct{}{}
-			}
-		}),
-
-		WithCapabilityBuilders(func(c *Command, f flags, opts scanOptions, p profile) []pipeline.Capability {
-			var caps []pipeline.Capability
-			katanaWebRoutes := wrapRoutes(acceptsTarget(targetWeb), webSources()...)
-			if p.Enabled(capKatanaCrawl) {
-				depth := p.CrawlDepth
-				if depth <= 0 {
-					depth = 2
-				}
-				caps = append(caps, wrapCapability(
-					capKatanaCrawl,
-					katanaWebRoutes,
-					2,
-					func(ctx context.Context, e event, emit func(event)) {
-						runKatanaCrawl(ctx, c, e, depth, false, emit)
-					},
-				))
-			}
-			if p.Enabled(capKatanaDeep) {
-				caps = append(caps, wrapCapability(
-					capKatanaDeep,
-					katanaWebRoutes,
-					1,
-					func(ctx context.Context, e event, emit func(event)) {
-						runKatanaCrawl(ctx, c, e, 3, true, emit)
-					},
-				))
-			}
-			return caps
-		}),
+func extendKatanaProfile(mode string, p *profile) {
+	switch mode {
+	case scanModeQuick:
+		p.Capabilities[capKatanaCrawl] = struct{}{}
+		if p.CrawlDepth > 1 {
+			p.CrawlDepth = 1
+		}
+	case scanModeFull:
+		p.Capabilities[capKatanaCrawl] = struct{}{}
+		p.Capabilities[capKatanaDeep] = struct{}{}
 	}
+}
+
+func (c *Command) buildKatanaCapabilities(p profile) []pipeline.Capability[event] {
+	var caps []pipeline.Capability[event]
+	katanaWebRoutes := routes(acceptsTarget(targetWeb), webSources()...)
+	if p.Enabled(capKatanaCrawl) {
+		depth := p.CrawlDepth
+		if depth <= 0 {
+			depth = 2
+		}
+		caps = append(caps, scanCapability(
+			capKatanaCrawl,
+			katanaWebRoutes,
+			2,
+			func(ctx context.Context, e event, emit func(event)) {
+				runKatanaCrawl(ctx, c, e, depth, false, emit)
+			},
+		))
+	}
+	if p.Enabled(capKatanaDeep) {
+		caps = append(caps, scanCapability(
+			capKatanaDeep,
+			katanaWebRoutes,
+			1,
+			func(ctx context.Context, e event, emit func(event)) {
+				runKatanaCrawl(ctx, c, e, 3, true, emit)
+			},
+		))
+	}
+	return caps
 }
 
 func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode bool, emit func(event)) {
@@ -152,17 +148,18 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		}
 	}
 
-	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(options, &scanResultWriter{onResult: handleResult}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Use instance-owned output and logging: this process hosts other tools, so
+	// construction must not reconfigure the global logger.
+	crawlerOptions, err := katanatypes.NewCrawlerOptionsWithOutput(
+		options,
+		&scanResultWriter{onResult: handleResult},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
 	if err != nil {
-
 		emitError(emit, source, "katana init %s: %v", wt.URL, err)
 		return
 	}
-	// Output ownership is transferred during construction.
-	defer func() {
-		crawlerOptions.Close()
-
-	}()
+	defer crawlerOptions.Close()
 
 	var crawler engine.Engine
 	if jsMode {

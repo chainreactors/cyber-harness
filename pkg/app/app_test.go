@@ -5,13 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/chainreactors/cyber/core/extension"
 
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	telemetryext "github.com/chainreactors/aiscan/pkg/exts/telemetry"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,26 +16,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	providerapi "github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent"
+	providerapi "github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/utils/parsers"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestAppUsesProfileRegistriesWithoutOwningThem(t *testing.T) {
-	hookRegistry := hooks.New()
-	commandRegistry := commands.NewRegistry(hookRegistry)
-	toolRegistry := toolset.NewRegistry(hookRegistry)
-	resource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{
-		Hooks: hookRegistry, Commands: commandRegistry, Tools: toolRegistry,
-	})
-	application := resource.App
-	if application.Commands != commandRegistry || application.Tools != toolRegistry || application.Hooks != hookRegistry {
+	stream := coreevents.New()
+	application := newTestApp(t, telemetry.NopLogger(), stream)
+	if application.Events() != stream {
 		t.Fatal("application replaced profile-owned registries")
 	}
 }
@@ -67,7 +59,7 @@ func TestLogLLMProbeStatusReady(t *testing.T) {
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
-	if health.State != LLMHealthReady || health.LatencyMs < 0 || health.Error != "" {
+	if health.State != providerapi.HealthReady || health.LatencyMs < 0 || health.Error != "" {
 		t.Fatalf("health = %+v", health)
 	}
 
@@ -94,7 +86,7 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 		APIKey:   "sk-test",
 		Model:    "gpt-test",
 	}, logger)
-	if health.State != LLMHealthFailed || !strings.Contains(health.Error, "unauthorized") {
+	if health.State != providerapi.HealthFailed || !strings.Contains(health.Error, "unauthorized") {
 		t.Fatalf("health = %+v", health)
 	}
 
@@ -109,7 +101,7 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 
 func TestAppLoggerCanBeRetargeted(t *testing.T) {
 	var first, second bytes.Buffer
-	app := &App{}
+	app := &State{}
 	app.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &first}))
 	logger := app.Logger()
 
@@ -131,22 +123,21 @@ func TestAppLoggerCanBeRetargeted(t *testing.T) {
 func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	events := coreevents.New()
-	recorder, err := telemetryext.New(events, telemetryext.Options{Path: path})
+	recorder, err := telemetryext.New(telemetryext.Options{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	appResource := newTestApp(t, Config{SkipEngines: true, Logger: telemetry.NopLogger()}, AppServices{Events: events})
-	app := appResource.App
+	app := newTestApp(t, telemetry.NopLogger(), events)
 	appSet := testSet(t,
-		extension.Entry{ID: "output", Extension: recorder},
-		extension.Entry{ID: "app", DependsOn: []string{"output"}, Extension: appResource},
+		extension.Provided[*coreevents.Stream](events),
+		recorder,
 	)
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	app.Publish(&aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_ToolCall{ToolCall: &aop.ToolCall{Id: "call-1", Name: "gogo"}},
 	})
 	app.Progress.Emit(&toolpb.Progress{Tool: "gogo", Text: "raw PTY bytes", CallId: "call-1"})
@@ -157,7 +148,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 		t.Fatal(err)
 	}
 	artifactEvent := &aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 	}
 	artifactExtension, err := anypb.New(&toolpb.Artifact{
 		Tool: "gogo", Kind: toolpb.ArtifactKindService, Target: gogoResult.GetTarget(), Data: raw,
@@ -172,7 +163,7 @@ func TestJSONLRecorderPersistsCanonicalEventsAndOneArtifactPerResult(t *testing.
 	}
 	app.Publish(artifactEvent)
 	app.Publish(&aop.Event{
-		SessionId: "session-1", TurnId: "turn-1", Emitter: "aiscan",
+		SessionId: "session-1", TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{CallId: "call-1", Name: "gogo"}},
 	})
 	if err := appSet.Close(context.Background()); err != nil {

@@ -3,50 +3,42 @@ package search
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	searchtools "github.com/chainreactors/aiscan/tools/search"
-	"github.com/chainreactors/sdk/pkg/association"
+	"github.com/chainreactors/cyber/agent/provider"
+
+	"github.com/chainreactors/cyber/core/egress"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	app "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/commands"
+	searchtools "github.com/chainreactors/cyber/tools/search"
 )
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
-	commands commands.Runtime
-	tools    toolset.Registrar
-	config   Config
-}
-
-type ProxyEndpoint interface {
-	ProxyURL() string
-	CAPath() string
+	config Config
 }
 
 type Config struct {
-	Search     func(context.Context, string, int) (string, error)
 	TavilyKeys string
-	Proxy      ProxyEndpoint
-	// ResolveIndex is evaluated during Load, after any engine dependency has
-	// published its association index. Nil installs the command with no catalog.
-	ResolveIndex func() *association.Index
 }
 
-func New(toolRegistry toolset.Registrar, cmdRegistry commands.Runtime, config Config) (*Extension, error) {
-	if toolRegistry == nil || cmdRegistry == nil {
-		return nil, fmt.Errorf("search requires tool and command registries")
-	}
-	return &Extension{tools: toolRegistry, commands: cmdRegistry, config: config}, nil
-}
+func New(config Config) *Extension { return &Extension{config: config} }
 
 func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("search extension context is required")
 	}
-	var proxy, proxyCA string
-	if e.config.Proxy != nil {
-		proxy, proxyCA = e.config.Proxy.ProxyURL(), e.config.Proxy.CAPath()
+	endpoint, err := extension.Use[egress.Endpoint](scope)
+	if err != nil {
+		return err
 	}
+	application, err := extension.Use[*app.State](scope)
+	if err != nil {
+		return err
+	}
+	proxy, proxyCA := endpoint.ProxyURL(), endpoint.CAPath()
 	tavily := searchtools.NewTavilySearch(e.config.TavilyKeys)
 	if proxy != "" {
 		tavily.SetProxy(proxy)
@@ -54,32 +46,52 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
 	fetchCommand := commands.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/fetch.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/fetch.md",
 		Run:             fetch.Run,
 	}
 
-	var index *association.Index
-	if e.config.ResolveIndex != nil {
-		index = e.config.ResolveIndex()
-	}
-	cyberhub := searchtools.NewCyberhubSearch(index)
-	cyberhubCommand := commands.Command{
-		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/search.md",
-		Run:             cyberhub.Run,
-	}
-	searchTool := searchtools.NewWebSearchTool(e.config.Search, tavily)
-	entries := []commands.Command{fetchCommand, cyberhubCommand}
+	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
+	entries := []commands.Command{fetchCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := e.tools.Register("search", searchTool); err != nil {
+	if err := extension.Add[tool.Tool](scope, searchTool); err != nil {
 		return err
 	}
-	if err := e.commands.Register("search", "search", entries...); err != nil {
+	if err := extension.Add(scope, entries...); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (e *Extension) Close(context.Context) error { return nil }
+// providerWebSearch adapts the configured model's own web search, when it has
+// one, to the search tool's signature. It lives here because it is search
+// behavior, not composition.
+func providerWebSearch(application *app.State) func(context.Context, string, int) (string, error) {
+	model, _ := application.ProviderState()
+	searcher, ok := model.(provider.WebSearchProvider)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context, query string, maxResults int) (string, error) {
+		response, err := searcher.WebSearch(ctx, query, maxResults)
+		if err != nil {
+			return "", err
+		}
+		var text strings.Builder
+		fmt.Fprintf(&text, "Web search results for: %s\n\n", query)
+		if len(response.Results) == 0 && response.Summary == "" {
+			text.WriteString("No results found.\n")
+			return text.String(), nil
+		}
+		for index, result := range response.Results {
+			fmt.Fprintf(&text, "[%d] %s\n    URL: %s\n\n", index+1, result.Title, result.URL)
+		}
+		if response.Summary != "" {
+			text.WriteString("Summary:\n")
+			text.WriteString(response.Summary)
+			text.WriteByte('\n')
+		}
+		return text.String(), nil
+	}
+}

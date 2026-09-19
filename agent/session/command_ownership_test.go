@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestQueuedCommandsCannotMutateSessionHistoryInPlace(t *testing.T) {
 	for _, command := range []string{"/clear", "/compact", "/compact focus"} {
 		t.Run(command, func(t *testing.T) {
-			manager := newBareRuntime(t, nil, nil)
-			session, err := manager.OpenSession(t.Context(), SessionOptions{
+			runtime := newBareRuntime(t, nil, nil)
+			session, err := runtime.OpenSession(t.Context(), SessionOptions{
 				ID: "history",
 				Messages: []*aop.Message{
 					{Role: "user", Content: []*aop.Content{aop.Text("preserve this history")}},

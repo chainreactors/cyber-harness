@@ -6,31 +6,28 @@ package tui
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
 )
 
 type Extension struct{ registry *api.Registry }
 
-func (e *Extension) Descriptor() extension.Descriptor {
-	return extension.Descriptor{ID: "tui", Description: "terminal presentation registry"}
-}
+func New() *Extension { return &Extension{registry: api.NewRegistry()} }
 
-func New() *Extension                         { return &Extension{registry: api.NewRegistry()} }
-func (e *Extension) Registrar() api.Registrar { return e.registry }
-
-// Bindings seals registration. Hosts call it only after the complete profile
-// has loaded its contributors. Terminal lifetimes remain owned by the host.
-func (e *Extension) Bindings() *api.Bindings { return e.registry.Bindings() }
 func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
 		return fmt.Errorf("tui requires scope")
 	}
-	if err := scope.Init().Err(); err != nil {
+	// The point stores bindings; the registry is the capability a host borrows
+	// to seal and read them once the whole profile has contributed. Sealing is
+	// why this is not published as the snapshot itself: the snapshot does not
+	// exist until the last contributor has loaded.
+	if err := extension.Define[*api.Bindings](scope, e.registry); err != nil {
 		return err
 	}
-	return e.registry.Open()
+	return extension.Provide[*api.Registry](scope, e.registry)
 }
+
 func (e *Extension) Close(context.Context) error { e.registry.Close(); return nil }
 
 var _ extension.Extension = (*Extension)(nil)

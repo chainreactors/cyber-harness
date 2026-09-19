@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/chainreactors/aiscan/tools/scan/engine"
+	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/projectdiscovery/uncover/sources"
 )
 

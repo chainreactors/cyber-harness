@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
 func TestEditsUseOriginalAndRejectAmbiguousChanges(t *testing.T) {

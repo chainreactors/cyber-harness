@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	scannerprobe "github.com/chainreactors/aiscan/pkg/exts/scanner/probe"
-	searchprobe "github.com/chainreactors/aiscan/pkg/exts/search/probe"
-	"github.com/chainreactors/aiscan/pkg/probe"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
+	types "github.com/chainreactors/cyber/core/types"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 )
 
 // fakeConfigStore is a minimal in-memory ConfigStore.
@@ -32,21 +33,27 @@ func (f *fakeConfigStore) GetDistributeConfig(context.Context) (string, bool, *t
 }
 
 func (f *fakeConfigStore) SaveConfig(context.Context, *types.DistributeConfig) (*types.ConfigView, error) {
-	return nil, errors.New("configuration updates unavailable in probe fixture")
+	return nil, errors.New("configuration updates unavailable in connection fixture")
 }
 
 func (f *fakeConfigStore) ActivateConfig(context.Context, string) (*types.ConfigView, error) {
-	return nil, errors.New("configuration activation unavailable in probe fixture")
+	return nil, errors.New("configuration activation unavailable in connection fixture")
 }
 
 func newConfig(backend ConfigBackend) *Config {
-	registry := probe.New()
-	for name, check := range map[string]probe.Check{"cyberhub": scannerprobe.Cyberhub, "recon": scannerprobe.Recon, "search": searchprobe.Check} {
-		if err := registry.Register(name, name, check); err != nil {
-			panic(err)
-		}
+	sections := configpkg.NewSections()
+	resources := resource.New()
+	if _, err := resource.Define[configpkg.Connection](resources, sections.ConnectionPoint()); err != nil {
+		panic(err)
 	}
-	return NewConfig(backend, ConfigOptions{Probes: registry})
+	if err := scannerext.Declare(resources); err != nil {
+		panic(err)
+	}
+	if err := searchext.Declare(resources); err != nil {
+		panic(err)
+	}
+	resources.Freeze()
+	return NewConfig(backend, ConfigOptions{Sections: sections})
 }
 
 // configWith builds a DistributeConfig, letting each test set only the fields
@@ -105,7 +112,7 @@ func TestConfigStatusIncludesModelLimits(t *testing.T) {
 			MaxTokens: 32768, ContextWindow: 1000000, Timeout: 45, Images: &images,
 		}},
 	}}
-	view := ConfigView(conf, "aiscan.yaml", true)
+	view := ConfigView(conf, "cyber.yaml", true)
 	if view.GetLlm().GetActive().GetMaxTokens() != 32768 || view.GetLlm().GetActive().GetContextWindow() != 1000000 {
 		t.Fatalf("active limits missing from view: %+v", view.GetLlm())
 	}
@@ -124,7 +131,7 @@ func TestTestConnUnknownSection(t *testing.T) {
 	}
 }
 
-func TestProbeCyberhubSuccess(t *testing.T) {
+func TestConnectionCyberhubSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/fingerprints/export") {
 			http.NotFound(w, r)
@@ -153,7 +160,7 @@ func TestProbeCyberhubSuccess(t *testing.T) {
 	}
 }
 
-func TestProbeCyberhubAuthError(t *testing.T) {
+func TestConnectionCyberhubAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte("bad key"))
@@ -172,7 +179,7 @@ func TestProbeCyberhubAuthError(t *testing.T) {
 	}
 }
 
-func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
+func TestConnectionFofaSuccessAndStoredKeyFallback(t *testing.T) {
 	var gotKey string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.URL.Query().Get("key")
@@ -181,9 +188,9 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := scannerprobe.FofaInfoEndpoint
-	scannerprobe.FofaInfoEndpoint = srv.URL
-	defer func() { scannerprobe.FofaInfoEndpoint = orig }()
+	orig := scannerext.FofaInfoEndpoint
+	scannerext.FofaInfoEndpoint = srv.URL
+	defer func() { scannerext.FofaInfoEndpoint = orig }()
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
@@ -205,14 +212,14 @@ func TestProbeFofaSuccessAndStoredKeyFallback(t *testing.T) {
 	}
 }
 
-func TestProbeFofaError(t *testing.T) {
+func TestConnectionFofaError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": true, "errmsg": "[-700] account invalid"})
 	}))
 	defer srv.Close()
-	orig := scannerprobe.FofaInfoEndpoint
-	scannerprobe.FofaInfoEndpoint = srv.URL
-	defer func() { scannerprobe.FofaInfoEndpoint = orig }()
+	orig := scannerext.FofaInfoEndpoint
+	scannerext.FofaInfoEndpoint = srv.URL
+	defer func() { scannerext.FofaInfoEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{FofaKey: "bad"}
@@ -226,7 +233,7 @@ func TestProbeFofaError(t *testing.T) {
 	}
 }
 
-func TestProbeHunterSuccess(t *testing.T) {
+func TestConnectionHunterSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("api-key") == "" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -237,9 +244,9 @@ func TestProbeHunterSuccess(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := scannerprobe.HunterSearchEndpoint
-	scannerprobe.HunterSearchEndpoint = srv.URL
-	defer func() { scannerprobe.HunterSearchEndpoint = orig }()
+	orig := scannerext.HunterSearchEndpoint
+	scannerext.HunterSearchEndpoint = srv.URL
+	defer func() { scannerext.HunterSearchEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "hk"}
@@ -249,14 +256,14 @@ func TestProbeHunterSuccess(t *testing.T) {
 	}
 }
 
-func TestProbeHunterError(t *testing.T) {
+func TestConnectionHunterError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 401, "message": "invalid api-key"})
 	}))
 	defer srv.Close()
-	orig := scannerprobe.HunterSearchEndpoint
-	scannerprobe.HunterSearchEndpoint = srv.URL
-	defer func() { scannerprobe.HunterSearchEndpoint = orig }()
+	orig := scannerext.HunterSearchEndpoint
+	scannerext.HunterSearchEndpoint = srv.URL
+	defer func() { scannerext.HunterSearchEndpoint = orig }()
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		c.Recon = &types.ReconConfig{HunterApiKey: "bad"}

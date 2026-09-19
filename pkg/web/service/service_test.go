@@ -7,17 +7,19 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
@@ -72,9 +74,9 @@ func TestRemovedChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	handler := newHandler(svc, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := newHandler(svc, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}), "")
+	}))
 	for _, test := range []struct {
 		method string
 		path   string
@@ -158,7 +160,7 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 // frontend "/" menu uses and proves it returns the protobuf command catalog.
 func TestSessionCommandsConnectRPC(t *testing.T) {
 	svc := newMenuTestService(t)
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 
 	client := rpc.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())
@@ -177,6 +179,59 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 	}
 	if names["/scan"] {
 		t.Error("ListCommands leaked deferred scan command")
+	}
+}
+
+// A node only recreates a session it has lost from memory, and it resumes with
+// an empty context. The hub still holds the transcript, so it must say so
+// instead of letting the operator believe the agent remembers the conversation.
+func TestSessionRecreationBroadcastsContextResetNotice(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	createStoredSession(t, store, "s1")
+
+	svc.BroadcastAOPEvent("s1", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m1", Role: "assistant", Content: []*aop.Content{aop.Text("hello")}}},
+	})
+	svc.BroadcastAOPEvent("s1", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}},
+	})
+
+	events, err := store.ListAOPEvents(context.Background(), "s1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1]
+	if last.GetMessage().GetRole() != "system" {
+		t.Fatalf("last event = %v, want the context-reset notice", last)
+	}
+	metadata, ok, err := types.GetWebMessage(last)
+	if err != nil || !ok {
+		t.Fatalf("notice metadata = %v, %v, %v", metadata, ok, err)
+	}
+	if metadata.GetCode() != SysSessionContextReset {
+		t.Fatalf("notice code = %q, want %q", metadata.GetCode(), SysSessionContextReset)
+	}
+
+	// The first session_started for a session with no durable history is a
+	// normal open and must stay silent.
+	createStoredSession(t, store, "s2")
+	svc.BroadcastAOPEvent("s2", &aop.Event{
+		Emitter: "agent",
+		Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{}},
+	})
+	fresh, err := store.ListAOPEvents(context.Background(), "s2", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh) != 1 {
+		t.Fatalf("fresh session persisted %d events, want 1", len(fresh))
 	}
 }
 
@@ -255,49 +310,55 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 }
 
 type recordingProfile struct {
-	extensions *extension.Set
-	app        *apppkg.App
+	extensions         *extension.Set
+	app                *apppkg.State
+	registerNamespaces func(*aop.NamespaceMux) error
 }
 
 func (p *recordingProfile) Load(ctx context.Context) error  { return p.extensions.Load(ctx) }
 func (p *recordingProfile) Close(ctx context.Context) error { return p.extensions.Close(ctx) }
-func (p *recordingProfile) App() (*apppkg.App, error) {
+func (p *recordingProfile) State() (*apppkg.State, error) {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil, errors.New("recording profile is not active")
 	}
 	return p.app, nil
 }
-func (p *recordingProfile) Runtime() (*agentext.Runtime, error) {
+func (p *recordingProfile) Runtime() (*agentsession.Runtime, error) {
 	return nil, errors.New("recording profile has no runtime")
 }
-func (p *recordingProfile) RegisterResourceNamespaces(*aop.NamespaceMux) error {
+func (p *recordingProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return errors.New("recording profile is not active")
+	}
+	if p.registerNamespaces != nil {
+		return p.registerNamespaces(mux)
 	}
 	return nil
 }
 
-var _ profile.Application = (*recordingProfile)(nil)
+var _ profile.Profile = (*recordingProfile)(nil)
 
-func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
+func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.State, func() bool) {
 	t.Helper()
-	resource := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{})
-	extensions, err := extension.New(extension.Entry{ID: "application", Extension: resource})
+	resource := apptest.NewState(t, nil, nil)
+	var closed atomic.Bool
+	extensions, err := extension.New(extension.Func{CloseFunc: func(context.Context) error {
+		closed.Store(true)
+		return nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := &recordingProfile{extensions: extensions, app: resource.App}
+	value := &recordingProfile{extensions: extensions, app: resource}
 	t.Cleanup(func() { _ = value.Close(context.Background()) })
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, err := value.App()
+	app, err := value.State()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return value, app, func() bool {
-		return app.Closed()
-	}
+	return value, app, closed.Load
 }
 
 func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
@@ -364,7 +425,7 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 	if err := svc.swapProfile(candidate); err == nil {
 		t.Fatal("closing service accepted a profile")
 	}
-	if _, err := candidate.App(); err != nil {
+	if _, err := candidate.State(); err != nil {
 		t.Fatalf("rejected candidate was closed by service: %v", err)
 	}
 	if closed() {
@@ -378,5 +439,3 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 func (*recordingProfile) AgentStatus() *aop.AgentStatus { return &aop.AgentStatus{} }
 
 func (*recordingProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
-
-func (*recordingProfile) Capabilities() []string { return nil }

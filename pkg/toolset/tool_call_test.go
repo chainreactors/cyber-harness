@@ -8,13 +8,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type aopTestExecutor struct{}
@@ -92,7 +92,7 @@ func TestExecuteToolRequestRejectsMismatchedCorrelation(t *testing.T) {
 
 type recordingBash struct {
 	command string
-	options commands.BashExecOptions
+	options terminaltool.BashExecOptions
 }
 
 func (*recordingBash) Name() string        { return "bash" }
@@ -103,18 +103,18 @@ func (*recordingBash) Definition() *tool.Definition {
 	}{})
 }
 func (b *recordingBash) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
-	args, err := tool.ParseArgs[commands.BashArgs](arguments)
+	args, err := tool.ParseArgs[terminaltool.BashArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
-	options := commands.BashExecOptions{OnOutput: operation.InvocationFromContext(ctx).Progress}
+	options := terminaltool.BashExecOptions{OnOutput: operation.InvocationFromContext(ctx).Progress}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
 	}
 	return b.RunForegroundTool(ctx, args.Command, options)
 }
-func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options commands.BashExecOptions) (*tool.Result, error) {
+func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options terminaltool.BashExecOptions) (*tool.Result, error) {
 	b.command = command
 	b.options = options
 	options.OnOutput([]byte("streamed\n"))
@@ -221,7 +221,7 @@ func (*panicForegroundBash) Execute(context.Context, string) (*tool.Result, erro
 	panic("foreground boom")
 }
 
-func (*panicForegroundBash) RunForegroundTool(context.Context, string, commands.BashExecOptions) (*tool.Result, error) {
+func (*panicForegroundBash) RunForegroundTool(context.Context, string, terminaltool.BashExecOptions) (*tool.Result, error) {
 	panic("foreground boom")
 }
 

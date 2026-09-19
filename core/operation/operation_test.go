@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/operation"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 func TestNestedOperationsPreserveInvocationAndCancelNearestScope(t *testing.T) {

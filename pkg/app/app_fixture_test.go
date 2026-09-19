@@ -4,16 +4,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 // The harness imports this package, so these tests build their own host instead
 // of importing the harness.
-func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
+func testSet(t testing.TB, entries ...extension.Extension) *extension.Set {
 	t.Helper()
 	set, err := extension.New(entries...)
 	if err != nil {
@@ -27,37 +25,16 @@ func testSet(t testing.TB, entries ...extension.Entry) *extension.Set {
 	return set
 }
 
-// newTestApp supplies explicitly test-owned, unpublished registries. Tests that
-// execute commands or tools must activate their registry in their own graph.
-func newTestApp(t testing.TB, config Config, deps AppServices) *Resource {
+// newTestApp builds the shared state a test owns. It carries only what State
+// owns: a stream to publish on, provider state, progress and a logger.
+func newTestApp(t testing.TB, logger telemetry.Logger, stream *events.Stream) *State {
 	t.Helper()
-	if deps.Hooks == nil {
-		deps.Hooks = hooks.New()
+	if stream == nil {
+		stream = events.New()
 	}
-	if deps.Events == nil {
-		deps.Events = events.New()
-	}
-	if deps.Commands == nil {
-		registry := commands.NewRegistry(deps.Hooks)
-		deps.Commands = registry
-		t.Cleanup(func() {
-			if err := registry.Close(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	if deps.Tools == nil {
-		registry := toolset.NewRegistry(deps.Hooks)
-		deps.Tools = registry
-		t.Cleanup(func() {
-			if err := registry.Close(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	resource, err := New(config, deps)
+	application, err := New(logger, stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resource
+	return application
 }

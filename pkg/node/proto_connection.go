@@ -19,32 +19,24 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	execpb "github.com/chainreactors/aiscan/aop/exec"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	toolset "github.com/chainreactors/aiscan/pkg/toolset"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
+	execpb "github.com/chainreactors/cyber/aop/exec"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/aopws"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
+	toolset "github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/gorilla/websocket"
-	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
 )
-
-type webSocketEnvelopeStream struct {
-	conn *websocket.Conn
-	json bool
-}
 
 func attachToolProgress(progressBus *eventbus.Bus[*toolpb.Progress], send func(string, protobuf.Message)) *eventbus.Subscription[*toolpb.Progress] {
 	if progressBus == nil {
@@ -68,74 +60,7 @@ const (
 	reconnectStableAfter = websocketPongWait + websocketPingPeriod
 )
 
-func newWebSocketEnvelopeStream(conn *websocket.Conn, json bool) (*webSocketEnvelopeStream, error) {
-	if err := conn.SetReadDeadline(time.Now().Add(websocketPongWait)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
-	})
-	return &webSocketEnvelopeStream{conn: conn, json: json}, nil
-}
-
-func (s *webSocketEnvelopeStream) heartbeat(ctx context.Context) {
-	ticker := time.NewTicker(websocketPingPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			_ = s.conn.Close()
-			return
-		case <-ticker.C:
-			if err := s.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(websocketWriteWait)); err != nil {
-				_ = s.conn.Close()
-				return
-			}
-		}
-	}
-}
-
-func (s *webSocketEnvelopeStream) Close() error { return s.conn.Close() }
-
-func (s *webSocketEnvelopeStream) Recv() (*aop.Envelope, error) {
-	_, data, err := s.conn.ReadMessage()
-	if err != nil {
-		return nil, err
-	}
-	envelope := new(aop.Envelope)
-	if s.json {
-		if err := protojson.Unmarshal(data, envelope); err != nil {
-			return nil, fmt.Errorf("decode AOP envelope: %w", err)
-		}
-		return envelope, nil
-	}
-	if err := protobuf.Unmarshal(data, envelope); err != nil {
-		return nil, fmt.Errorf("decode AOP envelope: %w", err)
-	}
-	return envelope, nil
-}
-
-func (s *webSocketEnvelopeStream) Send(envelope *aop.Envelope) error {
-	var data []byte
-	var err error
-	frame := websocket.BinaryMessage
-	if s.json {
-		data, err = protojson.Marshal(envelope)
-		frame = websocket.TextMessage
-	} else {
-		data, err = protobuf.Marshal(envelope)
-	}
-	if err != nil {
-		return err
-	}
-	if err := s.conn.SetWriteDeadline(time.Now().Add(websocketWriteWait)); err != nil {
-		return err
-	}
-	return s.conn.WriteMessage(frame, data)
-}
-
-func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnvelopeStream, error) {
+func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*aopws.Stream, error) {
 	dialURL, accessKey := SplitAccessKey(cc.ServerURL)
 	if cc.Token != "" {
 		accessKey = cc.Token
@@ -158,7 +83,16 @@ func dialProtoWebSocket(ctx context.Context, cc connectionConfig) (*webSocketEnv
 		}
 		return nil, err
 	}
-	return newWebSocketEnvelopeStream(conn, cc.JSONFrames)
+	encoding := aopws.Binary
+	if cc.JSONFrames {
+		encoding = aopws.ProtoJSON
+	}
+	return aopws.New(ctx, conn, aopws.Options{
+		Encoding:     encoding,
+		WriteTimeout: websocketWriteWait,
+		PingInterval: websocketPingPeriod,
+		PongTimeout:  websocketPongWait,
+	})
 }
 
 func shouldResetReconnectBackoff(connectedAt, disconnectedAt time.Time) bool {
@@ -180,10 +114,7 @@ func connectGenerated(ctx context.Context, cc connectionConfig) error {
 		connectedAt := time.Time{}
 		if err == nil {
 			connectedAt = time.Now()
-			heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
-			go stream.heartbeat(heartbeatCtx)
 			err = serveAgentConnection(ctx, cc, logger, stream)
-			stopHeartbeat()
 			_ = stream.Close()
 		}
 		if ctx.Err() != nil {
@@ -227,7 +158,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	} else if cc.Chat == nil {
 		hello.Capabilities = []string{"pty", "file", "exec", "tool", "sco"}
 	}
-	hello.Capabilities = append(hello.Capabilities, cc.ExtraCapabilities...)
 	helloEnvelope, err := aop.Wrap(nextEnvelopeID("hello"), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{AgentHello: hello}})
 	if err != nil {
 		return err
@@ -307,7 +237,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 	// operations tracks live tool/exec calls by id; sealed remembers the ids
 	// whose artifact window this connection has already closed — either because
 	// the terminal is about to be sent (handleAgentToolMessage) or because the
-	// hub canceled the call (handleAgentCoreMessage). The artifact-forwarding
+	// hub canceled the call. The artifact-forwarding
 	// subscriber below reads sealed to drop a streaming tool's trailing
 	// artifacts. Both are declared here (rather than just above the mux) so the
 	// subscriber can see them.
@@ -381,27 +311,6 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}(cloneAgentStatus(initial))
 	}
 
-	var router *terminal.Router
-	if cc.PTYRouter != nil {
-		router, err = cc.PTYRouter()
-	} else if cc.Bash != nil {
-		router = NewPTYRouter(cc.Bash)
-	}
-	if err != nil {
-		return err
-	}
-	if router != nil {
-		defer router.Close()
-	}
-	if cc.PTYRouter == nil && cc.Bash != nil {
-		if manager := RegistryPTYManager(cc.Bash); manager != nil {
-			unsubscribe := SubscribePTYSessions(connectionCtx, manager, router, func(message *ptypb.ProtocolMessage) {
-				send("", message)
-			})
-			defer unsubscribe()
-		}
-	}
-
 	sendEnvelope := func(envelope *aop.Envelope) {
 		if envelope == nil {
 			return
@@ -411,7 +320,7 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		case <-connectionCtx.Done():
 		}
 	}
-	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, router, send, sendEnvelope, &operationsMu, operations, sealed)
+	namespaceMux, err := newAgentConnectionNamespaceMux(connectionCtx, cc, send, &operationsMu, operations, sealed)
 	if err != nil {
 		return fmt.Errorf("register connection namespaces: %w", err)
 	}
@@ -435,6 +344,14 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 			}
 			return err
 		}
+		intercepted, err := interceptCancelOperation(envelope, &operationsMu, operations, sealed)
+		if err != nil {
+			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
+			continue
+		}
+		if intercepted {
+			continue
+		}
 		handled, err := namespaceMux.Dispatch(envelope, reply)
 		if err != nil {
 			send(envelope.GetId(), protocolFailure("INVALID_PAYLOAD", err.Error()))
@@ -456,9 +373,7 @@ func cloneAgentStatus(value *aop.AgentStatus) *aop.AgentStatus {
 func newAgentConnectionNamespaceMux(
 	connectionCtx context.Context,
 	cc connectionConfig,
-	router *terminal.Router,
 	send func(string, protobuf.Message),
-	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 	sealed map[string]time.Time,
@@ -470,28 +385,7 @@ func newAgentConnectionNamespaceMux(
 			_ = mux.Close(context.Background())
 		}
 	}()
-	if err := mux.Register("agent", &aop.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, ok := message.(*aop.ProtocolMessage)
-		if !ok {
-			return fmt.Errorf("unexpected core namespace message %T", message)
-		}
-		return handleAgentCoreMessage(ctx, cc.Control, envelope, value, send, sendEnvelope, operationsMu, operations, sealed)
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register("agent.commands", &types.CommandProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		if cc.Control != nil {
-			return cc.Control.HandleCommandNamespace(ctx, envelope, message, func(response *aop.Envelope) error {
-				sendEnvelope(response)
-				return nil
-			})
-		}
-		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "command handler is unavailable"))
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register("tools", &toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&toolpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*toolpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected tool namespace message %T", message)
@@ -501,7 +395,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("files", &filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&filepb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*filepb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected file namespace message %T", message)
@@ -511,7 +405,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("terminal", &execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&execpb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*execpb.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected exec namespace message %T", message)
@@ -521,7 +415,7 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("config", &types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
+	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, ok := message.(*types.ReloadProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected reload namespace message %T", message)
@@ -531,18 +425,8 @@ func newAgentConnectionNamespaceMux(
 	}); err != nil {
 		return nil, err
 	}
-	if err := mux.Register("terminal", &ptypb.ProtocolMessage{}, func(ctx context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, ok := message.(*ptypb.ProtocolMessage)
-		if !ok {
-			return fmt.Errorf("unexpected PTY namespace message %T", message)
-		}
-		handleAgentPTYMessage(ctx, router, envelope, value, send)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if cc.RegisterResourceNamespaces != nil {
-		if err := cc.RegisterResourceNamespaces(mux); err != nil {
+	if cc.RegisterNamespaces != nil {
+		if err := cc.RegisterNamespaces(mux); err != nil {
 			return nil, err
 		}
 	}
@@ -550,44 +434,45 @@ func newAgentConnectionNamespaceMux(
 	return mux, nil
 }
 
-// handleAgentCoreMessage intercepts the connection-local CancelOperation
-// payload, then calls the same session handler registered for stdio/inline.
-func handleAgentCoreMessage(
-	ctx context.Context,
-	control *agentext.Runtime,
+// interceptCancelOperation handles connection-local call cancellation before
+// typed namespace dispatch. Session control remains owned by its contributed
+// aop.ProtocolMessage binding, so a connection never installs a second handler
+// for the same protobuf namespace.
+func interceptCancelOperation(
 	envelope *aop.Envelope,
-	value *aop.ProtocolMessage,
-	send func(string, protobuf.Message),
-	sendEnvelope func(*aop.Envelope),
 	operationsMu *sync.Mutex,
 	operations map[string]context.CancelFunc,
 	sealed map[string]time.Time,
-) error {
-	if payload, ok := value.Message.(*aop.ProtocolMessage_CancelOperation); ok {
-		targetID := payload.CancelOperation.GetTargetId()
-		operationsMu.Lock()
-		cancel := operations[targetID]
-		operationsMu.Unlock()
-		if cancel == nil {
-			return nil
-		}
-		// Cancellation is advisory: a scanner that ignores its context (katana's
-		// Crawl takes no ctx) keeps running and emitting for the rest of its
-		// crawl. The hub has already given up on this call, so seal it now —
-		// otherwise every one of those artifacts crosses the wire only to be
-		// rejected on arrival.
-		sealCall(operationsMu, sealed, targetID)
-		cancel()
-		return nil
+) (bool, error) {
+	prototype := &aop.ProtocolMessage{}
+	if envelope == nil || envelope.Payload == nil || !envelope.Payload.MessageIs(prototype) {
+		return false, nil
 	}
-	if control != nil {
-		return control.HandleCoreNamespace(ctx, envelope, value, func(response *aop.Envelope) error {
-			sendEnvelope(response)
-			return nil
-		})
+	canonical := "type.googleapis.com/" + string(prototype.ProtoReflect().Descriptor().FullName())
+	if envelope.Payload.TypeUrl != canonical {
+		return false, fmt.Errorf("non-canonical type URL %q, want %q", envelope.Payload.TypeUrl, canonical)
 	}
-	send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "chat handler is unavailable"))
-	return nil
+	value := new(aop.ProtocolMessage)
+	if err := envelope.Payload.UnmarshalTo(value); err != nil {
+		return false, fmt.Errorf("decode core protocol message: %w", err)
+	}
+	payload, ok := value.Message.(*aop.ProtocolMessage_CancelOperation)
+	if !ok {
+		return false, nil
+	}
+	targetID := payload.CancelOperation.GetTargetId()
+	operationsMu.Lock()
+	cancel := operations[targetID]
+	operationsMu.Unlock()
+	if cancel == nil {
+		return true, nil
+	}
+	// Cancellation is advisory: a scanner that ignores its context (katana's
+	// Crawl takes no ctx) keeps running and emitting for the rest of its crawl.
+	// Seal the call before cancellation so trailing artifacts stay off the wire.
+	sealCall(operationsMu, sealed, targetID)
+	cancel()
+	return true, nil
 }
 
 func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *toolpb.ProtocolMessage, send func(string, protobuf.Message), operationsMu *sync.Mutex, operations map[string]context.CancelFunc, sealed map[string]time.Time) {
@@ -614,7 +499,7 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	// plane. Everything emitted before the seal is already queued ahead of the
 	// terminal on the FIFO send channel. This narrows the tail to nothing rather
 	// than closing it absolutely: an artifact that passed the seal check may
-	// still be queued just after the terminal. Forwarding the whole tail is what
+	// still be queued just after the pty. Forwarding the whole tail is what
 	// floods the control plane; a stray record is what it counts and drops.
 	seal := func() { sealCall(operationsMu, sealed, operationID) }
 	go func() {
@@ -742,16 +627,6 @@ func handleAgentReloadMessage(cc connectionConfig, envelope *aop.Envelope, value
 		send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStatus{AgentStatus: status}})
 	}
 	send(replyTo, &types.ReloadProtocolMessage{Message: &types.ReloadProtocolMessage_Result{Result: result}})
-}
-
-func handleAgentPTYMessage(ctx context.Context, router *terminal.Router, envelope *aop.Envelope, value *ptypb.ProtocolMessage, send func(string, protobuf.Message)) {
-	if router == nil {
-		send(envelope.GetId(), protocolFailure("OPERATION_FAILED", "PTY router is unavailable"))
-		return
-	}
-	router.Handle(ctx, value, func(out *ptypb.ProtocolMessage) {
-		send(envelope.GetId(), out)
-	})
 }
 
 func workingDir(runtimeInfo *aop.AgentRuntimeInfo) string {

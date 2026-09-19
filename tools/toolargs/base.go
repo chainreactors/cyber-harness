@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

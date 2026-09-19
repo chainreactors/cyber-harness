@@ -64,5 +64,7 @@ export default {
     cancel: 'Cancel',
     submit: 'Start import',
     submitting: 'Importing…',
+    submitFailed: 'Import failed: {{message}}',
+    importedNothing: 'No assets could be parsed from the selected files. Check that the artifact type matches the file contents.',
   },
 }

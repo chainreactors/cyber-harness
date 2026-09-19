@@ -889,7 +889,7 @@ const file_aop_protocol_proto_rawDesc = "" +
 	".aop.EventH\x00R\x05event\x12A\n" +
 	"\x10cancel_operation\x18( \x01(\v2\x14.aop.CancelOperationH\x00R\x0fcancelOperation\x12;\n" +
 	"\x0eprotocol_error\x18) \x01(\v2\x12.aop.ProtocolErrorH\x00R\rprotocolErrorB\t\n" +
-	"\amessageB%Z#github.com/chainreactors/aiscan/aopb\x06proto3"
+	"\amessageB$Z\"github.com/chainreactors/cyber/aopb\x06proto3"
 
 var (
 	file_aop_protocol_proto_rawDescOnce sync.Once

@@ -8,24 +8,23 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/console"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/console"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
-func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, factory, option, logger)
+func RunWebSocket(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
+	return runRemoteAgent(ctx, newProfile, option, logger)
 }
 
-func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
+func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
 	if err := resolveRemoteAgentURLs(option); err != nil {
 		return err
 	}
@@ -34,32 +33,35 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	features := apppkg.RuntimeFeatures{
-		ProviderEnabled: true, ProviderOptional: true, ToolsEnabled: true, AIEnabled: true,
+	if newProfile == nil {
+		return fmt.Errorf("profile constructor is required")
 	}
-	product, err := factory.Build(profile.Request{
-		Option: option, Features: features, Logger: logger,
-		Runtime: &agentext.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
+	p, err := newProfile(profile.Request{
+		Option: option, ProviderMode: profile.ProviderOptional, Logger: logger,
+		Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
 	})
 	if err != nil {
 		return err
 	}
-	if err := product.Load(ctx); err != nil {
-		_ = product.Close(context.Background())
+	if p == nil {
+		return fmt.Errorf("profile constructor returned nil")
+	}
+	if err := p.Load(ctx); err != nil {
+		_ = p.Close(context.Background())
 		return err
 	}
-	defer product.Close(context.Background())
-	application, err := product.App()
+	defer p.Close(context.Background())
+	application, err := p.State()
 	if err != nil {
 		return err
 	}
 	_, providerConfig := application.ProviderState()
 	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
-	rt, err := product.Runtime()
+	rt, err := p.Runtime()
 	if err != nil {
 		return err
 	}
-	repl, err := console.StartPersistent(rt, option, product.ConsoleBindings())
+	repl, err := console.StartPersistent(rt, option, p.ConsoleBindings())
 	if err != nil {
 		return err
 	}
@@ -71,35 +73,30 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		option: option,
 		logger: logger,
 		ready:  make(chan struct{}),
-		status: product.AgentStatus,
+		status: p.AgentStatus,
 	}
 
 	connectionDone := make(chan struct{})
 	go func() {
 		defer close(connectionDone)
-		_ = application.WaitEngines(ctx)
 		dialURL, _ := SplitAccessKey(option.ServerURL)
 		logger.Debugf("websocket transport connection to %s", dialURL)
 
 		connection := connectionConfig{
-			ServerURL:                  option.ServerURL,
-			Name:                       rt.NodeName(),
-			Registry:                   application.Commands,
-			Executor:                   application.Tools,
-			Agent:                      rt,
-			Control:                    rt,
-			Progress:                   application.Progress,
-			Hooks:                      application.Hooks,
-			Logger:                     logger,
-			Chat:                       chatHandler,
-			NodeID:                     nodeID,
-			Runtime:                    agentext.DefaultRuntimeInfo(),
-			Status:                     product.AgentStatus,
-			ExtraCapabilities:          product.Capabilities(),
-			Menu:                       rt.CommandCatalog,
-			PTYRouter:                  func() (*terminal.Router, error) { return NewPTYRouter(application.Bash), nil },
-			Bash:                       application.Bash,
-			RegisterResourceNamespaces: product.RegisterResourceNamespaces,
+			ServerURL:          option.ServerURL,
+			Name:               rt.NodeName(),
+			Registry:           rt.CommandRegistry(),
+			Executor:           rt.Tools(),
+			Agent:              rt,
+			Progress:           application.Progress,
+			Hooks:              rt.Hooks(),
+			Logger:             logger,
+			Chat:               chatHandler,
+			NodeID:             nodeID,
+			Runtime:            DefaultRuntimeInfo(),
+			Status:             p.AgentStatus,
+			Menu:               func() []*types.CommandSpec { return CommandSpecs(rt) },
+			RegisterNamespaces: p.RegisterNamespaces,
 		}
 		_ = connect(ctx, connection)
 	}()
@@ -130,15 +127,15 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return nil
 	}
 
-	_, err = rt.EnsureSession(agentext.SessionOptions{ID: "startup"})
+	_, err = rt.EnsureSession(agentsession.SessionOptions{ID: "startup"})
 	if err != nil {
 		return err
 	}
-	run, err := rt.RunSession(ctx, "startup", agentext.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
+	run, err := rt.RunSession(ctx, "startup", agentsession.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
 	if err == nil {
 		_, err = run.Wait()
 	}
-	_ = rt.CloseSession(context.Background(), "startup", agentext.SessionCloseCompleted)
+	_ = rt.CloseSession(context.Background(), "startup", agentsession.SessionCloseCompleted)
 
 	<-connectionDone
 	return err
@@ -160,8 +157,8 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
-	rt        *agentext.Runtime
-	app       *apppkg.App
+	rt        *agentsession.Runtime
+	app       *apppkg.State
 	option    *cfg.Option
 	logger    telemetry.Logger
 	ready     chan struct{}
@@ -177,7 +174,7 @@ func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, er
 	if filename == "." || filename == "" {
 		filename = "upload"
 	}
-	dir := filepath.Join(os.TempDir(), "aiscan-uploads")
+	dir := filepath.Join(os.TempDir(), "cyber-uploads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -194,7 +191,7 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 			close(h.ready)
 		}
 	})
-	provider, model, err := agentext.ReloadConfig(config, h.rt, h.option, h.logger)
+	provider, model, err := ReloadConfig(config, h.rt, h.option, h.logger)
 	result := &types.ReloadResult{Ok: err == nil, Model: model}
 	if err != nil {
 		result.Error = err.Error()
@@ -204,7 +201,7 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 	if h.status != nil {
 		return result, h.status()
 	}
-	return result, agentext.AgentStatus(h.app)
+	return result, AgentStatus(h.app)
 }
 
 // ---------------------------------------------------------------------------

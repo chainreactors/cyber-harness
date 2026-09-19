@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 type Origin string
