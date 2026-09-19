@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/chainreactors/cyber/agent/prompt"
@@ -108,5 +109,23 @@ func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	}
 	if !p.loaded || !p.closed || p.runtimeCalls != 1 {
 		t.Fatalf("profile lifecycle: loaded=%v closed=%v runtime calls=%d", p.loaded, p.closed, p.runtimeCalls)
+	}
+}
+
+func TestFilterScannerJSONLinesRemovesPTYProgress(t *testing.T) {
+	if !isDirectScannerJSONOutput([]string{"scan", "--json"}) {
+		t.Fatal("scan --json was not recognized as direct JSON output")
+	}
+	raw := "" +
+		"╭─ scanner ─╮\n" +
+		"[summary] completed 1 target\n" +
+		`{"url":"http://127.0.0.1:18080","status":200}` + "\n" +
+		`{"url":"http://127.0.0.1:18080/admin/","status":403}` + "\n"
+	got := filterScannerJSONLines(raw)
+	if strings.Contains(got, "summary") || strings.Contains(got, "scanner") {
+		t.Fatalf("progress leaked into JSON output: %q", got)
+	}
+	if want := "{\"url\":\"http://127.0.0.1:18080\",\"status\":200}\n{\"url\":\"http://127.0.0.1:18080/admin/\",\"status\":403}\n"; got != want {
+		t.Fatalf("filtered JSON = %q, want %q", got, want)
 	}
 }

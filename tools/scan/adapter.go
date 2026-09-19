@@ -100,6 +100,7 @@ func applyWebStrategyOptions(flags flags, web webOptions, opts engine.SprayCheck
 	opts.Threads = flags.SprayThreads
 	opts.Timeout = flags.Timeout
 	opts.Debug = flags.Debug
+	opts.Quiet = flags.JSON
 	return opts
 }
 
