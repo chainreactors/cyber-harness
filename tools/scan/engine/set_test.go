@@ -481,7 +481,13 @@ func TestZombieStatsHandlerSafeAfterCancel(t *testing.T) {
 		WithTimeout(1).
 		WithStatsHandler(func(s sdktypes.Stats) {})
 
-	ch, err := eng.Execute(zCtx, sdkzombie.NewBruteTask([]sdkzombie.Target{{IP: "127.0.0.1", Port: "1", Service: "ssh"}}))
+	task := sdkzombie.NewBruteTask([]sdkzombie.Target{{IP: "127.0.0.1", Port: "1", Service: "ssh"}})
+	// Keep this cancellation regression bounded to one attempt. The SDK's
+	// default dictionaries are intentionally large and their unauthenticated
+	// expansion can outlive a canceled test under the race detector.
+	task.Users = []string{"test"}
+	task.Passwords = []string{"test"}
+	ch, err := eng.Execute(zCtx, task)
 	if err != nil {
 		t.Fatalf("Execute error = %v", err)
 	}
