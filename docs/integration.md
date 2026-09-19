@@ -1,13 +1,15 @@
 # 第三方语言接入 cyber
 
+[开发者指南](development.md) · 前置：[会话与宿主集成](developer/hosting.md) · 字段：[API 参考](api.md)
+
 本文档面向 Android/Kotlin、Java、Swift、Python、TypeScript 等非 Go 客户端，说明如何从 cyber protobuf schema 生成代码，并接入两组外部 API。
 
 | 功能组 | 传输 | 用途 |
 |--------|------|------|
 | Application WebSocket | 二进制 protobuf 长连接 | 创建会话、发送自然语言、接收流式回答、取消 Turn |
-| ConnectRPC | protobuf unary RPC | 查询会话历史、扫描、配置、Agent、系统状态和 SCO |
+| ConnectRPC | protobuf unary RPC | 查询会话历史、扫描、配置、Agent、系统状态及同步原始 Artifact |
 
-详细字段与错误语义见 [api.md](api.md)。Go 开发者请直接阅读 [`examples/acp/README.md`](../examples/acp/README.md)。
+详细字段与错误语义见 [api.md](api.md)。Go 进程内嵌入从[会话示例](../examples/session/main.go)开始；AOP 连接示例见 [examples/acp](../examples/acp/README.md)。协议迁移中的当前边界见[协议架构](protocol-architecture.md)。
 
 ## 1. 获取 protobuf schema
 

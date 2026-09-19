@@ -18,203 +18,71 @@
 
 ---
 
-cyber-harness is an agent harness built on one idea: **everything is an extension**.
+cyber-harness is an agent runtime for cybersecurity. Model reasoning, tool execution, knowledge, observation, and collaboration are assembled through the same extension lifecycle. Use the reference distribution or compose the capabilities your own Go application needs.
 
-At its core is a small model-tool loop — ask the model, run the tool calls it requests, feed the
-results back, and repeat until the job is done. Scanners, browsers, terminals, proxies, the Web UI,
-and multi-agent collaboration are all built the same way and statically linked into one binary.
-Extending the harness means adding a new component next to the existing ones, not patching a
-privileged kernel.
+`aiscan` packages the agent, core scanners, proxy routing, skills, and IOA collaboration. `aiscan-full` adds the Web workbench, browser automation, passive recon, and deep crawling.
 
-`aiscan` is the reference distribution — the agent, a security toolset, skills, deterministic
-scanning, and IOA collaboration packaged as a single executable.
+> Use only on explicitly authorized targets.
 
-> **Use only on explicitly authorized targets. Unauthorized use is illegal.**
+## Start here
 
-## Key features
+Download the matching `aiscan` or `aiscan-full` archive from [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest), extract it, and add the executable to PATH. See [Getting started (中文)](docs/getting-started.md) for installation, PowerShell configuration, and a complete first run.
 
-- **Everything is an extension** — no privileged kernel. Scanners, browsers, terminals, proxies,
-  the Web UI, and multi-agent collaboration are all assembled the same way and statically linked
-  into one binary; the same framework can be embedded in your own application.
-- **Minimal agent core** — the loop is deliberately small; security tooling, evaluation,
-  collaboration, and workflows all live outside it.
-- **Single-binary distribution** — `aiscan` bundles the core security toolset and IOA collaboration;
-  `aiscan-full` adds the Web UI, browser automation, passive recon, and deep crawling.
-- **Multi-agent collaboration** — IOA provides shared message spaces and worker mode for
-  distributed agents, with a built-in token-authenticated server.
+```sh
+# With an LLM configured: run a local task and save its events
+aiscan agent -p "Read the current directory and explain its structure; do not modify files" -o first-run.jsonl
 
-## Run
+# Run a deterministic scan against your own local lab, without AI verification
+aiscan scan -i http://127.0.0.1:3000 --verify=off
 
-```bash
-# One-shot agent task (with an LLM)
-aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
-  -p "scan targets and check for high-risk vulnerabilities" -i 192.168.1.0/24
-
-# Skip the LLM and drive the scanner engines directly
-aiscan scan -i 192.168.1.0/24
-
-# Web console (full edition)
+# Full edition: start the Web workbench and sign in with the printed access key
 aiscan-full web
 ```
 
-The scanner engines are also exposed as deterministic commands — for automation and environments
-without an LLM — and as IOA workers for multi-agent collaboration:
+The agent lets the model choose tool calls. The scan pipeline chooses work through rules and scan events, with optional AI stages. Both use the same underlying tool infrastructure.
 
-```bash
-aiscan scan -i http://target.example --mode full --deep --report
-aiscan agent -p "scan assigned targets and report findings" \
-  --ioa-url http://127.0.0.1:8765 --space pentest-project
-```
+## Configure a model
 
-## Install
-
-From [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest):
-
-| Edition | Description |
-| --- | --- |
-| **aiscan** | The agent with the core security toolset and IOA collaboration |
-| **aiscan-full** | Adds the Web UI, browser automation, passive recon, and deep crawling |
-
-| OS | Arch | Standard | Full |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
-
-```bash
-# Linux
-curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_linux_amd64.zip
-unzip aiscan_linux_amd64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# macOS Apple Silicon
-curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_darwin_arm64.zip
-unzip aiscan_darwin_arm64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
-Expand-Archive .\aiscan.zip -DestinationPath .
-.\aiscan.exe --version
-```
-
-### Web console (full edition)
-
-`aiscan-full web` starts the browser UI and an embedded local agent. Open
-`http://127.0.0.1:8080` and enter the access key printed at startup.
-
-```bash
-aiscan-full web                                              # local, ephemeral key
-aiscan-full web --addr 0.0.0.0:8080 --token change-me        # network, fixed key
-aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent   # hub only
-```
-
-Sessions, scans, assets, findings, and configuration are stored in `cyber-web.db` by default;
-override with `--db <path>`.
-
-### Build from source
-
-```bash
-git clone https://github.com/chainreactors/cyber-harness.git && cd cyber-harness
-make              # standard edition (aiscan)
-make agent        # minimal local agent (no scanner/search/proxy/web)
-make full         # frontend + full edition (aiscan-full)
-```
-
-`make full` needs Node.js/npm and a working CGO toolchain; it builds the frontend first so the
-latest `web/static` is embedded. The native `record` tool is built separately with `make record`
-(see [docs/record.md](docs/record.md)).
-
-## What's inside
-
-**Agent capabilities**
-
-- [`terminal`](docs/agent.md) — runs commands in a real pseudo-terminal, with interactive input and background tasks
-- [`goal`](docs/agent.md#goal-evaluation) — goal evaluation: the agent checks its work against the goal before finishing
-- [`subagent`](docs/agent.md) — breaks complex tasks into subagents
-- [`skills`](docs/agent.md) — pluggable prompts, knowledge, and reusable capabilities
-- [`search`](docs/scan.md) — fingerprint, CVE, and web intelligence lookup
-- [web_search / fetch](docs/agent.md) — CVE search and URL fetching
-- [`tmux`](docs/agent.md) — background task sessions with incremental output delivery
-- [`ioa`](docs/ioa.md) — multi-agent collaboration over shared message spaces and worker mode
-- [`proxy`](docs/reference.md) — multi-protocol proxy chain (trojan/vless/anytls/hy2/ss)
-- [`arsenal`](docs/reference.md) — security tool package manager
-
-**Scanners**
-- gogo — port, service, and banner discovery
-- spray — web probing, fingerprinting, path fuzzing
-- zombie — credential testing
-- neutron — template-based POC execution
-- proton — sensitive information scanning (API keys, tokens, credentials, secrets)
-- cyberhub — fingerprint and POC association query
-
-**Browser & recon** (full edition)
-- playwright — headless Chromium sessions, screenshots, network capture
-- katana — web crawler (standard/headless/hybrid engines)
-- passive — cyberspace search (FOFA, Hunter, Shodan)
-
-Optional SDK tool: `record` — native desktop/window screenshots and H.264/MP4 recording
-(Windows and Linux X11).
-
-## Configuration
-
-```bash
-export OPENAI_API_KEY="sk-..."      # environment
-aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
-```
-
-Config file `cyber.yaml`:
+Create `cyber.yaml` in your working directory:
 
 ```yaml
 llm:
   provider: openai
-  api_key: sk-...
-  model: gpt-4o
-  context_window: 128000   # literal token count, not "128K"
-  max_tokens: 16384
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
 ```
 
-See [docs/reference.md](docs/reference.md) for the full flag, provider, and scanner reference.
-
-## Embed
-
-Custom distributions use the same public composition path as the shipped binaries:
-
-```go
-entries, err := base.New(config)
-entries = append(entries, myExtensions...)
-set, err := extension.New(entries...)
-```
-
-The caller owns `set.Load` and `set.Close`. Use `pkg/aiscan.New` when embedding the complete
-reference distribution instead of selecting capability packs yourself. A runnable minimal
-distribution is in [`examples/custom`](examples/custom); lifecycle and ordering rules are in the
-[extension architecture](docs/architecture.md).
+Set `OPENAI_API_KEY` to your credential. For Anthropic-compatible services, use `provider: anthropic` and the corresponding settings. See the [configuration reference](docs/reference.md) for protocols, profiles, and precedence.
 
 ## Documentation
 
-| Doc | Description |
-| --- | --- |
-| [Agent Runtime](docs/agent.md) | Tools, goal evaluation, REPL, sessions, subagents |
-| [Extension Architecture](docs/architecture.md) | Typed composition, lifecycle, ownership |
-| [Development](docs/development.md) | How to extend the harness |
-| [Composition RFC](docs/rfc-composition.md) | Public composition boundary and Go API migration |
-| [Security Pipeline](docs/scan.md) | Direct scanning, AI enhancements, output formats |
-| [IOA Collaboration](docs/ioa.md) | Multi-agent message spaces, worker mode |
-| [AOP Integration](docs/integration.md) | Agent transport and host integration |
-| [Protocol & Transport](docs/protocol-architecture.md) | AOP WebSocket, Connect management plane |
-| [Record Tool](docs/record.md) | Desktop/window capture, native builds |
-| [Reference](docs/reference.md) | Configuration, providers, flags, scanner usage, FAQ |
-| [v1.0.0 Guide](docs/v1.0.0.md) | Stable API baseline, pre-v1 cleanup |
-| [Changelog](docs/changelog.md) | Version history |
+Start at the [documentation home](docs/README.md). Detailed documentation is maintained in Chinese and describes the current source; use the matching Git tag for a release.
+
+[Concepts](docs/concepts.md) introduces the harness, models, tools, sessions, and knowledge, without requiring Go experience.
+
+The [user guide](docs/user/README.md) progresses from installation and a first task to sessions, tools, Skills, scanning, and collaboration.
+
+The [developer guide](docs/development.md) builds an application in Go, starting with a runnable tool and then an embedded session, extensions, and host integration.
+
+[Architecture](docs/architecture.md) explains composition and lifetime, the Agent loop, execution, context, and data flow. Configuration and API details remain in the [reference](docs/reference.md).
+
+## Build and embed
+
+```sh
+git clone --recurse-submodules https://github.com/chainreactors/cyber-harness.git
+cd cyber-harness
+make          # standard distribution
+make agent    # minimal local agent
+make full     # frontend + full distribution
+```
+
+Use the Go version declared in [go.mod](go.mod). Full builds also need Node.js/npm; standard and full builds use CGO_ENABLED=0. Build tags are defined in [editions.env](editions.env); native recording requires CGO and is a separate [record build](docs/record.md).
+
+For custom distributions, call `base.New(config)`, append your extensions, and pass them to `extension.New`. The host owns Load/Close. Use `pkg/aiscan.New` to embed the reference distribution. See the runnable [custom example](examples/custom) and the [extension development guide](docs/development.md).
 
 ## Contributing
 
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/xxx`)
-3. Commit your changes (`git commit -m 'feat: add xxx'`)
-4. Push to the branch (`git push origin feature/xxx`)
-5. Create a Pull Request
+Read the [development guide](docs/development.md) and [documentation standards](docs/maintaining-docs.md). Describe the behavior change, affected entry points, and validation in your PR. Update the relevant guide or reference with behavior changes.
 
 ## Disclaimer
 

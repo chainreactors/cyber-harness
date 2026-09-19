@@ -1,5 +1,7 @@
 # 参考手册
 
+[文档首页](README.md) · 使用：[使用者指南](user/README.md) · 本页用于查询参数，完整操作流程见对应主题。
+
 本文档是 cyber 的完整参考，涵盖命令结构、配置、LLM Provider、各扫描器用法、资源查询和常见问题。
 
 ---
@@ -12,8 +14,8 @@ aiscan [全局参数] <subcommand> [子命令参数]
 
 | 命令 | 类型 | 功能 |
 | --- | --- | --- |
-| `agent` | agentic | LLM agent；无任务输入时进入交互式 REPL，`--ioa-url` 时作为 IOA worker |
-| `scan` | pipeline | 自动流水线：gogo → spray → zombie → neutron，可选 AI 验证/sniper/deep |
+| `agent` | agentic | LLM Agent；无任务输入时进入交互式 REPL；`--ioa-url` 增加协作连接，不改变任务模式 |
+| `scan` | pipeline | 服务、Web、认证和 POC 的事件流水线，可选后续 AI 验证与情报搜索 |
 | `gogo` | scanner | 主机存活、端口、服务、banner 和指纹发现 |
 | `spray` | scanner | Web 探测、HTTP 指纹、常见文件、爬取和路径检查 |
 | `zombie` | scanner | 授权弱口令检测 |
@@ -106,7 +108,6 @@ output:
 # 扫描默认值
 scan:
   verify: ""          # auto, off, low, medium, high, critical
-  verify_timeout: 0
 
 # 通用选项
 misc:
@@ -151,7 +152,7 @@ misc:
 | `--context-window` | 模型上下文窗口；自定义模型 ID 建议显式设置 |
 | `--max-tokens` | 单次 LLM 响应的最大输出 token 数 |
 | `--llm-proxy` | 访问 LLM API 的 HTTP 代理 |
-| `--ai` | 对 scanner 输出启用 LLM 分析 |
+| `--ai` | 将单扫描器命令与意图交给 Agent 执行和分析 |
 
 ### Agent 参数
 
@@ -164,6 +165,7 @@ misc:
 | `--heartbeat <分钟>` | heartbeat 间隔（0 表示关闭，默认 0） |
 | `--timeout <秒>` | 整体超时（默认 3600） |
 | `-e, --eval` | 目标评估标准 — 独立 LLM 判断任务是否达成 |
+| `--eval-rounds` | 数字设定评估硬上限，自然语言提供评估节奏指导；默认上限 20 |
 | `--observe <列表>` | 安装指定观测处理器：`tools,commands,processes,files,http` |
 | `-o, --output <路径>` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件 |
 | `--output-format <格式>` | One-shot stdout：`text`、`json` 或 `stream-json` |
@@ -266,10 +268,10 @@ Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详�
 
 ### 流量捕获与多级代理（MITM Hub）
 
-运行期常驻一个本地 MITM Hub 作为**统一路由底座**:所有工具(内置 curl/scanner、以及 bash 里的 curl/wget 等外部命令)的流量都经它出站。它有两层解耦——
+运行期本地 MITM Hub 为接入出口配置的内置客户端和遵循代理环境变量的外部程序提供路由。外部程序忽略环境变量、自建连接或使用不支持的协议时，不能保证其流量经过 Hub。
 
 - **稳定前端**:Hub 监听固定本地地址,一次性注入到所有工具(env + 内置 client),地址不变。
-- **动态后端**:出口代理链由 `proxy` 命令驱动(节点/订阅/负载均衡),`proxy switch/auto` 只热切换 Hub 的上游,已在跑的子进程无感,存量连接也能换出口。
+- **动态后端**:出口代理链由 `proxy` 命令驱动(节点/订阅/负载均衡),`proxy switch/auto` 切换 Hub 后续连接的上游，已建立的 TCP 连接不会因此迁移。
 
 两个命令职责分明,均为命令行优先:
 
@@ -278,7 +280,7 @@ Agent 模式下还可通过 `proxy` 工具在运行时动态管理代理，详�
 
 捕获默认开启,可用 `--mitm=false` 或配置 `mitm: false` 关闭(转为纯路由,不拦截 HTTPS、不抓包、无需信任 CA)。HTTPS 捕获会为工具注入 Hub CA(`CURL_CA_BUNDLE`/`SSL_CERT_FILE` 等);对**裸 IP** 目标的 HTTPS 因证书无 IP SAN 可能被严格校验拒绝,使用主机名不受影响。
 
-作为 Cairn Runner 运行时,每次工具执行的流量元数据和 body 前缀会作为 `http.exchange.v1` 证据进入流量表(敏感头在 Runner 侧脱敏),覆盖全部工具流量而非仅漏洞相关的零散记录。单个 request/response body 最多保留 8 MiB,超出部分会在 Flow 的 error 中标记为 truncated;保留中的 body 总量默认不超过 2 GiB,淘汰流量时对应文件会一并回收。
+作为 Cairn Runner 运行时,每次工具执行的流量元数据和 body 前缀会作为 `http.exchange.v1` 证据进入流量表(敏感头在 Runner 侧脱敏),覆盖实际通过 Hub 且被捕获的工具流量。单个 request/response body 最多保留 8 MiB,超出部分会在 Flow 的 error 中标记为 truncated;保留中的 body 总量默认不超过 2 GiB,淘汰流量时对应文件会一并回收。
 
 ### LLM API 代理
 
@@ -421,17 +423,44 @@ aiscan cyberhub id tomcat
 
 ---
 
+## scan 参数
+
+行为与执行范围见[扫描指南](scan.md)，当前二进制的参数以 `aiscan scan -h` 为准。
+
+| 参数 | 含义 | 默认 |
+| --- | --- | --- |
+| `-i, --input` | URL、IP、IP:port 或 CIDR，可重复 | 无 |
+| `-l, --list` | 每行一个目标的文件 | 无 |
+| `--mode` | quick 或 full | quick |
+| `--ports` | 资源端口集合、范围或列表 | quick 为 all，full 为 - |
+| `--thread` | 引擎容量缩放基准，不是聚合硬上限 | 1000 |
+| `--timeout` | 每个探测超时秒数 | 5 |
+| `--dict`、`--rule` | 字典与变形规则文件，可重复 | 无 |
+| `--word` | 路径词汇生成表达式 | 无 |
+| `--default-dict`、`--advance` | 默认字典、advance 插件 | 关闭 |
+| `--user`、`--pwd` | 认证检测候选用户名、密码，可重复 | 无覆盖 |
+| `--zombie-top` | 默认弱口令组合数量 | 由引擎解析 |
+| `--max-neutron-per-finger` | 每个指纹的模板上限 | 20 |
+| `--broad-poc` | 无匹配指纹时也运行 POC | 关闭 |
+| `--verify` | off、low、medium、high、critical、auto | CLI 配置默认 auto，限制见正文 |
+| `--sniper` | 指纹的后续漏洞情报搜索 | 关闭 |
+| `--deep` | 保留参数；当前没有接通 AI deep 执行阶段 | 关闭 |
+| `-j, --json` | 完成后输出 gogo/spray 原生 JSON Lines | 关闭 |
+| `--trace`、`--debug` | 调度观察、底层日志 | 关闭 |
+| `--no-color` | 关闭终端颜色 | 关闭 |
+
+`-o` 保存全局 AOP 事件；`-F` 读取历史，`--view-format markdown -f report.md` 输出回放的 Markdown。`--report` 不是当前 scan 解析器接受的参数。
+
 ## 扫描默认值
 
 ```yaml
 scan:
-  verify: "auto"       # auto 等效 high，LLM 不可用时跳过
-  verify_timeout: 0
+  verify: "auto"       # 当前执行限制见扫描指南；明确启用时在 CLI 指定级别
 ```
 
 | 值 | 说明 |
 | --- | --- |
-| `auto` | 编译时默认值；等效 `high`，LLM 不可用时自动跳过 |
+| `auto` | 配置默认值；当前 CLI 移除该值但未转为 high，不能据此保证执行验证 |
 | `off` | 关闭验证 |
 | `low` / `medium` / `high` / `critical` | 验证对应优先级及以上的发现 |
 
@@ -482,14 +511,13 @@ scan:
 | 快速资产发现和风险初筛 | `aiscan scan -i <target>` |
 | 完整扫描（含路径爆破） | `aiscan scan -i <target> --mode full` |
 | 搜索已知漏洞情报 | `aiscan scan -i <target> --sniper` |
-| 深度动态测试 | `aiscan scan -i <target> --deep` |
 | AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=high --sniper` |
 | 自动解释结果和生成结论 | `aiscan agent -p "<任务>" -i <target>` |
 | 目标驱动 + 自动评估 | `aiscan agent -e "<标准>" -p "<任务>" -i <target>` |
-| 对 scanner 输出做 AI 摘要 | `aiscan --ai -p "<意图>" <scanner> ...` |
+| 由 Agent 调用扫描器并分析 | `aiscan --ai -p "<意图>" <scanner> ...` |
 | 查询指纹和 POC | `aiscan cyberhub search --finger <name>` |
-| 机器可读输出 | `aiscan scan -i <target> -j` |
-| 人可读报告 | `aiscan scan -i <target> --report` |
+| gogo/spray 原生结果 | `aiscan scan -i <target> -j` |
+| 已保存事件的 Markdown 回放 | `aiscan -F result.jsonl --view-format markdown -f report.md` |
 | 回看历史扫描记录 | `aiscan -F result.jsonl` |
 | 多 worker 协作 | `aiscan ioa serve` + `aiscan agent --ioa-url http://127.0.0.1:8765 --space case-1` |
 | 交互式探索 | `aiscan agent` |
@@ -511,12 +539,12 @@ aiscan agent -p "检查目标" -i http://target.example
 
 1. 检查是否配置了 LLM provider
 2. 确认发现的风险优先级达到了 `--verify` 阈值
-3. 未显式传 `--verify` 时默认 `auto`（等效 `high`），LLM 不可用时静默跳过
+3. 当前 `auto` 路径未转成 high 验证阈值；明确启用请传 `--verify=high`，详见[扫描限制](scan.md#ai-增强扫描)
 
 ### 输出太多或包含颜色
 
 ```bash
-aiscan scan -i 127.0.0.1 -f result.txt          # 文件输出（自动去除 ANSI）
+aiscan scan -i 127.0.0.1 --no-color > result.txt # 保存终端文本
 aiscan scan -i 127.0.0.1 --no-color              # 禁用颜色
 ```
 
@@ -529,7 +557,7 @@ aiscan scan -i 192.168.1.0/24 --thread 500        # 降低并发
 
 ### --ai 需要 LLM 但 scan 不需要
 
-顶层 `--ai` 在 scanner 执行后启动 LLM agent 分析输出，必须配置 LLM。`scan` 核心流水线不依赖 LLM。`scan --verify` 在 LLM 不可用时自动跳过。
+单扫描器的顶层 `--ai` 将命令和意图交给 Agent，由模型调用工具并分析，需要配置 LLM。`scan` 核心流水线不依赖 LLM；显式验证级别和 `--sniper` 需要模型，`auto` 的当前限制见[扫描指南](scan.md#ai-增强扫描)。
 
 ### cyberhub 没有结果
 

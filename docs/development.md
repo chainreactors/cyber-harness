@@ -1,80 +1,59 @@
-# Cyber 扩展开发手册
+# 开发者指南
 
-新增能力前先确定它是声明、运行资源还是生命周期所有者，不要为同一个对象重复建立机制。
+[文档首页](README.md) · 前置：[基本概念](concepts.md)
 
-## Tool、Command 与 Skill
+本指南面向把 cyber-harness 嵌入应用的开发者。你可以给现有 Agent 增加工具，也可以自己组合模型、会话和宿主界面。下面从一个无需模型的 Go 程序开始，逐步把工具变成可对话的应用。
 
-- 模型直接调用的结构化能力实现 `core/tool.Tool`。
-- bash 内的 pseudo-command 使用 `commands.Command`。
-- prompt/知识使用 `skills.Bundle` 或普通 Skill，不并入执行 Registry。
+## 第一个组合
 
-Tool Registry 和 Command Registry 在 Load 时分别定义自己的 typed Point。贡献 Extension 只需：
+准备好 [快速开始](getting-started.md)中的源码与 Go 环境，在仓库根目录执行：
 
-```go
-func (e *Extension) Load(scope *extension.Scope) error {
-    return extension.Add[tool.Tool](scope, e.tool)
-}
+```sh
+go run ./examples/custom
 ```
 
-批次必须原子校验。Scope 关闭时先撤销该批次并排空它的在途调用，不影响其他插件。名称、
-flag、section key 等由各领域校验；不要再增加 Plugin ID、owner token 或通用 typed ID。
+程序输出 `Hello, Cyber!`，然后释放资源退出。[完整源码](../examples/custom/main.go)把一个 hello 工具注册到基础组合，通过执行接口真正调用它。这里还没有模型循环，因此输出是确定的。
 
-## 新资源类型
-
-资源类型是具体 Go 类型。基础 Extension 实现 `resource.Point[T]` 并调用
-`extension.Define[T]`，后续插件调用 `extension.Add[T]`。Point 负责该领域的重复、覆盖、
-快照和排空规则。不要在 `core/resource` 中加入这些业务策略。
-
-资源类型定义只在 Profile Load 阶段开放；完整 Load 后冻结。已有 Point 可继续接受运行时
-热增删。定义者必须排在贡献者前面，较早 Scope 无法反向使用较晚定义。
-
-## Config、CLI 与连接测试
-
-这些是解析前 Resource，不需要 Extension 生命周期：
+先看工具本身。`helloTool` 提供名称、描述、参数定义和 `Execute`。它只处理业务输入并返回结果，不需要知道应用怎样启动。扩展负责把这个对象交给框架：
 
 ```go
-resources := resource.New()
-sections := config.NewSections()
-resource.Define[cli.Contribution](resources, cliRegistry)
-resource.Define[config.Section](resources, sections)
-resource.Define[config.Connection](resources, sections.ConnectionPoint())
-plugin.Declare(resources)
-resources.Freeze()
-sections.Seal()
-cliRegistry.Seal()
+extension.Func{LoadFunc: func(scope *extension.Scope) error {
+    return extension.Add[tool.Tool](scope, helloTool{})
+}}
 ```
 
-扩展在自己的包中提供 `Declare` 初始化入口，内部直接 `resource.Add` 自己拥有的
-`cli.Contribution`、`config.Section` 和可选 `config.Connection`。Declare 不调用 `Define`，不返回
-聚合 DTO，也不建立 declaration 子包或第二套插件接口；没有解析前资源的扩展不需要空 Declare。
-贡献在 Seal 前可撤销；CLI 按注册顺序物化，因此后面的扩展可以扩展前面声明的命令。连接测试
-属于对应配置扩展，不要恢复独立 Probe Registry、Catalog 或 settings Declaration DTO。
+`Add[tool.Tool]` 将工具加入基础组合已经定义的贡献点。显式写接口类型很重要：按具体类型注册不会落到同一个贡献点。参数 schema 是模型和执行器理解输入的契约，业务实现仍应处理无效值和执行错误。
 
-## 依赖与生命周期
+## 组合根与宿主
 
-构造参数表达业务依赖，`extension.New(a, b, c)` 的顺序表达加载和关闭关系。没有 Entry、
-DependsOn、Service table、Descriptor 或 capability catalog。底层 Resource 由 Extension 保留，
-消费者只接收不含 Load/Close 的业务对象。
+示例先用 `base.New` 建立基础能力，传入绝对工作目录，并关闭启动时的 Provider 初始化。它随后追加工具扩展和一个最终消费者；消费者用 `Use[tool.Executor]` 借到执行接口。最后，宿主创建 Set、Load、调用工具并 Close。
 
-Close 返回普通错误表示回收已经完成；只有仍需重试时返回或包装
-`extension.ErrCloseIncomplete`。初始化使用 `scope.Init()`，后台工作绑定
-`scope.Lifetime()`。
+这个顺序也是资源依赖顺序。工具注册表必须先存在，工具才能加入；宿主必须等 Load 完全成功后才能使用借出的接口。示例把 Close 放在 Load 之前注册的 defer 中，因此部分初始化失败也有清理入口，关闭错误会与业务错误一起返回。
 
-## 组合与验证
+基础组合提供工具、命令、知识、提示词、执行环境和应用状态；它并不自动开始推理或创建会话。要让模型调用这个 hello 工具，在同一组合中加入运行循环和会话运行时即可。
 
-通用自定义发行版从 `pkg/base.New` 取得有序基础扩展，显式 append 自己的扩展，再交给
-`extension.New`。参考发行版位于 `pkg/aiscan`，`cmd/aiscan` 只是它的 CLI host。最小本地 Agent
-在 `cmd/agent`，不得依赖 scanner、search、proxy、IOA、browser、record 或 Web。
-`pkg/runner` 保留 aiscan 的共享运行模式逻辑，不是命令。
+## 从工具到会话
 
-build tag 只能选择同名函数的实现，组合根必须显式调用；不要用 `init()`、全局 factory slice
-或 import side effect 注册扩展。可运行的最小组合见 `examples/custom`。
+```sh
+go run ./examples/session
+```
 
-新增或修改资源至少验证：
+[会话示例](../examples/session/main.go)在基础组合之后加入 `StandardLoop` 和 Session 扩展，借出 `*session.Runtime`。宿主打开一个会话，连续提交两次输入，等待结果，观察结束事件，最后关闭会话和整个组合。
 
-- 原子批次、重复拒绝和 handle 撤销。
-- Load 失败逆序回滚。
-- 热删除只取消并排空自己的在途调用。
-- Close context 超时后可重试。
-- `go test -race ./core/resource ./core/extension ./core/registry`。
-- `go list -deps ./cmd/agent` 仍满足最小依赖边界。
+例子使用本地演示 Provider：第一次报告收到 1 条用户消息，第二次报告 2 条。这验证了宿主接入、历史连续性和结束事件；它不调用远程服务，也不模拟模型的工具选择能力。换成实际模型配置后，循环才会依据模型响应调用已注册的工具。
+
+接下来阅读[扩展开发](developer/extensions.md)，将工具扩展为命令、知识和共享服务；再阅读[会话与宿主集成](developer/hosting.md)，把这套组合接入自己的 UI、服务或协议客户端。
+
+## 构建自己的应用
+
+通用应用可以沿用示例的 `base.New → append → extension.New`。如果需要 aiscan 的完整安全工具组合，使用 [pkg/aiscan](../pkg/aiscan)；它的 `New(Request)` 要求 `Option.Resolved` 已通过配置声明与解析建立，不能把空 Option 当作快捷配置传入。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
+
+构建源码发行版时，`make agent` 生成最小本地 Agent，`make` 生成标准版，`make full` 生成包含前端的完整版。标签来自 [editions.env](../editions.env)，实际步骤来自 [Makefile](../Makefile)。full 需要前端工具链；standard 与 full 均使用 CGO_ENABLED=0。原生录屏需要 CGO 工具链，另见 [record](record.md)。
+
+自定义应用应明确分发哪些模型配置、知识文件和外部运行依赖。二进制中注册了浏览器或外部命令入口，并不意味着目标机器已经安装对应程序。固定源码版本后验证实际部署平台上的启动、一个完整任务和关闭；按 AGPL-3.0 的要求处理分发与源代码提供。
+
+## 继续深入
+
+[架构概览](architecture.md)解释宿主、运行时、工具和协议之间的关系；[扩展装配](architecture/composition.md)进一步解释贡献、借用、回滚与关闭。这些规则在开发有后台工作或共享资源的扩展时尤其重要。
+
+为项目贡献代码时，业务实现保持独立，生命周期适配放在扩展中；行为变化同步更新对应的使用章节。文档归属和验证方式见[文档维护](maintaining-docs.md)。

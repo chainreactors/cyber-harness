@@ -1,5 +1,7 @@
 # Cyber 协议与传输架构
 
+[架构概览](architecture.md) · 前置：[事件与数据](architecture/data.md) · 开发：[外部接入](integration.md)
+
 本文定义 Cyber 的协议职责。ConnectRPC 承担应用管理与查询；实时 Application 与 Node 数据均使用 AOP Envelope。服务端暴露两个明确 endpoint，但握手后的连接运行机制与 namespace dispatch 保持统一。
 
 ## 1. 唯一真相
@@ -12,8 +14,8 @@ CSTX 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulnerab
 
 | 平面 | 传输 | 职责 |
 | --- | --- | --- |
-| AOP 应用平面 | Application WS `/api/aop/application/ws`、Node WS `/api/aop/node/ws`、Application `AOPService.Connect` | Agent 会话、Turn、事件、工具、命令、file、exec、PTY、SCO 增量、取消和实时 scan 事件 |
-| Cyber 管理平面 | ConnectRPC unary | 查询、配置、Agent 列表与本地进程生命周期、Session 历史、Scan CRUD、SCO 查询/导入、系统状态 |
+| AOP 应用平面 | Application WS `/api/aop/application/ws`、Node WS `/api/aop/node/ws`、Application `AOPService.Connect` | Agent 会话、Turn、事件、工具、原始 Artifact、命令、file、exec、PTY、取消和实时 scan 事件 |
+| Cyber 管理平面 | ConnectRPC unary | 查询、配置、Agent 列表与本地进程生命周期、Session 历史、Scan CRUD、原始 Artifact 归档同步、系统状态 |
 
 目标态不存在 JSON-RPC、AOP ChatService、独立 Agent socket、独立 terminal socket 或额外的 WebSocket wire。AOP 只定义一个 `Connect(stream Envelope)` 双向流；Connect/gRPC 与浏览器 WebSocket 适配到同一个 `EnvelopeStream` 服务核心。当前 Agent 默认仍使用 WebSocket，新增 gRPC 服务端不改变旧 Agent 或浏览器连接。管理 RPC 与 AOP 流由同一个 Connect handler 注册，但职责仍按 service 分离。
 
@@ -40,7 +42,7 @@ Agent 对外只使用 `--server-url` 作为 Cyber Web/AOP 基址。IOA 使用独
 - `cyber.command`：Cyber 命令目录、请求、结果与 receipt；
 - `cyber.scan`：Scan 状态、快照和实时事件；
 - `cyber.reload`：Cyber 配置热重载；
-- `cyber.agent/config/chat/sco/system`：Connect 管理服务及其返回类型。
+- `cyber.agent/config/chat/artifact/system`：管理数据类型；对应服务位于 `cyber.rpc.*`。
 
 Cyber 专有元数据通过 `google.protobuf.Any` 携带 namespace-owned message；protobuf full name / `Any.type_url` 是唯一类型身份，不得再增加 namespace 字符串或把 protobuf 编码成 JSON bytes。
 
@@ -161,7 +163,7 @@ namespace 贡献只有一个类型 `aop.Binding`（`Prototype` + `Open`）：`Op
 第 2 节的线协议边界在 Go 代码上投影为三个服务端层和一个 client 世界。分层的判断标准是语义归属，不是文件大小或调用频次。
 
 - **rpc（定义投影层，`proto/rpc`、`pkg/rpc`）**：protobuf service contract、生成的 Go message/client/handler 接口，不实现业务语义。
-- **api（业务层，`pkg/web/api`）**：实现控制面（Sessions/Scans/Config/SCO/Agents/Status）与 Application envelope 业务路由（OpenSession/RunTurn/Watch/Command/File/PTY）。本层不得 import net/http、WebSocket、Connect 或 SQLite；机制通过 Store/Runtime/CommandExecutor/FileUploader/PTYRouter 和最小 ApplicationConnection 接口注入。
+- **api（业务层，`pkg/web/api`）**：实现控制面（Sessions/Scans/Config/Artifacts/Agents/Status）与 Application envelope 业务路由（OpenSession/RunTurn/Watch/Command/File/PTY）。本层不得 import net/http、WebSocket、Connect 或 SQLite；机制通过 Store/Runtime/CommandExecutor/FileUploader/PTYRouter 和最小 ApplicationConnection 接口注入。
 - **web（机制与传输层，`pkg/web`）**：拥有 WS upgrade、EnvelopeStream adapter、Connection、认证、持久化、AgentPool、Hub 与装配。两个 endpoint 只做各自首帧初始化；Application 移交 api，Node 移交 AgentPool，之后复用 Connection。
 - **core（领域层，`core/`、`agent/`、`pkg/runner`、`aop/`）**：web 之前已存在的领域能力，不感知管理端。
 - **client 世界**：SPA、CLI、node 平级，都是 api 的消费者。node（`pkg/node`，原 `pkg/web/agent`）是 cyber 的节点端 client：只依赖 aop 协议与 runner，不得依赖 `pkg/web`。

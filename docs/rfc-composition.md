@@ -1,5 +1,7 @@
 # RFC: simplify composition boundaries and profile lifecycle
 
+Historical design record. For the current implementation, read [composition and lifecycle](architecture/composition.md) and the [developer guide](development.md).
+
 Tracking issue: https://github.com/chainreactors/cyber-harness/issues/137
 
 ## Problem

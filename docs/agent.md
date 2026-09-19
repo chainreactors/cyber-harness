@@ -1,601 +1,76 @@
-# Agent 模式详解
+# Agent 使用指南
 
-本文档基于 `v0.2.2` 源码编写，是 Agent 模式的完整参考。基本用法参见 [README](../README.md)，LLM Provider 配置参见 [参考手册](reference.md)。
+[使用者指南](user/README.md) · 前一篇：[快速开始](getting-started.md) · 下一篇：[会话与上下文](user/sessions.md)
 
-标记 ★ 的功能为 v0.2.2 新增。
+Agent 接受任务，向模型提供当前上下文与工具，然后根据模型的选择执行、读取结果并继续。这使它能处理事先无法写成固定步骤的工作。一次任务可能包含多次模型请求和工具调用，最后一段回答只是这个过程的结果。
 
----
+## 交互模式
 
-## 目录
+配置模型后，运行：
 
-- [运行模式](#运行模式)
-- [One-shot 模式](#one-shot-模式)
-- [Goal Evaluation](#goal-evaluation)
-- [交互式 REPL](#交互式-repl)
-- [Agent 工具集](#agent-工具集)
-- [--ai 模式](#--ai-模式)
-- [Skills](#skills)
-- [信号处理](#信号处理)
-- [多 Provider 配置](#多-provider-配置)
-- [适用场景](#适用场景)
-
----
-
-## 运行模式
-
-`aiscan agent` 根据输入自动选择三种运行模式之一：
-
-| 条件 | 模式 | 行为 |
-| --- | --- | --- |
-| 提供 `-p`、`--task-file`、`-i` 或 stdin pipe | **One-shot** | 执行任务后退出 |
-| 指定 `--ioa-url` | **IOA worker** | 连接 IOA server，注册节点，监听并执行任务 |
-| 无任何输入 | **交互式 REPL** | 进入交互命令行，支持会话保持和连续追问 |
-
-判断逻辑：`--ioa-url` 优先级最高；其次检查是否存在任务输入（prompt、目标、文件、stdin）；均不满足时进入 REPL。
-
----
-
-## One-shot 模式
-
-One-shot 模式接收一次性任务，agent 执行完成后自动退出。
-
-### 输入方式
-
-| 方式 | 参数 | 说明 |
-| --- | --- | --- |
-| Prompt | `-p, --prompt` | 任务描述；若值是已存在的文件路径，则读取文件内容 |
-| 目标 | `-i, --input` | IP、URL、IP:port、CIDR，可重复 |
-| 任务文件 | `--task-file` | 从文件读取任务描述（支持 Markdown） |
-| 指定 skill | `-s, --skill` | 加载指定 skill，可重复 |
-| stdin | 管道输入 | 从标准输入读取任务描述 |
-
-输入可以组合使用。仅提供 `-i` 时，agent 会自动生成扫描任务。
-
-### 输出与观测
-
-`--output-format=text|json|stream-json` 只控制 One-shot 的 stdout：`json` 是单个结果对象，
-`stream-json` 是逐事件的 typed AOP JSONL。`--observe=tools,commands,processes,files,http`
-选择要安装的观测处理器；`-o/--output <path>` 独立地把完整 canonical AOP 事件流持久化到
-新文件。`--resume` 只读历史，不会修改历史文件或隐式开启输出。
-
-```bash
-aiscan agent -p "检查目标" -i http://target.example --output-format json
-aiscan agent -p "检查目标" -i http://target.example --observe=files,http -o run.jsonl
-aiscan agent -p "继续分析" --resume run.jsonl -o continuation.jsonl
+```sh
+aiscan agent
 ```
 
-### 示例
+先输入 `/status` 查看当前模型与工具，再输入任务。例如让它只读查看当前目录、说明各模块职责，然后追问某个文件。交互模式会保留已有对话，后续输入可以引用之前的结果。
 
-```bash
-# 基本用法
-aiscan agent -p "发现 Web 服务并检查高风险漏洞，给出可复现证据" -i 192.168.1.0/24
+`/help` 显示当前宿主实际安装的命令。需要直接执行已知命令时使用 `!` 前缀，例如 `!gogo -h`；此时不经过模型选择，仍使用当前运行环境。工具调用可能访问文件、启动进程或发送网络请求，任务说明应明确范围和预期产物。
 
-# 多个目标
-aiscan agent -p "枚举服务并输出风险摘要" -i 10.0.0.10 -i http://10.0.0.20
+## 一次性任务
 
-# 从文件读取任务
-aiscan agent --task-file task.md -i 192.168.1.0/24
+把任务作为启动参数传入，Agent 完成后退出：
 
-# -p 也会自动读取已存在的 prompt 文件
-aiscan agent -p task.md -i 192.168.1.0/24
-
-# 仅提供目标（自动生成扫描任务）
-aiscan agent -i http://target.example
-
-# 指定 skill
-aiscan agent -s scan -s neutron -p "先做快速扫描，再分析高危 POC 命中" -i http://target.example
-
-# 从 stdin 读取任务
-echo "检查这个网段的暴露面" | aiscan agent -i 192.168.1.0/24
+```sh
+aiscan agent -p "只读查看当前目录并解释主要模块"
+aiscan agent --task-file task.md
+aiscan agent -p task.md
 ```
 
----
+`-p` 指向已有文件时读取文件内容。任务文本依次取 prompt、task-file、非空 stdin；只有 `-i` 目标时生成默认任务，目标也会附加到选中的任务文本中。输入不是把所有来源按任意顺序拼接。
+
+```sh
+echo "只读检查当前目录" | aiscan agent
+aiscan agent -p "检查已授权本地靶场，保留证据" -i http://127.0.0.1:3000
+```
+
+自动化中可用 `--output-format json` 获取最终结果，或用 `stream-json` 消费流式事件。`-o run.jsonl` 独立保存历史记录；完整区别见[会话与上下文](user/sessions.md#记录)。
+
+## 任务推进与控制
+
+模型每轮可以直接回答，也可以请求工具。同一轮的多个工具调用可能并行执行；需要前一步结果的工作进入后续轮次。工具失败会作为结果交回模型，模型可以修正输入后继续，因此一次错误不一定结束整个任务。
+
+`/stop` 请求停止当前工作，`/continue` 基于已有上下文继续，`/followup <任务>` 在当前任务完成后提交新输入。停止不会撤销已经发生的外部修改。后台命令与子 Agent 尚未返回时，Agent 可以等待它们的结果；查看执行状态见[工具与环境](user/tools.md)。
+
+本地 Console 的 Ctrl+C 分阶段处理：先停止当前工作，再取消根上下文退出，最后强制退出；连续按键间隔超过 5 秒会重置计数。`!` 命令使用独立取消路径。
+
+自然结束、达到轮次限制和用户取消是不同状态。需要判断自动化任务是否达成目标，应同时读取结束状态、最终结果和证据；内部停止条件见[Agent 运行时](architecture/runtime.md#停止条件)。
 
 ## Goal Evaluation
 
-★ v0.2.2 新增。
+目标评估为任务增加一个反馈循环：Agent 完成一轮工作后，评估器根据验收标准检查轨迹与输出，需要继续时把反馈交回 Agent。
 
-Goal Evaluation 让一个独立的评估 LLM 在 agent 完成任务后判定是否达成目标。如果未通过，评估反馈会被注入 agent 继续执行。是否继续由评估 LLM 自己判断：只要还有进展就继续下一轮，判定再跑也没有意义时主动收尾。节奏可以用自然语言交代（`--eval-rounds "尽量深入，最多十轮"`），这句话原样交给评估器，由它在每轮判定时遵守。轮数上限只是防跑飞的硬保险，默认 20 轮，通常不会触及。
-
-### 启用方式
-
-```bash
-# One-shot 模式
-aiscan agent -p "检查目标 Web 漏洞" -i http://target.example -e "必须给出至少一个可复现的漏洞证据，包含请求和响应"
-
-# 交互式 REPL
-aiscan> /eval 必须包含完整的端口列表和风险等级
-aiscan> 扫描 192.168.1.0/24
+```sh
+aiscan agent -p "核对当前目录中的报告" -e "每个结论都有来源；明确列出未验证事项" --eval-rounds 3
 ```
 
-| 参数 | 说明 |
-| --- | --- |
-| `-e, --eval` | 指定评估标准（自然语言） |
-| `--eval-rounds` | 轮数节奏：纯数字为硬上限；自然语言原样交给评估器遵守；留空使用默认上限 20 |
-| `/eval <criteria>` | REPL 中设置评估标准 |
-| `/eval` | REPL 中查看当前评估标准 |
-| `/eval rounds <spec>` | REPL 中设置轮数节奏（数字或自然语言），`/eval rounds auto` 恢复默认 |
-| `/eval off` | REPL 中关闭评估 |
+验收标准应描述可检查的结果。交互模式用 `/eval <标准>` 设置，`/eval off` 关闭。评估请求独立于执行请求，默认仍使用当前 Provider 和模型，因此不能将它视为另一套独立事实来源。
 
-### 机制
+`--eval-rounds` 的数字限制评估轮数，自然语言则提供节奏指导；默认硬上限为 20。评估器也可以认为未达标但已无法继续，此时正常收尾不等于通过验收。返回字段、重试和上下文继承见[评估机制](architecture/runtime.md#goal-evaluation)。
 
-1. Agent 完成一次运行后，评估器将执行轨迹压缩为结构化摘要（工具调用序列 + assistant 摘要 + 最终输出，最大 16KB），连同评估标准一起发送给评估 LLM
-2. 评估 LLM 通过强制工具调用（verdict tool）返回结构化判定：
+## Agent 与扫描
 
-```json
-{
-  "pass": false,
-  "continue": true,
-  "reason": "报告中缺少请求和响应的原始数据",
-  "feedback": "请补充漏洞验证的完整 HTTP 请求和响应内容"
-}
+直接 `scan` 按规则推进扫描流水线，Agent 则根据模型响应选择下一步。单扫描器的顶层 `--ai` 入口把命令、参数和意图组织成 Agent 任务：
+
+```sh
+aiscan --ai -p "解释结果并注明证据" gogo -i 127.0.0.1 -p 80,443
 ```
 
-3. 如果 `pass=false` 且 `continue=true`，feedback 被注入为新 prompt，agent 继续执行
-4. 下一轮的评估 prompt 会带上此前每一轮的 `reason` 和 feedback，以及 `--eval-rounds` 给出的自然语言节奏要求，评估器据此判断是在推进还是在原地打转
-5. `continue=false` 是未达标任务的正常结束方式（卡死、重复失败、缺凭据、目标不可达、标准本身无法满足），返回最后一次执行结果，不报错
-6. 只有评估器始终不收尾时才会撞到轮数上限，此时记一条 warning 并返回最后一次结果。自然语言里出现的数字只会抬高这个硬上限（"最多三十轮" → 上限 30），不会压低它——收紧是评估器读懂语义后自己做的事，正则分不清"至少三轮"和"最多三轮"
+这里由 Agent 调用工具并分析，不能假定宿主先确定性执行一次扫描器再总结 stdout。`scan --verify` 属于扫描结果的后续验证，当前能力与限制见[扫描指南](scan.md)。
 
-### 评估器容错
+## 知识与协作
 
-评估 LLM 调用失败时不会中断主流程。系统降级为通用反馈：
+工具集合由发行版和扩展决定；Skills 为这些能力提供领域方法。选择自定义知识时使用 `-s review`，文件结构与加载顺序见[Skills 与知识](user/knowledge.md)。
 
-> Goal evaluation could not determine if the task is complete. Original criteria: {criteria}. Please review your work and continue if the goal is not yet fully achieved.
+`--ioa-url` 只增加消息协作连接，不改变本地任务模式：带 `-p` 仍会完成一次任务后退出。长期协作、Web 工作台及远程执行节点见 [Web 与协作](user/web.md)。跨语言宿主使用的 stdio/AOP 属于[开发者接入](developer/hosting.md)。
 
-agent 收到此反馈后继续执行，不会因为评估器问题而停止。连续 3 轮评估调用都失败时循环终止并返回错误——评估器已经死掉，再跑 agent 也没有判定可依。
-
-### 事件
-
-评估过程通过 eventbus 发布以下事件：
-
-| 事件 | 时机 | 携带数据 |
-| --- | --- | --- |
-| `GoalEvalStart` | 开始评估 | `EvalRound` |
-| `GoalEvalEnd` | 评估完成 | `EvalRound`, `EvalPass`, `EvalReason` |
-| `GoalEvalError` | 评估器调用失败 | `EvalRound`, `EvalError` |
-
-### 示例
-
-```bash
-# 要求输出格式和内容的评估
-aiscan agent -p "扫描目标所有端口并识别服务" -i 10.0.0.0/24 \
-  -e "输出必须包含每个开放端口的服务名称和版本号，使用表格格式"
-
-# 要求漏洞验证深度的评估
-aiscan agent -p "检查 Web 应用漏洞" -i http://target.example \
-  -e "每个发现的漏洞必须附带可复现的 curl 命令"
-
-# REPL 中动态启用/关闭
-aiscan> /eval 扫描结果必须覆盖 `gogo -P port` 列出的当前运行时端口预设
-aiscan> 扫描 192.168.1.1
-aiscan> /eval off
-```
-
----
-
-## 交互式 REPL
-
-无任何输入时进入交互式 REPL。支持命令历史、补全，会话上下文在 `/reset` 前保留。
-
-```bash
-aiscan agent --model gpt-4o
-```
-
-### 命令列表
-
-#### 内置命令
-
-| 命令 | 说明 |
-| --- | --- |
-| `/help` | 显示命令面板 |
-| `/status` | 查看当前模型、渲染模式、IOA 连接和已加载 skill |
-| `/reset` | 清空会话上下文 |
-| `/continue` | 不追加新 prompt，让 agent 继续当前上下文 |
-| `/stop` | 停止当前正在执行的任务 |
-| `/followup <prompt>` | 排队消息，等当前任务完成后自动发送 |
-| `/eval [criteria\|off]` | 设置/查看/关闭 Goal Evaluation ★ |
-| `/exit`, `/quit` | 退出 |
-
-#### Provider 命令 ★
-
-| 命令 | 说明 |
-| --- | --- |
-| `/provider` | 查看 LLM Provider 配置（active/configured） |
-| `/provider list` | 列出当前和其他可用 provider 配置 |
-| `/provider set ...` | 显式设置当前 provider 和模型 |
-
-#### IOA 命令（需 `--ioa-url`）
-
-| 命令 | 说明 |
-| --- | --- |
-| `/spaces` | 列出所有 IOA 空间 |
-| `/messages <space>` | 列出空间中的起始消息 |
-| `/context <space> <msg-id>` | 查看消息上下文/线程 |
-| `/nodes [space]` | 列出节点 |
-
-#### Skill 命令
-
-每个已注册的非 internal skill 自动成为 REPL 命令：
-
-```text
-aiscan> /scan 检查这个网段的高危漏洞
-aiscan> /neutron 用 critical 级别 POC 检查 http://target.example
-aiscan> /report 根据上次扫描结果生成报告
-```
-
-#### `!` 直接执行 ★
-
-`!` 前缀直接执行命令，绕过 LLM。所有注册的 scanner 伪命令和 shell 命令均可使用，支持 Ctrl+C / Escape 取消。
-
-```text
-aiscan> !gogo -i 192.168.1.0/24 -p top2
-aiscan> !scan -i http://target.example
-aiscan> !cyberhub list poc --severity critical
-aiscan> !neutron -u http://target.example -s high
-```
-
-输入普通文本（非 `/` 或 `!` 开头）直接作为 prompt 发送给 agent。
-
----
-
-## Agent 工具集
-
-Agent 在运行时可使用以下工具，由 LLM 自主选择调用。
-
-### Agent 工具（LLM 直接调用）
-
-| 工具 | 说明 | 备注 |
-| --- | --- | --- |
-| `bash` | 执行 shell 命令（通过 tmux PTY 运行） | 核心工具 |
-| `read` | 读取文件内容 | 核心工具 |
-| `write` | 写入文件内容 | 核心工具 |
-| `glob` | 文件模式匹配搜索 | 核心工具 |
-| `web_search` ★ | Web 搜索，查询 CVE/Exploit/安全情报 | 优先使用 provider 原生搜索，回退 Tavily |
-| `fetch` | 抓取 URL 内容为可读文本 | |
-| `finish` ★ | 显式终止 agent 循环（`ToolResult.Terminate`） | 终止工具 |
-| `subagent` | 创建子 agent（sync 同步 / async 异步 / fork 分支） | |
-
-### Scanner 伪命令（通过 bash 工具调用）
-
-| 命令 | 说明 |
-| --- | --- |
-| `gogo` | 主机存活、端口、服务、banner 和指纹发现 |
-| `spray` | Web 探测、HTTP 指纹、路径检查、爬取 |
-| `zombie` | 弱口令检测 |
-| `neutron` | 模板化 POC 检测 |
-| `scan` | 自动扫描流水线 |
-| `cyberhub` ★ | 指纹和 POC 关联查询（基于 SDK association index 重构，支持 `--finger`/`--cve`/`--vendor`/`--product`/`--poc` 结构化查询） |
-| `katana` | Web 爬虫（仅 full 版） |
-| `passive` | 网络空间搜索（仅 full 版） |
-
-### tmux — 后台会话管理
-
-tmux 是 agent 管理长时间运行命令的核心工具。bash 工具执行的命令如果超时会自动转入 tmux 后台会话，增量输出每 10 秒自动推送到 agent inbox。
-
-| 子命令 | 说明 |
-| --- | --- |
-| `tmux new-session [-d] [-s name] [--timeout duration] "command"` | 创建会话。`-d` 后台运行，`-s` 指定名称 |
-| `tmux ls` | 列出所有会话及状态 |
-| `tmux capture-pane -t <id>` | 读取新增输出（默认增量模式，仅返回上次读取后的新内容） |
-| `tmux capture-pane -t <id> -n <N>` | 读取末尾 N 行 |
-| `tmux capture-pane -t <id> -c <N>` | 读取末尾 N 字节 |
-| `tmux capture-pane -t <id> --full` | 读取完整缓冲区 |
-| `tmux send-keys -t <id> "text" Enter` | 向会话发送按键（支持 Enter、C-c、C-d、Escape、Tab 等） |
-| `tmux kill-session -t <id>` | 终止会话 |
-| `tmux wait-for -t <id> [--timeout 60s]` | 阻塞等待会话结束 |
-
-增量输出机制：`capture-pane` 默认只返回上次读取后的新输出，避免重复。同时后台 goroutine 每 10 秒将新输出推送到 agent inbox，agent 不需要手动轮询。
-
-直接传命令也可以隐式创建后台会话：
-
-```bash
-tmux nmap -sV 192.168.1.0/24    # 等价于 tmux new-session -d "nmap -sV 192.168.1.0/24"
-```
-
-### proxy — 代理节点管理
-
-proxy 工具管理扫描代理，支持 Clash 订阅自动负载均衡和多协议直连。
-
-| 子命令 | 说明 |
-| --- | --- |
-| `proxy <url> <command> [args...]` | 通过指定代理执行命令（类似 proxychains） |
-| `proxy auto <url> [options]` | 推荐模式：订阅 + 自适应负载均衡 |
-| `proxy subscribe <url>` | 拉取 Clash 订阅并列出可用节点 |
-| `proxy list` | 列出已加载的代理节点 |
-| `proxy switch <name\|index>` | 切换活跃代理节点 |
-| `proxy test [name\|index]` | 测试代理节点连通性 |
-| `proxy current` | 显示当前活跃代理 |
-| `proxy clear` | 清除订阅，恢复原始代理 |
-
-支持的协议：`socks5://`、`trojan://`、`vless://`、`anytls://`、`hysteria2://`、`shadowsocks://`、`clash://`（订阅 URL）。
-
-**proxy-chain 执行**（通过代理运行扫描命令）：
-
-```bash
-proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2
-proxy trojan://pass@host:443 zombie -i 10.0.0.1 -s ssh
-proxy 6 gogo -i 10.0.0.1 -p top2       # 使用订阅节点 #6
-proxy HK gogo -i 10.0.0.1               # 使用名称匹配 "HK" 的节点
-```
-
-**auto 模式**（推荐）：
-
-```bash
-proxy auto https://subscribe.example/link --type trojan,vless --country HK,JP --strategy adaptive
-```
-
-auto 模式选项：
-
-| 选项 | 说明 |
-| --- | --- |
-| `--type, -t` | 按协议类型过滤（trojan, vless 等） |
-| `--name, -n` | 按节点名关键词过滤 |
-| `--country, -c` | 按服务器 IP 国家过滤（ISO 3166-1 alpha-2） |
-| `--strategy, -s` | 负载均衡策略：adaptive（自适应）、url-test、round-robin、random |
-
-全局 `--proxy` 参数与 proxy 工具的关系：`--proxy` 设置初始扫描代理（所有 scanner 共享），proxy 工具可在运行时动态切换或通过 proxy-chain 对单次命令使用不同代理。
-
-### playwright — 无头浏览器（仅 full 版）
-
-playwright 提供 Chromium 无头浏览器，用于 JS 渲染页面、截图、网络捕获和交互式漏洞验证。
-
-**无状态命令**（直接传 URL，用完即关）：
-
-| 子命令 | 说明 |
-| --- | --- |
-| `playwright goto <url> [selector]` | 导航到 URL 并返回文本内容 |
-| `playwright content <url> [selector]` | 导航到 URL 并返回 HTML |
-| `playwright screenshot <url> [options]` | 截图 |
-| `playwright evaluate <url> <script>` | 执行 JavaScript |
-| `playwright network <url>` | 捕获页面网络请求 |
-| `playwright pdf <url>` | 生成 PDF |
-
-**会话模式**（多步交互工作流）：
-
-```bash
-playwright open <url> [--session name] [--record]   # 打开持久会话
-playwright discover <session>                         # 发现表单、按钮、事件监听器
-playwright autofill <session> [--form N] [--data k=v] # 智能表单填充
-playwright click <session> <selector>                 # 点击
-playwright fill <session> <selector> <value>          # 输入
-playwright screenshot <session>                       # 截图当前状态
-playwright network <session> --start/--dump/--stop    # 网络捕获
-playwright close <session>                            # 关闭会话
-playwright sessions                                   # 列出活跃会话
-```
-
-会话交互命令完整列表：`goto`、`content`、`evaluate`、`screenshot`、`network`、`reload`、`go-back`、`go-forward`、`click`、`dblclick`、`fill`、`press`、`hover`、`select-option`、`check`、`uncheck`、`set-input-files`、`focus`、`blur`、`wait-for`、`wait-for-url`、`wait-for-request`、`wait-for-response`、`dispatch-event`。
-
-`--record` 选项开启操作录制，可用于生成自动化测试模板。
-
-### record — 桌面/窗口截图与录屏（Windows、Linux X11 可选工具）
-
-`record` 是面向 SDK 和工具开发者的可选原生 Agent Tool，不包含在默认 full 构建中。它支持桌面或指定窗口截图、固定时长录制，以及异步 `start` / `stop` / `status` 会话。窗口目标可以传 Windows HWND、X11 Window ID，或使用 PID 自动解析面积最大的可见主窗口。
-
-默认输出 PNG 截图和 H.264/MP4 视频，不录制音频；Wayland、最小化窗口和不可见后台窗口不受支持。详细参数见 [record 文档](record.md)。
-
-### subagent — 子 agent
-
-subagent 工具创建独立子 agent 处理子任务。
-
-| action | 说明 |
-| --- | --- |
-| `create` | 创建子 agent（默认） |
-| `list` | 列出运行中的子 agent |
-| `kill` | 按名称取消子 agent |
-| `message` | 向运行中的子 agent 发送消息 |
-
-运行模式：
-
-| 模式 | 说明 |
-| --- | --- |
-| `sync` | 同步阻塞，等待子 agent 完成后返回结果 |
-| `async` | 异步后台运行，使用全新上下文 |
-| `fork` | 异步后台运行，继承父 agent 对话上下文（cache 友好） |
-
-可通过 `type` 参数指定 agent 类型（对应 `agent: true` 的 skill），子 agent 会使用该 skill 的系统提示词。
-
-### IOA 工具（需 `--ioa-url`）
-
-| 命令 | 说明 |
-| --- | --- |
-| `ioa send` | 向 Space 发送消息（任务分派、情报共享、结果汇报） |
-| `ioa read` | 读取 Space 中的消息 |
-| `ioa space` | 获取或创建 Space |
-
-### web_search 详情
-
-`web_search` 支持多后端：
-
-1. 如果当前 LLM provider 实现了 `WebSearchProvider` 接口（如 Anthropic `web_search_20250305`、OpenAI Responses API），优先使用 provider 原生搜索
-2. 否则回退到 Tavily Search API
-3. 两者均不可用时返回错误
-
-### finish 工具
-
-`finish` 工具让 agent 显式声明任务完成。调用时传入 `summary` 参数，返回 `ToolResult.Terminate=true`，agent 循环以 `StopReasonTerminated` 结束。这比等待 LLM 自然停止更可控。
-
----
-
-## --ai 模式
-
-`--ai` 模式将 scanner 执行和 LLM 分析结合：先运行 scanner，再由 agent 分析输出。
-
-```bash
-aiscan --ai -p "<分析意图>" <scanner> [scanner 参数...]
-```
-
-### 工作方式
-
-1. 解析 scanner 命令和参数
-2. 自动加载对应 scanner 的 skill（如 `gogo` 命令加载 gogo skill）
-3. 创建 agent runtime，将 scanner 参数和用户意图格式化为任务 prompt
-4. Agent 拥有完整工具集，可以运行 scanner、分析输出、调用其他工具进一步验证
-
-### 示例
-
-```bash
-# gogo 结果由 agent 分析
-aiscan --ai -p "只提取高风险暴露面，并给出证据" gogo -i 192.168.1.0/24 -p top2
-
-# spray 结果分析
-aiscan --ai -p "判断这些 Web 指纹是否值得进一步验证" spray -u http://target.example --finger
-
-# neutron 结果分析
-aiscan --ai -p "解释命中的 POC 影响和复现条件" neutron -u http://target.example -s critical,high
-
-# 额外指定 skill
-aiscan --ai --skill scan gogo -i 192.168.1.0/24 -p all
-```
-
-> `--ai` 适合对 scanner 输出做总结、解释和筛选。如果需要自动化证据验证，使用 `scan --verify`。
-
----
-
-## Skills
-
-Skills 是 agent 按需加载的知识文件，提供工具使用指南、最佳实践和领域知识。
-
-### 内置 skill 列表
-
-| Skill | 说明 | 可用性 |
-| --- | --- | --- |
-| `cyber` | 核心机制、能力、scanner 伪命令、工具调用规则 | 默认 |
-| `scan` | 多阶段扫描流水线知识 | 默认 |
-| `search` | Cyberhub 指纹和 POC 模板查询 | 默认 |
-| `report` | 安全扫描报告生成 | 默认 |
-| `gogo` | 主机/端口/服务/指纹发现 | 默认 |
-| `spray` | Web 探测/HTTP 指纹/路径分析 | 默认 |
-| `zombie` | 弱口令检测和认证结果分析 | 默认 |
-| `neutron` | 模板化 POC 执行和结果分析 | 默认 |
-| `ioa` | IOA 多 agent 协作 | 默认 |
-| `tmux` | 后台会话管理 | 默认 |
-| `playwright` | 无头浏览器操作 | 仅 full 版 |
-| `passive` | 网络空间搜索（FOFA/Hunter） | 仅 full 版 |
-| `katana` | Web 深度爬取和参数发现 | 仅 full 版 |
-
-### 指定 skill
-
-通过 `-s` 参数指定加载的 skill：
-
-```bash
-# 加载多个 skill
-aiscan agent -s aiscan -s scan -p "全面扫描这个网段" -i 10.0.0.0/24
-
-# 报告生成
-aiscan agent -s report -p "根据扫描结果生成报告" -i http://target.example
-```
-
-### 加载优先级
-
-```
-内置 embedded skill < .cyber/skills/ < .agent/skills/ < -s 指定路径
-```
-
-后加载的同名 skill 覆盖先加载的。`-s` 除了接受 skill 名称，也可以指定自定义 skill 文件路径。
-
----
-
-## 信号处理
-
-★ v0.2.2 重构了信号处理机制，支持三阶段 Ctrl+C 和上下文传播。
-
-### 三阶段 Ctrl+C
-
-| 阶段 | 行为 |
-| --- | --- |
-| 第一次 Ctrl+C | 停止当前正在执行的任务（调用 `controller.Stop()`），回到 REPL 等待新输入。如果没有任务在执行，提示再按一次退出 |
-| 第二次 Ctrl+C | 取消根上下文，结束当前 turn 后退出 REPL |
-| 第三次 Ctrl+C | 强制退出（`os.Exit(1)`） |
-
-### 5 秒空闲重置
-
-如果两次 Ctrl+C 之间间隔超过 5 秒，信号计数器重置为 0。下一次 Ctrl+C 重新从第一阶段开始，避免误操作导致退出。
-
-### 上下文传播
-
-信号处理的上下文链：
-
-```
-根 context → controller runCtx → agent runCtx → tool 执行 context → bash/tmux timeout context
-```
-
-`controller.Stop()` 取消 `runCtx`，该取消信号通过 context 链传播到所有正在执行的工具，包括 `tmux.CreateFunc` 创建的后台命令。同时调用 `output.AbortCurrentRun()` 停止 spinner 和流式输出。
-
-### `!` 直接命令取消
-
-REPL 中 `!` 前缀的直接命令拥有独立的 cancel context，支持 Ctrl+C 和 Escape 取消，不影响 agent 会话状态。
-
----
-
-## 多 Provider 配置
-
-可以保存多个 provider profile，但模型切换始终由用户显式触发。Agent 不会在请求失败后自动换 provider。
-
-### 机制
-
-1. 当前 provider 的 LLM 请求按配置执行重试和退避
-2. 可重试的错误：HTTP 429（限流）、500/502/503/529（服务端错误）、超时、连接错误
-3. 不可重试的错误：HTTP 401/403/404（认证/权限/不存在）立即失败
-4. 当前 provider 重试耗尽后，agent 以 `StopReasonError` 停止
-5. 其他 profile 不会收到当前 turn，避免跨模型隐式重放
-
-### 配置
-
-在配置文件中定义 provider profile，并明确指定当前项：
-
-```yaml
-llm:
-  active_profile: openai
-  providers:
-    - id: openai
-      provider: openai
-      model: gpt-4o
-      api_key: "sk-..."
-    - id: deepseek
-      provider: openai
-      base_url: "https://api.deepseek.com/v1"
-      model: deepseek-chat
-      api_key: "..."
-    - id: ollama
-      provider: openai
-      model: llama3
-      base_url: "http://localhost:11434/v1"
-      api_key: "local"
-```
-
-`active_profile` 按 `id` 选择当前项；未设置时使用列表第一项。完整格式参见 [参考手册](reference.md)。
-
-### 查看状态
-
-REPL 中使用 `/provider` 命令查看当前和其他可用配置：
-
-```text
-aiscan> /provider
-Provider profiles:
-  1. openai / gpt-4o          # active
-  2. openai / deepseek-chat   # deepseek profile
-  3. openai / llama3          # ollama profile
-```
-
-切换通过 Web 设置页，或 REPL 的 `/provider set --provider ... --model ...` 显式完成。
-
----
-
-## 适用场景
-
-### agent 适合
-
-- **任务描述不完全确定** — 需要 agent 自己选择扫描路径和工具组合
-- **需要多 scanner 关联** — 把 gogo、spray、neutron 等结果串联起来分析
-- **需要人可读输出** — 生成面向人的摘要、复现步骤或后续建议
-- **IOA 多 agent 协作** — 多个 worker 分工执行不同扫描任务
-- **需要迭代验证** — 通过 Goal Evaluation 确保输出质量
-- **交互式探索** — 连续追问，根据上一步结果调整方向
-
-### agent 不适合
-
-- **大范围批量扫描** — 大规模无约束扫描直接用 `scan` 命令更高效
-- **严格输出格式** — 对时间和格式有严格要求的批处理任务用 `scan -j`
-- **没有 LLM 环境** — agent 必须有可用的 LLM provider；无 LLM 时使用 `scan` 命令
-- **低延迟要求** — LLM 调用增加延迟，纯扫描任务不需要 agent 介入
+下一篇[会话与上下文](user/sessions.md)解释连续输入、压缩、记录和恢复，让长任务可以被管理与复核。

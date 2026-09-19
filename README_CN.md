@@ -18,195 +18,71 @@
 
 ---
 
-cyber-harness 是一个「一切皆扩展」的 agent harness。
+cyber-harness 是面向网络安全的 Agent 运行框架。它把模型循环、工具执行、知识、观测和协作按同一套 Extension 生命周期组装；你可以使用现成发行版，也可以在 Go 应用里选择自己的能力组合。
 
-它的核心只是一个极小的 model-tool loop：请求模型 → 执行它要调用的工具 → 把结果追加回去 →
-循环，直到任务完成。扫描器、浏览器、终端、代理、Web UI、多 Agent 协作——全都以同一种方式
-构建，静态链接进同一个二进制。扩展这个 harness 的方式，是往现有组件旁边加一个新组件，
-而不是去 patch 一个特权内核。
+`aiscan` 是参考发行版：Agent、核心扫描器、代理、Skills 和 IOA 协作；`aiscan-full` 进一步提供 Web 工作台、浏览器自动化、被动测绘和深度爬取。
 
-`aiscan` 是它的参考发行版——把 Agent、安全工具集、Skill、确定性扫描和 IOA 协作打包成一个
-单文件可执行程序。
+> 请只在明确授权的目标上使用。
 
-> **请只在明确授权的目标上使用，未经授权的使用属于违法行为。**
+## 开始使用
 
-## 核心特性
+从 [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest) 下载对应平台的 `aiscan` 或 `aiscan-full`，解压并加入 PATH。安装、PowerShell 配置、模型连接和首个任务的完整步骤见 [快速上手](docs/getting-started.md)。
 
-- **一切皆扩展** —— 没有特权内核。扫描器、浏览器、终端、代理、Web UI、多 Agent 协作都按同一套模型组装，静态链接进同一个二进制；同一套框架也能嵌入你自己的应用。
-- **极简的 agent 架构** —— loop 刻意做小；安全工具、评估、协作、工作流都放在核心之外。
-- **单二进制发行** —— `aiscan` 打包核心安全工具集与 IOA 协作；`aiscan-full` 再叠加 Web UI、浏览器自动化、被动测绘与深度爬取。
-- **多 Agent 协作** —— 通过 IOA 的共享消息空间与 worker 模式，把任务分发给分布式 agent，内置带 token 认证的 server。
+```sh
+# 已配置模型后：完成一次 Agent 任务，保存事件记录
+aiscan agent -p "只读查看当前目录并解释文件结构" -o first-run.jsonl
 
-## 运行
+# 对自己的本地靶场执行规则扫描，关闭 AI 验证
+aiscan scan -i http://127.0.0.1:3000 --verify=off
 
-```bash
-# 一次性 Agent 任务（带 LLM）
-aiscan agent --base-url "https://api.deepseek.com" --api-key "sk-..." --model deepseek-chat \
-  -p "扫描目标并检查高风险漏洞" -i 192.168.1.0/24
-
-# 绕过 LLM，直接驱动扫描引擎
-aiscan scan -i 192.168.1.0/24
-
-# Web 控制台（完整版）
+# 完整版：启动 Web 工作台，使用启动时打印的 access key 登录
 aiscan-full web
 ```
 
-同一套扫描引擎也以确定性命令的形式暴露，用于自动化流程和没有 LLM 的环境；也可以作为 IOA
-worker 参与多 Agent 协作：
+Agent 由模型决定下一步工具调用；`scan` 由规则和扫描事件驱动，可按需启用 AI 阶段。二者的关系见 [概念与执行全景](docs/concepts.md)。
 
-```bash
-aiscan scan -i http://target.example --mode full --deep --report
-aiscan agent -p "扫描分配到的目标并上报发现" \
-  --ioa-url http://127.0.0.1:8765 --space pentest-project
-```
+## 模型配置
 
-## 安装
-
-从 [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest) 下载：
-
-| 版本 | 说明 |
-| --- | --- |
-| **aiscan** | 开箱即用的 Agent，包含核心安全工具集与 IOA 协作能力 |
-| **aiscan-full** | 额外包含 Web UI、浏览器自动化、被动测绘和深度爬取 |
-
-| 系统 | 架构 | 标准版 | 完整版 |
-| --- | --- | --- | --- |
-| Linux | amd64 / arm64 | `aiscan_linux_<arch>.zip` | `aiscan-full_linux_<arch>.zip` |
-| macOS | Intel / Apple Silicon | `aiscan_darwin_<arch>.zip` | `aiscan-full_darwin_<arch>.zip` |
-| Windows | amd64 / arm64 | `aiscan_windows_<arch>.zip` | `aiscan-full_windows_amd64.zip` |
-
-```bash
-# Linux
-curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_linux_amd64.zip
-unzip aiscan_linux_amd64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# macOS Apple Silicon
-curl -LO https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_darwin_arm64.zip
-unzip aiscan_darwin_arm64.zip
-chmod +x aiscan && sudo mv aiscan /usr/local/bin/
-
-# Windows (PowerShell)
-Invoke-WebRequest "https://github.com/chainreactors/cyber-harness/releases/latest/download/aiscan_windows_amd64.zip" -OutFile aiscan.zip
-Expand-Archive .\aiscan.zip -DestinationPath .
-.\aiscan.exe --version
-```
-
-### Web 控制台（完整版）
-
-`aiscan-full web` 会启动浏览器界面和一个内嵌本地 Agent。访问
-`http://127.0.0.1:8080`，输入终端中打印的 access key 即可。
-
-```bash
-aiscan-full web                                              # 本机，临时 access key
-aiscan-full web --addr 0.0.0.0:8080 --token change-me        # 局域网，固定 access key
-aiscan-full web --addr 0.0.0.0:8080 --token change-me --no-agent   # 仅作 Hub
-```
-
-会话、扫描、资产、发现和配置默认保存在 `cyber-web.db`；可用 `--db <path>` 指定其他 SQLite
-数据库。
-
-### 从源码构建
-
-```bash
-git clone https://github.com/chainreactors/cyber-harness.git && cd cyber-harness
-make              # 标准版（aiscan）
-make agent        # 最小本地 Agent（不含 scanner/search/proxy/web）
-make full         # 前端 + 完整版（aiscan-full）
-```
-
-`make full` 需要 Node.js/npm 和可用的 CGO 工具链，会先构建前端，再把最新的 `web/static`
-嵌入完整版二进制。原生 `record` 工具需单独用 `make record` 构建，详见
-[record 文档](docs/record.md)。
-
-## 内置能力
-
-**Agent 能力**
-
-- [`terminal`](docs/agent.md) —— 在真实伪终端里执行命令，支持交互输入与后台任务
-- [`goal`](docs/agent.md#goal-evaluation) —— 目标评估：agent 在结束前对照目标检查自己的产出
-- [`subagent`](docs/agent.md) —— 把复杂任务拆解给子 agent
-- [`skills`](docs/agent.md) —— 可挂载的提示词、知识与可复用技能
-- [`search`](docs/scan.md) —— 指纹、CVE 与网络情报检索
-- [web_search / fetch](docs/agent.md) —— CVE 搜索和 URL 抓取
-- [`tmux`](docs/agent.md) —— 后台任务会话，增量输出自动推送
-- [`ioa`](docs/ioa.md) —— 通过共享消息空间与 worker 模式进行多 Agent 协作
-- [`proxy`](docs/reference.md) —— 多协议代理链（trojan/vless/anytls/hy2/ss）
-- [`arsenal`](docs/reference.md) —— 安全工具包管理器
-
-**扫描器**
-- gogo — 端口、服务、banner 发现
-- spray — Web 探测、指纹识别、路径 fuzz
-- zombie — 弱口令检测
-- neutron — 模板化 POC 执行
-- proton — 敏感信息扫描（API 密钥、令牌、凭证、密码）
-- cyberhub — 指纹和 POC 关联查询
-
-**浏览器 & 侦察**（完整版）
-- playwright — headless Chromium 会话、截图、网络捕获
-- katana — Web 爬虫（standard/headless/hybrid 引擎）
-- passive — 网络空间搜索（FOFA、Hunter、Shodan）
-
-可选 SDK 工具：`record` — 原生桌面/窗口截图和 H.264/MP4 录屏（Windows 与 Linux X11）。
-
-## 配置
-
-```bash
-export OPENAI_API_KEY="sk-..."      # 环境变量
-aiscan agent --provider openai --base-url https://api.deepseek.com/v1 --api-key sk-... --model deepseek-chat
-```
-
-配置文件 `cyber.yaml`：
+工作目录中的 `cyber.yaml`：
 
 ```yaml
 llm:
   provider: openai
-  api_key: sk-...
-  model: gpt-4o
-  context_window: 128000   # 真实 Token 数，不要写 128K
-  max_tokens: 16384
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
 ```
 
-完整的 flag、Provider 与扫描器参数见 [docs/reference.md](docs/reference.md)。
-
-## 嵌入
-
-自定义发行版与官方二进制使用同一条公开组合路径：
-
-```go
-entries, err := base.New(config)
-entries = append(entries, myExtensions...)
-set, err := extension.New(entries...)
-```
-
-调用方负责 `set.Load` 和 `set.Close`。需要完整参考发行版时直接使用 `pkg/aiscan.New`，无需自行
-选择能力包。可运行的最小发行版位于 [`examples/custom`](examples/custom)，生命周期和顺序规则见
-[扩展架构](docs/architecture.md)。
+通过 `OPENAI_API_KEY` 提供密钥。Anthropic-compatible 服务使用 `provider: anthropic` 和相应配置。协议、profile、环境变量优先级见 [配置参考](docs/reference.md)。
 
 ## 文档
 
-| 文档 | 说明 |
-| --- | --- |
-| [Agent Runtime](docs/agent.md) | 工具、Goal Evaluation、REPL、Session 与 Subagent |
-| [Extension 架构](docs/architecture.md) | 类型化组合、生命周期、所有权 |
-| [开发手册](docs/development.md) | 如何扩展这个 harness |
-| [组合架构 RFC](docs/rfc-composition.md) | 公开组合边界与 Go API 迁移 |
-| [安全扫描流水线](docs/scan.md) | 直接扫描、AI 增强与输出格式 |
-| [IOA 协作](docs/ioa.md) | 多 Agent 消息空间、Worker 模式 |
-| [AOP 集成](docs/integration.md) | Agent Transport 与 Host 集成 |
-| [协议与传输架构](docs/protocol-architecture.md) | AOP WebSocket、Connect 管理平面 |
-| [Record 工具](docs/record.md) | 桌面/窗口捕获、原生构建 |
-| [参考手册](docs/reference.md) | 配置、Provider、全局参数、扫描器用法、FAQ |
-| [v1.0.0 发布与迁移](docs/v1.0.0.md) | 稳定接口基线 |
-| [Changelog](docs/changelog.md) | 版本变更记录 |
+从[文档首页](docs/README.md)进入。正文描述当前源码，使用 release 时选择对应 Git tag。
+
+[基本概念](docs/concepts.md)解释 harness、模型、工具、会话和知识的关系，不要求先了解 Go。
+
+[使用者指南](docs/user/README.md)从安装和第一次任务开始，逐步介绍会话、工具、Skills、扫描与协作。
+
+[开发者指南](docs/development.md)面向基于框架构建应用的人，从可运行的工具组合推进到会话嵌入、扩展开发和宿主接入。
+
+[架构](docs/architecture.md)解释装配与生命周期、Agent 循环、执行环境、上下文及数据流。完整配置与命令单独放在[参考页](docs/reference.md)。
+
+## 构建与嵌入
+
+```sh
+git clone --recurse-submodules https://github.com/chainreactors/cyber-harness.git
+cd cyber-harness
+make          # 标准发行版
+make agent    # 最小本地 Agent
+make full     # 前端 + 完整发行版
+```
+
+Go 版本见 [go.mod](go.mod)；full 还需要 Node.js/npm，standard 与 full 均使用 CGO_ENABLED=0。构建标签由 [editions.env](editions.env) 定义；原生录屏需要 CGO，另见 [record](docs/record.md)。
+
+自定义发行版使用 `base.New(config)` 取得基础扩展，追加自己的扩展后交给 `extension.New`，由宿主持有 Load/Close；完整参考发行版使用 `pkg/aiscan.New`。可运行例子见 [examples/custom](examples/custom)，注册工具的最小示例见 [扩展开发](docs/development.md)。
 
 ## 贡献
 
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/xxx`)
-3. 提交更改 (`git commit -m 'feat: add xxx'`)
-4. 推送分支 (`git push origin feature/xxx`)
-5. 创建 Pull Request
+先阅读 [扩展开发](docs/development.md) 与 [文档维护标准](docs/maintaining-docs.md)。提交 PR 时描述具体行为变化、影响的入口和验证结果；行为变化应同步更新对应教程或参考页。
 
 ## 免责声明
 

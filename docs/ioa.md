@@ -1,10 +1,14 @@
 # IOA 客户端与服务端扩展
 
+[文档首页](README.md) · 前置：[Web 与协作](user/web.md) · 开发前置：[扩展装配](architecture/composition.md)
+
+先在两个终端分别运行 `aiscan ioa serve` 和配置好模型的 `aiscan agent --ioa-url http://127.0.0.1:8765 --space lab`。后者在没有任务输入时保持交互会话；带 `-p` 时仍是一次性任务。本章继续解释身份、投递、配置与资源所有权。
+
 IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。Cyber 通过两个独立扩展集成：
 
 | 扩展 | 所有权 | 对外业务能力 |
 | --- | --- | --- |
-| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Runtime()`：查询、状态，无 SDK 句柄和 Start/Close |
+| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Service()`：业务服务与状态，无扩展 Load/Close |
 | `pkg/exts/ioa/server` | Store、Service、认证、HTTP/SSE 请求排空 | `Server()`，无 Start/Close |
 
 客户端与服务端使用 IOA HTTP 协议通信。原始实现在 `tools/ioa` 与 `tools/ioa/server`，
@@ -20,12 +24,12 @@ Agent Inbox      ←─ peer 消息 ─ IOA Client
 Console / CLI    ── Reader ───→ IOA Client
 ```
 
-Profile 构造客户端并注入 Command Registry、共享的 Event Stream 和可选的投递函数。
+Profile 构造客户端并传入配置、Skills 和可选投递函数；客户端在 Load 时通过 `Add` 贡献命令、知识与提示词，通过 `Use` 借用共享 Event Stream。
 客户端不导入 Agent Extension，Agent 不导入 IOA SDK。
 没有投递函数时仍可使用命令和 skills，不启动自动收信。
 
-加载顺序为 IOA Client → App/贡献者 → Command Registry → Tool Registry → Agent；
-关闭顺序相反。只有整张 Profile 图发布后，投递函数才允许调用 Agent 的 `Deliver`。
+基础能力与 Command/Tool Registry 先加载，随后安装 IOA Client，再安装会话与展示扩展；
+关闭顺序相反。具体组合见 [Profile](../pkg/aiscan/profile.go)。只有整个 Set 加载成功并发布后，投递函数才允许调用 Agent 的 `Deliver`。
 该入口选择主会话，否则选择唯一会话；无会话、多会话歧义、关闭或队列满时返回错误。
 不会自动创建会话。忙碌会话接收追加输入，空闲会话通过既有 Inbox 机制自动执行。
 
@@ -35,7 +39,7 @@ Profile 构造客户端并注入 Command Registry、共享的 Event Stream 和�
 
 handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/return 内容和引用关系。
 队列上限为 256 个事件、16 MiB。发送失败被记录，不终止后续事件消费；队列溢出会停止
-该订阅并记录错误和丢弃数量。`Runtime.Status()` 提供 Bound、Space、LastError 和 Dropped。
+该订阅并记录错误和丢弃数量。`Service().Status()` 提供 Bound、Space、LastError 和 Dropped。
 关闭时先取消并等待收信，再排空 handoff，最后释放客户端资源；超时可通过 Set.Close 重试。
 已完成资源回收但输出失败时返回普通错误，不再报告资源未关闭。
 
@@ -129,8 +133,8 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 根目录 `go.work` 联调 workspace 随之移除，构建不再依赖相邻仓库的本地路径。
 
 ```text
-go test . ./core/config ./pkg/cli ./skills ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./cmd/aiscan ./pkg/web/service
-go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./skills
+go test ./core/config ./pkg/cli ./agent/skills ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./cmd/aiscan ./pkg/web/service
+go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./agent/skills
 go test -tags full ./cmd/aiscan ./pkg/web/service
 go test github.com/chainreactors/ioa/server
 ```

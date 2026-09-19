@@ -1,11 +1,13 @@
 # cyber 外部接入 API
 
+[文档首页](README.md) · 教程：[外部接入](integration.md) · 架构：[协议边界](protocol-architecture.md)
+
 本文档描述外部程序集成 cyber 时使用的两组 API。
 
 | 功能组 | 传输 | 语义 |
 |--------|------|------|
 | Application WebSocket | 双向、长连接、二进制 protobuf | Session/Turn 生命周期和实时事件流 |
-| ConnectRPC | unary 请求/响应 | 会话历史、扫描、配置、Agent、系统状态和 SCO 管理 |
+| ConnectRPC | unary 请求/响应 | 会话历史、扫描、配置、Agent、系统状态和原始 Artifact 归档同步 |
 
 第三方语言的 protobuf 生成和接入流程见 [integration.md](integration.md)。Go 可运行示例见 [`examples/acp/README.md`](../examples/acp/README.md)。字段级参考以 proto 源码为准，需要时按 [api/README.md](api/README.md) 的步骤生成文档。
 
@@ -25,7 +27,7 @@
 - 重置或删除 session
 - 提交、查询和取消扫描
 - 查询或更新配置
-- 查询 Agent、系统状态和 SCO 数据
+- 查询 Agent、系统状态和同步原始 Artifact 归档；规范化资产视图在浏览器生成
 
 `SessionService/ListEvents` 只返回已持久化历史，不替代 WebSocket `WatchEvents`。
 
