@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -251,7 +252,11 @@ func RunDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return ctx.Err()
 	}
 	if !streaming {
-		fmt.Print(captured.String())
+		output := captured.String()
+		if isDirectScannerJSONOutput(scannerArgs) {
+			output = filterScannerJSONLines(output)
+		}
+		fmt.Print(output)
 	}
 	info, retained := execution.Session()
 	if !retained && execution.ID != "" {
@@ -267,6 +272,23 @@ func RunDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return fmt.Errorf("%s %s (exit code %d)", scannerArgs[0], info.State, info.ExitStatus())
 	}
 	return nil
+}
+
+// filterScannerJSONLines keeps the public --json contract stable when a
+// scanner engine writes progress text through the PTY alongside its records.
+// The scan command emits one compact JSON value per line; progress banners,
+// tables, and summaries are deliberately excluded from stdout in this mode.
+func filterScannerJSONLines(raw string) string {
+	var out strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || (line[0] != '{' && line[0] != '[') || !json.Valid([]byte(line)) {
+			continue
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func directScannerDebugEnabled(option *cfg.Option, scannerArgs []string) bool {

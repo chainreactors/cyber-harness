@@ -178,6 +178,8 @@ misc:
 
 ### Scanner 参数
 
+全局参数应放在 scanner 命令之前；命令之后的参数由该 scanner 自己解释。例如，`aiscan -o events.jsonl gogo ... -o jl` 会把 canonical AOP 事件写入 `events.jsonl`，同时让 gogo 以 JSON Lines 输出原生结果。
+
 | 参数 | 说明 |
 | --- | --- |
 | `--proxy` | Scanner 代理，支持 `socks5://`、`trojan://`、`vless://`、`clash://`（订阅自动负载均衡） |
@@ -355,7 +357,7 @@ aiscan neutron -u http://target.example -t ./pocs --id shiro-detect -j
 | `--tags` | 按 tag 过滤 |
 | `-s, --severity` | 按严重性过滤 |
 | `-j, --json` | JSON Lines 输出 |
-| `-o, --output` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件；原生结果文件请使用 stdout 重定向 |
+| `-o, --output` | 将 proton 原生结果写入文件；canonical AOP 输出使用命令前的全局 `-o` |
 | `--template-list` | 列出匹配规则（不执行） |
 
 ```bash

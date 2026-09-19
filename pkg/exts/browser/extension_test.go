@@ -17,6 +17,7 @@ func TestModuleOwnsBrowserRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := hosttest.Set(t,
+		hosttest.Capabilities(),
 		registry,
 		instance,
 	)

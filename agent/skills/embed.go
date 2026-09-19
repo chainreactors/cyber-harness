@@ -624,7 +624,7 @@ func (s *Store) ApplySelected(text string, selected []string) (string, error) {
 		if name == "" {
 			continue
 		}
-		if skill, ok := s.ByName(name); ok {
+		if skill, ok := s.selected(name); ok {
 			if sb.Len() > 0 {
 				sb.WriteString("\n\n")
 			}
@@ -650,6 +650,33 @@ func (s *Store) ApplySelected(text string, selected []string) (string, error) {
 		sb.WriteString(strings.TrimSpace(text))
 	}
 	return sb.String(), nil
+}
+
+// selected resolves both the public skill name and a CLI-selected local
+// skill path. LoadFrom records the absolute path in Skill.Location, while CLI
+// options commonly preserve the path spelling supplied by the user.
+func (s *Store) selected(value string) (Skill, bool) {
+	if skill, ok := s.ByName(value); ok {
+		return skill, true
+	}
+	if s == nil || !strings.ContainsAny(value, `/\\`) {
+		return Skill{}, false
+	}
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return Skill{}, false
+	}
+	abs = filepath.Clean(abs)
+	for _, skill := range s.All() {
+		if skill.Location == "" || skill.Source == SourceEmbedded {
+			continue
+		}
+		location, err := filepath.Abs(skill.Location)
+		if err == nil && filepath.Clean(location) == abs {
+			return skill, true
+		}
+	}
+	return Skill{}, false
 }
 
 func parseSkill(filePath, defaultName, raw string, source SkillSource) (Skill, []Diagnostic, bool) {

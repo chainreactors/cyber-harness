@@ -106,7 +106,7 @@ export default function SessionList({
         className={cn(
           'surface-raised flex flex-col border-r border-border bg-card/95 backdrop-blur-sm transition-all duration-200 ease-in-out shrink-0 md:bg-card/50',
           open
-            ? 'fixed inset-y-0 left-0 z-40 w-72 shadow-elevated md:relative md:inset-auto md:z-auto md:shadow-none'
+            ? 'fixed bottom-0 left-0 top-[calc(env(safe-area-inset-top)+3rem)] z-40 w-72 shadow-elevated md:relative md:inset-auto md:z-auto md:shadow-none'
             // Collapsed: a 48px icon rail on desktop, but fully hidden on phones —
             // there the drawer opens from the header's menu button, so the chat
             // gets the full width instead of a stub rail down the left edge.

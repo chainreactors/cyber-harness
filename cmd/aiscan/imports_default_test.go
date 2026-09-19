@@ -15,6 +15,16 @@ func TestDefaultScannerSet(t *testing.T) {
 	}
 }
 
+func TestDefaultCLIExcludesFullScannerCommands(t *testing.T) {
+	var cli cliOptions
+	parser := newCLIParser(&cli, 0)
+	for _, name := range []string{"katana", "passive"} {
+		if parser.Find(name) != nil {
+			t.Errorf("standard CLI unexpectedly declares full-only command %q", name)
+		}
+	}
+}
+
 // CGO is deliberately not asserted here: the standard manifest gates no cgo
 // file, so STANDARD_CGO only keeps the release binary free of a C toolchain,
 // while a test build may legitimately leave cgo at its default.
