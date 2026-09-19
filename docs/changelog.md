@@ -1,28 +1,62 @@
 # Changelog
 
-## v1.0.0-rc4 — 组合架构、浏览器 CSTX 与纯 Go full 构建
+## v1.0.0-rc4 — Web 资产链路、组合式扩展与纯 Go full
 
-rc4 收敛运行时组合与 Artifact 数据路径：Go 服务只负责归档原始事件，CSTX 的解析、合并和关联由浏览器中的 TypeScript/WASM SDK 完成；full 版本不再依赖 libcstx 或原生 RE2。
+rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力”变成了可以直接验证的行为：CLI 继续产生原始 Artifact，Web 归档并通过浏览器端 CSTX WASM 解析成资产；`aiscan-full` 不再要求 Go 侧安装 libcstx 或 native RE2。普通版适合 CLI 和自动化，full 版在此基础上提供 Web、浏览器和深度扫描能力。
 
-### 架构与数据路径
+### 用户可见的变化
 
-- 按 [组合架构 RFC](rfc-composition.md) 将参考发行版组合提取到公开的 `pkg/aiscan.New`；`pkg/base.New` 与扩展 capability 成为自定义发行版的明确边界。
-- 删除运行时 sink、pending、wire 和重复 DTO 转发层，扩展直接贡献或借用 capability；Profile 成为应用组合和生命周期入口。
-- Go 侧移除 CSTX 处理结果、SCO 查询服务及对应数据库表，只保留原始 Artifact 的归档与同步 RPC；保留的 native CSTX 扩展不再被任何产品 edition 选择。
-- `cyber-ui` 通过 `@cyber/cstx` 的 v0.5 TypeScript/WASM ABI 在浏览器中解析归档 Artifact，并直接生成资产视图。
-- PTY、进程、prompt、scanner、IOA client 和 Web application dispatch 收敛到各自扩展所有权，减少跨包手工装配和隐式全局状态。
+- `aiscan --version`、`aiscan -h`、`aiscan scan -h` 在发布二进制中直接可用；普通版保留 `agent`、`scan`、`gogo`、`spray`、`zombie`、`neutron`、`proton` 等 CLI 能力。
+- `aiscan-full web` 启动内嵌 Web 工作台，默认监听 `127.0.0.1:8080`，启动日志打印访问地址、access key 和 Agent 连接命令；`--addr`、`--token`、`--db`、`--no-agent` 可分别控制监听地址、认证、SQLite 文件和是否启动内嵌 Agent。
+- Web 首屏、`/health`、认证登录、会话列表、扫描列表和 Artifact 归档查询使用同一套发布构建中的静态资源与 ConnectRPC；无效 bearer token 会被拒绝，访问 key 不会写入可缓存的响应。
+- 扫描完成后，Web 会显示扫描摘要卡片并把原始 Artifact 归档到对应会话；资产面板支持导入、分页、类型筛选、搜索、关系图、详情和导出，不再要求 Go 服务先生成一套重复的 SCO 报告 DTO。
+- 快速连接从当前 Web space 获取 Agent token 并加入当前 space；命令面板从客户端命令目录生成 `/help`，代码块可复制，扫描卡片、资产表格、连接提示和错误通知均提供中英文文本。
+- Web 的聊天、会话恢复、Agent 状态、PTY、IOA 控制台、工具目录、配置面板和 Artifact 详情都改为同一条二进制 Connect/AOP 数据路径；前端不再维护旧的 scan/report/SCO 客户端分支。SPA 路由回退到当前 `index.html`，指纹化静态资源可长期缓存，入口文档始终禁止缓存。
+- 流量工具使用 canonical protobuf `traffic.Flow`/`traffic.Exchange`；MITM Hub 支持按调用选择订阅、限制捕获大小，并把响应 body 流式写入持久文件。代理切换、Host 重建、取消请求和尾随 Artifact 的处理都绑定到实际 operation，而不是时间窗口或临时 sink。
+- 纯 Go `curl` 支持常用请求、重定向、表单、cookie jar、代理、`--resolve`、超时、HTTP 版本、trace、输出文件和 `--write-out`；默认注入浏览器请求头并继续经过 Runner egress/HTTP 观察链。
+- Agent 的 goal loop 使用自然语言 pacing；compaction、budget、失败回合、命令结果和 evaluator 记录只在时间线中出现一次，失败回合不会被错误地自动继续。
 
-### Agent 与 Web
+### Artifact、CSTX 与数据边界
 
-- evaluator 以自然语言 pacing 驱动 goal loop，修复 compaction、budget、失败消息和命令结果在时间线中的重复或缺失。
-- Web 资产导入、扫描卡片、快速连接、命令面板和 ConnectRPC 二进制 framing 完成端到端修复，并补齐中英文标签。
-- 文档重组为用户、开发者、架构和概念入口，新增可编译的自定义组合与 session 示例。
+- Go 端只接收、归档和同步原始 Artifact，并通过 Artifact RPC 提供给 Web；旧的 CSTX 解析结果、SCO 查询服务、报告转发层以及相关数据库表已移除。
+- `cyber-ui` 的 `@cyber/cstx` 升级到 `0.5.0`，使用 TypeScript/WASM ABI 在浏览器完成 artifact 的 parse、merge、link 和节点规范化；资产视图、关系图、列推断和导出都读取这条浏览器数据路径。
+- 当前 Artifact protobuf/ABI 是唯一事实来源，发行版不再携带 v1/v2/v3 兼容 DTO、sink、pending 或 wire 转发层。保留的 native CSTX 扩展只用于 SDK/自定义组合，不被 `aiscan` 或 `aiscan-full` 产品 profile 选中。
+- Web、PTY、进程、prompt、scanner、IOA client 和 application dispatch 各自声明 capability；自定义宿主使用 `pkg/aiscan.New`，更底层的最小宿主使用 `pkg/base.New`，无需手工拼装内部生命周期对象。
+- IOA 已拆成独立 client/server extension：Agent 的 `--ioa-url` 使用 URL userinfo 传递 access key，Web 通过同源 `/ioa/` bridge 注入保留的 IOA identity；space、node、message/context 查询和快速连接都使用当前 space/node 关系，不再读取旧的全局字段。
+- 资源和生命周期由 profile/manifest 组合：工具资源从 `core` 移到 `tools`，每个 extension 通过 capability 声明依赖，统一的 process registry 管理命令、PTY、tmux 和后台任务；旧 root workspace、重复 runner/harness 和 product architecture 名称被移除。
 
-### 构建与发布
+### 构建、CGO 与发行版选择
 
-- full 默认使用纯 Go/WASM RE2，`CGO_ENABLED=0` 与 `CGO_ENABLED=1` 均可构建；仅 record edition 需要 CGO 和 recorder SDK。
-- standard 与 full 都从 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64，不再下载静态 RE2 SDK 或 macOS CGO 工具链。
-- `aiscan` 与 `aiscan-full` 各发布 6 个 ZIP；`aiscan_checksums.txt` 覆盖全部 12 个 ZIP，`runner` 仅参与构建验证。
+- `aiscan-full` 的默认 RE2 路径是纯 Go；`CGO_ENABLED=0` 和 `CGO_ENABLED=1` 都能构建和运行。普通版与 full 版都不依赖 Go 侧 libcstx。
+- 只有显式启用 `record` edition 才需要 CGO 和 recorder SDK；官方 `aiscan`/`aiscan-full` ZIP 不包含录屏 SDK，也不会在启动时加载 native CSTX 扩展。
+- 普通版 (`aiscan`) 包含 Agent、核心扫描器、代理、Skills 和 IOA，适合服务器、脚本和无浏览器环境；full 版 (`aiscan-full`) 额外包含 Web、Chromium 复用、Katana 和被动测绘能力。
+- 两个发行版都由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；这不代表目标机自带模型、Chromium 或扫描规则服务，具体外部依赖仍按使用的工具和配置决定。
+- `go.mod`、AOP 子模块和公开包路径已从 `aiscan` 重命名为 `cyber`；`Makefile` 与 `editions.env` 是本地构建的唯一入口和 tag/CGO 真相，GoReleaser 只负责编译，打包、UPX、checksum 和启动验证由 release workflow 完成。
+- record SDK 改由 `chainreactors/native` Release 提供，`.github/native/sdk.sh` 负责固定版本、SHA-256、manifest 和 ABI header 校验；仓库不再携带 native 库，也不在 standard/full 构建中隐式下载或链接 recorder。
+
+### 迁移影响
+
+- 依赖旧 Go SCO/report RPC、旧数据库表或旧的临时 loot/file-range 编码的客户端需要重新生成 protobuf，并改用 Artifact RPC 与当前 latest schema。
+- 自定义发行版不应再注册全局 sink、pending 或 wire 适配器；将功能声明为 extension capability，并从组合根传入 `pkg/aiscan.New` 所需的配置。
+- 要使用 Web，下载 `aiscan-full`；下载普通 `aiscan` 后执行 `web` 会得到明确的能力缺失，而不是静默启动一个不完整的 Web 服务。
+- 依赖 `pkg/runner`、`pkg/tui`、`pkg/types`、`pkg/web/api/report`、`proto/*/sco.proto` 或旧的 `cmd/runner` 的嵌入方需要按新目录和 protobuf 生成包迁移；这些旧路径在 rc4 中没有兼容别名。
+
+### Release Matrix 与验证
+
+| 产物 | Linux | macOS | Windows | 数量 |
+| --- | --- | --- | --- | ---: |
+| `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
+| `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
+| `aiscan_checksums.txt` | — | — | — | 1 |
+
+`v1.0.0-rc4` 的发布门禁覆盖 Go 单元/竞态、架构与依赖检查、Web 前端构建、Playwright E2E、扫描器功能、headless record/replay、Windows cgo/非 cgo 编译、两套 GoReleaser 矩阵、ZIP 解包启动和 Linux amd64/arm64/Windows 产物验证。Release 包含 12 个 ZIP 和 1 个 checksum 文件；`runner` 只参与验证，不作为附件发布。
+
+### 审查记录
+
+- rc3 与 rc4 标签不是线性父子关系；完整审查使用两标签的实际 commit（`100278e0..f2f510d2`），覆盖合并分支中的 Web、runtime、extension、traffic、curl、native build 和 CI 改动，而不是只查看 rc4 最近几条提交。
+- 已下载并校验 Windows amd64 的 `aiscan` 与 `aiscan-full` 发布包。普通版 CLI、初始化和能力缺失提示正常；full 版实际启动 Web，验证了 `/health`、嵌入式页面、登录、无认证拒绝、Bearer 认证和 HttpOnly session。浏览器检查确认 access key 不出现在 URL、local/session storage 或页面文本中。
+- rc4 的 `scan --json` 仍会把 spray 的进度表/banner 写入 stdout，破坏 JSONL 消费者的严格解析；该问题在 rc4 之后由 `e2b2960e` 修复（quiet spray + JSON 行过滤），不应视为 rc4 已解决项。`--skill <local-path>` 同样在 rc4 后才修复路径匹配，rc4 用户应使用已加载 skill 名称作为临时规避。
+- 本机完整 `go test ./...` 的唯一失败是 Katana headless 测试被 Windows Defender 以“virus or potentially unwanted software”拒绝执行临时 `leakless.exe`；其余 Go、vet、前端构建、CGO=0/1 full/standard 构建和 Web smoke 均通过，不能将该环境阻断归因于 rc4 代码。
 
 ## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
 
