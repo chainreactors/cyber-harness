@@ -16,5 +16,4 @@ func TestFullScannerSet(t *testing.T) {
 
 func TestFullManifestTags(t *testing.T) {
 	assertManifestTags(t, "FULL")
-	assertManifestCGO(t, "FULL")
 }

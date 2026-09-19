@@ -32,11 +32,6 @@ jobs:
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
-
       - name: Check go mod tidy
         run: |
           cp go.mod "$RUNNER_TEMP/go.mod.before"
@@ -93,16 +88,24 @@ jobs:
             exit 1
           fi
 
-      # libcstx is a cgo-only dependency owned by pkg/exts/cstx. Standard
-      # composition must not reach that Extension.
-      - name: Ensure the standard edition does not depend on libcstx
+      # The retained native CSTX Extension is not part of any product edition;
+      # browser builds use @cyber/cstx WASM.
+      - name: Ensure aiscan does not depend on libcstx
         run: |
           if CGO_ENABLED=0 go list -deps \
-            -tags "$STANDARD_TAGS" ./... \
+            -tags "$STANDARD_TAGS" ./cmd/aiscan \
             | grep -q '^github.com/chainreactors/libcstx/go$'; then
-            echo "::error::the standard edition reaches the CSTX Extension"
+            echo "::error::aiscan reaches the dormant native CSTX Extension"
             exit 1
           fi
+          for cgo in 0 1; do
+            if CGO_ENABLED="$cgo" go list -deps \
+              -tags "$FULL_TAGS" ./cmd/aiscan \
+              | grep -q '^github.com/chainreactors/libcstx/go$'; then
+              echo "::error::aiscan-full reaches the dormant native CSTX Extension with CGO_ENABLED=$cgo"
+              exit 1
+            fi
+          done
 
       - name: Enforce native Extension ownership
         run: |
@@ -122,15 +125,10 @@ jobs:
             exit 1
           fi
 
-      # `full` must imply cgo: it enables the native libcstx runtime. A silent
-      # CGO_ENABLED=0 success would mean the cstx files stopped being gated.
-      - name: Ensure the full edition requires cgo
+      - name: Ensure the full edition builds with and without cgo
         run: |
+          CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
           CGO_ENABLED=1 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
-          if CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan 2>/dev/null; then
-            echo "::error::the full edition built with CGO_ENABLED=0; full must imply cgo"
-            exit 1
-          fi
 
       - name: Run go vet
         run: go vet ./...
@@ -158,7 +156,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
-          args: --timeout=8m --build-tags "${{ env.RE2_CGO_TAGS }}"
+          args: --timeout=8m
           skip-cache: ${{ env.ACT == 'true' }}
 
   test:
@@ -178,11 +176,6 @@ jobs:
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
-
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Generate embedded resources
         run: go generate ./tools/resources/...
@@ -204,7 +197,7 @@ jobs:
           package_list="$(go list ./...)"
           # The product-process harness is intentionally manual-only.
           mapfile -t packages < <(printf '%s\n' "$package_list" | grep -v '^github.com/chainreactors/cyber/cmd/harness\(/\|$\)')
-          go test -tags "$RE2_CGO_TAGS" -race -count=1 "${test_args[@]}" \
+          go test -race -count=1 "${test_args[@]}" \
             -coverprofile=coverage.out \
             -covermode=atomic \
             "${packages[@]}"
@@ -266,27 +259,20 @@ jobs:
           go-version-file: go.mod
           cache: ${{ env.ACT != 'true' }}
 
-      - name: Set up mingw for libcstx
-        shell: bash
-        run: echo "C:/msys64/mingw64/bin" >> "$GITHUB_PATH"
-
       - name: Load the build editions
         shell: bash
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
-      - name: Install the static RE2 SDK
-        shell: bash
-        run: |
-          bash .github/native/sdk.sh fetch re2 windows amd64
-          bash .github/native/sdk.sh env re2 windows amd64 >> "$GITHUB_ENV"
+      - name: Run Windows package tests
+        run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
 
-      - name: Run native Windows package tests
-        run: go test -count=1 -tags "$RE2_CGO_TAGS" ./agent/... ./pkg/runner/... ./pkg/web/...
+      - name: Compile and test the full CLI without cgo on Windows
+        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
 
-      - name: Compile and test the full CLI on Windows
-        run: go test -count=1 -tags "$FULL_TAGS" ./cmd/aiscan
+      - name: Compile and test the full CLI with cgo on Windows
+        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
         env:
           CGO_ENABLED: "1"
 
@@ -307,11 +293,6 @@ jobs:
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
-
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Run scanner functional regressions
         run: |
@@ -339,7 +320,7 @@ jobs:
 
       - name: Run full server CSTX integration
         run: |
-          CGO_ENABLED=1 go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
+          CGO_ENABLED=0 go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             ./cmd/aiscan ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
@@ -360,11 +341,6 @@ jobs:
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
-
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Set up Chrome
         uses: browser-actions/setup-chrome@v2
@@ -413,11 +389,6 @@ jobs:
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
-
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -483,7 +454,7 @@ jobs:
       - name: Run backend E2E tests
         run: |
           go test -race -count=1 -timeout 10m \
-            -tags "e2e $RE2_CGO_TAGS" \
+            -tags "e2e" \
             -v \
             ./pkg/web/...
 

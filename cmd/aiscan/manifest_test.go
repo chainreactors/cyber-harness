@@ -69,46 +69,29 @@ func buildSetting(t *testing.T, key string) string {
 // gates from compiling, so the suites those files carry disappear while CI
 // stays green. Comparing the whole set is the only thing that notices.
 //
-// Two spellings are legitimate — the manifest's full tag set, and the
-// capability-only set the CI suites use, which omits the base policy tags — and
-// either may carry the cgo RE2 bindings on top, because the suites switch that
-// backend on over every manifest and it selects no manifest-gating file.
+// Two spellings are legitimate: the manifest's full tag set, and the
+// capability-only set the CI suites use, which omits the base policy tags.
 func assertManifestTags(t *testing.T, manifest string) {
 	t.Helper()
 	values := readBuildManifest(t)
 	got := sortedTags(strings.ReplaceAll(buildSetting(t, "-tags"), ",", " "))
-	re2 := sortedTags(manifestValue(t, values, "RE2_CGO_TAGS"))
 
 	var declared []string
 	for _, suffix := range []string{"_TAGS", "_CAPS_TAGS"} {
 		key := manifest + suffix
 		want := sortedTags(manifestValue(t, values, key))
-		candidates := [][]string{want}
-		if merged := mergeTags(want, re2); !slices.Equal(merged, want) {
-			candidates = append(candidates, merged)
+		if slices.Equal(got, want) {
+			return
 		}
-		for _, candidate := range candidates {
-			if slices.Equal(got, candidate) {
-				return
-			}
-			declared = append(declared, key+" = ["+strings.Join(candidate, " ")+"]")
-		}
+		declared = append(declared, key+" = ["+strings.Join(want, " ")+"]")
 	}
 	t.Fatalf("built with tags [%s], which is not the declared %s manifest\n  %s",
 		strings.Join(got, " "), manifest, strings.Join(declared, "\n  "))
 }
 
-func mergeTags(tags []string, extra []string) []string {
-	merged := slices.Concat(tags, extra)
-	slices.Sort(merged)
-	return slices.Compact(merged)
-}
-
-// assertManifestCGO checks the declared CGO_ENABLED for a manifest that
-// requires cgo. `full` enables the native libcstx runtime and the static RE2
-// backend, both of which exist only under cgo, so a full build that quietly ran
-// with CGO_ENABLED=0 would select different files and test a different binary —
-// the same reason ci.yml refuses to build full with cgo off.
+// assertManifestCGO checks the declared CGO policy for editions whose compiled
+// feature set requires it. Only record has that constraint; standard and full
+// may be tested with either host setting.
 func assertManifestCGO(t *testing.T, manifest string) { //nolint:unused // called by the full-tag and record-tag files, which the lint build tags exclude
 	t.Helper()
 	want := manifestValue(t, readBuildManifest(t), manifest+"_CGO")
@@ -141,7 +124,7 @@ func TestBuildManifestIsConsistent(t *testing.T) {
 	widest := sortedTags(manifestValue(t, values, "RECORD_TAGS"))
 	for _, key := range []string{
 		"BASE_TAGS", "STANDARD_CAPS_TAGS", "FULL_CAPS_TAGS", "RECORD_CAPS_TAGS",
-		"STANDARD_TAGS", "FULL_TAGS", "RE2_CGO_TAGS",
+		"STANDARD_TAGS", "FULL_TAGS",
 	} {
 		for _, tag := range sortedTags(manifestValue(t, values, key)) {
 			if !slices.Contains(widest, tag) {

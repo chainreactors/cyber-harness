@@ -76,14 +76,9 @@ else
 NATIVE_OS := unsupported
 endif
 
-# The native SDKs below are prebuilt and published by chainreactors/native;
-# these targets only download, verify, and unpack them. The cache layout
-# `.cache/native/<family>/<os>_<arch>` is shared with `.github/native/sdk.sh`,
-# which is what actually performs the install.
+# The recorder SDK is prebuilt and published by chainreactors/native. This
+# target only downloads, verifies, and unpacks it through .github/native/sdk.sh.
 RECORD_ARCH ?= $(shell $(GO) env GOARCH)
-RE2_ARCH ?= $(shell $(GO) env GOARCH)
-RE2_PREFIX := $(if $(CYBER_RE2_PREFIX),$(CYBER_RE2_PREFIX),$(PROJECT_ROOT)/.cache/native/re2/$(NATIVE_OS)_$(RE2_ARCH))
-RE2_LDFLAGS := -L$(RE2_PREFIX)/lib
 
 ifeq ($(NATIVE_OS),windows)
 RECORD_PLATFORM := windows
@@ -95,11 +90,9 @@ else
 RECORD_PLATFORM := unsupported
 endif
 RECORD_PREFIX := $(if $(CYBER_RECORD_PREFIX),$(CYBER_RECORD_PREFIX),$(PROJECT_ROOT)/.cache/native/record/$(RECORD_PLATFORM)_$(RECORD_ARCH))
-# A single CGO_LDFLAGS must carry both prefixes: setting it twice in one recipe
-# line would silently drop the first.
-RECORD_BUILD_ENV := CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS) $(RE2_LDFLAGS)"
+RECORD_BUILD_ENV := CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 
-.PHONY: help prepare frontend proto-gen standard agent full record record-native re2-static web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
+.PHONY: help prepare frontend proto-gen standard agent full record record-native web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
 
 help:
 	@echo "aiscan build targets:"
@@ -109,7 +102,6 @@ help:
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
-	@echo "  make re2-static       Install the static RE2 SDK"
 	@echo "  make record-native    Install the recorder SDK"
 	@echo "  make proto-gen        Regenerate all AOP and Cyber protobuf bindings"
 	@echo "  make harness          Run user scenarios against the real application process"
@@ -175,18 +167,8 @@ else
 	"$(BASH)" ".github/native/sdk.sh" fetch record "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"
 endif
 
-re2-static:
-ifeq ($(NATIVE_OS),unsupported)
-	@echo "static RE2 SDK is not available for this platform" >&2
-	@exit 1
-else
-	"$(BASH)" ".github/native/sdk.sh" fetch re2 "$(NATIVE_OS)" "$(RE2_ARCH)"
-endif
-
-# The full edition links the static RE2 SDK, so the fetch is part of the build
-# rather than a step the caller has to remember.
-full: $(EMBED_PREREQ) frontend re2-static prepare
-	CGO_ENABLED=$(FULL_CGO) CGO_LDFLAGS="$(RE2_LDFLAGS)" $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
+full: $(EMBED_PREREQ) frontend prepare
+	CGO_ENABLED=$(FULL_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
 	@echo "Built full edition: $(FULL_BIN)"
 
 ifeq ($(RECORD_PLATFORM),unsupported)
@@ -194,9 +176,8 @@ record:
 	@echo "record native backend is not supported on this platform" >&2
 	@exit 1
 else
-# `record-native` and `re2-static` install both SDKs, so `make record` needs no
-# pre-step and links both static RE2 and the recorder backend.
-record: $(EMBED_PREREQ) frontend record-native re2-static prepare
+# `record-native` installs the only SDK this edition needs.
+record: $(EMBED_PREREQ) frontend record-native prepare
 	$(RECORD_BUILD_ENV) CGO_ENABLED=$(RECORD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
 	@echo "Built record-enabled edition: $(RECORD_BIN)"
 endif

@@ -161,12 +161,12 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **发布与原生构建链路**
 
-- standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
+- standard 与 full 都由 Linux runner 直接交叉编译 Linux、macOS、Windows 的 amd64/arm64，不再需要平台 C 工具链
 - CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
 - recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算，并通过独立 workflow 构建发布
-- full profile 恢复静态 RE2，并验证 Windows RE2 原生库没有变成运行时 DLL 依赖
+- full profile 使用 RE2 的纯 Go 后端，并验证 `CGO_ENABLED=0/1` 都能完成编译和测试
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
-- 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
+- 本地 standard/full release profile 默认使用 `-s -w`，且架构测试阻止调试段再次进入发布构建
 
 **v1 包边界与历史清理**
 

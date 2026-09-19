@@ -33,11 +33,6 @@ jobs:
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
-      - name: Install the static RE2 SDK
-        run: |
-          bash .github/native/sdk.sh fetch re2 linux amd64
-          bash .github/native/sdk.sh env re2 linux amd64 >> "$GITHUB_ENV"
-
       - name: Run bounded public scanner regressions
         run: |
           go test -tags "$FULL_CAPS_TAGS integration" -count=1 -timeout 8m -v \

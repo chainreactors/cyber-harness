@@ -107,11 +107,9 @@ if (frontendBuild.status !== 0) {
   process.exit(frontendBuild.status ?? 1)
 }
 
-// The full edition's tags and cgo settings come from editions.env, the file the
-// Makefile and the CI workflows build from. `full` alone cannot link — it gates
-// web_full.go, which imports the cstx extension — and the capability set is used
-// rather than FULL_TAGS because it omits the base policy tags that keep the
-// resource templates outside the binary.
+// The full edition's tags and cgo setting come from editions.env, the same file
+// used by the Makefile and CI. The capability set omits the base policy tags so
+// this E2E binary embeds its resource templates.
 const editions = new Map()
 for (const line of readFileSync(join(root, 'editions.env'), 'utf8').split('\n')) {
   const entry = line.trim()
@@ -126,14 +124,6 @@ const editionValue = (key) => {
   return value
 }
 
-// The static RE2 SDK contributes its library search path and nothing else, so
-// derive it the way the Makefile's RE2_PREFIX and .github/native/sdk.sh do
-// instead of requiring the caller to have exported it.
-const nativeOS = { win32: 'windows', darwin: 'darwin' }[process.platform] ?? 'linux'
-const nativeArch = { x64: 'amd64', arm64: 'arm64' }[process.arch] ?? process.arch
-const re2Prefix = (process.env.CYBER_RE2_PREFIX
-  || join(root, '.cache/native/re2', `${nativeOS}_${nativeArch}`)).replaceAll('\\', '/')
-
 const build = spawnSync('go', [
   'build',
   '-tags', editionValue('FULL_CAPS_TAGS'),
@@ -143,7 +133,7 @@ const build = spawnSync('go', [
 ], {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, CGO_ENABLED: editionValue('FULL_CGO'), CGO_LDFLAGS: `-L${re2Prefix}/lib` },
+  env: { ...process.env, CGO_ENABLED: editionValue('FULL_CGO') },
 })
 if (build.status !== 0) {
   mockLLM?.close()

@@ -7,11 +7,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/core/extension"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
-	cyberdist "github.com/chainreactors/cyber/pkg/aiscan"
+	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 )
 
 func TestRecordFullScannerSet(t *testing.T) {
@@ -26,29 +25,30 @@ func TestRecordManifestTags(t *testing.T) {
 	assertManifestCGO(t, "RECORD")
 }
 
-// The tool registry is a capability, so this borrows it the way an extension
-// would instead of reading it off the application.
+// The distribution profile is the composition boundary. Its runtime exposes
+// the tool capability assembled by the selected extensions.
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	graph, err := cyberdist.Extensions(cyberdist.AppConfig{Logger: telemetry.NopLogger(), SkipEngines: true}, agent.NoLoop(), t.TempDir(), nil)
+	option := &cfg.Option{}
+	option.DataDir = t.TempDir()
+	profile, err := newCyberProfileFromRequest(profilepkg.Request{
+		Option:       option,
+		ProviderMode: profilepkg.ProviderDisabled,
+		Session:      &agentsession.Config{},
+		Logger:       telemetry.NopLogger(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tools tool.Executor
-	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		var err error
-		tools, err = extension.Use[tool.Executor](scope)
-		return err
-	}}
-	set, err := extension.New(append(graph, borrow)...)
-	if err != nil {
+	t.Cleanup(func() { _ = profile.Close(context.Background()) })
+	if err := profile.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = set.Close(context.Background()) })
-	if err := set.Load(t.Context()); err != nil {
+	runtime, err := profile.Runtime()
+	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
-	for _, definition := range tools.ToolDefinitions() {
+	for _, definition := range runtime.Tools().ToolDefinitions() {
 		found = found || definition.Name == "record"
 	}
 	if !found {

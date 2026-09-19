@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Install the prebuilt native SDKs this repository links against.
+# Install the prebuilt recorder SDK this repository links against.
 #
-# The SDKs are built and published by chainreactors/native; this script only
-# downloads, verifies, and unpacks them. Building them from source is a
+# The SDK is built and published by chainreactors/native; this script only
+# downloads, verifies, and unpacks it. Building it from source is a
 # maintainer task owned by that repository.
 set -euo pipefail
 
@@ -11,11 +11,10 @@ source "${ROOT}/.github/native/versions.env"
 
 usage() {
   cat >&2 <<'EOF'
-usage: sdk.sh fetch <record|re2> [os] [arch]
-       sdk.sh env   <record|re2> [os] [arch]
+usage: sdk.sh fetch record [os] [arch]
+       sdk.sh env   record [os] [arch]
 
   record  static record FFI + FFmpeg/x264 for the record Extension (linux, windows)
-  re2     static libre2_cre2.a for the re2_cgo re2_static build (linux, windows, darwin)
 
 OS and architecture default to the current host. `env` prints the CGO
 environment that points at the installed prefix; append it to $GITHUB_ENV in CI.
@@ -50,47 +49,17 @@ manifest_field() {
   printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"
 }
 
-# Per-family coordinates. Everything derived from them — archive name, release
-# URL, cache path, manifest expectation — is shared, so a family only has to
-# declare which targets it publishes and where its version is pinned.
 validate_target() {
-  case "$1/$2/$3" in
-    record/linux/amd64|record/linux/arm64|record/windows/amd64) ;;
-    re2/linux/amd64|re2/linux/arm64|re2/windows/amd64|re2/darwin/amd64|re2/darwin/arm64) ;;
-    record/darwin/*)
+  case "$1/$2" in
+    linux/amd64|linux/arm64|windows/amd64) ;;
+    darwin/*)
       echo "the record native backend is not supported on darwin" >&2
       exit 1
       ;;
     *)
-      echo "unsupported $1 SDK target $2/$3" >&2
+      echo "unsupported record SDK target $1/$2" >&2
       exit 1
       ;;
-  esac
-}
-
-family_version() {
-  case "$1" in
-    record) echo "${RECORD_NATIVE_VERSION}" ;;
-    re2) echo "${RE2_STATIC_VERSION}" ;;
-    *) return 1 ;;
-  esac
-}
-
-family_release() {
-  case "$1" in
-    record) echo "${RECORD_NATIVE_RELEASE}" ;;
-    re2) echo "${RE2_STATIC_RELEASE}" ;;
-    *) return 1 ;;
-  esac
-}
-
-# `${VAR-}` rather than `${VAR}`: the overrides are normally unset, and a bare
-# reference aborts the script under `set -u`.
-family_prefix() {
-  case "$1" in
-    record) echo "${CYBER_RECORD_PREFIX-}" ;;
-    re2) echo "${CYBER_RE2_PREFIX-}" ;;
-    *) return 1 ;;
   esac
 }
 
@@ -98,16 +67,19 @@ family_prefix() {
 #       SDK_PREFIX SDK_EXPECTED
 describe_sdk() {
   local family="$1" os="$2" arch="$3" override
-  validate_target "${family}" "${os}" "${arch}"
-  SDK_FAMILY="${family}"
+  if [[ "${family}" != record ]]; then
+    usage
+  fi
+  validate_target "${os}" "${arch}"
+  SDK_FAMILY=record
   SDK_OS="${os}"
   SDK_ARCH="${arch}"
-  SDK_VERSION="$(family_version "${family}")"
-  SDK_RELEASE="$(family_release "${family}")"
-  SDK_ARCHIVE="native-${family}-${SDK_VERSION}-${os}_${arch}.tar.gz"
-  SDK_EXPECTED="family=${family} version=${SDK_VERSION} platform=${os}_${arch}"
-  override="$(family_prefix "${family}")"
-  SDK_PREFIX="${override:-${ROOT}/.cache/native/${family}/${os}_${arch}}"
+  SDK_VERSION="${RECORD_NATIVE_VERSION}"
+  SDK_RELEASE="${RECORD_NATIVE_RELEASE}"
+  SDK_ARCHIVE="native-record-${SDK_VERSION}-${os}_${arch}.tar.gz"
+  SDK_EXPECTED="family=record version=${SDK_VERSION} platform=${os}_${arch}"
+  override="${CYBER_RECORD_PREFIX-}"
+  SDK_PREFIX="${override:-${ROOT}/.cache/native/record/${os}_${arch}}"
 }
 
 # The release manifest is a superset of what this repository pins, so compare
@@ -135,20 +107,11 @@ configure_link_env() {
   else
     SDK_PREFIX_UNIX="${SDK_PREFIX}"
   fi
-  case "${SDK_FAMILY}" in
-    record)
-      if [[ "${SDK_OS}" == windows ]]; then
-        export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib -static -static-libgcc"
-      else
-        export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib"
-      fi
-      ;;
-    re2)
-      # The re2_static cgo directives carry every link flag except the search
-      # path, so this is the only thing the SDK needs to contribute.
-      export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib"
-      ;;
-  esac
+  if [[ "${SDK_OS}" == windows ]]; then
+    export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib -static -static-libgcc"
+  else
+    export CGO_LDFLAGS="-L${SDK_PREFIX_UNIX}/lib"
+  fi
 }
 
 emit_link_env() {
@@ -204,14 +167,12 @@ fetch_sdk() {
   tar -xzf "${tmp}/${SDK_ARCHIVE}" -C "${stage}"
   verify_manifest "${stage}/.versions" "${SDK_EXPECTED}"
   [[ -d "${stage}/lib" ]] || { echo "native SDK archive is missing lib/" >&2; exit 1; }
-  if [[ "${SDK_FAMILY}" == record ]]; then
-    [[ -f "${stage}/lib/librecord.a" ]] || { echo "record SDK archive is missing librecord.a" >&2; exit 1; }
-    [[ -f "${stage}/include/record_ffi.h" ]] || { echo "record SDK archive is missing record_ffi.h" >&2; exit 1; }
-    cmp -s "${stage}/include/record_ffi.h" "${ROOT}/pkg/exts/record/record_ffi.h" || {
-      echo "record SDK ABI header does not match pkg/exts/record/record_ffi.h" >&2
-      exit 1
-    }
-  fi
+  [[ -f "${stage}/lib/librecord.a" ]] || { echo "record SDK archive is missing librecord.a" >&2; exit 1; }
+  [[ -f "${stage}/include/record_ffi.h" ]] || { echo "record SDK archive is missing record_ffi.h" >&2; exit 1; }
+  cmp -s "${stage}/include/record_ffi.h" "${ROOT}/pkg/exts/record/record_ffi.h" || {
+    echo "record SDK ABI header does not match pkg/exts/record/record_ffi.h" >&2
+    exit 1
+  }
 
   [[ ! -e "${prefix}" ]] || mv "${prefix}" "${backup}"
   if ! mv "${stage}" "${prefix}"; then

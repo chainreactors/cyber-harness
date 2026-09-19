@@ -102,9 +102,8 @@ func repositoryRoot() (string, error) {
 const editionsFile = "editions.env"
 
 // fullBuildSettings returns the tags and environment a full-edition build needs.
-// They are read from the manifest and the native SDK cache rather than inherited
-// from the caller, so the harness builds the shipped edition however it was
-// started — `make harness` exports neither.
+// They are read from the manifest rather than inherited from the caller, so the
+// harness builds the shipped edition however it was started.
 //
 // The capability tag set is deliberate: it drops the base policy tags that keep
 // the resource templates outside the binary, so the harness drives a binary that
@@ -133,14 +132,7 @@ func fullBuildSettings(root string) (string, []string, error) {
 		return "", nil, fmt.Errorf("%s does not declare FULL_CGO", editionsFile)
 	}
 
-	// The static RE2 SDK contributes its library search path and nothing else,
-	// so derive it the way the Makefile's RE2_PREFIX and .github/native/sdk.sh
-	// do. The linker resolves a slash-separated path on every platform.
-	prefix := os.Getenv("CYBER_RE2_PREFIX")
-	if prefix == "" {
-		prefix = filepath.Join(root, ".cache", "native", "re2", runtime.GOOS+"_"+runtime.GOARCH)
-	}
-	env := make([]string, 0, len(os.Environ())+2)
+	env := make([]string, 0, len(os.Environ())+1)
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
 		switch strings.ToUpper(name) {
@@ -149,7 +141,7 @@ func fullBuildSettings(root string) (string, []string, error) {
 			env = append(env, entry)
 		}
 	}
-	return tags, append(env, "CGO_ENABLED="+cgo, "CGO_LDFLAGS=-L"+filepath.ToSlash(filepath.Join(prefix, "lib"))), nil
+	return tags, append(env, "CGO_ENABLED="+cgo), nil
 }
 
 func buildExecutable(t *testing.T) string {
