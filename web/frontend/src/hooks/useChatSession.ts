@@ -352,8 +352,8 @@ export function useChatSession() {
           setTimelineItems((previous) => previous.some((item) => item.id === timelineID)
             ? previous
             : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
-          // A completed scan's result is the SCO node set persisted under its
-          // scan_id — load it so the timeline card can render.
+          // A completed scan's result is the local CSTX node set associated
+          // with its scan id; load it so the timeline card can render.
           void syncCSTXArtifacts().then(() => listSCONodes({ scanId: scan.scanId, limit: 2000 })).then((nodes) => {
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
@@ -448,9 +448,7 @@ export function useChatSession() {
       if (session.scanIds.length) {
 		await syncCSTXArtifacts()
 		if (activation !== activationRef.current) return
-        // Fetch every linked scan's SCO nodes at once instead of awaiting them
-        // one after another — a session with N scans used to cost N serial
-        // round-trips before its results deck filled in.
+        // Read every linked scan's CSTX nodes together after the archive sync.
         const loaded = await Promise.all(
           session.scanIds.map(async (scanID) => {
             try {

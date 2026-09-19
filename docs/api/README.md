@@ -4,8 +4,8 @@
 
 | 文档 | 来源 | 内容 |
 |------|------|------|
-| `aop.md` | `web/frontend/cyber-ui/packages/aop/proto/aop/**` | AOP 实时平面：Envelope、Session/Turn、Event、Tool/File/Exec/PTY/SCO 全部 message 与 enum |
-| `rpc.md` | `proto/rpc/*.proto` + `proto/types/*.proto` | 管理平面：SessionService / ScanService / AgentService / ConfigService / SCOService / SystemService 的方法与请求响应 |
+| `aop.md` | `web/frontend/cyber-ui/packages/aop/proto/aop/**` | AOP 实时平面：Envelope、Session/Turn、Event、Tool/File/Exec/PTY 全部 message 与 enum |
+| `rpc.md` | `proto/rpc/*.proto` + `proto/types/*.proto` | 管理平面：SessionService / ScanService / AgentService / ConfigService / ArtifactService / SystemService 的方法与请求响应 |
 
 接入教程（chat 输入/输出）见 [../api.md](../api.md)；概念与拓扑见 [../integration.md](../integration.md)。
 

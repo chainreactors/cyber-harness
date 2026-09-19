@@ -7,7 +7,6 @@ import {
   type Event as AOPEvent,
 } from '@cyber/aop'
 import {
-  CSTX_ABI_VERSION,
   CSTXArtifactNormalizer,
   type CanonicalSCONode,
 } from '@cyber/cstx'
@@ -35,11 +34,16 @@ type Meta = {
 }
 
 let databasePromise: Promise<IDBDatabase> | undefined
+let databaseABI: string | undefined
 let runtimePromise: Promise<CSTXArtifactNormalizer> | undefined
 let syncing: Promise<number> | undefined
 
-async function database(): Promise<IDBDatabase> {
+async function database(abiVersion: string): Promise<IDBDatabase> {
+  if (databaseABI && databaseABI !== abiVersion) {
+    throw new Error(`CSTX database is already open for ABI ${databaseABI}`)
+  }
   if (!databasePromise) {
+    databaseABI = abiVersion
     databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(databaseName, databaseVersion)
       request.onupgradeneeded = () => {
@@ -55,18 +59,19 @@ async function database(): Promise<IDBDatabase> {
       request.onblocked = () => reject(new Error('CSTX database upgrade is blocked'))
     }).then(async (db) => {
       const abi = await getMeta(db, abiKey)
-      if (abi !== CSTX_ABI_VERSION) {
+      if (abi !== abiVersion) {
         const transaction = db.transaction([nodesStore, observationsStore, metaStore], 'readwrite')
         transaction.objectStore(nodesStore).clear()
         transaction.objectStore(observationsStore).clear()
         transaction.objectStore(metaStore).clear()
-        transaction.objectStore(metaStore).put({ key: abiKey, value: CSTX_ABI_VERSION } satisfies Meta)
+        transaction.objectStore(metaStore).put({ key: abiKey, value: abiVersion } satisfies Meta)
         transaction.objectStore(metaStore).put({ key: cursorKey, value: '0' } satisfies Meta)
         await transactionDone(transaction)
       }
       return db
     }).catch((error) => {
       databasePromise = undefined
+      databaseABI = undefined
       throw error
     })
   }
@@ -75,7 +80,8 @@ async function database(): Promise<IDBDatabase> {
 
 async function cstxRuntime(): Promise<CSTXArtifactNormalizer> {
   if (!runtimePromise) {
-    runtimePromise = Promise.all([CSTXArtifactNormalizer.create(), database()]).then(async ([runtime, db]) => {
+    runtimePromise = CSTXArtifactNormalizer.create().then(async (runtime) => {
+      const db = await database(runtime.abiVersion)
       runtime.hydrate(await getAll<CanonicalSCONode>(db, nodesStore))
       return runtime
     }).catch((error) => {
@@ -93,13 +99,13 @@ export async function getSupportedCSTXArtifacts(): Promise<string[]> {
 export async function importCSTXArtifact(
   file: File,
   artifact: string,
-  operationId = 'import',
-): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
+  operationId = newID(),
+): Promise<number> {
   const now = timestampNow()
+  const eventID = newID()
   const event = create(EventSchema, {
-    id: newID(),
+    id: eventID,
     emittedAt: now,
-    emitter: 'web',
     payload: {
       case: 'extension',
       value: anyPack(ArtifactSchema, create(ArtifactSchema, {
@@ -114,8 +120,7 @@ export async function importCSTXArtifact(
     },
     extensions: [anyPack(RefSchema, create(RefSchema, { callId: operationId }))],
   })
-  const nodes = await syncCSTXArtifacts([event])
-  return { status: 'ok', nodes, artifact, duplicates: 0 }
+  return syncCSTXArtifacts([event])
 }
 
 export function syncCSTXArtifacts(artifacts: AOPEvent[] = []): Promise<number> {
@@ -131,13 +136,14 @@ export function syncCSTXArtifacts(artifacts: AOPEvent[] = []): Promise<number> {
 }
 
 export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
-  const db = await database()
+  const runtime = await cstxRuntime()
+  const db = await database(runtime.abiVersion)
   let nodes = await getAll<CanonicalSCONode>(db, nodesStore)
   if (opts?.scanId) {
-    const observations = await getAll<Observation>(db, observationsStore)
-    const ids = new Set(observations
-      .filter((observation) => observation.operation_id === opts.scanId)
-      .map((observation) => observation.cstx_id))
+    const transaction = db.transaction(observationsStore)
+    const observations = await requestValue<Observation[]>(transaction.objectStore(observationsStore)
+      .index('operation_id').getAll(opts.scanId))
+    const ids = new Set(observations.map((observation) => observation.cstx_id))
     nodes = nodes.filter((node) => ids.has(node.cstx_id))
   }
   if (opts?.type) nodes = nodes.filter((node) => node.cstx_type === opts.type)
@@ -151,7 +157,8 @@ export function subscribeCSTXChanges(listener: () => void): () => void {
 }
 
 async function syncArchive(upload: AOPEvent[]): Promise<number> {
-  const [runtime, db] = await Promise.all([cstxRuntime(), database()])
+  const runtime = await cstxRuntime()
+  const db = await database(runtime.abiVersion)
   let cursor = await getMeta(db, cursorKey) || '0'
   let stored = 0
   let appended = upload
@@ -170,11 +177,8 @@ async function syncArchive(upload: AOPEvent[]): Promise<number> {
         const artifact = anyUnpack(event.payload.value, ArtifactSchema)
         if (!artifact) throw new Error('archive entry is not an aop.tool.Artifact')
         const operationID = operationIDOf(event)
-        const result = runtime.normalizeAOPArtifact({
+        const result = runtime.normalize({
           artifact: artifact.tool,
-          producer: artifact.tool,
-          kind: artifact.kind,
-          resultId: artifact.resultId,
           data: artifact.data,
         })
         await persistResult(db, delivery.cursor, operationID, result.nodes)
@@ -194,9 +198,9 @@ async function syncArchive(upload: AOPEvent[]): Promise<number> {
 function operationIDOf(event: AOPEvent): string {
   for (const extension of event.extensions) {
     const ref = anyUnpack(extension, RefSchema)
-    if (ref) return ref.callId || ref.operationId || event.turnId || event.sessionId || 'unscoped'
+    if (ref) return ref.callId || ref.operationId || event.turnId || event.sessionId || event.id
   }
-  return event.turnId || event.sessionId || 'unscoped'
+  return event.turnId || event.sessionId || event.id
 }
 
 async function persistResult(

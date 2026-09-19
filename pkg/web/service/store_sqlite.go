@@ -645,6 +645,48 @@ const artifactSyncBatch = 100
 // SyncArtifactEvents appends raw Artifact events and returns the next archive
 // page. CSTX parsing and projection belong to the browser.
 func (s *SQLiteStore) SyncArtifactEvents(ctx context.Context, appended []*aop.Event, after int64) ([]*aop.EventDelivery, error) {
+	models, err := artifactEventModels(appended)
+	if err != nil {
+		return nil, err
+	}
+
+	var deliveries []*aop.EventDelivery
+	err = s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := insertArtifactModels(ctx, tx, models); err != nil {
+			return err
+		}
+		var archived []rawArtifactModel
+		if err := tx.NewSelect().Model(&archived).Where("cursor > ?", after).
+			OrderExpr("cursor ASC").Limit(artifactSyncBatch).Scan(ctx); err != nil {
+			return err
+		}
+		deliveries = make([]*aop.EventDelivery, 0, len(archived))
+		for _, model := range archived {
+			event := new(aop.Event)
+			if err := protobuf.Unmarshal(model.EventProto, event); err != nil {
+				return fmt.Errorf("decode artifact event %q: %w", model.EventID, err)
+			}
+			deliveries = append(deliveries, &aop.EventDelivery{
+				Cursor: strconv.FormatInt(model.Cursor, 10),
+				Event:  event,
+			})
+		}
+		return nil
+	})
+	return deliveries, err
+}
+
+func (s *SQLiteStore) archiveArtifactEvents(ctx context.Context, appended []*aop.Event) error {
+	models, err := artifactEventModels(appended)
+	if err != nil {
+		return err
+	}
+	return s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		return insertArtifactModels(ctx, tx, models)
+	})
+}
+
+func artifactEventModels(appended []*aop.Event) ([]*rawArtifactModel, error) {
 	models := make([]*rawArtifactModel, 0, len(appended))
 	for index, event := range appended {
 		if event == nil {
@@ -672,31 +714,14 @@ func (s *SQLiteStore) SyncArtifactEvents(ctx context.Context, appended []*aop.Ev
 			CreatedAt:  event.GetEmittedAt().AsTime().UTC().Format(time.RFC3339Nano),
 		})
 	}
+	return models, nil
+}
 
-	var deliveries []*aop.EventDelivery
-	err := s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		for _, model := range models {
-			if _, err := tx.NewInsert().Model(model).On("CONFLICT (event_id) DO NOTHING").Exec(ctx); err != nil {
-				return err
-			}
-		}
-		var archived []rawArtifactModel
-		if err := tx.NewSelect().Model(&archived).Where("cursor > ?", after).
-			OrderExpr("cursor ASC").Limit(artifactSyncBatch).Scan(ctx); err != nil {
+func insertArtifactModels(ctx context.Context, tx bun.Tx, models []*rawArtifactModel) error {
+	for _, model := range models {
+		if _, err := tx.NewInsert().Model(model).On("CONFLICT (event_id) DO NOTHING").Exec(ctx); err != nil {
 			return err
 		}
-		deliveries = make([]*aop.EventDelivery, 0, len(archived))
-		for _, model := range archived {
-			event := new(aop.Event)
-			if err := protobuf.Unmarshal(model.EventProto, event); err != nil {
-				return fmt.Errorf("decode artifact event %q: %w", model.EventID, err)
-			}
-			deliveries = append(deliveries, &aop.EventDelivery{
-				Cursor: strconv.FormatInt(model.Cursor, 10),
-				Event:  event,
-			})
-		}
-		return nil
-	})
-	return deliveries, err
+	}
+	return nil
 }

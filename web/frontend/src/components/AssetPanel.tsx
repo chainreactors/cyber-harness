@@ -235,7 +235,7 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
   const handleImportSubmit = useCallback(async (entries: ImportFileEntry[]) => {
     let written = 0
     for (const entry of entries) {
-      written += (await importCSTXArtifact(entry.file, entry.artifactType)).nodes
+      written += await importCSTXArtifact(entry.file, entry.artifactType)
     }
     void load()
     onChanged?.()

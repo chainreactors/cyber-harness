@@ -856,9 +856,9 @@ func (c *Command) emitArtifact(ctx context.Context, flow *traffic.Flow, size int
 		ContentType: headerValue(flow.GetResponse().GetHeaders(), "Content-Type"),
 		BodyLength:  size,
 	}
-	// The compact observation follows CSTX's web schema, which the server reads
-	// as its "spray" artifact; cyber names the producer.
-	c.EmitArtifactCtx(ctx, "cyber", toolpb.ArtifactKindWeb, summary.URL, summary)
+	// The compact observation follows CSTX's spray artifact schema. The event
+	// emitter records the producer independently.
+	c.EmitArtifactCtx(ctx, "spray", toolpb.ArtifactKindWeb, summary.URL, summary)
 }
 
 func headerValue(headers []*traffic.Header, name string) string {

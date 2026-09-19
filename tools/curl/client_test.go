@@ -54,7 +54,7 @@ func TestGetWritesBody(t *testing.T) {
 	}
 }
 
-func TestResponseEmitsCyberArtifact(t *testing.T) {
+func TestResponseEmitsSprayArtifact(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("hello"))
@@ -81,7 +81,7 @@ func TestResponseEmitsCyberArtifact(t *testing.T) {
 		t.Fatal("response did not emit an artifact")
 	}
 	expectedURL := srv.URL + "/"
-	if artifact.Tool != "cyber" || artifact.Kind != toolpb.ArtifactKindWeb || artifact.Target != expectedURL {
+	if artifact.Tool != "spray" || artifact.Kind != toolpb.ArtifactKindWeb || artifact.Target != expectedURL {
 		t.Fatalf("artifact metadata = %+v", artifact)
 	}
 	var summary struct {

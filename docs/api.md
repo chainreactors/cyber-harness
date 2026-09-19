@@ -437,7 +437,6 @@ HTTP procedure 示例：
 | `GetScan` | 查询扫描 |
 | `ListScans` | 查询扫描列表 |
 | `CancelScan` | 取消扫描 |
-| `GetScanReport` | 获取扫描报告 |
 
 #### ConfigService
 
@@ -462,16 +461,15 @@ HTTP procedure 示例：
 |--------|------|
 | `GetStatus` | 查询系统状态 |
 
-#### SCOService
+#### ArtifactService
 
 | Method | 用途 |
 |--------|------|
-| `ListNodes` | 查询 SCO nodes |
-| `GetNode` | 查询单个 SCO node |
-| `GetStats` | 查询 SCO 统计 |
-| `DeleteNodes` | 删除 SCO nodes |
-| `ImportNodes` | 导入结构化 nodes |
-| `ListArtifacts` | 查询支持的 artifact 类型 |
+| `SyncArtifacts` | 追加浏览器导入的原始 Artifact events，并按 cursor 读取归档事件 |
+
+`SyncArtifactsRequest` 只有 `after_cursor` 和可选的 `artifacts`；响应是
+`aop.EventDelivery` 列表。服务端固定按 100 条分页，不接收或返回 CSTX node、
+处理完成状态或额外 Artifact DTO。
 
 完整字段见 `proto/rpc/*.proto`。
 

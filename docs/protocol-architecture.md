@@ -6,7 +6,7 @@
 
 跨进程、跨语言和跨前后端的数据类型只在 protobuf 中定义。业务代码可以拥有领域对象或 UI view model，但不得再定义与 protobuf 同构的 wire DTO，也不得在 AOP、Connect、REST 或 JSON-RPC 之间做同一语义的多次转换。
 
-libcstx 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulnerability 等节点由 libcstx 定义。Cyber 只记录操作、会话和这些节点之间的关系，不再定义 Asset、Service、WebProbe、Framework Vulnerability 等平行事实类型。
+CSTX 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulnerability 等节点由浏览器中的 `@cyber/cstx` WASM ABI 定义和生成。Go 只归档原始 `aop.tool.Artifact` event，不定义或持久化平行事实类型。
 
 ## 2. 两个平面
 
@@ -29,7 +29,7 @@ Agent 对外只使用 `--server-url` 作为 Cyber Web/AOP 基址。IOA 使用独
 
 - `aop.ProtocolMessage`：Agent 注册与 Session/Turn 生命周期；
 - `aop.Event`：message、tool、usage、status、error 和生命周期事件；
-- `aop.file`、`aop.exec`、`aop.pty`、`aop.tool`、`aop.sco`：通用扩展协议。
+- `aop.file`、`aop.exec`、`aop.pty`、`aop.tool`：通用扩展协议。
 
 这些扩展不是 Cyber DTO。PTY 和 file 对任何 AOP Agent 都成立，因此由 AOP 拥有。
 
@@ -123,7 +123,7 @@ Web 管理面暴露以下 unary 服务：
 - `cyber.rpc.agent.AgentService`
 - `cyber.rpc.chat.SessionService`
 - `cyber.rpc.scan.ScanService`
-- `cyber.rpc.sco.SCOService`
+- `cyber.rpc.artifact.ArtifactService`
 
 AOP 应用面只额外暴露一个双向流服务：
 
@@ -135,6 +135,8 @@ AOP 应用面只额外暴露一个双向流服务：
 
 - Session 和 Scan 以 protobuf 为存储真相；
 - AOP 历史只存 `aop.Event` ProtoJSON；
+- Artifact archive 只存完整 `aop.tool.Artifact` event protobuf 与自增 cursor；Go 不存 CSTX node、operation-node projection 或处理状态；
+- 浏览器通过 `@cyber/cstx` WASM ABI 生成 canonical nodes，并在 IndexedDB 保存 nodes、operation 关联和 archive cursor；
 - CLI `-o/--output` 通过 `telemetry` Extension 将 agent、scan、观测和 scanner-native artifact 写入一个新建的 `aop.Event` ProtoJSONL；
 - `-r`、`/resume` 和 `-F` 只读取事件流，不修改恢复源，也不隐式开启输出；系统不保留 checkpoint/snapshot 文件、Record/Timeline 双写或 replay/fallback 管线。
 

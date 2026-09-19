@@ -125,15 +125,15 @@ test.describe('ConnectRPC management plane', () => {
     expect(agents.some((agent) => agent.hello?.nodeId === 'local')).toBeTruthy()
   })
 
-  test('session, scan, SCO and node queries use ConnectRPC', async ({ request }) => {
+  test('session, scan and artifact archive queries use ConnectRPC', async ({ request }) => {
     const sessions = await connectRPC(request, '/cyber.rpc.chat.SessionService/ListSessions', { includeClosed: true })
     expect(Array.isArray(sessions.sessions ?? [])).toBeTruthy()
 
     const scans = await connectRPC(request, '/cyber.rpc.scan.ScanService/ListScans', {})
     expect(Array.isArray(scans.scans ?? [])).toBeTruthy()
 
-    const nodes = await connectRPC(request, '/cyber.rpc.sco.SCOService/ListNodes', { limit: 10 })
-    expect(Array.isArray(nodes.nodes?.nodes ?? [])).toBeTruthy()
+    const artifacts = await connectRPC(request, '/cyber.rpc.artifact.ArtifactService/SyncArtifacts', {})
+    expect(Array.isArray(artifacts.artifacts ?? [])).toBeTruthy()
 
     const agents = await connectRPC(request, '/cyber.rpc.agent.AgentService/ListAgents', {})
     expect(Array.isArray(agents.agents ?? [])).toBeTruthy()
