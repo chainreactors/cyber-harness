@@ -8,17 +8,14 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/base"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
-	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/harness"
 )
 
 func main() {
@@ -55,33 +52,25 @@ func run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	entries, err := base.New(base.Config{
-		Directory:    directory,
-		SkillExclude: []string{"cyber"},
-		Provider:     provider.StartupConfig{Mode: provider.StartupDisabled},
+	h, err := harness.New(harness.Config{
+		Base: base.Config{
+			Directory: directory, SkillExclude: []string{"cyber"},
+			Provider: provider.StartupConfig{Mode: provider.StartupDisabled},
+		},
+		Session: &agentsession.Config{
+			Option: &cfg.Option{}, Logger: telemetry.NopLogger(), PrimarySessionID: "main",
+		},
 	})
 	if err != nil {
 		return err
 	}
-	var runtime *agentsession.Runtime
-	entries = append(entries,
-		loopext.New(agent.StandardLoop{}),
-		sessionext.New(agentsession.Config{
-			Option: &cfg.Option{}, Logger: telemetry.NopLogger(), PrimarySessionID: "main",
-		}),
-		extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			var err error
-			runtime, err = extension.Use[*agentsession.Runtime](scope)
-			return err
-		}},
-	)
-	set, err := extension.New(entries...)
-	if err != nil {
+	// Cleanup gets its own context even when the host request was canceled.
+	defer func() { resultErr = errors.Join(resultErr, h.Close(context.Background())) }()
+	if err := h.Load(ctx); err != nil {
 		return err
 	}
-	// Cleanup gets its own context even when the host request was canceled.
-	defer func() { resultErr = errors.Join(resultErr, set.Close(context.Background())) }()
-	if err := set.Load(ctx); err != nil {
+	runtime, err := h.Runtime()
+	if err != nil {
 		return err
 	}
 	runtime.SetProvider(demoProvider{}, provider.ProviderConfig{Model: "demo"})
