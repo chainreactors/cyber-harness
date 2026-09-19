@@ -143,11 +143,17 @@ jobs:
             found { print }
           ' docs/changelog.md > /tmp/changelog.md
 
-          prev_tag=$(git tag --merged "${TAG}^" --sort=-version:refname \
+          # Release tags may be created from parallel branches (for example rc3
+          # and rc4), so ancestry-based lookup can miss the previous release.
+          # Git's version ordering gives us the previous published version while
+          # still keeping the result deterministic for non-linear histories.
+          prev_tag=$(git tag --list --sort=-version:refname \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$' \
             | grep -Ev 'nightly|^v0\.0\.0-ci\.' \
-            | grep -Fxv "${TAG}" \
-            | head -1 || true)
+            | awk -v current="${TAG}" '
+              $0 == current { seen = 1; next }
+              seen { print; exit }
+            ' || true)
           if [ -s /tmp/changelog.md ]; then
             echo "Using curated notes from docs/changelog.md"
           elif [ -n "$prev_tag" ]; then
