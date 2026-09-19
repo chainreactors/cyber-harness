@@ -5,31 +5,27 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	"github.com/chainreactors/aiscan/pkg/host"
-	"github.com/chainreactors/aiscan/pkg/profile"
+	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/host"
+	"github.com/chainreactors/cyber/pkg/profile"
 )
 
-// RunStdio assembles the product runtime around the transport-only host.
-func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
+// RunStdio assembles a Profile around the transport-only host.
+func RunStdio(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	product, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentext.Config{Loop: agent.StandardLoop{}})
+	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
 	mux := aop.NewNamespaceMux(ctx)
-	if err := rt.RegisterNamespaces(mux); err != nil {
-		_ = product.Close(context.Background())
-		return err
-	}
-	if err := product.RegisterResourceNamespaces(mux); err != nil {
-		_ = product.Close(context.Background())
+	if err := p.RegisterNamespaces(mux); err != nil {
+		_ = p.Close(context.Background())
 		return err
 	}
 	h := host.New(mux)
@@ -40,7 +36,7 @@ func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, 
 	// One owner closes in dependency order and checks failures from the last
 	// session-ended events as well as ordinary replies.
 	defer func() {
-		_ = product.Close(context.Background())
+		_ = p.Close(context.Background())
 		unsubscribe.Cancel()
 		h.Close()
 		if err := h.Err(); err != nil {

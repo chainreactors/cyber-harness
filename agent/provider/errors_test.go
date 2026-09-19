@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 // A 404 on the chat endpoint must surface as an actionable protocol-mismatch

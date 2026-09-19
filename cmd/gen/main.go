@@ -1,4 +1,4 @@
-// Command gen is the single protobuf generation entrypoint for AIScan.
+// Command gen is the single protobuf generation entrypoint for Cyber.
 package main
 
 import (
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const modulePath = "github.com/chainreactors/aiscan"
+const modulePath = "github.com/chainreactors/cyber"
 
 const (
 	protocVersion           = "35.1"
@@ -32,28 +32,27 @@ var aopProtos = []string{
 	"aop/exec/protocol.proto",
 	"aop/pty/protocol.proto",
 	"aop/tool/protocol.proto",
-	"aop/sco/protocol.proto",
 	"aop/traffic/protocol.proto",
 }
 
 var typeProtos = []string{
 	"types/agent.proto",
+	"types/artifact.proto",
 	"types/chat.proto",
 	"types/command.proto",
 	"types/config.proto",
 	"types/reload.proto",
 	"types/scan.proto",
-	"types/sco.proto",
 	"types/system.proto",
 }
 
 var rpcProtos = []string{
 	"rpc/aop.proto",
 	"rpc/agent.proto",
+	"rpc/artifact.proto",
 	"rpc/chat.proto",
 	"rpc/config.proto",
 	"rpc/scan.proto",
-	"rpc/sco.proto",
 	"rpc/system.proto",
 }
 
@@ -84,10 +83,10 @@ func main() {
 	checkVersion(esPlugin, "protoc-gen-es", protocGenESVersion)
 
 	cyberProto := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "proto")
-	productProto := filepath.Join(root, "proto")
+	localProto := filepath.Join(root, "proto")
 	aopTS := filepath.Join(root, "web", "frontend", "cyber-ui", "packages", "aop", "src", "gen", "aop")
-	productTS := filepath.Join(root, "web", "frontend", "src", "gen")
-	typesDir := filepath.Join(root, "pkg", "types")
+	localTS := filepath.Join(root, "web", "frontend", "src", "gen")
+	typesDir := filepath.Join(root, "core", "types")
 
 	for _, path := range []string{
 		filepath.Join(root, "pkg", "rpc"),
@@ -100,7 +99,7 @@ func main() {
 		}
 	}
 	if err := removeGeneratedFiles(typesDir, ".pb.go"); err != nil {
-		fatal("clear generated AIScan types", err)
+		fatal("clear generated Cyber types", err)
 	}
 
 	goInputs := append(append([]string{}, aopProtos...), typeProtos...)
@@ -108,23 +107,23 @@ func main() {
 	sort.Strings(goInputs)
 	goArgs := []string{
 		"-I", cyberProto,
-		"-I", productProto,
+		"-I", localProto,
 		"--plugin=protoc-gen-go=" + goPlugin,
 		"--go_out=" + root,
 		"--go_opt=module=" + modulePath,
 	}
-	goArgs = append(goArgs, absoluteInputs(cyberProto, productProto, goInputs)...)
+	goArgs = append(goArgs, absoluteInputs(cyberProto, localProto, goInputs)...)
 	run(root, protoc, goArgs...)
 
 	connectArgs := []string{
 		"-I", cyberProto,
-		"-I", productProto,
+		"-I", localProto,
 		"--plugin=protoc-gen-connect-go=" + connectPlugin,
 		"--connect-go_out=" + root,
 		"--connect-go_opt=module=" + modulePath,
 		"--connect-go_opt=package_suffix",
 	}
-	connectArgs = append(connectArgs, absoluteInputs(cyberProto, productProto, rpcProtos)...)
+	connectArgs = append(connectArgs, absoluteInputs(cyberProto, localProto, rpcProtos)...)
 	run(root, protoc, connectArgs...)
 
 	if err := os.MkdirAll(filepath.Dir(aopTS), 0o755); err != nil {
@@ -132,34 +131,34 @@ func main() {
 	}
 	aopArgs := []string{
 		"-I", cyberProto,
-		"-I", productProto,
+		"-I", localProto,
 		"--plugin=protoc-gen-es=" + esPlugin,
 		"--es_out=" + filepath.Dir(aopTS),
 		"--es_opt=target=ts,import_extension=js",
 	}
-	aopArgs = append(aopArgs, absoluteInputs(cyberProto, productProto, aopProtos)...)
+	aopArgs = append(aopArgs, absoluteInputs(cyberProto, localProto, aopProtos)...)
 	run(root, protoc, aopArgs...)
 
-	if err := os.MkdirAll(productTS, 0o755); err != nil {
-		fatal("create AIScan TypeScript output", err)
+	if err := os.MkdirAll(localTS, 0o755); err != nil {
+		fatal("create Cyber TypeScript output", err)
 	}
-	productInputs := append(append([]string{}, typeProtos...), rpcProtos...)
-	sort.Strings(productInputs)
-	productArgs := []string{
+	localInputs := append(append([]string{}, typeProtos...), rpcProtos...)
+	sort.Strings(localInputs)
+	localArgs := []string{
 		"-I", cyberProto,
-		"-I", productProto,
+		"-I", localProto,
 		"--plugin=protoc-gen-es=" + esPlugin,
-		"--es_out=" + productTS,
+		"--es_out=" + localTS,
 		"--es_opt=target=ts,import_extension=js",
 	}
-	productArgs = append(productArgs, absoluteInputs(cyberProto, productProto, productInputs)...)
-	run(root, protoc, productArgs...)
-	if err := rewriteProductAOPImports(productTS); err != nil {
-		fatal("rewrite AIScan TypeScript AOP imports", err)
+	localArgs = append(localArgs, absoluteInputs(cyberProto, localProto, localInputs)...)
+	run(root, protoc, localArgs...)
+	if err := rewriteAOPImports(localTS); err != nil {
+		fatal("rewrite Cyber TypeScript AOP imports", err)
 	}
 }
 
-func rewriteProductAOPImports(root string) error {
+func rewriteAOPImports(root string) error {
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -200,10 +199,10 @@ func removeGeneratedFiles(dir, suffix string) error {
 	return nil
 }
 
-func absoluteInputs(cyberProto, productProto string, inputs []string) []string {
+func absoluteInputs(cyberProto, localProto string, inputs []string) []string {
 	values := make([]string, 0, len(inputs))
 	for _, input := range inputs {
-		base := productProto
+		base := localProto
 		if len(input) >= 4 && input[:4] == "aop/" {
 			base = cyberProto
 		}

@@ -9,46 +9,41 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	web "github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	"github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	types "github.com/chainreactors/cyber/core/types"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	web "github.com/chainreactors/cyber/pkg/web"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ServiceConfig struct {
-	RegisterApplicationNamespaces func(*aop.NamespaceMux) error
-	ConfigAPI                     managementapi.ConfigOptions
-	Store                         *SQLiteStore
-	Profile                       profile.Application
-	ConfigStore                   ConfigStore
+	ConfigAPI   managementapi.ConfigOptions
+	Store       *SQLiteStore
+	Profile     profile.Profile
+	ConfigStore ConfigStore
 	// BuildProfile returns a fresh candidate, including partial results on error.
 	// Service owns every returned candidate and its cleanup.
-	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Application, error)
-	AgentPool     *AgentPool
-	Artifacts     managementapi.ArtifactImporter
+	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Profile, error)
 	MaxConcurrent int
 	ScanTimeout   time.Duration
 	AccessKey     string
 }
 
 type Service struct {
-	applicationNamespaces func(*aop.NamespaceMux) error
 	// configGate serializes update/activation with shutdown. Service owns both
 	// candidate and published profiles throughout the transaction.
 	configGate   chan struct{}
 	configStore  ConfigStore
-	buildProfile func(context.Context, *PreparedConfig) (profile.Application, error)
-	pending      profile.Application
+	buildProfile func(context.Context, *PreparedConfig) (profile.Profile, error)
+	pending      profile.Profile
 	store        *SQLiteStore
 	appMu        sync.Mutex
-	profile      profile.Application
+	profile      profile.Profile
 	// profiles owns the current and retired profiles and counts active request leases.
 	// Entries survive cleanup timeouts; the profile itself owns lifecycle state.
-	profiles map[profile.Application]int
+	profiles map[profile.Profile]int
 	// profileClose serializes release and error collection as one transaction.
 	profileClose chan struct{}
 	appChanged   chan struct{}
@@ -83,28 +78,26 @@ func NewService(cfg ServiceConfig) *Service {
 		timeout = 10 * time.Minute
 	}
 	svc := &Service{
-		applicationNamespaces: cfg.RegisterApplicationNamespaces,
-		configGate:            make(chan struct{}, 1),
-		configStore:           cfg.ConfigStore,
-		buildProfile:          cfg.BuildProfile,
-		store:                 cfg.Store,
-		profiles:              make(map[profile.Application]int),
-		profileClose:          make(chan struct{}, 1),
-		appChanged:            make(chan struct{}),
-		agents:                cfg.AgentPool,
-		hub:                   NewHub(),
-		sem:                   make(chan struct{}, maxConcurrent),
-		timeout:               timeout,
-		auth:                  NewAuth(cfg.AccessKey),
-		cancels:               make(map[string]context.CancelFunc),
-		scanNodeIDs:           make(map[string]string),
-		taskSessions:          make(map[string]string),
-		taskNodeIDs:           make(map[string]string),
-		taskCanceled:          make(map[string]bool),
-		sessionSeq:            make(map[string]uint64),
-		endedTurns:            make(map[string]bool),
+		configGate:   make(chan struct{}, 1),
+		configStore:  cfg.ConfigStore,
+		buildProfile: cfg.BuildProfile,
+		store:        cfg.Store,
+		profiles:     make(map[profile.Profile]int),
+		profileClose: make(chan struct{}, 1),
+		appChanged:   make(chan struct{}),
+		hub:          NewHub(),
+		sem:          make(chan struct{}, maxConcurrent),
+		timeout:      timeout,
+		auth:         NewAuth(cfg.AccessKey),
+		cancels:      make(map[string]context.CancelFunc),
+		scanNodeIDs:  make(map[string]string),
+		taskSessions: make(map[string]string),
+		taskNodeIDs:  make(map[string]string),
+		taskCanceled: make(map[string]bool),
+		sessionSeq:   make(map[string]uint64),
+		endedTurns:   make(map[string]bool),
 	}
-	if !profile.IsNil(cfg.Profile) {
+	if cfg.Profile != nil {
 		svc.profile = cfg.Profile
 		svc.profiles[cfg.Profile] = 0
 	}
@@ -113,13 +106,9 @@ func NewService(cfg ServiceConfig) *Service {
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,
 		Scans:     managementapi.NewScans(svc, svc.hub),
-		SCO:       managementapi.NewSCO(cfg.Store, cfg.Artifacts),
+		Artifacts: managementapi.NewArtifacts(cfg.Store),
 		Status:    svc,
 		ServerURL: "/",
-	}
-	if cfg.AgentPool != nil {
-		svc.api.Agents = cfg.AgentPool
-		cfg.AgentPool.SetSessionLookup(svc)
 	}
 	return svc
 }
@@ -181,7 +170,7 @@ func (s *Service) Close(ctx context.Context) (resultErr error) {
 		s.appMu.Lock()
 		remaining := len(s.profiles)
 		changed := s.appChanged
-		var ready []profile.Application
+		var ready []profile.Profile
 		for p, refs := range s.profiles {
 			if refs == 0 {
 				ready = append(ready, p)

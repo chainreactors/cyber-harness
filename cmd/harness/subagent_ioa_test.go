@@ -59,7 +59,7 @@ waitParent:
 		case err := <-gate.failure:
 			t.Fatalf("model boundary: %v", err)
 		case <-p.done:
-			t.Fatalf("product ended: %v", p.err)
+			t.Fatalf("application ended: %v", p.err)
 		case <-deadline.C:
 			t.Fatal("parent/subagent IOA task exceeded 150s")
 		case <-ticker.C:
@@ -80,7 +80,7 @@ waitParent:
 		}
 	}
 	proof := assertSiblingEvents(t, events, offer, reply, ack, nonce)
-	// Automatic handoff recording is another product path, separate from the
+	// Automatic handoff recording is another application path, separate from the
 	// siblings' own IOA messages. Read it before closing the runtime.
 	if _, err := p.command(t, "ioa space "+space+"-inbox-parent harness"); err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ waitParent:
 		t.Fatal(err)
 	default:
 	}
-	writeJSONEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
+	writeEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
 	t.Logf("parent and two real subagents completed IOA exchange; model requests: %v", counts)
 }
 
@@ -253,14 +253,6 @@ func eventOutputText(value any) string {
 		}
 	}
 	return out.String()
-}
-func writeJSONEvidence(t *testing.T, path string, value any) {
-	t.Helper()
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, path, redactSecrets(data))
 }
 
 func waitSiblingHandoffs(t *testing.T, p *stdioClient, proof map[string]siblingSession) []map[string]any {

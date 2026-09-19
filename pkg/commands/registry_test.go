@@ -5,21 +5,19 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
-type testCommandGroup struct {
-	id       string
-	group    string
+type testCommandBatch struct {
 	commands []Command
 }
 
 func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 	hookRegistry := hooks.New()
-	registry := NewRegistry(hookRegistry)
+	registry := NewRegistry()
 	runs, decisions, completions := 0, 0, 0
 	before := toolhooks.BeforeCommand.On(hookRegistry, "policy", func(_ context.Context, event toolhooks.CommandEvent) (toolhooks.Admission, error) {
 		decisions++
@@ -42,11 +40,12 @@ func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 		return "ok", nil
 	}}
 	contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register("test", "test", command)
+		return extension.Add(scope, command)
 	}}
 	set, err := extension.New(
-		extension.Entry{ID: "command", Extension: contributor},
-		extension.Entry{ID: "registry", DependsOn: []string{"command"}, Extension: registry},
+		extension.Provided[*hooks.Registry](hookRegistry),
+		registry,
+		contributor,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -66,26 +65,23 @@ func TestRegistryUsesCommandHookBoundaryExactlyOnce(t *testing.T) {
 	}
 }
 
-func commandGroup(id, group string, commands ...Command) testCommandGroup {
-	return testCommandGroup{id: id, group: group, commands: commands}
+func commandBatch(commands ...Command) testCommandBatch {
+	return testCommandBatch{commands: commands}
 }
 
-func loadTestRegistry(t *testing.T, groups ...testCommandGroup) (*Registry, *extension.Set) {
+func loadTestRegistry(t *testing.T, batches ...testCommandBatch) (*Registry, *extension.Set) {
 	t.Helper()
-	registry := NewRegistry(nil)
-	entries := make([]extension.Entry, 0, len(groups)+1)
-	dependencies := make([]string, 0, len(groups))
-	for _, group := range groups {
-		group := group
-		dependencies = append(dependencies, group.id)
-		entries = append(entries, extension.Entry{
-			ID: group.id,
-			Extension: extension.Func{LoadFunc: func(scope *extension.Scope) error {
-				return registry.Register("test", group.group, group.commands...)
+	registry := NewRegistry()
+	entries := []extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}
+	for _, batch := range batches {
+		batch := batch
+		entries = append(entries,
+
+			extension.Func{LoadFunc: func(scope *extension.Scope) error {
+				return extension.Add(scope, batch.commands...)
 			}},
-		})
+		)
 	}
-	entries = append(entries, extension.Entry{ID: "registry", DependsOn: dependencies, Extension: registry})
 	set, err := extension.New(entries...)
 	if err != nil {
 		t.Fatal(err)

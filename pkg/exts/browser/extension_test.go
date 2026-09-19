@@ -6,20 +6,19 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {
-	registry := commands.NewRegistry(nil)
-	instance, err := New(registry, t.TempDir(), "default")
+	registry := commands.NewRegistry()
+	instance, err := New(t.TempDir(), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	set := harness.Set(t,
-		extension.Entry{ID: "browser", Extension: instance},
-		extension.Entry{ID: "commands", DependsOn: []string{"browser"}, Extension: registry},
+	set := hosttest.Set(t,
+		registry,
+		instance,
 	)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

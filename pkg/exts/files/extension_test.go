@@ -4,30 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	fileext "github.com/chainreactors/aiscan/pkg/exts/files"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/files"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/files"
 )
 
 func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
 	t.Helper()
-	registry := toolset.NewRegistry(nil)
-	f, err := fileext.New(registry, nil, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	registry := toolset.NewRegistry()
+	f := fileext.New(cfg)
 	set, err := extension.New(
-		extension.Entry{ID: "files", Extension: f},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"files"}, Extension: registry},
+		hosttest.Capabilities(),
+		registry,
+		f,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -94,18 +94,14 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 	}
 }
 
+// The extension owns the lifetime; the file access it builds must not offer a
+// second one for a consumer to drive.
 func TestFilesDoesNotExposeLifecycle(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
-	adapter, err := fileext.New(registry, nil, files.Config{Directory: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	filesystem := adapter.Files()
-	if _, ok := any(filesystem).(interface{ Close(context.Context) error }); ok {
-		t.Fatal("file access exposes Close")
-	}
-	if _, ok := any(filesystem).(interface{ Open(context.Context) error }); ok {
-		t.Fatal("file access exposes Open")
+	filesystem := reflect.TypeFor[*files.Files]()
+	for _, method := range []string{"Open", "Close"} {
+		if _, exists := filesystem.MethodByName(method); exists {
+			t.Errorf("file access exposes lifecycle method %s", method)
+		}
 	}
 }
 
@@ -239,14 +235,14 @@ func TestSymlinkCannotLeaveConfiguredRoot(t *testing.T) {
 }
 
 func TestProductionDependenciesStayIndependent(t *testing.T) {
-	const prefix = "github.com/chainreactors/aiscan/"
+	const prefix = "github.com/chainreactors/cyber/"
 	cmd := exec.CommandContext(t.Context(), "go", "list", "-mod=readonly", "-deps", prefix+"pkg/exts/files")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("dependency inspection: %v\n%s", err, output)
 	}
 	allowed := []string{
-		"aop", "core/capability", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry",
+		"aop", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry", "core/resource",
 		"core/tool", "core/tool/hooks", "pkg/exts/files", "pkg/toolset", "tools/files",
 	}
 	for _, dep := range strings.Fields(string(output)) {

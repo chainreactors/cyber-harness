@@ -1,4 +1,4 @@
-//go:build full && cstx
+//go:build full
 
 package main
 
@@ -6,8 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
-	webext "github.com/chainreactors/aiscan/pkg/exts/web"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	"net"
 	"net/http"
 	"os"
@@ -15,29 +14,43 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
-	webservice "github.com/chainreactors/aiscan/pkg/web/service"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/web"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, ingestor managementapi.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
-	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
-	pool := webservice.NewAgentPool(service.Hub(), ingestor)
+func newHeadlessHandler(store *webservice.SQLiteStore, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
+	service := webservice.NewService(webservice.ServiceConfig{Store: store, AccessKey: token})
+	pool := webservice.NewAgentPool(service.Hub(), store)
 	service.SetAgentPool(pool)
-	handler, err := web.NewHandler(service.Auth(), nil, webext.Routes(service)...)
+	routes := webext.New(service)
+	routeSet, err := extension.New(routes)
 	if err != nil {
 		_ = service.Close(context.Background())
 		return nil, nil, nil, err
 	}
+	if err := routeSet.Load(context.Background()); err != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, err
+	}
+	handler, err := web.NewHandler(service.Auth(), nil, routes.Routes()...)
+	closeErr := routeSet.Close(context.Background())
+	if err != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, err
+	}
+	if closeErr != nil {
+		_ = service.Close(context.Background())
+		return nil, nil, nil, closeErr
+	}
 	return service, pool, handler, nil
 }
 
-// acp server: AIScan headless control plane — no UI and no hidden local
+// acp server: Cyber headless control plane — no UI and no hidden local
 // application graph. Agents connect through the public AOP endpoint.
 //
 //	go run ./examples/acp/server --addr 127.0.0.1:8080
@@ -66,28 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	artifactExt, err := cstxext.New(store)
-	if err != nil {
-		logger.Errorf("init artifact normalization: %v", err)
-		os.Exit(1)
-	}
-	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
-	if err != nil {
-		logger.Errorf("init artifact scope: %v", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if err := artifactSet.Close(context.Background()); err != nil {
-			logger.Errorf("close artifact scope: %v", err)
-		}
-	}()
-	if err := artifactSet.Load(ctx); err != nil {
-		logger.Errorf("load artifact scope: %v", err)
-		os.Exit(1)
-	}
-	ingestor := artifactExt.Importer()
-
-	service, _, handler, err := newHeadlessHandler(store, ingestor, token)
+	service, _, handler, err := newHeadlessHandler(store, token)
 	if err != nil {
 		logger.Errorf("create handler: %v", err)
 		return

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
 
@@ -23,7 +23,7 @@ func TestResponseEOFKeepsCaptureOpenUntilEngineCompletion(t *testing.T) {
 	addon := &captureAddon{hub: hub}
 	flow := &mitmproxy.Flow{StartTime: time.Now()}
 	state := newCaptureState(hub, flow)
-	state.flow.Response = &traffic.Response{StatusCode: 200}
+	state.flow.Response = &traffic.HttpResponse{StatusCode: 200}
 	addon.pending.Store(flow.Id.String(), state)
 	reader := addon.StreamResponseModifier(flow, strings.NewReader("local response"))
 	if _, err := io.Copy(io.Discard, reader); err != nil {

@@ -5,9 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 // BuildHello builds the AOP core agent registration message.
@@ -17,7 +16,7 @@ func BuildHello(name string, executor tool.Executor, nodeID string, runtimeInfo 
 		return nil, fmt.Errorf("node_id is required")
 	}
 	if runtimeInfo == nil || runtimeInfo.Os == "" {
-		runtimeInfo = agentext.DefaultRuntimeInfo()
+		runtimeInfo = DefaultRuntimeInfo()
 	}
 	hello := &aop.AgentHello{
 		NodeId: nodeID, Name: name,

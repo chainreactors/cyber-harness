@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/operation"
-	coretool "github.com/chainreactors/aiscan/core/tool"
+	"github.com/chainreactors/cyber/core/operation"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 type fakeBackend struct {
@@ -27,21 +27,21 @@ type fakeBackend struct {
 	screenshot    image.Image
 	screenshotErr error
 	nilScreenshot bool
-	record        func(context.Context, string) (mediaInfo, error)
+	record        func(context.Context, string) (MediaInfo, error)
 }
 
-func (b *fakeBackend) Resolve(_ context.Context, req captureRequest) (resolvedTarget, error) {
+func (b *fakeBackend) Resolve(_ context.Context, req CaptureRequest) (ResolvedTarget, error) {
 	if b.resolveErr != nil {
-		return resolvedTarget{}, b.resolveErr
+		return ResolvedTarget{}, b.resolveErr
 	}
 	info := TargetInfo{Kind: req.Target, PID: req.PID, Width: 320, Height: 240}
 	if req.WindowHandle != 0 {
 		info.WindowHandle = "0x1"
 	}
-	return resolvedTarget{Info: info}, nil
+	return ResolvedTarget{Info: info}, nil
 }
 
-func (b *fakeBackend) Screenshot(context.Context, resolvedTarget) (image.Image, error) {
+func (b *fakeBackend) Screenshot(context.Context, ResolvedTarget) (image.Image, error) {
 	if b.screenshotErr != nil {
 		return nil, b.screenshotErr
 	}
@@ -56,7 +56,7 @@ func (b *fakeBackend) Screenshot(context.Context, resolvedTarget) (image.Image, 
 	return img, nil
 }
 
-func (b *fakeBackend) Record(ctx context.Context, _ resolvedTarget, output string, _ int) (mediaInfo, error) {
+func (b *fakeBackend) Record(ctx context.Context, _ ResolvedTarget, output string, _ int) (MediaInfo, error) {
 	b.mu.Lock()
 	if b.started != nil {
 		b.startOnce.Do(func() { close(b.started) })
@@ -67,9 +67,9 @@ func (b *fakeBackend) Record(ctx context.Context, _ resolvedTarget, output strin
 	}
 	<-ctx.Done()
 	if err := os.WriteFile(output, []byte("fake-mp4"), 0o644); err != nil {
-		return mediaInfo{}, err
+		return MediaInfo{}, err
 	}
-	return mediaInfo{Width: 320, Height: 240, Frames: 3}, nil
+	return MediaInfo{Width: 320, Height: 240, Frames: 3}, nil
 }
 
 func TestScreenshotReturnsImageAndPath(t *testing.T) {
@@ -193,7 +193,7 @@ func TestDefaultOutputUsesInvocationRecordDir(t *testing.T) {
 	if err := json.Unmarshal([]byte(coretool.ResultText(result)), &meta); err != nil {
 		t.Fatal(err)
 	}
-	wantDir := filepath.Join(dir, ".aiscan", "record")
+	wantDir := filepath.Join(dir, ".cyber", "record")
 	if filepath.Dir(meta.Output) != wantDir {
 		t.Fatalf("result directory = %s, want %s", filepath.Dir(meta.Output), wantDir)
 	}
@@ -229,8 +229,8 @@ func TestSynchronousRecordCompletesAfterDuration(t *testing.T) {
 }
 
 func TestBackendFailureReturnsStructuredToolError(t *testing.T) {
-	backend := &fakeBackend{record: func(context.Context, string) (mediaInfo, error) {
-		return mediaInfo{}, errors.New("encoder failed")
+	backend := &fakeBackend{record: func(context.Context, string) (MediaInfo, error) {
+		return MediaInfo{}, errors.New("encoder failed")
 	}}
 	recorder := New(t.TempDir(), t.TempDir(), 1, backend)
 	result, err := recorder.Execute(context.Background(), `{"action":"record","duration_seconds":1}`)
@@ -250,7 +250,7 @@ func TestBackendFailureReturnsStructuredToolError(t *testing.T) {
 }
 
 func TestBackendPanicIsContainedInSession(t *testing.T) {
-	backend := &fakeBackend{record: func(context.Context, string) (mediaInfo, error) {
+	backend := &fakeBackend{record: func(context.Context, string) (MediaInfo, error) {
 		panic("native crash")
 	}}
 	recorder := New(t.TempDir(), t.TempDir(), 1, backend)
@@ -307,11 +307,11 @@ func TestDuplicateActiveOutputIsRejected(t *testing.T) {
 }
 
 func TestSessionHistoryIsBounded(t *testing.T) {
-	backend := &fakeBackend{record: func(_ context.Context, output string) (mediaInfo, error) {
+	backend := &fakeBackend{record: func(_ context.Context, output string) (MediaInfo, error) {
 		if err := os.WriteFile(output, []byte("mp4"), 0o644); err != nil {
-			return mediaInfo{}, err
+			return MediaInfo{}, err
 		}
-		return mediaInfo{Frames: 1, Width: 2, Height: 2}, nil
+		return MediaInfo{Frames: 1, Width: 2, Height: 2}, nil
 	}}
 	recorder := New(t.TempDir(), t.TempDir(), 1, backend)
 	for range maxSessionHistory + 5 {
@@ -341,7 +341,7 @@ func TestClosedToolRejectsNewCaptureButKeepsStatus(t *testing.T) {
 }
 
 func TestUnavailableOrInvalidScreenshotBackend(t *testing.T) {
-	for name, backend := range map[string]captureBackend{
+	for name, backend := range map[string]Backend{
 		"nil backend":   nil,
 		"backend error": &fakeBackend{screenshotErr: errNilImage},
 		"nil image":     &fakeBackend{nilScreenshot: true},

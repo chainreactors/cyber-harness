@@ -1,27 +1,57 @@
 # Changelog
 
-## v1.0.0-rc3 — 流量、curl 和 Web 工作台更新
+## v1.0.0-rc4 — 组合架构、浏览器 CSTX 与纯 Go full 构建
 
-### 具体修改
+rc4 收敛运行时组合与 Artifact 数据路径：Go 服务只负责归档原始事件，CSTX 的解析、合并和关联由浏览器中的 TypeScript/WASM SDK 完成；full 版本不再依赖 libcstx 或原生 RE2。
 
-- 流量模型新增 `Exchange`，一条 Flow 同时保存 request 和 response；代理层支持按订阅选择 Flow，并把超过内存预算的 response body 写入文件。
-- 修复代理捕获中的 Host 丢失问题；切换代理出口只影响新连接，已有连接继续完成；MITM body 文件在 Flow 删除后回收。
-- curl 工具新增 `-x/--proxy`、`-F/--form`、`--data-urlencode`、ASCII trace；补充 `--http1.0/--http1.1/--http2`、HEAD 请求校验、超时返回码 28、TLS/resolve 处理和失败输出保留。
-- 工具结果新增 64 KiB 内联上限；JSONL 文件和每个会话的 SQLite 事件数量有上限；取消任务后迟到的 Artifact 不再写入会话。
-- 失败的 Agent turn 不再自动重复执行；AOP 文本在协议边界统一清洗为合法 UTF-8。
-- Web 资产列表改为分页；聊天时间线和回复完成时间使用新的时间字段；curl、gogo、scan 统一使用 Web 资产摘要。
-- 取消远程扫描通过运行时控制通道立即处理；前台 shell 命令继承调用方工作目录。
-- Agent 重连后，已打开的终端会重新发送 `pty.list`；Agent 断线向浏览器发送 `pty.detached`；连接关闭时丢弃排队发送。
-- 更新 cyber-ui 子模块、聊天时间线和 IOA 控制台的协议生成代码，修复前后端版本漂移。
+### 架构与数据路径
 
-### 发布产物
+- 按 [组合架构 RFC](rfc-composition.md) 将参考发行版组合提取到公开的 `pkg/aiscan.New`；`pkg/base.New` 与扩展 capability 成为自定义发行版的明确边界。
+- 删除运行时 sink、pending、wire 和重复 DTO 转发层，扩展直接贡献或借用 capability；Profile 成为应用组合和生命周期入口。
+- Go 侧移除 CSTX 处理结果、SCO 查询服务及对应数据库表，只保留原始 Artifact 的归档与同步 RPC；保留的 native CSTX 扩展不再被任何产品 edition 选择。
+- `cyber-ui` 通过 `@cyber/cstx` 的 v0.5 TypeScript/WASM ABI 在浏览器中解析归档 Artifact，并直接生成资产视图。
+- PTY、进程、prompt、scanner、IOA client 和 Web application dispatch 收敛到各自扩展所有权，减少跨包手工装配和隐式全局状态。
+
+### Agent 与 Web
+
+- evaluator 以自然语言 pacing 驱动 goal loop，修复 compaction、budget、失败消息和命令结果在时间线中的重复或缺失。
+- Web 资产导入、扫描卡片、快速连接、命令面板和 ConnectRPC 二进制 framing 完成端到端修复，并补齐中英文标签。
+- 文档重组为用户、开发者、架构和概念入口，新增可编译的自定义组合与 session 示例。
+
+### 构建与发布
+
+- full 默认使用纯 Go/WASM RE2，`CGO_ENABLED=0` 与 `CGO_ENABLED=1` 均可构建；仅 record edition 需要 CGO 和 recorder SDK。
+- standard 与 full 都从 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64，不再下载静态 RE2 SDK 或 macOS CGO 工具链。
+- `aiscan` 与 `aiscan-full` 各发布 6 个 ZIP；`aiscan_checksums.txt` 覆盖全部 12 个 ZIP，`runner` 仅参与构建验证。
+
+## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
+
+本次候选版本汇总 rc2 之后的改动，重点改善流量数据的存储边界、Web 会话的稳定性以及发布产物验证。
+
+### Improvements
+
+- HTTP 流量使用统一 Exchange 结构，支持选择性订阅、有界捕获、body 文件存储与回收。
+- 限制工具内联结果、JSONL 文件和会话 SQLite 事件的大小或数量，减少长期会话的资源占用。
+- 避免 AOP 事件重复持久化，规范协议边界的 UTF-8 文本，修复失败回合重复自动继续的问题。
+- Web 取消请求由运行时处理；前台命令继承调用工作目录。资产面板支持分页，并更新聊天时间线与回复完成时间展示。
+- 内置 curl 补充常用参数兼容行为，并统一响应快照和 Web 资产摘要。
+
+### CI and Release
+
+- 修复连接结束后仍可能发送排队消息的竞态，增加连接关闭重复回归。
+- 后端 E2E 覆盖整个 Web 包树，修正周常 Web 并发测试迁移后的包路径和测试名。
+- 发布前检查目标提交已经通过完整 CI；已公开的同名 Release 不再删除重建。
+- 修复 Linux/macOS ZIP 内二进制执行权限，增加 Linux amd64/arm64 解包启动与 checksum 验证。
+
+### Release Matrix
 
 - `aiscan`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
 - `aiscan-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
-- `aiscan_checksums.txt` 包含 11 个 ZIP 的 SHA-256；`runner` 仅用于构建验证，不作为 Release 附件。
+- 校验文件：`aiscan_checksums.txt`。`runner` 参与构建验证，不作为 Release 附件发布。
+
 ## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
-v1.0.0-rc2 重点重构了 AIScan 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
+v1.0.0-rc2 重点重构了 Cyber 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
 
 ### New Features
 
@@ -105,7 +135,7 @@ Release 只包含 `aiscan`、`aiscan-full` 和 checksum。
 
 ## v1.0.0-rc1 — 原生录屏 + 浏览器自动化扩展 + 稳定接口候选
 
-v1.0.0-rc1 是 AIScan 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。
+v1.0.0-rc1 是 Cyber 首个 v1 发布候选版本。它在 v0.4.0 Web 工作台、Agent 会话和 SCO 资产模型之上补齐原生桌面录制、可复用浏览器自动化、scanner-native Artifact/Loot 传输和跨平台 shell 命令组合，同时把 CLI、配置、AOP/Connect 协议、包边界与 standard/full 发布矩阵收敛为 v1 稳定基线。
 
 ### New Features
 
@@ -123,7 +153,7 @@ Wayland、macOS、Windows arm64、无图形会话的 headless 主机和 Windows 
 
 **浏览器自动化与 Katana headless 复用**
 
-Playwright、nuclei headless 和 Katana 现在共享同一套 Chromium 发现逻辑。可以通过 `AISCAN_BROWSER_PATH` 显式指定浏览器，也可以自动复用系统 Chrome/Chromium/Edge，减少不同浏览器工具各自下载或选择不同运行时的问题。
+Playwright、nuclei headless 和 Katana 现在共享同一套 Chromium 发现逻辑。可以通过 `CYBER_BROWSER_PATH` 显式指定浏览器，也可以自动复用系统 Chrome/Chromium/Edge，减少不同浏览器工具各自下载或选择不同运行时的问题。
 
 - headless action 新增双击、hover、focus/blur、check/uncheck、drag、scroll、viewport 和自定义 DOM event
 - 新增 URL、request、response、可见性与断言等待，以及 cookie、localStorage/sessionStorage 操作
@@ -142,7 +172,7 @@ Playwright、nuclei headless 和 Katana 现在共享同一套 Chromium 发现逻
 
 **Shell 内存命令组合**
 
-AIScan 注册的 scan、spray、proton 等进程内命令现在可以像普通可执行文件一样参与 shell 管道和重定向。适配层按需创建，不启动额外常驻服务，并完整传递工作目录、stdin/stdout/stderr、退出码、调用上下文与取消信号。
+Cyber 注册的 scan、spray、proton 等进程内命令现在可以像普通可执行文件一样参与 shell 管道和重定向。适配层按需创建，不启动额外常驻服务，并完整传递工作目录、stdin/stdout/stderr、退出码、调用上下文与取消信号。
 
 ```bash
 scan -i target -j | proton
@@ -156,16 +186,16 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **发布与原生构建链路**
 
-- standard 由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；full 的 macOS amd64/arm64 也通过 Linux 上的 Zig 和固定 SDK 交叉编译
+- standard 与 full 都由 Linux runner 直接交叉编译 Linux、macOS、Windows 的 amd64/arm64，不再需要平台 C 工具链
 - CI、定时回归和正式 release 共用同一套构建标签与发布约束，版本注入、压缩和平台矩阵不再漂移
 - recorder SDK 使用固定源码、组件 allowlist、SHA-256 和静态库体积预算，并通过独立 workflow 构建发布
-- full profile 恢复静态 RE2，并验证 Windows RE2 原生库没有变成运行时 DLL 依赖
+- full profile 使用 RE2 的纯 Go 后端，并验证 `CGO_ENABLED=0/1` 都能完成编译和测试
 - Windows 发布包经 UPX 压缩后会在干净 runner 中解压并真实执行 `--version`，避免“能打包但无法启动”
-- 本地 standard/full release profile 默认使用 `-s -w`；Windows full 从约 200 MiB 恢复到约 124 MiB，且架构测试阻止调试段再次进入发布构建
+- 本地 standard/full release profile 默认使用 `-s -w`，且架构测试阻止调试段再次进入发布构建
 
 **v1 包边界与历史清理**
 
-- 终端路由从 `core/terminal` 移至 `pkg/terminal`；`core` 只保留 AIScan 领域基础设施
+- 终端路由从 `core/terminal` 移至 `pkg/terminal`；`core` 只保留 Cyber 领域基础设施
 - 删除 pre-v1 的重复 CLI 别名、配置字段、Playwright 命令和临时文件协议入口
 - 移除不可用 recorder backend 的占位实现；不支持原生录制的平台不会注册伪 record 工具
 - 架构测试覆盖包方向、legacy 标识、发布 profile、protobuf 字段和子模块 pin，历史债务重新出现会直接阻断 CI
@@ -205,7 +235,7 @@ Unix 使用本地 socket，Windows 使用 named pipe；进程退出或异常中�
 
 **Web 工作台（首次正式发布）**
 
-v0.4.0 是 Web 工作台的首个正式版本。它不是单独的扫描结果页面，而是 aiscan 的浏览器入口：用户可以在同一个界面中选择 Agent、发起自然语言任务、观察工具执行、查看扫描资产与漏洞证据，并继续围绕已有结果追问。界面支持中英文、明暗主题和移动端访问，会话、扫描、配置和资产统一持久化到 SQLite，刷新页面或重启服务后仍可继续工作。
+v0.4.0 是 Web 工作台的首个正式版本。它不是单独的扫描结果页面，而是 cyber 的浏览器入口：用户可以在同一个界面中选择 Agent、发起自然语言任务、观察工具执行、查看扫描资产与漏洞证据，并继续围绕已有结果追问。界面支持中英文、明暗主题和移动端访问，会话、扫描、配置和资产统一持久化到 SQLite，刷新页面或重启服务后仍可继续工作。
 
 - 集成 Agent 对话、会话管理、扫描结果、资产中心、发现列表和配置中心
 - 支持中英文切换、明暗主题和移动端布局
@@ -273,7 +303,7 @@ Web 配置中心用于管理多个 LLM profile，并显式选择当前模型。P
 
 **Agent 上下文与输出控制**
 
-这组功能面向长时间、跨多轮的安全评估任务。AIScan 会根据模型的真实上下文窗口管理输入与输出预算，在接近上限时压缩历史，避免任务因为 context overflow 中断；同时允许用户控制终端中展示多少 thinking 和工具细节，在交互可见性与输出噪声之间取得平衡。
+这组功能面向长时间、跨多轮的安全评估任务。Cyber 会根据模型的真实上下文窗口管理输入与输出预算，在接近上限时压缩历史，避免任务因为 context overflow 中断；同时允许用户控制终端中展示多少 thinking 和工具细节，在交互可见性与输出噪声之间取得平衡。
 
 - 新增 `context_window` 和 `max_tokens` 配置；请求会根据剩余上下文动态收紧输出上限，避免无效请求和上下文溢出
 - 新增 `/compact [focus]` 手动压缩会话；上下文接近上限时自动压缩，使用率超过 80% 时提示用户
@@ -300,7 +330,7 @@ output:
 
 **标准化扫描结果**
 
-SCO 标准化输出用于解决不同 scanner 各自返回独立格式、结果难以关联和复用的问题。无论结果来自完整 scan 流水线还是单独执行某个 scanner，AIScan 都会把主机、端口、应用、URL 和漏洞转换为统一资产节点，供 Web 展示、报告生成、外部查询和后续 Agent 分析共同使用。
+SCO 标准化输出用于解决不同 scanner 各自返回独立格式、结果难以关联和复用的问题。无论结果来自完整 scan 流水线还是单独执行某个 scanner，Cyber 都会把主机、端口、应用、URL 和漏洞转换为统一资产节点，供 Web 展示、报告生成、外部查询和后续 Agent 分析共同使用。
 
 - 扫描流水线及 gogo、spray、neutron、katana、proton 等独立工具输出接入 SCO 标准化资产模型
 - Web 端可按主机、端口、应用、URL 和漏洞关联展示结果，独立 scanner 工具调用不再只显示原始文本
@@ -310,14 +340,14 @@ SCO 标准化输出用于解决不同 scanner 各自返回独立格式、结果�
 
 OKF 风格文档用于组织 Agent 的工具知识和最终交付物。工具说明不再作为大量独立 skill 一次性注入上下文，而是形成带索引和元数据的知识包，在真正调用某个工具时按需加载；扫描报告也使用相同思路，把总览、单个 Finding 和证据来源组织成可以追踪和继续处理的文档集合。
 
-- 原有分散的 scanner/runtime skill 收敛为单一 `aiscan` skill，工具文档按 OKF 风格拆分为可按需加载的 concept 文件
+- 原有分散的 scanner/runtime skill 收敛为单一 `cyber` skill，工具文档按 OKF 风格拆分为可按需加载的 concept 文件
 - 知识包分为 `easm` 和 `runtime` 两个 domain，每个目录包含 `index.md` 和带 YAML frontmatter 的工具 playbook
-- Agent 调用工具时可通过 `aiscan://skills/aiscan/okf/...` 按需读取对应文档，避免启动时加载全部工具说明
+- Agent 调用工具时可通过 `cyber://skills/cyber/okf/...` 按需读取对应文档，避免启动时加载全部工具说明
 - 安全报告改为 OKF 风格目录：`index.md` 提供摘要，每个确认漏洞或重要线索写入独立的 `findings/<id>.md`
 - Finding frontmatter 记录 `status`、`severity`、`verified`、`sources` 和 `tags`，确认漏洞优先引用 MITM 请求/响应与实际执行过的 nuclei/neutron PoC
 
 ```text
-skills/aiscan/
+skills/cyber/
 ├── SKILL.md
 ├── okf/
 │   ├── index.md
@@ -349,7 +379,7 @@ report/
 
 **外部接入 API**
 
-外部接入 API 面向需要把 aiscan 嵌入其他平台、桌面客户端或自动化系统的开发者。实时对话和工具事件使用长连接 Application WebSocket，管理查询使用 ConnectRPC，两者共享 protobuf 类型和 access key，避免第三方系统依赖 Web 页面或解析终端文本。
+外部接入 API 面向需要把 cyber 嵌入其他平台、桌面客户端或自动化系统的开发者。实时对话和工具事件使用长连接 Application WebSocket，管理查询使用 ConnectRPC，两者共享 protobuf 类型和 access key，避免第三方系统依赖 Web 页面或解析终端文本。
 
 - 实时 Agent 会话统一提供基于 protobuf 的 Application WebSocket，支持 Session/Turn、流式消息、工具调用、文件、PTY、取消与断线续传
 - 会话历史、扫描、配置、Agent、系统状态和 SCO 管理统一提供 ConnectRPC API
@@ -400,9 +430,9 @@ go run ./examples/acp/connectrpc --server http://127.0.0.1:8080 --token demo
 ### Breaking Changes
 
 - `llm.providers` 现在是可手动切换的 profile 列表，不再在请求失败后自动切换 Provider；使用 `llm.active_profile`、Web 设置页或 `/provider set` 显式选择
-- Agent 连接 AIScan Web/AOP 统一使用 `--server-url`；IOA 通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
+- Agent 连接 Cyber Web/AOP 统一使用 `--server-url`；IOA 通过独立的 `--ioa-url` 配置，未指定时默认使用 `<server-url>/ioa`
 - 官方 Release 不再单独发布 `aiscan-agent`，请统一使用 `aiscan agent`
-- 独立的 gogo、spray、neutron、proton 等顶层 tool skill 已收敛到 `aiscan` skill；工具细节改为调用时加载 `okf/easm` 或 `okf/runtime` concept
+- 独立的 gogo、spray、neutron、proton 等顶层 tool skill 已收敛到 `cyber` skill；工具细节改为调用时加载 `okf/easm` 或 `okf/runtime` concept
 - 报告输出由单一 Markdown 内容调整为 `index.md` + `findings/<id>.md` 的 OKF 风格 bundle
 - 外部 Web/Agent 接入迁移到 protobuf Application WebSocket 与 ConnectRPC；依赖旧 JSON WebSocket、管理 REST 或旧 endpoint 的客户端需要迁移
 - Proton JSON 字段从下划线命名迁移为连字符命名，例如 `template_id` → `template-id`
@@ -596,7 +626,7 @@ llm:
 
 **配置文件重命名**
 
-- `config.yaml` → `aiscan.yaml`，避免与其他项目的通用 config.yaml 冲突
+- `config.yaml` → `cyber.yaml`，避免与其他项目的通用 config.yaml 冲突
 
 **Scanner 工具基础设施精简**
 
@@ -605,7 +635,7 @@ llm:
 
 ### Bug Fixes
 
-- **FOFA key-only 认证**：FOFA 2023 年简化认证后只需 API key，但 aiscan 仍要求 email+key 双字段才注册 fofa 引擎。修复后仅 `FofaKey` 即可使用 `passive -s fofa`，同时兼容旧版 `email:key` 格式（#41）
+- **FOFA key-only 认证**：FOFA 2023 年简化认证后只需 API key，但 cyber 仍要求 email+key 双字段才注册 fofa 引擎。修复后仅 `FofaKey` 即可使用 `passive -s fofa`，同时兼容旧版 `email:key` 格式（#41）
 - 修复测试中的 Stripe key 触发 GitHub push protection（替换为假 key）
 - 修复 cumulative usage 事件发射，确保跨 turn token 统计正确
 - 修复 agent live status 渲染不一致
@@ -620,7 +650,7 @@ llm:
 
 ### Breaking Changes
 
-- **配置文件名变更**：`config.yaml` → `aiscan.yaml`，需手动重命名现有配置文件
+- **配置文件名变更**：`config.yaml` → `cyber.yaml`，需手动重命名现有配置文件
 - **`/reset` 重命名为 `/clear`**
 
 ---
@@ -633,7 +663,7 @@ Session 会话持久化（`--resume`/`--save-session`）；非视觉模型图片
 
 **Session 持久化**
 
-- `--save-session`：自动保存 agent 对话到 `.aiscan/sessions/`，每次 run 后持久化
+- `--save-session`：自动保存 agent 对话到 `.cyber/sessions/`，每次 run 后持久化
 - `--resume`：恢复最近一次保存的 session
 - `--resume <path>`：从指定 session 文件恢复
 - 反射驱动的 config 生成，自动同步 CLI flag 与配置文件字段
@@ -646,13 +676,13 @@ aiscan agent -p "scan target" --save-session
 aiscan agent --resume -p "now check the results"
 
 # 从指定文件恢复
-aiscan agent --resume .aiscan/sessions/2026-06-22_scan.json
+aiscan agent --resume .cyber/sessions/2026-06-22_scan.json
 ```
 
 **Config 路径 Fallback 链**
 
 - 配置文件查找顺序：`-c` 指定 > 当前目录 > 二进制所在目录
-- 数据目录（`.aiscan/`）统一跟随二进制路径
+- 数据目录（`.cyber/`）统一跟随二进制路径
 
 ### Improvements
 
@@ -842,7 +872,7 @@ playwright -s=s1 goto
 
 ## v0.2.2 (2026-06-16)
 
-新增 goal evaluation 闭环机制——独立 LLM 评估 agent 任务完成度并自动注入反馈驱动重试；内嵌 katana 爬虫引擎支持 headless 浏览器；新增多 provider 容错降级链；重构 TUI/REPL 为统一 pkg/tui 模块；大幅整理包结构，aiscan 专用包从 pkg/ 移入 core/。
+新增 goal evaluation 闭环机制——独立 LLM 评估 agent 任务完成度并自动注入反馈驱动重试；内嵌 katana 爬虫引擎支持 headless 浏览器；新增多 provider 容错降级链；重构 TUI/REPL 为统一 pkg/tui 模块；大幅整理包结构，cyber 专用包从 pkg/ 移入 core/。
 
 ### New Features
 

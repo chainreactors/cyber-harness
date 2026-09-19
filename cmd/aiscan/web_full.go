@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	webext "github.com/chainreactors/aiscan/pkg/exts/web"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	"io/fs"
 	"net"
 	"net/http"
@@ -18,70 +18,50 @@ import (
 	"sync"
 	"time"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	cstxext "github.com/chainreactors/aiscan/pkg/exts/cstx"
-	serverext "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
-	node "github.com/chainreactors/aiscan/pkg/node"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	"github.com/chainreactors/aiscan/pkg/runner"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	"github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
-	webservice "github.com/chainreactors/aiscan/pkg/web/service"
-	ioaservice "github.com/chainreactors/aiscan/tools/ioa/server"
-	webstatic "github.com/chainreactors/aiscan/web"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	cyberdist "github.com/chainreactors/cyber/pkg/aiscan"
+	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	node "github.com/chainreactors/cyber/pkg/node"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/pkg/runner"
+	"github.com/chainreactors/cyber/pkg/web"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
+	ioaservice "github.com/chainreactors/cyber/tools/ioa/server"
+	webstatic "github.com/chainreactors/cyber/web"
 	"github.com/chainreactors/ioa/protocols"
 )
 
-func init() {
-	webServeFunc = runWeb
-}
-
-func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) (resultErr error) {
+func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) (resultErr error) {
 	store, err := webservice.NewSQLiteStore(opts.DB)
 	if err != nil {
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
-	artifactExt, err := cstxext.New(store)
-	if err != nil {
-		return fmt.Errorf("init artifact normalization: %w", err)
-	}
-	artifactSet, err := extension.New(extension.Entry{ID: "cstx", Extension: artifactExt})
-	if err != nil {
-		return err
-	}
-	defer func() { resultErr = errors.Join(resultErr, artifactSet.Close(context.Background())) }()
-	if err := artifactSet.Load(ctx); err != nil {
-		return err
-	}
-	ingestor := artifactExt.Importer()
-
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
 	// later staged reloads, where the candidate config is resolved independently.
-	product, err := initWebProfile(ctx, option, logger, ingestor)
+	p, err := initWebProfile(ctx, option, logger)
 	if err != nil {
-		if product != nil {
-			err = errors.Join(err, product.Close(context.Background()))
+		if p != nil {
+			err = errors.Join(err, p.Close(context.Background()))
 		}
 		return fmt.Errorf("init aiscan: %w", err)
 	}
 	defer func() {
-		if product != nil {
-			resultErr = errors.Join(resultErr, product.Close(context.Background()))
+		if p != nil {
+			resultErr = errors.Join(resultErr, p.Close(context.Background()))
 		}
 	}()
-	application, err := product.App()
+	application, err := p.State()
 	if err != nil {
 		return err
 	}
 
 	if provider, _ := application.ProviderState(); provider == nil {
-		logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in aiscan.yaml or env"))
+		logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in cyber.yaml or env"))
 	}
 
 	configFile := option.ConfigFile
@@ -90,32 +70,25 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		accessKey = protocols.NewToken()
 	}
 	service := webservice.NewService(webservice.ServiceConfig{
-		ConfigAPI:   productConfigAPI(),
+		ConfigAPI:   configAPI(),
 		Store:       store,
-		Profile:     product,
-		Artifacts:   ingestor,
+		Profile:     p,
 		AccessKey:   accessKey,
-		ConfigStore: &webConfigStore{explicit: configFile},
-		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
+		ConfigStore: &webConfigStore{explicit: configFile, runtime: option},
+		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Profile, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
-			candidateOption.Sections = productSections(false)
-			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
+			candidateOption.Sections = defaultSections()
+			if _, err := runner.ResolveRuntimeConfig(&candidateOption); err != nil {
 				return nil, err
 			}
-			// The candidate app runs exactly the proto config being committed —
-			// no second parse of the staged YAML through cfg.Option.
-			appCfg := apppkg.AppConfigFromDistribute(prepared.Config, apppkg.RuntimeFeatures{
-				ProviderEnabled:  true,
-				ProviderOptional: true,
-				ToolsEnabled:     true,
-				AIEnabled:        true,
-			}, logger)
-			appCfg = apppkg.MergeOptionExtras(appCfg, &candidateOption)
-			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
+			// The staged YAML is resolved into the flags config, which stays the
+			// truth for the candidate runtime; the proto is only the settings
+			// payload that produced it.
+			candidateProfile, err := initWebProfile(ctx, &candidateOption, logger)
 			if err != nil {
 				return candidateProfile, err
 			}
@@ -124,14 +97,14 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
 	})
-	product = nil // Service now owns the initial profile and all replacements.
+	p = nil // Service now owns the initial Profile and all replacements.
 	defer func() { resultErr = errors.Join(resultErr, service.Close(context.Background())) }()
 
 	var pool *webservice.AgentPool
 	if option.Debug {
-		pool = webservice.NewAgentPool(service.Hub(), ingestor, "*")
+		pool = webservice.NewAgentPool(service.Hub(), store, "*")
 	} else {
-		pool = webservice.NewAgentPool(service.Hub(), ingestor)
+		pool = webservice.NewAgentPool(service.Hub(), store)
 	}
 	service.SetAgentPool(pool)
 
@@ -140,18 +113,17 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	ioaExtension := serverext.New(ioaservice.Config{AccessKey: accessKey})
-	ioaSet, err := extension.New(extension.Entry{ID: "ioa-server", Extension: ioaExtension})
+	routes := webext.New(service)
+	ioaExtension := serverext.NewBrowser(ioaservice.Config{AccessKey: accessKey}, serverext.BrowserOptions{
+		Authenticate: service.Auth().Authenticate,
+		AuthEnabled:  service.Auth().Enabled(),
+	})
+	webSet, err := extension.New(routes, ioaExtension)
 	if err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, ioaSet.Close(context.Background())) }()
-	if err := ioaSet.Load(ctx); err != nil {
-		return err
-	}
-	ioaSvc := ioaExtension.Server()
-	ioaHandler, err := serverext.BrowserHandler(ctx, ioaSvc, service.Auth().Authenticate, service.Auth().Enabled())
-	if err != nil {
+	defer func() { resultErr = errors.Join(resultErr, webSet.Close(context.Background())) }()
+	if err := webSet.Load(ctx); err != nil {
 		return err
 	}
 
@@ -162,7 +134,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), append(webext.Routes(service), web.Route{Source: "ioa.server", Pattern: "/ioa/", Handler: http.StripPrefix("/ioa", ioaHandler)})...)
+	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), routes.Routes()...)
 	if err != nil {
 		return err
 	}
@@ -188,7 +160,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		}
 		telemetry.SafeGo("embedded-agent", func() {
 			defer close(embeddedDone)
-			if err := node.RunWebSocket(embeddedCtx, aiscanProfileFactory, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(embeddedCtx, newCyberProfileFromRequest, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		})
@@ -202,7 +174,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		case <-closeCtx.Done():
 			return closeCtx.Err()
 		}
-		return ioaSet.Close(closeCtx)
+		return webSet.Close(closeCtx)
 	})
 }
 
@@ -211,7 +183,7 @@ func embeddedAgentOption(base *cfg.Option, accessKey, listenAddr string) (cfg.Op
 	if base != nil {
 		option = *base
 	}
-	if err := applyProductIdentity(&option); err != nil {
+	if err := applyIdentity(&option); err != nil {
 		return cfg.Option{}, err
 	}
 	serverURL := &url.URL{Scheme: "http", Host: listenAddr}
@@ -259,39 +231,30 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts managementapi.ArtifactImporter) (*aiscanProfile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*cyberdist.Profile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := apppkg.AppConfig(&option, apppkg.RuntimeFeatures{
-		ProviderEnabled:  true,
-		ProviderOptional: true,
-		ToolsEnabled:     true,
-		AIEnabled:        true,
-	}, logger)
-	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
-}
-
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg apppkg.Config, artifacts managementapi.ArtifactImporter) (*aiscanProfile, error) {
-	appCfg.SkipEngines = true
-	appCfg.Scanner.VerifyMode = "off"
-
-	profileConfig, err := profileConfigFromOption(option, apppkg.RuntimeFeatures{}, nil, appCfg.Logger)
+	if option.Resolved == nil {
+		resolved, err := defaultSections().ResolveValues(option.Extensions, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		option.Resolved = resolved
+		option.Extensions = resolved.Values()
+	}
+	p, err := cyberdist.New(cyberdist.Request{
+		Option: &option, ProviderMode: profile.ProviderOptional, Logger: logger,
+		SkipEngines: true, DisableIOA: true,
+	})
 	if err != nil {
 		return nil, err
 	}
-	profileConfig.Application = appCfg
-	profileConfig.IOA = nil
-	profileConfig.Artifacts = artifacts
-	product, err := newAIScanProfile(profileConfig)
-	if err != nil {
-		return nil, err
+	if err := p.Load(ctx); err != nil {
+		return p, err
 	}
-	if err := product.Load(ctx); err != nil {
-		return product, err
-	}
-	return product, nil
+	return p, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +263,11 @@ func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg ap
 
 type webConfigStore struct {
 	explicit string
-	mu       sync.Mutex
+	// runtime is the fully resolved startup option. It is the config truth when
+	// no cyber.yaml is loaded, so the settings page shows the flags the process
+	// actually runs with instead of an empty document.
+	runtime *cfg.Option
+	mu      sync.Mutex
 }
 
 func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
@@ -311,27 +278,15 @@ func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool,
 	defer s.mu.Unlock()
 	p, loaded := s.resolveConfigPath()
 	if !loaded {
-		return p, false, &types.DistributeConfig{}, nil
+		projected, err := projectRuntimeConfig(s.runtime)
+		return p, false, projected, err
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return p, false, nil, err
 	}
-	dc, err := parseProductConfig(data)
+	dc, err := parseConfig(data)
 	return p, true, dc, err
-}
-
-// parseDistributeConfig decodes the final protobuf-shaped YAML configuration.
-func parseDistributeConfig(data []byte) *types.DistributeConfig {
-	dc, err := cfg.LoadDistributeConfigYAML(data)
-	if err != nil || dc == nil {
-		dc = &types.DistributeConfig{}
-	}
-	if dc.Llm == nil {
-		dc.Llm = &types.LLMConfig{}
-	}
-	cfg.NormalizeLLMConfig(dc.Llm)
-	return dc
 }
 
 func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *types.DistributeConfig) (*webservice.PreparedConfig, error) {
@@ -344,17 +299,24 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 
 	p, loaded := s.resolveConfigPath()
 	var current *types.DistributeConfig
+	var original []byte
 	if loaded {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}
-		current, err = parseProductConfig(data)
+		original = data
+		current, err = parseConfig(data)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		current = &types.DistributeConfig{}
+		// Nothing on disk yet: the resolved flags config is what a settings save
+		// starts from, so blank secrets fall back to the running values.
+		current, err = projectRuntimeConfig(s.runtime)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if incoming == nil {
 		incoming = &types.DistributeConfig{}
@@ -375,21 +337,18 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
 	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
-	if err := normalizeProductConfig(incoming); err != nil {
-		return nil, err
-	}
-	sections := productSections(false)
+	sections := defaultSections()
 	nextValues, currentValues := cfg.ValuesFromProto(incoming.Extensions), cfg.ValuesFromProto(current.Extensions)
-	preserveProductURLCredentials(nextValues, currentValues)
+	preserveURLCredentials(nextValues, currentValues)
 	incoming.Extensions, err = cfg.ValuesToProto(sections.Preserve(nextValues, currentValues))
 	if err != nil {
 		return nil, err
 	}
-	if err = validateProductConfig(incoming); err != nil {
+	if err = validateConfig(incoming); err != nil {
 		return nil, err
 	}
 
-	next, err := marshalProductConfig(incoming)
+	next, err := marshalConfig(incoming, original)
 	if err != nil {
 		return nil, err
 	}
@@ -509,26 +468,28 @@ func preserveLLMProfileSecrets(incoming *types.LLMConfig, existing *types.LLMCon
 	}
 }
 
+// resolveConfigPath returns where a settings save is written and whether the
+// process is already reading that file. An explicit --config path that does not
+// exist yet is still the write target, but until the first save the process runs
+// from startup flags, so the settings page must project those instead.
 func (s *webConfigStore) resolveConfigPath() (string, bool) {
 	p := findWebConfigFile(s.explicit)
-	if p != "" {
-		return p, true
+	if p == "" {
+		p = "cyber.yaml"
 	}
-	if s.explicit != "" {
-		return s.explicit, false
-	}
-	return "aiscan.yaml", false
+	_, err := os.Stat(p)
+	return p, err == nil
 }
 
 func findWebConfigFile(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if _, err := os.Stat("aiscan.yaml"); err == nil {
-		return "aiscan.yaml"
+	if _, err := os.Stat("cyber.yaml"); err == nil {
+		return "cyber.yaml"
 	}
 	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), "aiscan.yaml")
+		p := filepath.Join(filepath.Dir(exe), "cyber.yaml")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

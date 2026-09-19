@@ -64,5 +64,7 @@ export default {
     cancel: '取消',
     submit: '开始导入',
     submitting: '导入中…',
+    submitFailed: '导入失败：{{message}}',
+    importedNothing: '没有从所选文件解析出任何资产，请确认 Artifact 类型与文件内容是否匹配。',
   },
 }

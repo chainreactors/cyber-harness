@@ -80,7 +80,7 @@ def test_press_combo_shift_key(test_server, pw_page, pw_driver):
     pw_page.keyboard.press("Shift+KeyA")
     assert pw_page.input_value("#username") == "A"
 
-    # aiscan
+    # cyber
     pw_driver.execute("open", url, "--session", "combo-t", "--timeout", "10")
     pw_driver.execute("fill", "combo-t", "#username", "")
     pw_driver.execute("press", "combo-t", "#username", "Shift+a")

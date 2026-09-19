@@ -7,86 +7,87 @@ import (
 	"testing"
 )
 
-func TestStoreRegistersAtomicallyAndPublishesOnActivate(t *testing.T) {
+func TestStorePublishesAndHotAddsBatches(t *testing.T) {
 	store := New[string]()
-	retract, err := store.Register("test", "shared",
+	first, err := store.Add(
 		Value[string]{Name: "one", Value: "first"},
 		Value[string]{Name: "two", Value: "second"},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := store.Get("one"); ok || len(store.Names()) != 0 {
-		t.Fatal("collecting registry published values")
-	}
-	if _, err := store.Register("test", "shared",
-		Value[string]{Name: "fresh", Value: "fresh"},
-		Value[string]{Name: "one", Value: "duplicate"},
-	); !errors.Is(err, ErrDuplicate) {
-		t.Fatalf("duplicate registration = %v", err)
+	if _, ok := store.Get("one"); ok {
+		t.Fatal("collecting store published values")
 	}
 	if err := store.Activate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(store.Names(), []string{"one", "two"}) || !slices.Equal(store.GroupNames("shared"), []string{"one", "two"}) {
-		t.Fatalf("published names=%v group=%v", store.Names(), store.GroupNames("shared"))
-	}
-	if _, err := store.Register("test", "", Value[string]{Name: "late", Value: "late"}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("late registration = %v", err)
-	}
-	retract()
-	// Retraction cannot mutate an active registry. It is owned by an Extension
-	// and normally runs only after the dependent registry has closed.
-	retract()
-	if !slices.Equal(store.Names(), []string{"one", "two"}) {
-		t.Fatal("active registry was mutated by retraction")
-	}
-	if err := store.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestStoreCloseCancelsAndDrainsAcquiredCalls(t *testing.T) {
-	store := New[string]()
-	if _, err := store.Register("test", "", Value[string]{Name: "hold", Value: "value"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Activate(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	entry, call, release, err := store.Acquire(context.Background(), "hold")
-	if err != nil || entry.Value != "value" {
-		t.Fatalf("acquire = %+v, %v", entry, err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := store.Close(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("close before release = %v", err)
-	}
-	if !errors.Is(call.Err(), context.Canceled) {
-		t.Fatalf("acquired context = %v", call.Err())
-	}
-	if _, _, _, err := store.Acquire(t.Context(), "hold"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("admission survived close = %v", err)
-	}
-	release()
-	release()
-	if err := store.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestStoreRetractsFailedBatchBeforeActivation(t *testing.T) {
-	store := New[int]()
-	retract, err := store.Register("test", "group", Value[int]{Name: "one", Value: 1})
+	late, err := store.Add(Value[string]{Name: "late", Value: "late"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	retract()
+	if !slices.Equal(store.Names(), []string{"one", "two", "late"}) {
+		t.Fatalf("names = %v", store.Names())
+	}
+	if err := first.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(store.Names(), []string{"late"}) {
+		t.Fatalf("names after retract = %v", store.Names())
+	}
+	if err := late.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBatchCloseCancelsOnlyItsCallsAndDrains(t *testing.T) {
+	store := New[string]()
+	hold, _ := store.Add(Value[string]{Name: "hold", Value: "value"})
+	keep, _ := store.Add(Value[string]{Name: "keep", Value: "value"})
 	if err := store.Activate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.Entries()) != 0 || len(store.GroupNames("group")) != 0 {
-		t.Fatal("retracted values were published")
+	_, call, release, err := store.Acquire(context.Background(), "hold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := hold.Close(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("close before release = %v", err)
+	}
+	if !errors.Is(call.Err(), context.Canceled) {
+		t.Fatalf("call context = %v", call.Err())
+	}
+	if _, _, _, err := store.Acquire(t.Context(), "hold"); !errors.Is(err, ErrUnknown) {
+		t.Fatalf("removed admission = %v", err)
+	}
+	if _, _, releaseKeep, err := store.Acquire(t.Context(), "keep"); err != nil {
+		t.Fatalf("unrelated admission = %v", err)
+	} else {
+		releaseKeep()
+	}
+	release()
+	if err := hold.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := keep.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreRejectsDuplicateBatchAtomically(t *testing.T) {
+	store := New[int]()
+	if _, err := store.Add(Value[int]{Name: "one", Value: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Add(Value[int]{Name: "two", Value: 2}, Value[int]{Name: "one", Value: 3}); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("duplicate = %v", err)
+	}
+	if err := store.Activate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(store.Names(), []string{"one"}) {
+		t.Fatalf("names = %v", store.Names())
 	}
 }

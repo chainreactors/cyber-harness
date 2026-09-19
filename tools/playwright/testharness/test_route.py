@@ -21,7 +21,7 @@ def test_route_fulfill(test_server, pw_page, pw_driver):
     assert "intercepted" in result
     pw_page.unroute("**/api/data")
 
-    # aiscan — set route first, then navigate, then click
+    # cyber — set route first, then navigate, then click
     pw_driver.execute("open", url, "--session", "route-t", "--timeout", "10")
     pw_driver.execute(
         "route", "route-t", "*/api/data",
@@ -54,7 +54,7 @@ def test_route_abort(test_server, pw_page, pw_driver):
     assert "error" in result.lower()
     pw_page.unroute("**/api/data")
 
-    # aiscan
+    # cyber
     pw_driver.execute("open", url, "--session", "abort-t", "--timeout", "10")
     pw_driver.execute("route", "abort-t", "*/api/data", "--abort")
     pw_driver.execute(

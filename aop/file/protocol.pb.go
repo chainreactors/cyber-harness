@@ -916,7 +916,7 @@ const file_aop_file_protocol_proto_rawDesc = "" +
 	"\x19ACCESS_SOURCE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ACCESS_SOURCE_TOOL\x10\x01\x12\x1a\n" +
 	"\x16ACCESS_SOURCE_SNAPSHOT\x10\x02\x12\x19\n" +
-	"\x15ACCESS_SOURCE_CONTROL\x10\x03B/Z-github.com/chainreactors/aiscan/aop/file;fileb\x06proto3"
+	"\x15ACCESS_SOURCE_CONTROL\x10\x03B.Z,github.com/chainreactors/cyber/aop/file;fileb\x06proto3"
 
 var (
 	file_aop_file_protocol_proto_rawDescOnce sync.Once

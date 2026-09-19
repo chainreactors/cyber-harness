@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 // FlowStore owns completed metadata and its optional files. The fixed pair is
-// request/response byte counts; -1 means no file. Paths never enter Exchange.
+// request/response byte counts; -1 means no file. Paths never enter Flow.
 type FlowStore struct {
 	publishMu               sync.Mutex
 	bodyMu                  sync.RWMutex
@@ -70,20 +70,20 @@ func (s *FlowStore) putLocked(f Flow, sizes [2]int64) {
 	}
 	s.flows[(s.head+s.size)%s.cap] = f
 	s.size++
-	s.files[f.ID] = sizes
+	s.files[f.Id] = sizes
 	s.bodyBytes += incoming
-	s.seq = max(s.seq, flowSequence(f.ID))
+	s.seq = max(s.seq, flowSequence(f.Id))
 }
 
 func (s *FlowStore) evictLocked() {
 	victim := s.flows[s.head]
-	previous := s.files[victim.ID]
+	previous := s.files[victim.Id]
 	s.bodyBytes -= storedBytes(previous)
-	delete(s.files, victim.ID)
+	delete(s.files, victim.Id)
 	if s.bodyDir != "" {
 		for side, size := range previous {
 			if size >= 0 {
-				_ = os.Remove(s.bodyPath(victim.ID, side))
+				_ = os.Remove(s.bodyPath(victim.Id, side))
 			}
 		}
 	}
@@ -94,7 +94,7 @@ func (s *FlowStore) evictLocked() {
 
 func (s *FlowStore) Add(f Flow) Flow { return s.addFiles(f, [2]*os.File{}) }
 
-// addFiles takes ownership of closed temporary files from the AIScan adapter.
+// addFiles takes ownership of closed temporary files from the Cyber adapter.
 // Only this store assigns final names; no arbitrary path travels on the bus.
 func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 	s.publishMu.Lock()
@@ -107,8 +107,12 @@ func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 		removeCaptureFiles(files)
 		return f
 	}
+	f = cloneFlowMetadata(f)
+	if f.Request == nil {
+		f.Request = &traffic.HttpRequest{}
+	}
 	s.seq++
-	f.ID = strconv.Itoa(s.seq)
+	f.Id = strconv.Itoa(s.seq)
 	sizes := [2]int64{-1, -1}
 	var fileErr error
 	for side, file := range files {
@@ -123,7 +127,7 @@ func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 		}
 		info, err := os.Stat(source)
 		if err == nil {
-			err = os.Rename(source, s.bodyPath(f.ID, side))
+			err = os.Rename(source, s.bodyPath(f.Id, side))
 		}
 		if err != nil {
 			fileErr = errors.Join(fileErr, err)
@@ -146,13 +150,12 @@ func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 		}
 		return body[:maxBodySnip]
 	}
-	f.Request.Body = trim(f.Request.Body, 0)
-	if f.Response != nil {
-		resp := *f.Response
-		f.Response = &resp
-		resp.Body = trim(resp.Body, 1)
+	if f.Request != nil {
+		f.Request.Body = trim(f.Request.Body, 0)
 	}
-	f = cloneFlowMetadata(f)
+	if f.Response != nil {
+		f.Response.Body = trim(f.Response.Body, 1)
+	}
 	s.putLocked(f, sizes)
 	s.mu.Unlock()
 	s.bodyMu.Unlock()
@@ -171,7 +174,7 @@ func (s *FlowStore) Query(opts QueryOpts) []Flow {
 			continue
 		}
 		if opts.Status != "" {
-			if f.Response == nil || !matchStatus(f.Response.StatusCode, opts.Status) {
+			if f.Response == nil || !matchStatus(int(f.Response.StatusCode), opts.Status) {
 				continue
 			}
 		}
@@ -199,20 +202,20 @@ func (s *FlowStore) hydrate(flow *Flow) error {
 // boundary, never while a Flow is queued.
 func (s *FlowStore) readBodies(flow *Flow) error {
 	s.mu.RLock()
-	sizes, ok := s.files[flow.ID]
+	sizes, ok := s.files[flow.Id]
 	dir := s.bodyDir
 	s.mu.RUnlock()
 	if dir == "" {
 		return nil
 	}
 	if !ok {
-		return fmt.Errorf("flow %s is no longer retained", flow.ID)
+		return fmt.Errorf("flow %s is no longer retained", flow.Id)
 	}
 	for side, size := range sizes {
 		if size < 0 {
 			continue
 		}
-		file, err := os.Open(filepath.Join(dir, "body", bodyFileName(flow.ID, side)))
+		file, err := os.Open(filepath.Join(dir, "body", bodyFileName(flow.Id, side)))
 		if err != nil {
 			return err
 		}
@@ -222,9 +225,9 @@ func (s *FlowStore) readBodies(flow *Flow) error {
 			return err
 		}
 		if int64(len(data)) != size {
-			return fmt.Errorf("body size changed for flow %s", flow.ID)
+			return fmt.Errorf("body size changed for flow %s", flow.Id)
 		}
-		if side == 0 {
+		if side == 0 && flow.Request != nil {
 			flow.Request.Body = data
 		} else if flow.Response != nil {
 			flow.Response.Body = data
@@ -240,7 +243,7 @@ func (s *FlowStore) Get(id int) *Flow {
 	var found *Flow
 	for n := 0; n < s.size; n++ {
 		f := s.flows[(s.head+n)%s.cap]
-		if f.ID == strconv.Itoa(id) {
+		if f.Id == strconv.Itoa(id) {
 			copy := cloneFlowMetadata(f)
 			found = &copy
 			break
@@ -266,25 +269,26 @@ func (s *FlowStore) subscribeIndex() error {
 
 func (s *FlowStore) appendIndex(f Flow) error {
 	s.mu.RLock()
-	sizes, ok := s.files[f.ID]
+	sizes, ok := s.files[f.Id]
 	oldest := ""
 	if s.size > 0 {
-		oldest = s.flows[s.head].ID
+		oldest = s.flows[s.head].Id
 	}
 	s.mu.RUnlock()
 	if !ok {
 		return nil // already evicted; do not invent a preview-only disk record
 	}
 	f = cloneFlowMetadata(f)
-	f.Request.Body = nil
+	if f.Request != nil {
+		f.Request.Body = nil
+	}
 	if f.Response != nil {
 		f.Response.Body = nil
 	}
-	exchange := f.Exchange
 	record := flowIndexRecord{
-		ID: f.ID, Operation: f.Operation, Timestamp: f.Timestamp, Host: f.Host,
+		Operation: f.Operation, Host: f.Host,
 		ContentType: f.ContentType, Duration: int64(f.Duration), TLS: f.TLS,
-		Exchange: &exchange, BodySizes: &sizes, OldestID: oldest,
+		Flow: f.Flow, BodySizes: &sizes, OldestID: oldest,
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -384,17 +388,15 @@ func (s *FlowStore) SetBodyDir(dir string) error {
 }
 
 type flowIndexRecord struct {
-	Sequence    *int              `json:"sequence,omitempty"`
-	ID          string            `json:"id,omitempty"`
-	Operation   *operationpb.Ref  `json:"operation,omitempty"`
-	Timestamp   time.Time         `json:"timestamp,omitempty"`
-	Host        string            `json:"host,omitempty"`
-	ContentType string            `json:"content_type,omitempty"`
-	Duration    int64             `json:"duration,omitempty"`
-	TLS         bool              `json:"tls,omitempty"`
-	Exchange    *traffic.Exchange `json:"exchange,omitempty"`
-	BodySizes   *[2]int64         `json:"body_sizes,omitempty"`
-	OldestID    string            `json:"oldest_id,omitempty"`
+	Sequence    *int             `json:"sequence,omitempty"`
+	Operation   *operationpb.Ref `json:"operation,omitempty"`
+	Host        string           `json:"host,omitempty"`
+	ContentType string           `json:"content_type,omitempty"`
+	Duration    int64            `json:"duration,omitempty"`
+	TLS         bool             `json:"tls,omitempty"`
+	Flow        *traffic.Flow    `json:"flow,omitempty"`
+	BodySizes   *[2]int64        `json:"body_sizes,omitempty"`
+	OldestID    string           `json:"oldest_id,omitempty"`
 }
 
 func (s *FlowStore) loadIndex(path string) error {
@@ -427,24 +429,23 @@ func (s *FlowStore) loadIndex(path string) error {
 			s.mu.Lock()
 			s.seq = max(s.seq, *record.Sequence)
 			s.mu.Unlock()
-			if record.ID != "" {
+			if record.Flow != nil {
 				_ = file.Close()
 				return errors.New("traffic: index sequence record contains a flow")
 			}
 			continue
 		}
-		if flowSequence(record.ID) <= 0 || record.Exchange == nil || record.BodySizes == nil {
+		if record.Flow == nil || flowSequence(record.Flow.GetId()) <= 0 || record.BodySizes == nil {
 			_ = file.Close()
 			return errors.New("traffic: invalid metadata index record")
 		}
 		f := Flow{
-			Operation: record.Operation, Timestamp: record.Timestamp, Host: record.Host,
+			Operation: record.Operation, Host: record.Host,
 			ContentType: record.ContentType, Duration: time.Duration(record.Duration),
-			TLS: record.TLS, Exchange: *record.Exchange,
+			TLS: record.TLS, Flow: record.Flow,
 		}
-		f.ID = record.ID
 		s.mu.Lock()
-		for s.size > 0 && flowSequence(s.flows[s.head].ID) < flowSequence(record.OldestID) {
+		for s.size > 0 && flowSequence(s.flows[s.head].Id) < flowSequence(record.OldestID) {
 			s.evictLocked()
 		}
 		s.mu.Unlock()

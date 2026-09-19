@@ -6,7 +6,7 @@ import type { BadgeTone, FindingPriority } from './scan-result'
     • severity  → warm spectrum tokens (critical→destructive … info→info)
     • status    → semantic tokens (running→primary, ok→success, …)
     • AI actor  → the violet `ai` role
-  See [[aiscan-web-redesign-direction]].
+  See [[cyber-web-redesign-direction]].
 */
 
 /** BadgeTone (used by AssetResultView's Badge) → token classes. */
@@ -49,7 +49,7 @@ export const aiTone = {
 
 /**
  * Colourise a scan-log line by its content. Keyword groups mirror the kinds of
- * output aiscan emits (errors, findings, AI steps, web/service, summaries).
+ * output cyber emits (errors, findings, AI steps, web/service, summaries).
  */
 export function logLineTone(line: string): string {
   const l = line.toLowerCase()

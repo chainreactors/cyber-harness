@@ -5,26 +5,24 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/chainreactors/aiscan/agent"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/scan/engine"
-	"github.com/chainreactors/aiscan/tools/scan/pipeline"
-	"github.com/chainreactors/aiscan/tools/toolargs"
+	"github.com/chainreactors/cyber/agent"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/scan/engine"
+	"github.com/chainreactors/cyber/tools/scan/pipeline"
+	"github.com/chainreactors/cyber/tools/toolargs"
 	goflags "github.com/jessevdk/go-flags"
 )
 
 type Command struct {
-	builders         []CapabilityBuilder
-	profileExtenders []ProfileExtender
 	toolargs.Base
 	engines     *engine.Set
 	parent      *agent.Agent
-	deepBrowser DeepBrowserFunc
-	readSkill   SkillReader
+	deepBrowser func(context.Context, string) (string, error)
+	readSkill   func(string) string
 }
 
 type flags struct {
@@ -80,6 +78,19 @@ func (c *Command) Usage() string {
 	return Usage()
 }
 
+func (c *Command) QuickReference() string {
+	return `### scan — the full pipeline: gogo -> spray -> zombie -> neutron
+  -i <target>          URL, IP, IP:port, or CIDR  (-l <file> for a list)
+  --mode quick|full    Scan profile (default quick)
+  --ports <preset>     gogo port preset; defaults to all in quick, - in full
+  --verify <level>     AI verification of loots: auto, off, low, medium, high, critical
+  --sniper / --deep    AI vulnerability search / deep AI testing on findings
+  -j                   Emit raw gogo and spray results as JSON Lines
+  Examples:
+    scan -i 10.0.0.0/24 --mode quick
+    scan -i https://target --mode full --verify high`
+}
+
 func Usage() string {
 	var options flags
 	return toolargs.GoFlagsHelp("scan", &options)
@@ -117,7 +128,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		defer restoreDebug()
 		c.Logger.Debugf("scanner debug enabled")
 	}
-	profile, err := profileForFlags(flags, c.profileExtenders...)
+	profile, err := profileForFlags(flags)
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
@@ -144,12 +155,12 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	trace := flags.Trace || flags.Debug
-	pipelineBus := eventbus.New[pipeline.Observation]()
+	pipelineBus := eventbus.New[pipeline.Observation[event]]()
 	coll := newCollector(rawInputs, stream, stream != nil && !flags.NoColor, trace)
 	subscribePipeline(pipelineBus, coll, trace, stream)
 
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
-		pipelineBus.Emit(pipeline.Observation{
+		pipelineBus.Emit(pipeline.Observation[event]{
 			Action: pipeline.ActionAccept,
 			Event:  errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw)),
 		})
@@ -159,14 +170,14 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	capabilities := c.buildCapabilities(flags, options, profile)
-	p, err := pipeline.New(ctx, pipeline.Config{
+	p, err := pipeline.New(ctx, pipeline.Config[event]{
 		Capabilities: capabilities,
 		Bus:          pipelineBus,
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
-	p.Run(seedsToEvents(seeds))
+	p.Run(seeds)
 
 	if c.parent != nil && verifyLevel != "" {
 		runVerifyPass(ctx, c.parent, c.readSkill, coll, verifyLevel, c.Logger)
@@ -189,6 +200,19 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	result := coll.StructuredResult()
 	c.emitStructuredData(ctx, result)
 	return out, result, nil
+}
+
+func subscribePipeline(bus *eventbus.Bus[pipeline.Observation[event]], coll *collector, debug bool, writer io.Writer) {
+	if coll != nil {
+		bus.Subscribe(coll.Observe)
+	}
+	if debug && writer != nil {
+		bus.Subscribe(func(observation pipeline.Observation[event]) {
+			if trace := formatTraceEvent(observation); trace != "" {
+				fmt.Fprintln(writer, trace)
+			}
+		})
+	}
 }
 
 func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanResult) {

@@ -28,7 +28,7 @@ const (
 	maxArtifactProjectedValueBytes = 512 << 10
 	maxArtifactOtherValueBytes     = 256 << 10
 	maxArtifactJSONDepth           = 128
-	artifactBudgetMetadataField    = "_aiscan_artifact"
+	artifactBudgetMetadataField    = "_cyber_artifact"
 )
 
 // boundArtifactData returns data byte-for-byte when it is within budget. An
@@ -156,7 +156,7 @@ func marshalBoundedArtifactString(value string, limit int) ([]byte, bool) {
 		}
 	}
 
-	marker := fmt.Sprintf("…[aiscan: truncated, %d bytes total]", len(value))
+	marker := fmt.Sprintf("…[cyber: truncated, %d bytes total]", len(value))
 	markerRaw, _ := json.Marshal(marker)
 	if len(markerRaw) > limit {
 		return []byte(`""`), true

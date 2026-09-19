@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cyber/ui'
-import { fetchScanReport, type SCONode } from '../../api'
+import type { SCONode } from '../../api'
 import { buildSCOModel } from '@cyber/cstx-easm'
 import { buildFindingsFromSCO } from '../../lib/scan-result'
 import { MarkdownContent } from '@/markdown'
 import AssetResultView from '../AssetResultView'
 import FindingsPanel from '../FindingsPanel'
+import { buildCSTXMarkdownReport } from '../../lib/scan-report'
 
 interface Props {
   scanID: string
@@ -20,22 +21,8 @@ export default function ScanSummaryCard({ scanID, nodes }: Props) {
   const model = useMemo(() => buildSCOModel(nodes), [nodes])
   const findings = useMemo(() => buildFindingsFromSCO(model), [model])
   const [tab, setTab] = useState('assets')
-  const [reportMd, setReportMd] = useState('')
-  const [reportLoadedKey, setReportLoadedKey] = useState('')
   const lang = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'
-  const reportKey = `${scanID}:${lang}`
-
-  useEffect(() => {
-    if (tab !== 'report' || reportLoadedKey === reportKey) return
-    setReportMd('')
-    let cancelled = false
-    fetchScanReport(scanID, lang)
-      .then((md) => { if (!cancelled) { setReportMd(md); setReportLoadedKey(reportKey) } })
-      .catch(() => { if (!cancelled) { setReportMd(''); setReportLoadedKey(reportKey) } })
-    return () => { cancelled = true }
-  }, [tab, scanID, lang, reportKey, reportLoadedKey])
-
-  const reportLoading = tab === 'report' && reportLoadedKey !== reportKey
+  const reportMd = useMemo(() => buildCSTXMarkdownReport(scanID, nodes, lang), [scanID, nodes, lang])
 
   return (
     <section className="overflow-hidden rounded-lg border border-border/80 bg-card">
@@ -77,13 +64,9 @@ export default function ScanSummaryCard({ scanID, nodes }: Props) {
           </TabsContent>
         )}
         <TabsContent value="report" className="mt-0 p-4 sm:p-5">
-          {reportLoading ? (
-            <div role="status" className="py-4 text-sm text-muted-foreground">{tf('loadingReport')}</div>
-          ) : (
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              <MarkdownContent content={reportMd || tf('noReportAvailable')} />
-            </div>
-          )}
+          <div className="prose prose-sm max-w-none dark:prose-invert">
+            <MarkdownContent content={reportMd || tf('noReportAvailable')} />
+          </div>
         </TabsContent>
       </Tabs>
     </section>

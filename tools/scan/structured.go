@@ -3,7 +3,7 @@ package scan
 import (
 	"time"
 
-	"github.com/chainreactors/aiscan/core/output"
+	"github.com/chainreactors/cyber/core/output"
 )
 
 func (c *collector) StructuredResult() *output.ScanResult {

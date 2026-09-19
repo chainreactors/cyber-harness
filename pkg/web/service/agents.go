@@ -9,13 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/pkg/terminal"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/core/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -169,15 +167,10 @@ type remoteAgent struct {
 	commandsMenu []*types.CommandSpec
 	close        func()
 	send         aop.SendFunc
-	// sendCh is retained for isolated AgentPool tests; live nodes bind send to
-	// the shared Connection mechanism instead of running a second write pump.
-	sendCh    chan *aop.Envelope
-	connectAt time.Time
-	runtime   *aop.AgentRuntimeInfo
-	status    *aop.AgentStatus
-	stats     *aop.AgentStats
-
-	done chan struct{}
+	connectAt    time.Time
+	runtime      *aop.AgentRuntimeInfo
+	status       *aop.AgentStatus
+	stats        *aop.AgentStats
 }
 
 func (a *remoteAgent) NodeID() string    { return a.nodeID }
@@ -233,7 +226,7 @@ type SessionLookup interface {
 	BroadcastAOPEvent(sessionID string, event *aop.Event)
 }
 
-// AgentPool manages connected aiscan agent nodes. Every member is a node that
+// AgentPool manages connected cyber agent nodes. Every member is a node that
 // registered over the application WebSocket — including the hub's own embedded
 // agent, which connects over loopback like any other node.
 type AgentPool struct {
@@ -241,7 +234,7 @@ type AgentPool struct {
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
-	artifacts      managementapi.ArtifactImporter
+	store          *SQLiteStore
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan *ptypb.ProtocolMessage
@@ -251,11 +244,11 @@ type AgentPool struct {
 	upgrader       websocket.Upgrader
 }
 
-func NewAgentPool(hub *Hub, artifacts managementapi.ArtifactImporter, allowedOrigins ...string) *AgentPool {
+func NewAgentPool(hub *Hub, store *SQLiteStore, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
-		artifacts:      artifacts,
+		store:          store,
 		ptySubs:        make(map[string]chan *ptypb.ProtocolMessage),
 		ptyNodeIDs:     make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
@@ -293,7 +286,7 @@ func (p *AgentPool) unregister(a *remoteAgent) {
 	}
 	p.mu.Unlock()
 	if removed {
-		p.notifyPTY(a.NodeID(), terminal.NewDetached)
+		p.notifyPTY(a.NodeID(), ptypb.NewDetached)
 	}
 	a.state().closeAllTasks()
 }
@@ -522,24 +515,13 @@ func (p *AgentPool) sendAgentMessage(nodeID, id, replyTo string, message protobu
 }
 
 func (a *remoteAgent) enqueue(envelope *aop.Envelope) error {
-	if a == nil {
+	if a == nil || a.send == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
-	if a.send != nil {
-		return a.send(envelope)
-	}
-	if a.sendCh == nil {
-		return fmt.Errorf("agent connection is unavailable")
-	}
-	select {
-	case a.sendCh <- envelope:
-		return nil
-	case <-a.done:
-		return fmt.Errorf("agent disconnected")
-	}
+	return a.send(envelope)
 }
 
-func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error {
+func (p *AgentPool) CancelTask(nodeID, taskID, sessionID string) error {
 	a := p.get(nodeID)
 	if a == nil {
 		return nil
@@ -552,13 +534,9 @@ func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error
 	if !pending {
 		return nil
 	}
-	var chatSessionID string
-	if len(sessionID) > 0 {
-		chatSessionID = sessionID[0]
-	}
 	requestID := generateID()
 	cancelMessage := protobuf.Message(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnRequest{CancelTurnRequest: &aop.CancelTurnRequest{
-		SessionId: chatSessionID, TurnId: taskID,
+		SessionId: sessionID, TurnId: taskID,
 	}}})
 	if isToolCall {
 		cancelMessage = &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: taskID}}}
@@ -570,11 +548,11 @@ func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error
 }
 
 func (p *AgentPool) CancelPTY(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", terminal.NewKill(terminalID))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", ptypb.NewKill(terminalID))
 }
 
 func (p *AgentPool) ClosePTY(nodeID, terminalID string) {
-	_ = p.sendAgentMessage(nodeID, generateID(), "", terminal.NewDetach(terminalID))
+	_ = p.sendAgentMessage(nodeID, generateID(), "", ptypb.NewDetach(terminalID))
 }
 
 func (p *AgentPool) SubscribePTY(nodeID, terminalID string) (<-chan *ptypb.ProtocolMessage, bool, func()) {
@@ -636,7 +614,7 @@ func (p *AgentPool) rebindPTY(agent *remoteAgent) {
 	for _, terminalID := range terminalIDs {
 		terminalID := terminalID
 		go func() {
-			_ = agent.enqueue(aop.MustWrap(generateID(), "", terminal.NewList(terminalID, "")))
+			_ = agent.enqueue(aop.MustWrap(generateID(), "", ptypb.NewList(terminalID, "")))
 		}()
 	}
 }

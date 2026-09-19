@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/aiscan/core/config"
+	"github.com/chainreactors/cyber/core/config"
 )
 
 type Provider interface {
@@ -86,7 +86,7 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	resolved.Provider = providerName
 
 	if strings.TrimSpace(resolved.APIKey) == "" {
-		return nil, fmt.Errorf("no API key: set --api-key, llm.api_key, or AISCAN_API_KEY")
+		return nil, fmt.Errorf("no API key: set --api-key, llm.api_key, or CYBER_API_KEY")
 	}
 
 	if resolved.Timeout <= 0 {

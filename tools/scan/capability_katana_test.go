@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	browserutil "github.com/chainreactors/aiscan/pkg/headless"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 )
 
-func TestKatanaProfileExtender(t *testing.T) {
-	quick, err := profileForMode("quick", katanaTestCommand().profileExtenders...)
+func TestKatanaProfiles(t *testing.T) {
+	quick, err := profileForMode("quick")
 	if err != nil {
 		t.Fatalf("quick profile error: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestKatanaProfileExtender(t *testing.T) {
 		t.Fatal("quick profile should not enable katana_deep")
 	}
 
-	full, err := profileForMode("full", katanaTestCommand().profileExtenders...)
+	full, err := profileForMode("full")
 	if err != nil {
 		t.Fatalf("full profile error: %v", err)
 	}
@@ -211,4 +211,4 @@ func TestE2EKatanaDeepRendersAuthenticatedSPA(t *testing.T) {
 	t.Fatal("katana_deep did not emit the browser-only workspace route")
 }
 
-func katanaTestCommand() *Command { return New(nil, KatanaOptions()...) }
+func katanaTestCommand() *Command { return New(nil) }

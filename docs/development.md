@@ -1,66 +1,59 @@
-# AIScan 扩展开发手册
+# 开发者指南
 
-新增结构化能力时，先阅读 [`tools/README.md`](../tools/README.md)。工具实现
-`core/tool.Tool`，静态声明可由 Profile 直接注册，需要资源就绪的声明在 Extension.Load 中注册；工具执行不依赖 Agent、Runtime
-或模型。
+[文档首页](README.md) · 前置：[基本概念](concepts.md)
 
-## 工具与命令的边界
+本指南面向把 cyber-harness 嵌入应用的开发者。你可以给现有 Agent 增加工具，也可以自己组合模型、会话和宿主界面。下面从一个无需模型的 Go 程序开始，逐步把工具变成可对话的应用。
 
-Flags、Config、静态 Skill、协议定义和宿主绑定同样是扩展点，不受 Tool/Command 分类限制。
-Flags 复用 `config.FlagGroup` 和普通 Options；入口先声明选项，再解析配置并选择运行扩展。
-Config 复用现有 struct/tag、加载、优先级和默认值机制，Profile 将结果注入具体功能。
-help、配置模板生成和参数校验不要求 Extension.Load。完整插件接入约定见
-[系统架构](architecture.md)。
+## 第一个组合
 
-原生 Tool 适合模型或外部框架直接调用：它提供名称、描述、AOP 定义和
-`Execute(context.Context, string)`。需要文件、代理、扫描引擎、IOA 或工作目录的
-工具通过构造参数接收这些依赖，资源由拥有它的模块关闭。
+准备好 [快速开始](getting-started.md)中的源码与 Go 环境，在仓库根目录执行：
 
-Pseudo-command 仍适合通过 `bash` 暴露已有命令行语义。命令实现
-`pkg/commands.Command` 的 `Run`，从 `commands.Execution` 读取参数并写入该调用的
-输出。命令的注册也由 profile 或应用装配入口显式完成；不再通过 `init` 工厂列表、
-`Deps`/`Bag` 或空导入隐式激活。
-
-```go
-func (e *Extension) Load(scope *extension.Scope) error {
-    return e.commands.Register("scanner", commands.Command{
-        Name: "whatweb", Usage: "whatweb <url>",
-        Run: func(ctx context.Context, execution *commands.Execution) (any, error) {
-            return runWhatweb(ctx, execution)
-        },
-    })
-}
+```sh
+go run ./examples/custom
 ```
 
-需要独立进程工具能力时，使用 `cmd/runner` 的显式文件组合：它组合具体
-`pkg/exts/files.Extension`（拥有 `tools/files.Files`）和 `toolset.Registry`，完整 Load 后返回 `tool.Executor`。AOP ToolNode 只负责协议
-入口；它不创建 Agent、Runtime、App 或第二套执行循环。
+程序输出 `Hello, Cyber!`，然后释放资源退出。[完整源码](../examples/custom/main.go)把一个 hello 工具注册到基础组合，通过执行接口真正调用它。这里还没有模型循环，因此输出是确定的。
+
+先看工具本身。`helloTool` 提供名称、描述、参数定义和 `Execute`。它只处理业务输入并返回结果，不需要知道应用怎样启动。扩展负责把这个对象交给框架：
 
 ```go
-// cmd/runner 中的产品装配入口；共享包不提供具体 Profile。
-profile, err := newFileProfile(files.Config{Directory: workDir})
-if err != nil { return err }
-defer profile.Close(context.Background())
-if err := profile.Load(ctx); err != nil { return err }
-executor, err := profile.Executor()
-if err != nil { return err }
-// 将 executor 交给入口。此处省略关闭错误处理；实际入口须检查
-// profile.Close 的结果，遇到 ErrCloseIncomplete 时保留实例并重试。
+extension.Func{LoadFunc: func(scope *extension.Scope) error {
+    return extension.Add[tool.Tool](scope, helloTool{})
+}}
 ```
 
-完整 AIScan 产品图和具体 `aiscanProfile` 都声明在 `cmd/aiscan`。`pkg/profile.Application`
-是 host 契约，具体 Profile 直接持有 Set；命令入口在唯一 Set 中组合 App 能力和可选
-Agent Runtime。Runtime 构造时接收已创建的 App，只使用工具、Provider、Commands、Hooks 和
-类型化事件观察；事件发布统一经 `App.Publish`。需要 Agent 时入口显式选择
-`agent.StandardLoop{}`，`pkg/exts/agent.Extension` 将受控 Loop 与 Session 宿主统一发布为一个
-Runtime。该扩展负责运行准入、寿命取消和排空；没有 Loop 时工具和命令仍可用，
-Agent Run 会明确返回未配置错误，不隐藏回退到默认 Loop。
+`Add[tool.Tool]` 将工具加入基础组合已经定义的贡献点。显式写接口类型很重要：按具体类型注册不会落到同一个贡献点。参数 schema 是模型和执行器理解输入的契约，业务实现仍应处理无效值和执行错误。
 
-需要初始化或清理的适配器实现 `core/extension.Extension` 的 `Load`/`Close`；底层资源和
-Agent Loop 保留普通实现。Profile 的固定 Entry 集合按依赖顺序装载、逆序关闭。
-App 的能力贡献者也必须并入该集合，不能在 App 或
-其他 Extension 内创建第二个 Set。依赖通过构造函数传递，`DependsOn` 只表达生命周期
-顺序，不用于运行时查找。不要增加全局容器、通用输出接口、线协议镜像类型或仅转接用的接口。
+## 组合根与宿主
 
-测试至少覆盖：工具定义和结构化结果、取消与超时、profile Load/Close、在途调用排空、
-失败回滚，以及 `go list -deps` 的无 Agent 工具闭包。
+示例先用 `base.New` 建立基础能力，传入绝对工作目录，并关闭启动时的 Provider 初始化。它随后追加工具扩展和一个最终消费者；消费者用 `Use[tool.Executor]` 借到执行接口。最后，宿主创建 Set、Load、调用工具并 Close。
+
+这个顺序也是资源依赖顺序。工具注册表必须先存在，工具才能加入；宿主必须等 Load 完全成功后才能使用借出的接口。示例把 Close 放在 Load 之前注册的 defer 中，因此部分初始化失败也有清理入口，关闭错误会与业务错误一起返回。
+
+基础组合提供工具、命令、知识、提示词、执行环境和应用状态；它并不自动开始推理或创建会话。要让模型调用这个 hello 工具，在同一组合中加入运行循环和会话运行时即可。
+
+## 从工具到会话
+
+```sh
+go run ./examples/session
+```
+
+[会话示例](../examples/session/main.go)在基础组合之后加入 `StandardLoop` 和 Session 扩展，借出 `*session.Runtime`。宿主打开一个会话，连续提交两次输入，等待结果，观察结束事件，最后关闭会话和整个组合。
+
+例子使用本地演示 Provider：第一次报告收到 1 条用户消息，第二次报告 2 条。这验证了宿主接入、历史连续性和结束事件；它不调用远程服务，也不模拟模型的工具选择能力。换成实际模型配置后，循环才会依据模型响应调用已注册的工具。
+
+接下来阅读[扩展开发](developer/extensions.md)，将工具扩展为命令、知识和共享服务；再阅读[会话与宿主集成](developer/hosting.md)，把这套组合接入自己的 UI、服务或协议客户端。
+
+## 构建自己的应用
+
+通用应用可以沿用示例的 `base.New → append → extension.New`。如果需要 aiscan 的完整安全工具组合，使用 [pkg/aiscan](../pkg/aiscan)；它的 `New(Request)` 要求 `Option.Resolved` 已通过配置声明与解析建立，不能把空 Option 当作快捷配置传入。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
+
+构建源码发行版时，`make agent` 生成最小本地 Agent，`make` 生成标准版，`make full` 生成包含前端的完整版。标签来自 [editions.env](../editions.env)，实际步骤来自 [Makefile](../Makefile)。full 需要前端工具链；standard 与 full 均使用 CGO_ENABLED=0。原生录屏需要 CGO 工具链，另见 [record](record.md)。
+
+自定义应用应明确分发哪些模型配置、知识文件和外部运行依赖。二进制中注册了浏览器或外部命令入口，并不意味着目标机器已经安装对应程序。固定源码版本后验证实际部署平台上的启动、一个完整任务和关闭；按 AGPL-3.0 的要求处理分发与源代码提供。
+
+## 继续深入
+
+[架构概览](architecture.md)解释宿主、运行时、工具和协议之间的关系；[扩展装配](architecture/composition.md)进一步解释贡献、借用、回滚与关闭。这些规则在开发有后台工作或共享资源的扩展时尤其重要。
+
+为项目贡献代码时，业务实现保持独立，生命周期适配放在扩展中；行为变化同步更新对应的使用章节。文档归属和验证方式见[文档维护](maintaining-docs.md)。

@@ -36,10 +36,6 @@ export default {
   llm: 'LLM',
   offline: '离线',
 
-  // chat/ScanProgressInline
-  startingScan: '正在启动扫描...',
-  scanLog: '扫描进度日志',
-
   // chat/ScanSummaryCard
   scanComplete: '扫描完成',
 

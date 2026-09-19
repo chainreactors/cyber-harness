@@ -16,8 +16,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/pkg/headless"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/headless"
 	"github.com/go-rod/rod/lib/launcher"
 	"gopkg.in/yaml.v3"
 )
@@ -816,7 +816,7 @@ func TestIntegration_RecordExtendedRoundTrip(t *testing.T) {
 <label><input type="checkbox" data-testid="terms"> Accept terms</label>
 <select aria-label="Plan"><option value="free">Free</option><option value="pro">Professional</option></select>
 <button id="continue">Continue</button>
-<script>document.getElementById('continue').addEventListener('aiscan', () => document.body.dataset.event = 'seen')</script>
+<script>document.getElementById('continue').addEventListener('cyber', () => document.body.dataset.event = 'seen')</script>
 </body></html>`)
 	}))
 	defer srv.Close()
@@ -833,7 +833,7 @@ func TestIntegration_RecordExtendedRoundTrip(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"select-option", "extended", `role=combobox[name="Plan"]`, "pro"})
 	recExecString(t, cmd, ctx, []string{"hover", "extended", `role=button[name="Continue"]`})
 	recExecString(t, cmd, ctx, []string{"dblclick", "extended", `role=button[name="Continue"]`})
-	recExecString(t, cmd, ctx, []string{"dispatch-event", "extended", "#continue", "aiscan"})
+	recExecString(t, cmd, ctx, []string{"dispatch-event", "extended", "#continue", "cyber"})
 	recExecString(t, cmd, ctx, []string{"localstorage-set", "extended", "token", "abc123"})
 	recExecString(t, cmd, ctx, []string{"cookie-set", "extended", "session=cookie-value"})
 	recExecString(t, cmd, ctx, []string{"set-viewport", "extended", "1024", "768"})

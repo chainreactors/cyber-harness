@@ -2,61 +2,74 @@ package main
 
 import (
 	"context"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	hostcli "github.com/chainreactors/aiscan/pkg/cli"
-	client "github.com/chainreactors/aiscan/pkg/exts/ioa/client"
-	clientcli "github.com/chainreactors/aiscan/pkg/exts/ioa/client/cli"
-	server "github.com/chainreactors/aiscan/pkg/exts/ioa/server"
-	servercli "github.com/chainreactors/aiscan/pkg/exts/ioa/server/cli"
-	"github.com/chainreactors/aiscan/pkg/exts/record"
-	settings "github.com/chainreactors/aiscan/pkg/exts/settings"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/resource"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	clientcli "github.com/chainreactors/cyber/pkg/exts/ioa/client/cli"
+	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	servercli "github.com/chainreactors/cyber/pkg/exts/ioa/server/cli"
+	recordext "github.com/chainreactors/cyber/pkg/exts/record"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	flags "github.com/jessevdk/go-flags"
 	"gopkg.in/yaml.v3"
+	"sync"
 )
 
-func declareProductCLI(reg *hostcli.Registry) error {
-	e, err := settings.New(productDeclarations(false))
-	if err != nil {
-		return err
-	}
-	return e.Declare(reg)
-}
+// defaultSections is the declaration graph of a host that contributes no CLI
+// parser of its own. It is identical on every call and sealed before it is
+// returned -- Add is refused and nothing else writes -- so the nine callers
+// that only read it share one instead of rebuilding six Declares apiece.
+var defaultSections = sync.OnceValue(func() *cfg.Sections { return declareResources(nil, nil) })
 
-// Product declarations are inert and independent of runtime IOA connections.
-// Other profiles select only the declaration layers they actually expose.
-func productDeclarations(serving bool) []settings.Declaration {
-	c, s := client.Section(), server.Section()
-	if serving {
-		c.Aliases = nil
-		s.Aliases = []string{"ioa"}
+func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cfg.Sections {
+	resources := resource.New()
+	sections := cfg.NewSections()
+	localCLI := cli == nil
+	if cli == nil {
+		cli = hostcli.New(flags.NewParser(&cliOptions{}, flags.None))
 	}
-	return []settings.Declaration{
-		{ID: client.ConfigKey, Config: []cfg.Section{c},
-			Flags: []settings.Flag{
-				{Command: "agent", Key: client.ConfigKey, Group: client.FlagGroup()},
-				{Command: "web", Key: client.ConfigKey, Group: client.FlagGroup()},
-			},
-			DeclareCLI: func(reg *hostcli.Registry) error {
-				return clientcli.Register(reg, runIOAClientCommand)
-			}},
-		{ID: server.ConfigKey, Config: []cfg.Section{s}, DeclareCLI: func(reg *hostcli.Registry) error {
-			return servercli.Register(reg, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
-				return runIOAServe(ctx, option, env.Logger)
-			})
-		}},
-		{ID: record.ConfigKey, Config: []cfg.Section{record.Section()}},
-	}
-}
-
-func productSections(serving bool) *cfg.Sections {
-	e, err := settings.New(productDeclarations(serving))
-	if err != nil {
+	if _, err := resource.Define[hostcli.Contribution](resources, cli); err != nil {
 		panic(err)
 	}
-	return e.Sections()
+	if _, err := resource.Define[cfg.Section](resources, sections); err != nil {
+		panic(err)
+	}
+	if _, err := resource.Define[cfg.Connection](resources, sections.ConnectionPoint()); err != nil {
+		panic(err)
+	}
+	mustDeclare := func(err error) {
+		if err != nil {
+			panic(err)
+		}
+	}
+	mustDeclare(client.Declare(resources, func(registry *hostcli.Registry) error {
+		return clientcli.Register(registry, runIOAClientCommand)
+	}))
+	mustDeclare(server.Declare(resources, func(registry *hostcli.Registry) error {
+		return servercli.Register(registry, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
+			return runIOAServe(ctx, option, env.Logger)
+		})
+	}))
+	mustDeclare(recordext.Declare(resources))
+	mustDeclare(scannerext.Declare(resources))
+	mustDeclare(searchext.Declare(resources))
+	if agentOptions != nil {
+		mustDeclare(sessionext.Declare(resources, agentOptions))
+	}
+	resources.Freeze()
+	if localCLI {
+		mustDeclare(cli.Seal())
+	}
+	sections.Seal()
+	return sections
 }
-func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
+
+func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent
-	option.Sections = productSections(serving)
+	option.Sections = defaultSections()
 	if serving {
 		if fields := option.Extensions[client.ConfigKey]; fields != nil {
 			if option.Extensions[server.ConfigKey] == nil {
@@ -73,8 +86,8 @@ func finalizeProductOptions(option *cfg.Option, action *hostcli.Action) {
 	}
 }
 
-func productDefaultConfig() string {
-	defaults := productSections(false).Defaults()
+func defaultConfig() string {
+	defaults := defaultSections().Defaults()
 	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
 	if defaults[client.ConfigKey]["url"] == "" {
 		delete(defaults[client.ConfigKey], "url")
@@ -84,8 +97,8 @@ func productDefaultConfig() string {
 	return cfg.InitDefaultConfig() + "\n" + string(b)
 }
 
-// Legacy node identity is projected once at the product boundary.
-func applyProductIdentity(option *cfg.Option) error {
+// Legacy node identity is projected once at the configuration boundary.
+func applyIdentity(option *cfg.Option) error {
 	value, err := client.ReadOptions(option)
 	if err != nil {
 		return err

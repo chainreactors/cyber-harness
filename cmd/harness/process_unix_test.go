@@ -7,9 +7,9 @@ import (
 	"os/exec"
 )
 
-func configureProductProcess(*exec.Cmd) {}
+func configureProcess(*exec.Cmd) {}
 
-func interruptProduct(pid int) error {
+func interruptProcess(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return err

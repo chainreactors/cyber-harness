@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
-	web "github.com/chainreactors/aiscan/pkg/web"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+	web "github.com/chainreactors/cyber/pkg/web"
 )
 
 func (s *Service) aiAvailable() bool {
@@ -25,26 +25,54 @@ func (s *Service) aiAvailable() bool {
 	return provider != nil
 }
 
-func (s *Service) acquireApp() (*apppkg.App, func()) {
+// acquireRuntime borrows the session runtime under the same reference count as
+// acquireApp. Tools that a session owns are reached through it, not through the
+// application.
+func (s *Service) acquireRuntime() (*agentsession.Runtime, func()) {
+	p, release := s.acquireProfile()
+	if p == nil {
+		return nil, release
+	}
+	runtime, err := p.Runtime()
+	if err != nil || runtime == nil {
+		release()
+		return nil, func() {}
+	}
+	return runtime, release
+}
+
+func (s *Service) acquireApp() (*apppkg.State, func()) {
+	p, release := s.acquireProfile()
+	if p == nil {
+		return nil, release
+	}
+	app, err := p.State()
+	if err != nil {
+		release()
+		return nil, func() {}
+	}
+	return app, release
+}
+
+func (s *Service) acquireProfile() (profile.Profile, func()) {
 	if s == nil {
 		return nil, func() {}
 	}
 	s.appMu.Lock()
 	p := s.profile
-	if profile.IsNil(p) {
-		s.appMu.Unlock()
-		return nil, func() {}
-	}
-	app, err := p.App()
-	if err != nil {
+	if p == nil {
 		s.appMu.Unlock()
 		return nil, func() {}
 	}
 	s.profiles[p]++
 	s.appMu.Unlock()
+	return p, s.releaseProfile(p)
+}
 
+// releaseProfile returns the one-shot release for a borrowed profile.
+func (s *Service) releaseProfile(p profile.Profile) func() {
 	var once sync.Once
-	return app, func() {
+	return func() {
 		once.Do(func() {
 			s.appMu.Lock()
 			s.profiles[p]--
@@ -63,11 +91,11 @@ func (s *Service) acquireApp() (*apppkg.App, func()) {
 
 // swapProfile transfers ownership only after validation. Retirement errors are
 // retained by Service; they do not undo publication of a new profile.
-func (s *Service) swapProfile(next profile.Application) error {
-	if s == nil || profile.IsNil(next) {
+func (s *Service) swapProfile(next profile.Profile) error {
+	if s == nil || next == nil {
 		return fmt.Errorf("service and profile are required")
 	}
-	if _, err := next.App(); err != nil {
+	if _, err := next.State(); err != nil {
 		return err
 	}
 	s.appMu.Lock()
@@ -88,7 +116,7 @@ func (s *Service) swapProfile(next profile.Application) error {
 	s.profiles[next] = 0
 	s.applicationChangedLocked()
 	s.appMu.Unlock()
-	if !profile.IsNil(prev) {
+	if prev != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.closeApplication(ctx, prev)
@@ -101,7 +129,7 @@ func (s *Service) applicationChangedLocked() {
 	s.appChanged = make(chan struct{})
 }
 
-func (s *Service) closeApplication(ctx context.Context, p profile.Application) error {
+func (s *Service) closeApplication(ctx context.Context, p profile.Profile) error {
 	select {
 	case s.profileClose <- struct{}{}:
 		defer func() { <-s.profileClose }()
@@ -129,8 +157,8 @@ func (s *Service) closeApplication(ctx context.Context, p profile.Application) e
 	return nil
 }
 
-// ServeApplication performs the Application Endpoint initialization and then
-// hands the unified Connection to the api business dispatcher.
+// ServeApplication performs Application Endpoint initialization and dispatches
+// application business messages through the unified Connection.
 func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStream) error {
 	if s == nil || s.api == nil || stream == nil {
 		return fmt.Errorf("application AOP stream is unavailable")
@@ -157,22 +185,10 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 		}
 	}
 
-	backends := &managementapi.ApplicationBackends{
-		RegisterNamespaces: s.applicationNamespaces,
-		Sessions:           s.api.Sessions,
-		Scans:              s.api.Scans,
-		Commands:           s,
-		Files:              s,
-		NewID:              generateID,
+	p, release := s.acquireProfile()
+	defer release()
+	if p == nil {
+		return s.serveApplication(connection, first, nil)
 	}
-	if s.agents != nil {
-		backends.PTY = s.agents
-	}
-	return managementapi.ServeApplication(connection, first, backends)
+	return s.serveApplication(connection, first, p.RegisterNamespaces)
 }
-
-var (
-	_ managementapi.PTYRouter       = (*AgentPool)(nil)
-	_ managementapi.CommandExecutor = (*Service)(nil)
-	_ managementapi.FileUploader    = (*Service)(nil)
-)

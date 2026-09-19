@@ -3,21 +3,21 @@ package console
 import (
 	"bytes"
 	"context"
-	aop "github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
+	aop "github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
 	"testing"
 )
 
 func TestSubscribeAgentOutputTracksRotatedRuntimeSession(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	c := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
+	c, application := newTestConsole(t, &cfg.Option{}, nil, &stdout, &stderr)
 	oldID := c.session.ID()
 	if _, err := c.session.Command(context.Background(), "/clear"); err != nil {
 		t.Fatal(err)
 	}
 	stdout.Reset()
 	emit := func(id, text string) {
-		c.runtime.App().Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
+		application.Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
 	}
 	emit(oldID, "stale")
 	emit("sibling", "sibling")

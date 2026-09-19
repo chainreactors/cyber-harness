@@ -5,6 +5,7 @@ import { CSTXTable } from '@cyber/cstx'
 import { Button } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import type { SCONode } from '@cyber/cstx-easm'
+import { useTableLabels } from '../i18n/useTableLabels'
 import type { MentionPopupApi, PopupNavigationKey } from '@/viewer'
 import type { IOAMessage, IOANode } from '../api'
 
@@ -64,6 +65,7 @@ export default function MentionPicker({
   navigation,
 }: MentionPickerProps) {
   const { t } = useTranslation('chat')
+  const tableLabels = useTableLabels()
   const q = query.trim().toLowerCase()
 
   const filteredNodes = useMemo(() => {
@@ -254,7 +256,10 @@ export default function MentionPicker({
             )}
           </button>
         ))}
-        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">← → {t('mention.switchCategory')} · ↑ ↓ {t('mention.navigate')} · Enter</span>
+        <span className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">
+          ← → {t('mention.switchCategory')} · ↑ ↓ {t('mention.navigate')} · Enter{' '}
+          {active === 'cstx' ? t('mention.selectKey') : t('mention.insertKey')}
+        </span>
         <Button
           variant="ghost"
           size="xs"
@@ -291,6 +296,7 @@ export default function MentionPicker({
                 compact: true,
                 columnsExclude: EXCLUDE,
                 batchActions: [{ id: 'confirm', label: t('mention.insert'), icon: 'Check' }],
+                i18n: tableLabels,
               }}
               onAction={handleCstxAction}
             />

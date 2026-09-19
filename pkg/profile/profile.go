@@ -1,73 +1,48 @@
-// Package profile defines the lifecycle boundary shared by AIScan hosts.
-// Product-specific composition and capabilities belong to the executable that
-// implements Application and owns its extension.Set; this package validates
-// product factories without adding another lifecycle wrapper.
+// Package profile defines the lifecycle boundary shared by Cyber hosts.
+// Composition belongs to the concrete distribution that implements Profile
+// and owns its extension.Set.
 package profile
 
 import (
 	"context"
-	"fmt"
-	"reflect"
 
-	"github.com/chainreactors/aiscan/aop"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
+	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/aop"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 )
 
-// Application is the complete capability surface published by a product
-// composition root. Load must publish nothing until the whole graph is active.
-type Application interface {
+// Profile is the complete runtime surface published by a composition root.
+// Load must publish nothing until the whole graph is active.
+type Profile interface {
 	Load(context.Context) error
 	Close(context.Context) error
-	App() (*apppkg.App, error)
-	Runtime() (*agentext.Runtime, error)
-	RegisterResourceNamespaces(*aop.NamespaceMux) error
+	State() (*apppkg.State, error)
+	Runtime() (*agentsession.Runtime, error)
+	RegisterNamespaces(*aop.NamespaceMux) error
 	AgentStatus() *aop.AgentStatus
-	Capabilities() []string
 	// ConsoleBindings publishes optional presentation contributions.
 	ConsoleBindings() *consoleapi.Bindings
 }
 
 // Request contains host-selected inputs. Extension selection and resource
-// construction remain decisions of the product Factory.
+// construction remain decisions of the concrete distribution constructor.
 type Request struct {
-	Option   *cfg.Option
-	Features apppkg.RuntimeFeatures
-	Runtime  *agentext.Config
-	Logger   telemetry.Logger
+	Option       *cfg.Option
+	ProviderMode ProviderMode
+	Session      *agentsession.Config
+	Logger       telemetry.Logger
 }
 
-// Factory constructs an unpublished product graph. The caller owns every
-// non-nil result, including cleanup when construction or loading fails.
-type Factory func(Request) (Application, error)
+// ProviderMode is the host's provider requirement for one profile graph and the
+// mode consumed directly by provider startup.
+type ProviderMode = provider.StartupMode
 
-func (f Factory) Build(request Request) (Application, error) {
-	if f == nil {
-		return nil, fmt.Errorf("profile factory is required")
-	}
-	value, err := f(request)
-	if IsNil(value) {
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("profile factory returned nil")
-	}
-	return value, err
-}
-
-// IsNil recognizes nil interface values and typed nil implementations.
-func IsNil(value Application) bool {
-	if value == nil {
-		return true
-	}
-	kind := reflect.ValueOf(value).Kind()
-	switch kind {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return reflect.ValueOf(value).IsNil()
-	default:
-		return false
-	}
-}
+const (
+	ProviderDisabled = provider.StartupDisabled
+	ProviderRequired = provider.StartupRequired
+	ProviderOptional = provider.StartupOptional
+)

@@ -1,50 +1,69 @@
 package session
+
 import (
- "context"
- "errors"
- "github.com/chainreactors/aiscan/agent"
- "github.com/chainreactors/aiscan/agent/prompt"
- "github.com/chainreactors/aiscan/core/extension"
- apppkg "github.com/chainreactors/aiscan/pkg/app"
- loopext "github.com/chainreactors/aiscan/pkg/exts/agent"
+	"context"
+	"errors"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/extension"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 )
+
 // Legacy integration scenarios exercise both resources through a test fixture.
 // Production profiles install separate Agent and Session nodes.
-type Extension struct { runtime *Runtime; loop *loopext.Extension; sessions bool }
-func New(c Config) (*Extension,error) {
- sessions:=c.Application!=nil
- var loop *loopext.Extension
- if c.Loop!=nil || !sessions {
-  var err error
-  loop,err=loopext.New(loopext.Config{Loop:c.Loop});if err!=nil{return nil,err}
-  c.Loop=loop.Runtime()
- }
- r,err:=NewManager(c);if err!=nil{return nil,err}
- return &Extension{runtime:r,loop:loop,sessions:sessions},nil
+type Extension struct {
+	resource *Resource
+	loop     *loopext.Extension
+	sessions bool
 }
-func(e *Extension) Runtime()*Runtime{return e.runtime}
-func(e *Extension) Load(s *extension.Scope)error{
- if e.loop!=nil{if err:=e.loop.Load(s);err!=nil{return err}}
- if e.sessions{return e.runtime.Start(s.Init(),s.Lifetime())};return nil
+
+func New(c Config) (*Extension, error) {
+	sessions := c.State != nil
+	var loop *loopext.Extension
+	if c.Loop != nil || !sessions {
+		loop = loopext.New(c.Loop)
+		c.Loop = loop.Loop()
+	}
+	resource, err := NewResource(c)
+	if err != nil {
+		return nil, err
+	}
+	return &Extension{resource: resource, loop: loop, sessions: sessions}, nil
 }
-func(e *Extension) Close(ctx context.Context)error{
- var err error
- if e.loop!=nil{err=e.loop.Close(ctx)}
- if e.sessions{err=errors.Join(err,e.runtime.Close(ctx))};return err
+func (e *Extension) Runtime() *Runtime { return e.resource.Runtime() }
+func (e *Extension) Load(s *extension.Scope) error {
+	if e.loop != nil {
+		if err := e.loop.Load(s); err != nil {
+			return err
+		}
+	}
+	if e.sessions {
+		return e.resource.Start(s.Init(), s.Lifetime())
+	}
+	return nil
 }
-func(r *Runtime) Run(ctx context.Context,c agent.Config)(*agent.Result,error){
- if r.runtimeConfig.Loop==nil{return nil,ErrUnavailable}
- result,err:=r.runtimeConfig.Loop.Run(ctx,c)
- if errors.Is(err,loopext.ErrUnavailable){err=errors.Join(err,ErrUnavailable)}
- return result,err
+func (e *Extension) Close(ctx context.Context) error {
+	var err error
+	if e.loop != nil {
+		err = e.loop.Close(ctx)
+	}
+	if e.sessions {
+		err = errors.Join(err, e.resource.Close(ctx))
+	}
+	return err
 }
-var SystemPromptFunc=prompt.SystemPromptFunc
-func testEnvironment(value any)*Environment{
- if e,ok:=value.(*Environment);ok{return e}
- a,ok:=value.(*apppkg.App);if !ok||a==nil{return nil}
- e:=&Environment{Tools:a.Tools,Commands:a.Commands,Skills:a.Skills,Hooks:a.Hooks,
- PublishEvent:a.Publish,ObserveEvents:a.ObserveEvents,ProviderState:a.ProviderState,
- SetProvider:a.SetProvider,ReloadProvider:a.ReloadProvider,ResolveProvider:apppkg.ProviderConfig,
- LLMHealth:a.LLMHealth,ScannerState:a.ScannerState,Logger:a.Logger,SetLogger:a.SetLogger}
- if a.Bash!=nil{e.Bash=a.Bash};return e
+func (r *Runtime) Run(ctx context.Context, c agent.Config) (*agent.Result, error) {
+	if r.config.Loop == nil {
+		return nil, ErrUnavailable
+	}
+	result, err := r.config.Loop.Run(ctx, c)
+	if errors.Is(err, loopext.ErrUnavailable) {
+		err = errors.Join(err, ErrUnavailable)
+	}
+	return result, err
+}
+
+func testEnvironment(value any) *apppkg.State {
+	application, _ := value.(*apppkg.State)
+	return application
 }

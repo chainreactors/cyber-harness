@@ -21,12 +21,12 @@ func TestWorkerPanic(t *testing.T) {
 	var mu sync.Mutex
 	var results []string
 
-	p, err := New(context.Background(), Config{
-		Capabilities: []Capability{
+	p, err := New(context.Background(), Config[testEvent]{
+		Capabilities: []Capability[testEvent]{
 			{
 				Name:   "crasher",
-				Routes: []Route{{From: ""}},
-				Run: func(_ context.Context, e Event, emit func(Event)) {
+				Routes: []Route[testEvent]{{From: ""}},
+				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
 					if e.Key() == "panic" {
 						panic("boom")
 					}
@@ -43,7 +43,7 @@ func TestWorkerPanic(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.Run([]Event{
+		p.Run([]testEvent{
 			testEvent{"before"},
 			testEvent{"panic"},
 			testEvent{"after"},
@@ -73,12 +73,12 @@ func TestDispatcherPanic(t *testing.T) {
 	var count int
 	var mu sync.Mutex
 
-	p, err := New(context.Background(), Config{
-		Capabilities: []Capability{
+	p, err := New(context.Background(), Config[testEvent]{
+		Capabilities: []Capability[testEvent]{
 			{
 				Name:   "counter",
-				Routes: []Route{{From: ""}},
-				Run: func(_ context.Context, e Event, emit func(Event)) {
+				Routes: []Route[testEvent]{{From: ""}},
+				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
 					// Emit an event that routes to "sinker".
 					emit(testEvent{fmt.Sprintf("out:%s", e.Key())})
 					mu.Lock()
@@ -88,13 +88,13 @@ func TestDispatcherPanic(t *testing.T) {
 			},
 			{
 				Name: "sinker",
-				Routes: []Route{{
+				Routes: []Route[testEvent]{{
 					From: "counter",
-					Accept: func(e Event) bool {
+					Accept: func(e testEvent) bool {
 						return true
 					},
 				}},
-				Run: func(_ context.Context, e Event, emit func(Event)) {
+				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
 					// just consume
 				},
 			},
@@ -106,7 +106,7 @@ func TestDispatcherPanic(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.Run([]Event{testEvent{"a"}, testEvent{"b"}})
+		p.Run([]testEvent{{"a"}, {"b"}})
 		close(done)
 	}()
 

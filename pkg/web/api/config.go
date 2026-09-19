@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	agentprovider "github.com/chainreactors/aiscan/agent/provider"
-	configpkg "github.com/chainreactors/aiscan/core/config"
-	probe "github.com/chainreactors/aiscan/pkg/probe"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	agentprovider "github.com/chainreactors/cyber/agent/provider"
+	configpkg "github.com/chainreactors/cyber/core/config"
+	types "github.com/chainreactors/cyber/core/types"
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API
@@ -20,7 +19,6 @@ type ConfigBackend interface {
 }
 
 type ConfigOptions struct {
-	Probes   *probe.Registry
 	Sections *configpkg.Sections
 	Project  func(*types.DistributeConfig, *types.ConfigView)
 }
@@ -29,16 +27,11 @@ type Config struct {
 	options ConfigOptions
 }
 
-func NewConfig(backend ConfigBackend, options ...ConfigOptions) *Config {
-	var selected ConfigOptions
-	if len(options) > 0 {
-		selected = options[0]
+func NewConfig(backend ConfigBackend, options ConfigOptions) *Config {
+	if options.Sections != nil {
+		options.Sections.Seal()
 	}
-	if selected.Probes == nil {
-		selected.Probes = probe.New()
-	}
-	selected.Probes.Seal()
-	return &Config{backend: backend, options: selected}
+	return &Config{backend: backend, options: options}
 }
 
 func (c *Config) GetConfig(ctx context.Context, _ *types.GetConfigRequest) (*types.GetConfigResponse, error) {
@@ -98,7 +91,7 @@ func (c *Config) TestConnection(ctx context.Context, request *types.TestConnecti
 		return nil, Errorf(CodeInvalidArgument, "request is required")
 	}
 	stored, _ := c.Distribute(ctx)
-	checks, err := c.options.Probes.Test(ctx, request.GetSection(), request.GetConfig(), stored)
+	checks, err := c.options.Sections.TestConnection(ctx, request.GetSection(), request.GetConfig(), stored)
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}

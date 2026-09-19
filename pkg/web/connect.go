@@ -7,13 +7,13 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
-	aop "github.com/chainreactors/aiscan/aop"
-	rpc "github.com/chainreactors/aiscan/pkg/rpc"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
+	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
-// Protobuf JSON base64-encodes SCO import bytes, so the 50 MiB business limit
+// Protobuf JSON base64-encodes raw artifact bytes, so the 50 MiB business limit
 // needs roughly 67 MiB on the management wire.
 const connectMaxMessageBytes = 72 << 20
 
@@ -44,37 +44,71 @@ func connectOptions(service Service) []connect.HandlerOption {
 func AOPRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewAOPServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "agent", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func SessionRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewSessionServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "agent", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func ScanRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewScanServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "scanner", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func ConfigRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewConfigServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "config", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func AgentRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewAgentServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "node", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
 func SystemRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
 	path, handler := rpc.NewSystemServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "web", Pattern: path, Handler: handler}
+	return Route{Pattern: path, Handler: handler}
 }
-func SCORoute(service Service) Route {
+func ArtifactRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
-	path, handler := rpc.NewSCOServiceHandler(server, connectOptions(service)...)
-	return Route{Source: "scanner", Pattern: path, Handler: handler}
+	path, handler := rpc.NewArtifactServiceHandler(server, connectOptions(service)...)
+	return Route{Pattern: path, Handler: handler}
+}
+
+// ManagementRoutes projects one service onto the routes it can actually serve.
+// A nil API family means the profile did not build that handler, so its route is
+// not advertised; the extension layer only publishes the result.
+func ManagementRoutes(service Service) []Route {
+	routes := []Route{AOPRoute(service)}
+	if api := service.API(); api != nil {
+		if api.Sessions != nil {
+			routes = append(routes, SessionRoute(service))
+		}
+		if api.Scans != nil {
+			routes = append(routes, ScanRoute(service))
+		}
+		if api.Config != nil {
+			routes = append(routes, ConfigRoute(service))
+		}
+		if api.Agents != nil {
+			routes = append(routes, AgentRoute(service))
+		}
+		if api.Status != nil {
+			routes = append(routes, SystemRoute(service))
+		}
+		if api.Artifacts != nil {
+			routes = append(routes, ArtifactRoute(service))
+		}
+	}
+	if handler := service.ApplicationWebSocketHandler(); handler != nil {
+		routes = append(routes, Route{Pattern: ApplicationWebSocketPath, Handler: handler})
+	}
+	if handler := service.NodeWebSocketHandler(); handler != nil {
+		routes = append(routes, Route{Pattern: NodeWebSocketPath, Handler: handler})
+	}
+	return routes
 }
 
 func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[aop.Envelope, aop.Envelope]) error {
@@ -125,10 +159,6 @@ func (s *connectServer) CancelScan(ctx context.Context, req *connect.Request[typ
 	return connectCall(s.api.Scans.CancelScan(ctx, req.Msg))
 }
 
-func (s *connectServer) GetScanReport(ctx context.Context, req *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
-	return connectCall(s.api.Scans.GetScanReport(ctx, req.Msg))
-}
-
 func (s *connectServer) GetConfig(ctx context.Context, req *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
 	return connectCall(s.api.Config.GetConfig(ctx, req.Msg))
 }
@@ -161,28 +191,8 @@ func (s *connectServer) GetStatus(_ context.Context, req *connect.Request[types.
 	return connect.NewResponse(s.api.GetStatus(req.Msg)), nil
 }
 
-func (s *connectServer) ListNodes(ctx context.Context, req *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error) {
-	return connectCall(s.api.SCO.ListNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) GetNode(ctx context.Context, req *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error) {
-	return connectCall(s.api.SCO.GetNode(ctx, req.Msg))
-}
-
-func (s *connectServer) GetStats(ctx context.Context, req *connect.Request[types.GetStatsRequest]) (*connect.Response[types.GetStatsResponse], error) {
-	return connectCall(s.api.SCO.GetStats(ctx, req.Msg))
-}
-
-func (s *connectServer) DeleteNodes(ctx context.Context, req *connect.Request[types.DeleteNodesRequest]) (*connect.Response[types.DeleteNodesResponse], error) {
-	return connectCall(s.api.SCO.DeleteNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) ImportNodes(ctx context.Context, req *connect.Request[types.ImportNodesRequest]) (*connect.Response[types.ImportNodesResponse], error) {
-	return connectCall(s.api.SCO.ImportNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) ListArtifacts(ctx context.Context, req *connect.Request[types.ListArtifactsRequest]) (*connect.Response[types.ListArtifactsResponse], error) {
-	return connectCall(s.api.SCO.ListArtifacts(ctx, req.Msg))
+func (s *connectServer) SyncArtifacts(ctx context.Context, req *connect.Request[types.SyncArtifactsRequest]) (*connect.Response[types.SyncArtifactsResponse], error) {
+	return connectCall(s.api.Artifacts.SyncArtifacts(ctx, req.Msg))
 }
 
 func connectCall[T any](response *T, err error) (*connect.Response[T], error) {
@@ -254,11 +264,11 @@ func connectAuthenticated(header http.Header, auth Auth) bool {
 }
 
 var (
-	_ rpc.AOPServiceHandler     = (*connectServer)(nil)
-	_ rpc.SessionServiceHandler = (*connectServer)(nil)
-	_ rpc.ScanServiceHandler    = (*connectServer)(nil)
-	_ rpc.ConfigServiceHandler  = (*connectServer)(nil)
-	_ rpc.AgentServiceHandler   = (*connectServer)(nil)
-	_ rpc.SystemServiceHandler  = (*connectServer)(nil)
-	_ rpc.SCOServiceHandler     = (*connectServer)(nil)
+	_ rpc.AOPServiceHandler      = (*connectServer)(nil)
+	_ rpc.SessionServiceHandler  = (*connectServer)(nil)
+	_ rpc.ScanServiceHandler     = (*connectServer)(nil)
+	_ rpc.ConfigServiceHandler   = (*connectServer)(nil)
+	_ rpc.AgentServiceHandler    = (*connectServer)(nil)
+	_ rpc.SystemServiceHandler   = (*connectServer)(nil)
+	_ rpc.ArtifactServiceHandler = (*connectServer)(nil)
 )

@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
 )
 
 var ErrUnavailable = errors.New("file service is not active")

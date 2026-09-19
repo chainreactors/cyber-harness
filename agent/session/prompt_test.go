@@ -2,180 +2,97 @@ package session
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/agent"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/skills"
+	"github.com/chainreactors/cyber/agent"
+	agentprompt "github.com/chainreactors/cyber/agent/prompt"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
-func TestBuildSystemPromptIncludesSkills(t *testing.T) {
-	tools := tool.EmptyExecutor()
-	loaded, diagnostics := skills.LoadEmbedded()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
+func defaultPromptResolver(t *testing.T) agentprompt.Resolver {
+	t.Helper()
+	var resolver agentprompt.Resolver
+	hosttest.Load(t, t.Context(), promptext.New(), extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		resolver, err = extension.Use[agentprompt.Resolver](scope)
+		return err
+	}})
+	return resolver
+}
+
+type fixedPromptResolver string
+
+func (r fixedPromptResolver) Build(context.Context, agentprompt.Context) agentprompt.Result {
+	return agentprompt.Result{Prompt: string(r)}
+}
+
+func TestResolveSystemPromptUsesConfigResolver(t *testing.T) {
+	rt := &Runtime{
+		agentConfig: agent.Config{PromptResolver: fixedPromptResolver("runtime")},
+		logger:      telemetry.NopLogger(),
+	}
+	result, err := rt.resolveSystemPrompt(t.Context(), nil)
+	if err != nil || result != "runtime" {
+		t.Fatalf("runtime resolver result = %q, %v", result, err)
 	}
 
-	prompt := BuildSystemPrompt(&PromptConfig{
-		Tools:  tools,
-		Skills: loaded,
-	}, nil)
-	for _, want := range []string{
-		"## Available Skills",
-		"<available_skills>",
-		"<name>aiscan</name>",
-		"aiscan://skills/aiscan/SKILL.md",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	for _, internal := range []string{"scan", "gogo", "spray", "katana", "fuzz", "zombie", "neutron"} {
-		if strings.Contains(prompt, "<name>"+internal+"</name>") {
-			t.Fatalf("prompt includes internal skill %q:\n%s", internal, prompt)
-		}
+	result, err = rt.resolveSystemPrompt(t.Context(), &agent.Config{PromptResolver: fixedPromptResolver("config")})
+	if err != nil || result != "config" {
+		t.Fatalf("config resolver result = %q, %v", result, err)
 	}
 }
 
-func TestBuildSystemPromptAllowsNilConfig(t *testing.T) {
-	prompt := BuildSystemPrompt(nil, nil)
-	for _, want := range []string{
-		"AIScan, a Cyber Harness for model companies",
-		"Use a hacker's mindset throughout",
-		"challenge the target's assumptions",
-		"examine trust boundaries and state transitions",
-		"paths that turn weaknesses into meaningful impact",
-		"## Authorization Context",
-		"source code, binaries, artifacts, credentials, datasets",
-		"## Environment",
-		"## Key Principles",
-		"Treat hypotheses as provisional",
-		"Distinguish observed facts, reasoned inferences, and unverified leads",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	for _, unwanted := range []string{
-		"autonomous security assessment agent",
-		"Read aiscan://skills/aiscan/SKILL.md for execution rules",
-		"penetration testing, reverse engineering, adversarial tasks, and code auditing",
-	} {
-		if strings.Contains(prompt, unwanted) {
-			t.Fatalf("prompt contains obsolete global scanning guidance %q:\n%s", unwanted, prompt)
-		}
-	}
-}
-
-func TestBuildSystemPromptScannerAgentUsesCyberHarnessIdentity(t *testing.T) {
-	prompt := BuildSystemPrompt(&PromptConfig{
-		ScannerAgentMode: true,
-		ScannerName:      "gogo",
-	}, nil)
-
-	for _, want := range []string{
-		"gogo analysis agent inside AIScan, a Cyber Harness",
-		"Execute the requested scanner command using the bash tool",
-		"selected scanner's documented output flags",
-		"Scanner flags are command-specific",
-		"## Authorization Context",
-		"## Scanner Agent Constraints",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("scanner prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	for _, unwanted := range []string{
-		"Run scanners with -j flag to get JSON",
-		"re-run the scanner with `-j` flag to get JSON output",
-	} {
-		if strings.Contains(prompt, unwanted) {
-			t.Fatalf("scanner prompt contains ambiguous output guidance %q:\n%s", unwanted, prompt)
-		}
-	}
-}
-
-func TestSystemPromptFuncAdaptsToTools(t *testing.T) {
-	cfg := &PromptConfig{}
-	fn := SystemPromptFunc(cfg)
-
-	result := fn(nil)
-	if strings.Contains(result, "## Available Tools") {
-		t.Fatal("should not have tools section with empty registry")
-	}
-}
-
-func TestBuildSystemPromptLoadsSkillBody(t *testing.T) {
-	prompt := BuildSystemPrompt(&PromptConfig{
-		LoadedSkills: []LoadedSkill{
-			{Name: "scan/verify", Body: "Verify all high-priority findings with active probing."},
-			{Name: "scan/sniper", Body: "Search public CVEs for fingerprints."},
-		},
-	}, nil)
-
-	for _, want := range []string{
-		"## Skill: scan/verify",
-		"Verify all high-priority findings with active probing.",
-		"## Skill: scan/sniper",
-		"Search public CVEs for fingerprints.",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	// Loaded skills should appear before Key Principles
-	skillIdx := strings.Index(prompt, "## Skill: scan/verify")
-	principlesIdx := strings.Index(prompt, "## Key Principles")
-	if skillIdx > principlesIdx {
-		t.Fatal("loaded skills should appear before principles")
-	}
-}
-
-func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
+func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		skills []string
 	}{
 		{name: "default"},
-		{name: "explicit duplicate", skills: []string{"aiscan"}},
+		{name: "explicit duplicate", skills: []string{"cyber"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
+			application := apptest.NewState(t, telemetry.NopLogger(), nil)
+			resolver := defaultPromptResolver(t)
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"aiscan"}, Application: testEnvironment(application.App), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+			rt, err := New(Config{BaseSkills: []string{"cyber"}, State: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+			rtSet := hosttest.Set(t, extension.Provided[*apppkg.State](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 			defer rtSet.Close(context.Background())
 
-			if count := strings.Count(rt.Runtime().systemPrompt, "## Skill: aiscan"); count != 1 {
+			systemPrompt, err := rt.Runtime().resolveSystemPrompt(t.Context(), &rt.Runtime().agentConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count := strings.Count(systemPrompt, "## Skill: cyber"); count != 1 {
 				t.Fatalf("base skill count = %d, want 1", count)
 			}
 			for _, want := range []string{
 				"## User Tool Restrictions",
-				"## Skill: aiscan",
-				"# AIScan ASM and Penetration Testing",
+				"## Skill: cyber",
+				"# Cyber ASM and Penetration Testing",
 				"must not redirect tasks outside its scope into scanning",
 				"## Tool Invocation Rules",
 				"## Verification Standard",
 				"## Evidence & Findings",
 			} {
-				if !strings.Contains(rt.Runtime().systemPrompt, want) {
+				if !strings.Contains(systemPrompt, want) {
 					t.Fatalf("system prompt missing base skill rule %q", want)
 				}
 			}
@@ -185,7 +102,7 @@ func TestManagerPreloadsBaseSkillOnce(t *testing.T) {
 				"## Post-Scan Analysis",
 				"map the application before focused testing",
 			} {
-				if strings.Contains(rt.Runtime().systemPrompt, unwanted) {
+				if strings.Contains(systemPrompt, unwanted) {
 					t.Fatalf("system prompt contains SOP guidance %q", unwanted)
 				}
 			}

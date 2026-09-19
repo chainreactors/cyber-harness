@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	coreevents "github.com/chainreactors/aiscan/core/events"
+	coreevents "github.com/chainreactors/cyber/core/events"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,19 +14,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	terminaltools "github.com/chainreactors/aiscan/pkg/exts/terminal"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	looptool "github.com/chainreactors/aiscan/tools/loop"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/pkg/commands"
+	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	looptool "github.com/chainreactors/cyber/tools/loop"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -233,7 +234,7 @@ func TestSessionAdmissionAndCancellationDrainEveryAcceptedOperation(t *testing.T
 
 func TestSessionWithoutLoopDoesNotQueueInput(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
-	rt.config.Loop = nil
+	rt.agentConfig.Loop = nil
 	session, err := rt.EnsureSession(SessionOptions{ID: "history-only"})
 	if err != nil {
 		t.Fatal(err)
@@ -420,6 +421,37 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 }
 
+// The hub keeps a session's transcript while the node that served it restarts,
+// so a command result emitted afterwards must not reuse the id of one emitted
+// before: the web transcript identifies messages by id, and a repeated id makes
+// the newer result overwrite the older one instead of appearing beside it.
+func TestCommandResultIDsSurviveNodeRestart(t *testing.T) {
+	ids := make([]string, 0, 2)
+	for _, marker := range []string{"BEFORE", "AFTER"} {
+		rt := newBareRuntime(t, nil, nil)
+		session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-restart"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var commandEvent *aop.Event
+		rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+			if event.GetMessage() != nil && event.TurnId == "" {
+				commandEvent = event
+			}
+		}))
+		if _, err := session.Command(context.Background(), "!printf "+marker); err != nil {
+			t.Fatal(err)
+		}
+		if commandEvent == nil || commandEvent.GetMessage().GetId() == "" {
+			t.Fatalf("command %s emitted no identified AOP message event: %+v", marker, commandEvent)
+		}
+		ids = append(ids, commandEvent.GetMessage().GetId())
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("command result id %q was reused across runtimes", ids[0])
+	}
+}
+
 func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -433,7 +465,7 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rt.config.Model = "gpt-test"
+	rt.agentConfig.Model = "gpt-test"
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-status", AgentName: "node-test"})
 	if err != nil {
@@ -456,7 +488,6 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		"Limits: context=128000 · max_output=8192 · timeout=45s",
 		"Tools: ready",
 		"bash",
-		"Scanners: disabled",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status missing %q:\n%s", want, text)
@@ -626,48 +657,43 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Runtime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	reg := commands.NewRegistry(nil)
-	tools := toolset.NewRegistry(nil)
-	terminal, err := terminaltools.New(nil, tools, reg, terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries := []extension.Entry{{ID: "terminal", Extension: terminal}}
-	commandDependencies := []string{"terminal"}
+	reg := commands.NewRegistry()
+	tools := toolset.NewRegistry()
+	terminal := terminaltools.New(terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
+	var bash *terminaltool.BashTool
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		bash, err = extension.Use[*terminaltool.BashTool](scope)
+		return err
+	}}
+	entries := []extension.Extension{hosttest.Capabilities(), reg, tools, terminal, borrow}
 	if len(values) > 0 {
 		contributor := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			return reg.Register("test", "test", values...)
+			return extension.Add(scope, values...)
 		}}
-		entries = append(entries, extension.Entry{ID: "test-commands", Extension: contributor})
-		commandDependencies = append(commandDependencies, "test-commands")
+		entries = append(entries, contributor)
 	}
-	entries = append(entries,
-		extension.Entry{ID: "command-registry", DependsOn: commandDependencies, Extension: reg},
-		extension.Entry{ID: "tool-registry", DependsOn: []string{"command-registry"}, Extension: tools},
-	)
-	terminalSet := harness.Set(t, entries...)
+	terminalSet := hosttest.Set(t, entries...)
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	bash := terminal.Bash()
-	application := newTestApp(t, apppkg.Config{SkipEngines: true}, apppkg.AppServices{}).App
-	application.Commands = reg
-	application.Tools = tools
-	application.Bash = bash
+	application := apptest.NewState(t, nil, nil)
 	rt := &Runtime{
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
+		commandRegistry: reg, tools: tools, bash: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		config:    agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
-		closeDone: make(chan struct{}), loaded: true,
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
+		closeDone:   make(chan struct{}), loaded: true,
 	}
-	rt.commands, rt.commandIndex, err = commandDeclarations(nil)
+	commandValues, commandIndex, err := commandDeclarations(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rt.commands, rt.commandIndex = commandValues, commandIndex
 	t.Cleanup(func() {
 		_ = terminalSet.Close(context.Background())
 	})
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	t.Cleanup(func() { _ = rt.close(context.Background()) })
 	return rt
 }
 
@@ -747,5 +773,41 @@ func TestRotationCommandsRejectActiveRunWithoutSwitchingSession(t *testing.T) {
 	close(provider.release)
 	if _, err := run.Wait(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The web hub drops the CommandResult that a command returns to its caller —
+// only messages published onto the AOP stream reach the chat. /compact used to
+// return its no-op text without publishing it, so an operator with too little
+// context to compact saw the command silently do nothing.
+func TestCompactWithoutEnoughContextPublishesItsResult(t *testing.T) {
+	runtime := newBareRuntime(t, nil, nil)
+	session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: "chat-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID := session.ID()
+
+	var events []*aop.Event
+	unsub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	result, err := session.Command(context.Background(), "/compact")
+	unsub.Cancel()
+	if err != nil {
+		t.Fatalf("/compact: %v", err)
+	}
+	if text := provider.MessageText(&aop.Message{Content: result.Content}); !strings.Contains(text, "Nothing to compact") {
+		t.Fatalf("compact result = %#v", result)
+	}
+	if session.ID() != originalID {
+		t.Fatalf("compact rotated with nothing to compact: %q -> %q", originalID, session.ID())
+	}
+	published := false
+	for _, event := range events {
+		if message := event.GetMessage(); message != nil && strings.Contains(provider.MessageText(message), "Nothing to compact") {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatal("nothing-to-compact result never reached the session stream")
 	}
 }

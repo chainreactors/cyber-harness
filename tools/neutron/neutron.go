@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	scanengine "github.com/chainreactors/aiscan/tools/scan/engine"
-	"github.com/chainreactors/aiscan/tools/toolargs"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	scanengine "github.com/chainreactors/cyber/tools/scan/engine"
+	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/neutron/templates"
 	sdkneutron "github.com/chainreactors/sdk/neutron"
 	"github.com/chainreactors/sdk/pkg/association"
@@ -369,7 +369,7 @@ func loadNeutronTemplatePaths(paths []string, proxyURL string) ([]*templates.Tem
 	return nonNilSortedTemplates(loaded), nil
 }
 
-const minimalTemplateID = "__aiscan_neutron_loader__"
+const minimalTemplateID = "__cyber_neutron_loader__"
 
 func minimalCompilableTemplate() *templates.Template {
 	return &templates.Template{

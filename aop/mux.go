@@ -17,35 +17,27 @@ type SendFunc func(*Envelope) error
 // NamespaceHandler processes one registered top-level namespace message. Its
 // context belongs to the namespace/connection and survives a dispatch return.
 // Handlers own and drain any asynchronous work they start; the mux only waits
-// for active dispatches when unregistering or closing.
+// for active dispatches when closing.
 type NamespaceHandler func(context.Context, *Envelope, proto.Message, SendFunc) error
 
 type namespaceEntry struct {
 	messageType protoreflect.MessageType
 	handler     NamespaceHandler
-	owner       *namespaceOwner
 }
 
-type namespaceOwner struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	stopping bool
-	inflight int
-	done     chan struct{}
-}
-
-var ErrNamespaceUnavailable = errors.New("namespace owner or mux is closed")
+var ErrNamespaceUnavailable = errors.New("namespace mux is closed")
 
 // NamespaceMux owns namespace registrations and admission, never the resources
-// used by handlers. A connection owns its mux; extensions unregister and wait
-// before releasing their resources. Closed owners and names cannot be reused.
+// used by handlers. A connection owns its mux and closes all namespaces as one
+// unit before releasing the resources used by their handlers.
 type NamespaceMux struct {
 	mu       sync.Mutex
 	ctx      context.Context
 	cancel   context.CancelFunc
 	handlers map[protoreflect.FullName]namespaceEntry
-	owners   map[string]*namespaceOwner
 	closed   bool
+	inflight int
+	done     chan struct{}
 }
 
 func NewNamespaceMux(ctx context.Context) *NamespaceMux {
@@ -57,7 +49,7 @@ func NewNamespaceMux(ctx context.Context) *NamespaceMux {
 		ctx:      ctx,
 		cancel:   cancel,
 		handlers: make(map[protoreflect.FullName]namespaceEntry),
-		owners:   make(map[string]*namespaceOwner),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -68,14 +60,13 @@ func (m *NamespaceMux) Context() context.Context { return m.ctx }
 // failure, including from inside a dispatch. Close performs the final drain.
 func (m *NamespaceMux) Cancel() { m.cancel() }
 
-// Register adds a handler owned by one extension instance. An owner may install
-// several namespaces; an unsuccessful registration never changes ownership.
-func (m *NamespaceMux) Register(owner string, prototype proto.Message, handler NamespaceHandler) error {
+// Register adds one typed protocol namespace to this connection.
+func (m *NamespaceMux) Register(prototype proto.Message, handler NamespaceHandler) error {
 	if m == nil {
 		return fmt.Errorf("namespace mux is required")
 	}
-	if strings.TrimSpace(owner) == "" || prototype == nil || !prototype.ProtoReflect().IsValid() || handler == nil {
-		return fmt.Errorf("namespace owner, prototype and handler are required")
+	if prototype == nil || !prototype.ProtoReflect().IsValid() || handler == nil {
+		return fmt.Errorf("namespace prototype and handler are required")
 	}
 	descriptor := prototype.ProtoReflect().Descriptor()
 	name := descriptor.FullName()
@@ -93,72 +84,30 @@ func (m *NamespaceMux) Register(owner string, prototype proto.Message, handler N
 	if _, exists := m.handlers[name]; exists {
 		return fmt.Errorf("namespace %q is already registered", name)
 	}
-	o := m.owners[owner]
-	if o != nil && o.stopping {
-		return ErrNamespaceUnavailable
-	}
-	if o == nil {
-		ctx, cancel := context.WithCancel(m.ctx)
-		o = &namespaceOwner{ctx: ctx, cancel: cancel, done: make(chan struct{})}
-		m.owners[owner] = o
-	}
-	m.handlers[name] = namespaceEntry{messageType: prototype.ProtoReflect().Type(), handler: handler, owner: o}
+	m.handlers[name] = namespaceEntry{messageType: prototype.ProtoReflect().Type(), handler: handler}
 	return nil
 }
 
-// UnregisterOwner stops admission, cancels handlers, and waits for accepted
-// dispatches. A handler's background subscriptions remain that extension's
-// responsibility. Timeout retains ownership; retry with a fresh context.
-func (m *NamespaceMux) UnregisterOwner(ctx context.Context, owner string) error {
-	if m == nil {
-		return fmt.Errorf("namespace mux is required")
-	}
-	m.mu.Lock()
-	o := m.owners[owner]
-	if o == nil {
-		m.mu.Unlock()
-		return fmt.Errorf("unknown namespace owner %q", owner)
-	}
-	m.stopOwner(o)
-	m.mu.Unlock()
-	o.cancel()
-	return waitNamespace(ctx, o.done)
-}
-
-// Close stops every owner before waiting for any of them. Even an expired
-// context stops admission; it only limits this attempt to wait for completion.
+// Close stops admission and waits for accepted dispatches. Even an expired
+// context closes the mux; it only limits this attempt to wait for completion.
 func (m *NamespaceMux) Close(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
-	m.Cancel()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.mu.Lock()
-	m.closed = true
-	owners := make([]*namespaceOwner, 0, len(m.owners))
-	for _, o := range m.owners {
-		m.stopOwner(o)
-		owners = append(owners, o)
+	if !m.closed {
+		m.closed = true
+		if m.inflight == 0 {
+			close(m.done)
+		}
 	}
+	done := m.done
 	m.mu.Unlock()
-	for _, o := range owners {
-		o.cancel()
-	}
-	for _, o := range owners {
-		if err := waitNamespace(ctx, o.done); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// stopOwner runs under m.mu, the same lock used to admit dispatches.
-func (m *NamespaceMux) stopOwner(o *namespaceOwner) {
-	if !o.stopping {
-		o.stopping = true
-		if o.inflight == 0 {
-			close(o.done)
-		}
-	}
+	m.Cancel()
+	return waitNamespace(ctx, done)
 }
 
 func waitNamespace(ctx context.Context, done <-chan struct{}) error {
@@ -196,21 +145,17 @@ func (m *NamespaceMux) Dispatch(envelope *Envelope, send SendFunc) (handled bool
 		m.mu.Unlock()
 		return false, nil
 	}
-	if entry.owner.stopping {
-		m.mu.Unlock()
-		return true, ErrNamespaceUnavailable
-	}
-	if err := entry.owner.ctx.Err(); err != nil {
+	if err := m.ctx.Err(); err != nil {
 		m.mu.Unlock()
 		return true, err
 	}
-	entry.owner.inflight++
+	m.inflight++
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
-		entry.owner.inflight--
-		if entry.owner.stopping && entry.owner.inflight == 0 {
-			close(entry.owner.done)
+		m.inflight--
+		if m.closed && m.inflight == 0 {
+			close(m.done)
 		}
 		m.mu.Unlock()
 	}()
@@ -222,10 +167,10 @@ func (m *NamespaceMux) Dispatch(envelope *Envelope, send SendFunc) (handled bool
 	if err := envelope.Payload.UnmarshalTo(message); err != nil {
 		return true, fmt.Errorf("decode %s: %w", name, err)
 	}
-	if err := entry.owner.ctx.Err(); err != nil {
+	if err := m.ctx.Err(); err != nil {
 		return true, err
 	}
-	if err := entry.handler(entry.owner.ctx, envelope, message, send); err != nil {
+	if err := entry.handler(m.ctx, envelope, message, send); err != nil {
 		return true, err
 	}
 	return true, nil

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -105,7 +105,7 @@ func TestBroadcastAOPEventPersistsCanonicalProtoJSON(t *testing.T) {
 	createStoredSession(t, store, "session-aop")
 	event := &aop.Event{
 		Id: "event-1", EmittedAt: timestamppb.New(time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)),
-		SessionId: "session-aop", Emitter: "aiscan", Seq: 7,
+		SessionId: "session-aop", Emitter: "cyber", Seq: 7,
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "message-1", Role: "assistant", Content: []*aop.Content{aop.Text("hello")}}},
 	}
 	service.BroadcastAOPEvent("session-aop", event)
@@ -130,7 +130,7 @@ func TestBroadcastAOPEventDoesNotFanOutRetryWithSameEventID(t *testing.T) {
 	deliveries, unsubscribe := service.SubscribeSessionEvents("session-retry")
 	defer unsubscribe()
 	event := &aop.Event{
-		Id: "event-retry", SessionId: "session-retry", Emitter: "aiscan",
+		Id: "event-retry", SessionId: "session-retry", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "message-1", Role: "assistant", Content: []*aop.Content{aop.Text("once")}}},
 	}
 	service.BroadcastAOPEvent("session-retry", event)
@@ -161,7 +161,7 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 	service := NewService(ServiceConfig{Store: store})
 	createStoredSession(t, store, "session-eval")
 	event := &aop.Event{
-		Id: "event-1", EmittedAt: timestamppb.Now(), SessionId: "session-eval", TurnId: "turn-1", Emitter: "aiscan",
+		Id: "event-1", EmittedAt: timestamppb.Now(), SessionId: "session-eval", TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}},
 	}
 	_ = types.SetEvalDetail(event, &types.EvalDetail{Round: 2, Reason: "needs verification"})
@@ -210,8 +210,12 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The session binds the scan at open time; that durable link — not a
+	// fabricated in-flight task — is what the completion fan-out resolves.
+	if err := store.LinkScanToSession(context.Background(), "session-scan", "scan-123"); err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(ServiceConfig{Store: store})
-	service.registerSessionTask("scan-123", "session-scan", "")
 	service.broadcastScanComplete("scan-123")
 
 	events, err := store.ListAOPEvents(context.Background(), "session-scan", 10)
@@ -232,6 +236,29 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	ids, err := store.SessionScanIDs(context.Background(), "session-scan")
 	if err != nil || len(ids) != 1 || ids[0] != "scan-123" {
 		t.Fatalf("session scan ids = %v, err = %v", ids, err)
+	}
+}
+
+func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "session-unbound")
+	service := NewService(ServiceConfig{Store: store})
+	// An in-flight task id is not a scan binding. The completion fan-out resolves
+	// the durable session_scans relation, so a stray task registration must not
+	// leak a result card into a session the scan was never bound to.
+	service.registerSessionTask("scan-stray", "session-unbound", "")
+	service.broadcastScanComplete("scan-stray")
+
+	events, err := store.ListAOPEvents(context.Background(), "session-unbound", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %+v, want none", events)
 	}
 }
 

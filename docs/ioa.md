@@ -1,10 +1,14 @@
 # IOA 客户端与服务端扩展
 
-IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。AIScan 通过两个独立扩展集成：
+[文档首页](README.md) · 前置：[Web 与协作](user/web.md) · 开发前置：[扩展装配](architecture/composition.md)
+
+先在两个终端分别运行 `aiscan ioa serve` 和配置好模型的 `aiscan agent --ioa-url http://127.0.0.1:8765 --space lab`。后者在没有任务输入时保持交互会话；带 `-p` 时仍是一次性任务。本章继续解释身份、投递、配置与资源所有权。
+
+IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。Cyber 通过两个独立扩展集成：
 
 | 扩展 | 所有权 | 对外业务能力 |
 | --- | --- | --- |
-| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Runtime()`：查询、状态，无 SDK 句柄和 Start/Close |
+| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Service()`：业务服务与状态，无扩展 Load/Close |
 | `pkg/exts/ioa/server` | Store、Service、认证、HTTP/SSE 请求排空 | `Server()`，无 Start/Close |
 
 客户端与服务端使用 IOA HTTP 协议通信。原始实现在 `tools/ioa` 与 `tools/ioa/server`，
@@ -20,12 +24,12 @@ Agent Inbox      ←─ peer 消息 ─ IOA Client
 Console / CLI    ── Reader ───→ IOA Client
 ```
 
-Profile 构造客户端并注入 Command Registry、共享的 Event Stream 和可选的投递函数。
+Profile 构造客户端并传入配置、Skills 和可选投递函数；客户端在 Load 时通过 `Add` 贡献命令、知识与提示词，通过 `Use` 借用共享 Event Stream。
 客户端不导入 Agent Extension，Agent 不导入 IOA SDK。
 没有投递函数时仍可使用命令和 skills，不启动自动收信。
 
-加载顺序为 IOA Client → App/贡献者 → Command Registry → Tool Registry → Agent；
-关闭顺序相反。只有整张 Profile 图发布后，投递函数才允许调用 Agent 的 `Deliver`。
+基础能力与 Command/Tool Registry 先加载，随后安装 IOA Client，再安装会话与展示扩展；
+关闭顺序相反。具体组合见 [Profile](../pkg/aiscan/profile.go)。只有整个 Set 加载成功并发布后，投递函数才允许调用 Agent 的 `Deliver`。
 该入口选择主会话，否则选择唯一会话；无会话、多会话歧义、关闭或队列满时返回错误。
 不会自动创建会话。忙碌会话接收追加输入，空闲会话通过既有 Inbox 机制自动执行。
 
@@ -35,7 +39,7 @@ Profile 构造客户端并注入 Command Registry、共享的 Event Stream 和�
 
 handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/return 内容和引用关系。
 队列上限为 256 个事件、16 MiB。发送失败被记录，不终止后续事件消费；队列溢出会停止
-该订阅并记录错误和丢弃数量。`Runtime.Status()` 提供 Bound、Space、LastError 和 Dropped。
+该订阅并记录错误和丢弃数量。`Service().Status()` 提供 Bound、Space、LastError 和 Dropped。
 关闭时先取消并等待收信，再排空 handoff，最后释放客户端资源；超时可通过 Set.Close 重试。
 已完成资源回收但输出失败时返回普通错误，不再报告资源未关闭。
 
@@ -45,21 +49,25 @@ handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/r
 提供 `/spaces`、`/nodes`、`/messages`、`/context`、补全和状态行，复用同一个已注册身份。
 Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭客户端；查询随扩展关闭而取消并排空。
 
-独立查询 CLI 在 `cmd/aiscan` 装配仅含 client ext 的图；连通性探测使用一次性的只读 client ext，
+独立查询 CLI 在 `cmd/aiscan` 装配仅含 client ext 的图；配置连接测试使用一次性的只读 client ext，
 支持已有 bearer token，且不自动注册节点。Console、Node、Runner 和 Web 不直接构造 IOA SDK。
 
 
 ## 启动声明与配置
 
-只有 client/server 两个生命周期扩展。`client/cli`、`client/console`、`client/probe` 和
-`server/cli` 是静态适配代码，不创建第三个 Extension，也不加入另一套生命周期。
-`cmd/aiscan/ioa_composition.go` 在解析参数前注册它们；运行时选择仍由具体 Profile 决定。
+只有 client/server 两个生命周期扩展。`client/cli`、`client/console` 和 `server/cli` 是静态
+适配代码，不创建第三个长期 Extension，也不加入另一套生命周期或 declaration 包。
+`cmd/aiscan/ioa_composition.go` 在解析参数前选择 client/server 声明；运行时选择仍由具体
+Profile 决定。
 
+- `pkg/cli.Registry` 直接实现 `Point[cli.Contribution]`。
+- `core/config.Sections` 直接实现 `Point[config.Section]`，并提供 `config.Connection` Point。
+- client/server 的 `Declare` 函数直接贡献资源，不返回 Provider DTO，也不经过 Catalog。
 - `core/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
 - `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
-- `pkg/probe.Registry` 只执行显式注册的探测；普通 Web API 不包含 IOA 分支。
-- `pkg/profile.Application` 只发布通用 ConsoleBindings、Capabilities 和完整 AgentStatus。
-- `pkg/web.Route` 由产品传入；`/ioa/` 及浏览器身份桥接由 server 扩展与产品组合根装配。
+- IOA client 声明拥有 `ioa` section 的连接测试；Web Config API 通过 Config Sections 分发。
+- `pkg/profile.Profile` 只发布通用 ConsoleBindings、共享 State 和完整 AgentStatus。
+- `pkg/web.Route` 是 typed resource；Web 扩展定义目录，IOA server 扩展在启用浏览器桥接时自行贡献 `/ioa/`。
 
 新配置使用独立命名空间：
 
@@ -77,11 +85,11 @@ extensions:
 
 继续接受 `--ioa-url`、`--server-token`、`--space`、`--node-name`、`ioa ...`、`ioa serve`、
 `serve --addr/--token`。旧 YAML `ioa:` 在客户端命令映射为 `ioa.client`，独立服务端命令映射为
-`ioa.server`；服务端忽略旧节中的客户端 space/node_name。旧 `ioa.node_name` 在产品边界兼容到
+`ioa.server`；服务端忽略旧节中的客户端 space/node_name。旧 `ioa.node_name` 在配置边界兼容到
 通用节点名称。客户端、服务端声明均可独立安装。
 
 扩展字段按显式 CLI > 文件 > 类型默认值解析，通用配置原有环境变量优先级保持不变。
-`build.sh` 的 IOA 编译默认值注入 client/server 包；通用节点名称注入 `core/config.DefaultNodeName`。
+IOA 端点与通用节点名称不再有构建期注入，未显式配置时使用代码内置默认值（端点为空，space 为 `default`）。
 字段缺失与显式空字符串、false、0 不等价；`url: ""` 禁用自动推导的客户端连接。
 同一字段的旧别名与新路径值冲突、未注册的扩展键、未知字段和非法类型在启动前报错。
 
@@ -91,19 +99,19 @@ Web protobuf 增加 `extensions` 数据及脱敏视图；旧 IOA protobuf 字段
 才提交；应用 Profile 可替换，宿主 IOA Server 持续存在。远端现有 Provider 重载仍保持原语义，
 扩展连接变化需要重建该节点的 Profile。没有自动生成扩展表单或运行时热注册。
 
-通用 core、Agent、Profile、Console、Node、Probe、Web 与 skills 的生产依赖闭包不包含 IOA SDK、
+通用 core、Agent、Profile、Console、Node、Web 与 skills 的生产依赖闭包不包含 IOA SDK、
 `tools/ioa` 或 IOA 扩展。架构测试同时检查直接 import 与传递依赖，兼容协议 DTO 不携带运行时行为。
 
 ## Skills
 
-客户端提供静态 `skills.Bundle`，由 Profile 在构造 App 时选择。
+客户端提供静态 `skills.Bundle`，由 Profile 在构造发行版图时选择。
 未安装客户端时，不加载 IOA 使用说明或协议 skills。
 
-- 使用说明：`aiscan://skills/ioa/SKILL.md`
+- 使用说明：`cyber://skills/ioa/SKILL.md`
 - 协议定义：`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`
 - 协议 schema：`ioa://skills/<name>/schema.json`
 
-覆盖顺序为内置 → 扩展 Bundle → `.aiscan/skills` → `.agent/skills` → CLI 路径。
+覆盖顺序为内置 → 扩展 Bundle → `.cyber/skills` → `.agent/skills` → CLI 路径。
 Bundle 不提供热注册或另一套生命周期。
 
 ## 服务端托管
@@ -125,8 +133,8 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 根目录 `go.work` 联调 workspace 随之移除，构建不再依赖相邻仓库的本地路径。
 
 ```text
-go test . ./core/config ./pkg/cli ./skills ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./cmd/aiscan ./pkg/web/service
-go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/ioa/... ./tools/ioa/... ./pkg/exts/agent ./pkg/profile ./pkg/node ./pkg/console ./pkg/probe ./skills
-go test -tags full cstx ./cmd/aiscan ./pkg/web/service
+go test ./core/config ./pkg/cli ./agent/skills ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./cmd/aiscan ./pkg/web/service
+go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./agent/skills
+go test -tags full ./cmd/aiscan ./pkg/web/service
 go test github.com/chainreactors/ioa/server
 ```

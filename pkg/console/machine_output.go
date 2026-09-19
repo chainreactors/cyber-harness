@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
+	"github.com/chainreactors/cyber/agent"
+	aop "github.com/chainreactors/cyber/aop"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -166,4 +166,3 @@ func writeMachineOutput(writer io.Writer, data []byte) error {
 	}
 	return err
 }
-

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, StatusDot, Tooltip, TooltipContent, TooltipTrigger, type StatusKind } from '@cyber/ui'
-import { getConfigStatus, testLLM } from '../api'
+import { getConfigStatus, getStatus, llmConfigured, testLLM } from '../api'
 
 type Phase = 'checking' | 'ok' | 'error' | 'unconfigured'
 
@@ -27,22 +27,23 @@ export default function LLMHealth({ onOpenSettings, reloadSignal }: Props) {
     setPhase('checking')
     setDetail('')
     try {
-      const cfg = await getConfigStatus()
-	  const active = cfg.llm?.active
-	  if (!active?.apiKeyConfigured) {
+      const [cfg, status] = await Promise.all([getConfigStatus(), getStatus()])
+      // Same predicate the settings panel uses, so the two never disagree.
+      if (!llmConfigured(status)) {
         setPhase('unconfigured')
         return
       }
+      const active = cfg.llm?.active
       const res = await testLLM({
-		provider: active.provider,
-		baseUrl: active.baseUrl,
+        provider: status.llmProvider || active?.provider || '',
+        baseUrl: active?.baseUrl || '',
         apiKey: '', // reuse the key already stored server-side
-		model: active.model,
-		proxy: active.proxy,
+        model: status.llmModel || active?.model || '',
+        proxy: active?.proxy || '',
       })
       if (res.ok) {
         setPhase('ok')
-		const label = res.model || active.model
+        const label = res.model || status.llmModel || active?.model || ''
         setDetail(res.latencyMs ? `${label} · ${res.latencyMs}ms` : label)
       } else {
         setPhase('error')

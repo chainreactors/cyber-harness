@@ -2,16 +2,33 @@ version: 2
 
 project_name: aiscan
 
-before:
-  hooks:
-    - npm --prefix web/frontend ci
-    - npm --prefix web/frontend run build
-    - go generate ./core/resources
+# This file is the build definition for the release workflow, which drives it
+# one target at a time:
+#
+#     GOOS=<goos> GOARCH=<goarch> goreleaser build --id <id> --single-target
+#
+# `goreleaser build` keeps ldflags, build tags and the CGO switch in one place
+# instead of spelling them out per profile in release-build.yml. Both editions
+# are pure Go and can be cross-compiled without a platform C toolchain.
+#
+# Packaging and publishing are deliberately absent. release-build.yml still
+# zips README and docs together with UPX and a checksum, and go-release.yml
+# still creates the GitHub Release from the curated docs/changelog.md, so
+# `goreleaser release` is never run.
+#
+# The build tags come from editions.env, the same file the Makefile and the
+# workflows read; nothing here restates them.
+
+# Scratch space, not an output: every invocation copies the binary out with
+# `-o`. It sits under .cache/ so the `--clean` each invocation needs — a second
+# run refuses to start against a non-empty dist — cannot touch the dist/build
+# directory the workflow collects artifacts in.
+dist: .cache/goreleaser
 
 builds:
   - id: aiscan
     main: ./cmd/aiscan
-    binary: "{{ .ProjectName }}"
+    binary: aiscan
     env:
       - CGO_ENABLED=0
     goos:
@@ -23,26 +40,19 @@ builds:
       - arm64
     flags:
       - -trimpath
+      - -buildvcs=false
     tags:
-      - forceposix
-      - emptytemplates
-      - noembed
-      - osusergo
-      - netgo
+      - '{{ .Env.STANDARD_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}
 
   - id: aiscan-full
     main: ./cmd/aiscan
-    binary: "{{ .ProjectName }}-full"
+    binary: aiscan-full
     env:
-      # Full links the native libcstx runtime. The official release workflow
-      # cross-compiles Darwin with Zig and a pinned macOS SDK on Linux.
-      - CGO_ENABLED=1
+      # CSTX runs in the browser through the TypeScript/WASM package; RE2 uses
+      # the dependency's pure-Go backend.
+      - CGO_ENABLED=0
     goos:
       - linux
       - darwin
@@ -50,75 +60,10 @@ builds:
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     flags:
       - -trimpath
+      - -buildvcs=false
     tags:
-      - forceposix
-      - emptytemplates
-      - noembed
-      - osusergo
-      - netgo
-      - full
-      - sqlite
-      - cstx
-      - re2_cgo
-      - re2_static
+      - '{{ .Env.FULL_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/aiscan/core/config.Version={{.Version}}
-    asmflags:
-      - all=-trimpath={{.Env.GOPATH}}
-    gcflags:
-      - all=-trimpath={{.Env.GOPATH}}
-
-upx:
-  - enabled: true
-    goos: [linux, windows]
-    goarch:
-      - amd64
-
-archives:
-  - id: aiscan
-    ids: [aiscan]
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
-      - src: docs/*
-
-  - id: aiscan-full
-    ids: [aiscan-full]
-    name_template: "{{ .ProjectName }}-full_{{ .Os }}_{{ .Arch }}"
-    formats:
-      - zip
-    files:
-      - src: README.md
-      - src: docs/*
-
-checksum:
-  name_template: "{{ .ProjectName }}_checksums.txt"
-
-snapshot:
-  version_template: "{{ incpatch .Version }}-next"
-
-changelog:
-  sort: desc
-  filters:
-    exclude:
-      - '^MERGE'
-      - "{{ .Tag }}"
-      - "^docs"
-
-release:
-  github:
-    owner: chainreactors
-    name: aiscan
-  draft: true
-  prerelease: auto
-  replace_existing_draft: true
-  replace_existing_artifacts: true
-  mode: replace
-  name_template: "{{ .Tag }}"
+      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}

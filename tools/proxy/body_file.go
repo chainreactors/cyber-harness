@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 // bodyFile owns one capture file, its writer subscription and recording slot.

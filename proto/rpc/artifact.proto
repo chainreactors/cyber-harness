@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package cyber.rpc.artifact;
+
+import "types/artifact.proto";
+
+option go_package = "github.com/chainreactors/cyber/pkg/rpc;rpc";
+
+service ArtifactService {
+  rpc SyncArtifacts(cyber.artifact.SyncArtifactsRequest) returns (cyber.artifact.SyncArtifactsResponse);
+}

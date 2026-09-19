@@ -4,9 +4,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/core/resource"
 	"github.com/spf13/cobra"
 	"io"
-	"strings"
 	"sync"
 )
 
@@ -25,62 +25,63 @@ type Bindings struct {
 	Status   func() []Row
 }
 
-// Contribution groups a feature's inert presentation factories under its source.
-// Commands must return the same names for every View and must not perform I/O.
-type Contribution struct {
-	Source   string
-	Bindings *Bindings
-}
-
-// Registrar is the presentation extension point. TUI/REPL owners lend it
-// during construction and open it in Load; feature extensions register commands, completion and
-// status contributions without depending on the concrete terminal runtime.
-type Registrar interface {
-	Register(Contribution) error
-}
-
-// Registry is a collecting presentation catalog. Registration is allowed only
+// Registry collects presentation bindings. Registration is allowed only
 // before the host publishes Bindings to a running TUI.
 type Registry struct {
-	mu             sync.Mutex
-	items          []Contribution
-	active, sealed bool
-	bindings       *Bindings
+	mu       sync.Mutex
+	batches  []*contributionBatch
+	sealed   bool
+	closed   bool
+	bindings *Bindings
+}
+
+type contributionBatch struct {
+	items  []*Bindings
+	closed bool
 }
 
 func NewRegistry() *Registry { return &Registry{} }
-func (r *Registry) Open() error {
+func (r *Registry) Add(values ...*Bindings) (resource.Handle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sealed {
-		return fmt.Errorf("console registry is sealed")
+	if r.sealed || r.closed || len(values) == 0 {
+		return nil, fmt.Errorf("console registry is not accepting contributions")
 	}
-	r.active = true
-	return nil
-}
-func (r *Registry) Register(c Contribution) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.active || r.sealed {
-		return fmt.Errorf("console registry is not accepting contributions")
-	}
-	for _, item := range r.items {
-		if item.Source == c.Source {
-			return fmt.Errorf("duplicate console source %q", c.Source)
-		}
-	}
-	if c.Bindings != nil {
-		copy := *c.Bindings
-		c.Bindings = &copy
-	}
-	candidate := append(append([]Contribution(nil), r.items...), c)
-	// Validate eagerly so a bad/duplicate contribution cannot leak at publish.
+	batch := &contributionBatch{items: cloneBindings(values)}
+	candidate := r.allLocked()
+	candidate = append(candidate, batch.items...)
 	b, err := Compose(candidate...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	r.items, r.bindings = candidate, b
-	return nil
+	r.batches = append(r.batches, batch)
+	r.bindings = b
+	return resource.HandleFunc(func(context.Context) error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if batch.closed {
+			return nil
+		}
+		batch.closed = true
+		for index, current := range r.batches {
+			if current == batch {
+				r.batches = append(r.batches[:index], r.batches[index+1:]...)
+				break
+			}
+		}
+		r.bindings, _ = Compose(r.allLocked()...)
+		return nil
+	}), nil
+}
+
+func (r *Registry) allLocked() []*Bindings {
+	var result []*Bindings
+	for _, batch := range r.batches {
+		if !batch.closed {
+			result = append(result, batch.items...)
+		}
+	}
+	return result
 }
 func (r *Registry) Bindings() *Bindings {
 	if r == nil {
@@ -88,7 +89,7 @@ func (r *Registry) Bindings() *Bindings {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.active {
+	if r.closed {
 		return nil
 	}
 	r.sealed = true
@@ -98,37 +99,35 @@ func (r *Registry) Bindings() *Bindings {
 	copy := *r.bindings
 	return &copy
 }
+
 func (r *Registry) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.active, r.sealed = false, true
-	r.items, r.bindings = nil, nil
+	r.closed, r.sealed = true, true
+	r.batches, r.bindings = nil, nil
 }
 
 // Compose validates a static snapshot without running handlers. Registry uses
 // it for atomic registration; hosts may also compose inert bindings directly.
-func Compose(contributions ...Contribution) (*Bindings, error) {
-	selected := append([]Contribution(nil), contributions...)
-	owners := map[string]string{}
-	for index, item := range selected {
-		if strings.TrimSpace(item.Source) == "" || item.Bindings == nil {
-			return nil, fmt.Errorf("console contribution requires source and bindings")
+func Compose(bindings ...*Bindings) (*Bindings, error) {
+	selected := cloneBindings(bindings)
+	owners := map[string]bool{}
+	for _, item := range selected {
+		if item == nil {
+			return nil, fmt.Errorf("console bindings are required")
 		}
-		copy := *item.Bindings
-		item.Bindings = &copy
-		selected[index] = item
-		if item.Bindings.Commands == nil {
+		if item.Commands == nil {
 			continue
 		}
-		for _, command := range item.Bindings.Commands(View{Out: io.Discard, Err: io.Discard, Table: func(string, [][]string) {}}) {
+		for _, command := range item.Commands(View{Out: io.Discard, Err: io.Discard, Table: func(string, [][]string) {}}) {
 			if command == nil || command.Name() == "" {
-				return nil, fmt.Errorf("console command requires a name (%s)", item.Source)
+				return nil, fmt.Errorf("console command requires a name")
 			}
 			for _, name := range append([]string{command.Name()}, command.Aliases...) {
-				if previous, found := owners[name]; found {
-					return nil, fmt.Errorf("duplicate console command %q (sources %s and %s)", name, previous, item.Source)
+				if owners[name] {
+					return nil, fmt.Errorf("duplicate console command %q", name)
 				}
-				owners[name] = item.Source
+				owners[name] = true
 			}
 		}
 	}
@@ -136,8 +135,8 @@ func Compose(contributions ...Contribution) (*Bindings, error) {
 		Commands: func(view View) []*cobra.Command {
 			var result []*cobra.Command
 			for _, item := range selected {
-				if item.Bindings.Commands != nil {
-					result = append(result, item.Bindings.Commands(view)...)
+				if item.Commands != nil {
+					result = append(result, item.Commands(view)...)
 				}
 			}
 			return result
@@ -146,8 +145,8 @@ func Compose(contributions ...Contribution) (*Bindings, error) {
 			var result []string
 			seen := map[string]bool{}
 			for _, item := range selected {
-				if item.Bindings.Complete != nil {
-					for _, name := range item.Bindings.Complete(ctx, value) {
+				if item.Complete != nil {
+					for _, name := range item.Complete(ctx, value) {
 						if !seen[name] {
 							seen[name] = true
 							result = append(result, name)
@@ -160,11 +159,24 @@ func Compose(contributions ...Contribution) (*Bindings, error) {
 		Status: func() []Row {
 			var result []Row
 			for _, item := range selected {
-				if item.Bindings.Status != nil {
-					result = append(result, item.Bindings.Status()...)
+				if item.Status != nil {
+					result = append(result, item.Status()...)
 				}
 			}
 			return result
 		},
 	}, nil
 }
+
+func cloneBindings(values []*Bindings) []*Bindings {
+	result := make([]*Bindings, len(values))
+	for index, value := range values {
+		if value != nil {
+			copy := *value
+			result[index] = &copy
+		}
+	}
+	return result
+}
+
+var _ resource.Point[*Bindings] = (*Registry)(nil)

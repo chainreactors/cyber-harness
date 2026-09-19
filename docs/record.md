@@ -26,15 +26,15 @@ Defaults:
 
 - Desktop target, 30 FPS, mouse cursor included.
 - Screenshots are PNG; recordings are H.264/libx264 in MP4.
-- Outputs are written below `.aiscan/record/` unless `output` is specified.
-- At most four recordings run concurrently. Set `AISCAN_RECORD_MAX_CONCURRENT` to a value from 1 to 16 to change the limit.
+- Outputs are written below `.cyber/record/` unless `output` is specified.
+- At most four recordings run concurrently. Set `CYBER_RECORD_MAX_CONCURRENT` to a value from 1 to 16 to change the limit.
 
 Media transport uses the existing AOP media and file namespaces. Screenshot
 previews are returned as bounded inline `Content.media` data. Completed videos
 are returned as `Content.media` with a task-relative `Resource.uri`; consumers
 read the underlying MP4 through chunked `aop.file` requests. When a tool
 invocation supplies a work directory, the default output is
-`<workdir>/.aiscan/record/`, so remote runners can expose the URI without
+`<workdir>/.cyber/record/`, so remote runners can expose the URI without
 leaking or depending on a machine-global data path.
 
 Limitations:
@@ -44,61 +44,100 @@ Limitations:
 - macOS and Windows arm64 do not have a native recorder backend.
 - Capture requires an interactive graphical session; headless hosts and Windows session 0 are not supported.
 - The window must be visible and non-minimized. Capture size is fixed when recording starts; closing, minimizing, or shrinking the window can terminate the recording.
-- The native backend is not present in official full builds. Custom builds require CGO, the `record_ffmpeg` build tag, and a supported C toolchain.
+- The native backend is not present in official full builds. Custom builds require CGO, the `record` build tag, and a supported C toolchain.
 
-Record-enabled builds statically link a feature-minimal FFmpeg and x264, so users do not install either runtime separately. This is single-file distribution, not literally zero runtime dependencies: Windows still uses system DLLs; Linux requires glibc, X11/XCB libraries, and an accessible `DISPLAY`. The SDK only enables the platform capture input, its raw/BMP decoder, libx264, the MP4 muxer, file output, and pixel conversion. It is not a general-purpose FFmpeg build.
+Record-enabled builds statically link a feature-minimal FFmpeg, x264, and the
+Linux XCB client code, so users do not install those runtimes separately. This
+is single-file distribution, not literally zero runtime dependencies: Windows
+still uses system DLLs, while Linux requires glibc and an accessible X11
+`DISPLAY`. The SDK only enables the platform capture input, its raw/BMP
+decoder, libx264, the MP4 muxer, file output, and pixel conversion. It is not a
+general-purpose FFmpeg build.
 
 ## Build tags and CGO
 
 Editions are defined by tags, not by which files happen to be imported. Three
-editions exist, and each one pins its CGO setting:
+editions exist; the build manifest also records the release default for CGO:
 
-| Edition | Tags | CGO_ENABLED |
+| Edition | Tags | Release CGO_ENABLED |
 | --- | --- | --- |
 | standard | `forceposix emptytemplates noembed osusergo netgo` | `0` |
-| full | standard + `full sqlite cstx re2_cgo re2_static` | `1` |
-| record | full + `record_ffmpeg` | `1` |
+| full | standard + `full sqlite` | `0` |
+| record | full + `record` | `1` |
 
-- **`cstx`** gates the native SCO importer in `pkg/exts/cstx`, which is the only
-  package that imports `libcstx`. Every file there requires both `cstx` and
-  `cgo`, so the dependency cannot leak into a pure-Go build. It is registered as
-  an extension on the web layer's own `extension.Set`.
-- **`full`** implies `cstx`, therefore `full` requires `CGO_ENABLED=1`. A full
-  build that succeeds with `CGO_ENABLED=0` means the cstx files stopped being
-  gated and the edition silently lost the native importer.
-- **`re2_cgo`/`re2_static`** select the cgo RE2 backend. Without them the RE2
-  binding stays on its pure-Go engine, which is slower but still builds with
-  `CGO_ENABLED=0`.
+`editions.env` at the repository root is the source of truth for this table:
+the Makefile includes it, the workflows append it to `$GITHUB_ENV`, and
+`TestBuildManifestIsConsistent` and the manifest tag tests in `cmd/aiscan` fail
+when a set here drifts from the file. It is a data file, not a shell script —
+the values hold spaces, so sourcing it would truncate every one of them.
+
+- **CSTX** normalization runs in the browser through `@cyber/cstx` and its
+  version-matched WASM ABI. `pkg/exts/cstx` remains available as an uncomposed
+  native extension, but no aiscan edition imports or starts it.
+- **`record`** composes `pkg/exts/record`. That Extension owns its native
+  runtime and contributes the record Tool through the typed resource scope.
+- **RE2** uses the dependency's pure-Go backend. The same standard or full
+  source tree builds and works with `CGO_ENABLED=0` or `CGO_ENABLED=1`; enabling
+  cgo no longer selects a different RE2 implementation.
 - `sqlite` is a dependency-supplied tag; the sqlite driver itself is pure Go.
 
-CI enforces both halves: `go list -deps` over the whole module must not reach
-`libcstx` under the standard tags, and the full edition must build with
-`CGO_ENABLED=1` and fail with `CGO_ENABLED=0`.
+CI checks that the aiscan dependency graph does not reach `libcstx` and compiles
+the full edition with both cgo settings. Official standard and full releases use
+`CGO_ENABLED=0` so they require no C toolchain. Record is the only edition whose
+feature set requires `CGO_ENABLED=1`.
 
-## Two-stage native build
+## Native SDKs
 
-Build the record-enabled edition with the dedicated target:
+The recorder's FFmpeg/x264 backend links a prebuilt static SDK that this
+repository downloads and verifies but never builds. It is published as a
+`chainreactors/native` release asset:
+
+| SDK | Target | Version pin | Release tag |
+| --- | --- | --- | --- |
+| Recorder | `record` | `RECORD_NATIVE_VERSION` | `RECORD_NATIVE_RELEASE` |
+
+`.github/native/versions.env` pins the tag, and `.github/native/sdk.sh fetch
+record [os] [arch]` downloads the archive, checks its SHA-256 sidecar and
+`.versions` manifest, and unpacks it into `.cache/native/record/<os>_<arch>`.
+`sdk.sh env record` prints the link environment for that prefix.
+
+The archive carries one `librecord.a` plus its narrow ABI header. It already
+combines the record shim, FFmpeg, x264, and Linux XCB objects; the cyber build
+consumes neither FFmpeg headers nor pkg-config metadata. Install it through the
+Makefile, which wires its library prefix in:
 
 ```bash
-make record
+make record-native   # .cache/native/record/<os>_<arch>, for `record`
+make record          # fetches it, then builds bin/aiscan-record
 ```
 
-`make record` builds the frontend, downloads a versioned SDK into `.cache/record-native/<platform>-<arch>`, verifies its SHA-256 sidecar and manifest, applies the native link environment, and compiles `bin/aiscan-record` with the `full` and `record_ffmpeg` tags. Supported SDK targets are Linux amd64/arm64 and Windows amd64. Linux source builds still need a C compiler, `pkg-config`, and XCB development packages; Windows source builds need MinGW-w64 and `pkgconf`.
+`make record` depends on the fetch target, so it needs no manual pre-step.
+Building the record edition by hand means exporting
+`CGO_LDFLAGS="-L<cache>/lib"` yourself, because a cgo directive can only expand
+`${SRCDIR}` and the archive is outside the module.
 
-Maintainers build the SDK from the pinned commits separately:
+The recorder SDK supports Linux amd64/arm64 and Windows amd64. `make record`
+therefore fails on macOS, and on Windows it needs MinGW-w64 so that `gcc` can
+link the MSVC-incompatible static archive.
 
-```bash
-make record-native-source record-native-package
-```
+`RECORD_ARCH` picks the SDK architecture, `CYBER_RECORD_PREFIX` overrides the
+cache directory, and `CYBER_NATIVE_URL` points downloads at a mirror.
 
-Set `RECORD_ARCH=arm64` or `RECORD_NATIVE_OUTPUT=<directory>` when the defaults do not match the target. The Makefile is the supported build interface; `.github/native/sdk.sh` is the underlying maintainer/CI implementation.
+### Publishing
 
-The `recorder-native-sdk` GitHub Actions workflow performs that source-build/package phase for every supported target and publishes the archives under the release tag declared in `.github/native/versions.env`. It is independent of the normal CI and release build paths. Set `AISCAN_RECORD_BUILD_FROM_SOURCE=1` when invoking `make record` or `make record-native` to opt into the slow source-build path locally. `AISCAN_RECORD_PREFIX` changes the SDK cache/install directory, and `AISCAN_RECORD_NATIVE_URL` can point downloads at an internal mirror.
+The SDK is built and published by `chainreactors/native`'s
+`record-native-sdk.yml` workflow. It runs on a matching native runner and
+publishes with that repository's own `GITHUB_TOKEN`, so no cross-repository
+credential is involved on this side.
 
-The source build verifies an exact FFmpeg component allowlist, and packaging rejects static libraries above a 16 MiB budget unless `AISCAN_RECORD_MAX_LIB_BYTES` explicitly overrides it. This prevents an FFmpeg upgrade or configure change from silently restoring all default codecs and adding tens of megabytes to record-enabled binaries.
+The recorder build verifies an exact FFmpeg component allowlist, and packaging
+rejects static libraries above a 16 MiB budget unless `CYBER_RECORD_MAX_LIB_BYTES`
+explicitly overrides it. This prevents an FFmpeg upgrade or configure change from
+silently restoring all default codecs and adding tens of megabytes to
+record-enabled binaries.
 
 Native smoke tests are opt-in because they require an interactive desktop/X11 session:
 
 ```bash
-go test -tags "record_ffmpeg record_integration" ./tools/record
+go test -tags "record record_integration" ./pkg/exts/record
 ```

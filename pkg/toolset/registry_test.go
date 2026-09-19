@@ -8,12 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 type registryTool struct {
@@ -45,7 +45,7 @@ func (e *contributor) Load(scope *extension.Scope) error {
 	if e.load != nil {
 		return e.load(scope)
 	}
-	return e.registry.Register("test", e.values...)
+	return extension.Add(scope, e.values...)
 }
 func (e *contributor) Close(ctx context.Context) error {
 	if e.close != nil {
@@ -54,17 +54,15 @@ func (e *contributor) Close(ctx context.Context) error {
 	return nil
 }
 
-func registrySet(t *testing.T, entries ...extension.Entry) (*toolset.Registry, *extension.Set) {
+func registrySet(t *testing.T, entries ...extension.Extension) (*toolset.Registry, *extension.Set) {
 	t.Helper()
-	registry := toolset.NewRegistry(nil)
-	dependencies := make([]string, 0, len(entries))
+	registry := toolset.NewRegistry()
 	for _, entry := range entries {
-		dependencies = append(dependencies, entry.ID)
-		if value, ok := entry.Extension.(*contributor); ok {
+		if value, ok := entry.(*contributor); ok {
 			value.registry = registry
 		}
 	}
-	entries = append(entries, extension.Entry{ID: "registry", DependsOn: dependencies, Extension: registry})
+	entries = append([]extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}, entries...)
 	set, err := extension.New(entries...)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +77,7 @@ func registrySet(t *testing.T, entries ...extension.Entry) (*toolset.Registry, *
 
 func TestRegistryPublishesOnlyAfterLoad(t *testing.T) {
 	first := echoTool("echo")
-	registry, set := registrySet(t, extension.Entry{ID: "tools", Extension: &contributor{values: []tool.Tool{first}}})
+	registry, set := registrySet(t, &contributor{values: []tool.Tool{first}})
 	if len(registry.ToolDefinitions()) != 0 {
 		t.Fatal("staged definitions were published")
 	}
@@ -106,7 +104,7 @@ func TestRegistryPublishesOnlyAfterLoad(t *testing.T) {
 
 func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 	r := hooks.New()
-	registry := toolset.NewRegistry(r)
+	registry := toolset.NewRegistry()
 	runs, decisions, completions := 0, 0, 0
 	value := echoTool("echo")
 	value.run = func(_ context.Context, args string) (*tool.Result, error) { runs++; return tool.TextResult(args), nil }
@@ -127,8 +125,9 @@ func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 	})
 	defer completed.Cancel()
 	set, err := extension.New(
-		extension.Entry{ID: "tools", Extension: &contributor{registry: registry, values: []tool.Tool{value}}},
-		extension.Entry{ID: "registry", DependsOn: []string{"tools"}, Extension: registry},
+		extension.Provided[*hooks.Registry](r),
+		registry,
+		&contributor{registry: registry, values: []tool.Tool{value}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -153,13 +152,14 @@ func TestRegistryUsesSharedHookBoundary(t *testing.T) {
 }
 
 func TestRegistryRegistrationIsAtomic(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	first := &contributor{registry: registry, values: []tool.Tool{echoTool("echo")}}
 	second := &contributor{registry: registry, values: []tool.Tool{echoTool("new"), echoTool("echo")}}
 	set, err := extension.New(
-		extension.Entry{ID: "first", Extension: first},
-		extension.Entry{ID: "second", Extension: second},
-		extension.Entry{ID: "registry", DependsOn: []string{"first", "second"}, Extension: registry},
+		extension.Provided[*hooks.Registry](hooks.New()),
+		registry,
+		first,
+		second,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -173,20 +173,21 @@ func TestRegistryRegistrationIsAtomic(t *testing.T) {
 }
 
 func TestRegistryRejectsInvalidBatchWithoutPartialState(t *testing.T) {
-	registry := toolset.NewRegistry(nil)
+	registry := toolset.NewRegistry()
 	value := &contributor{registry: registry, load: func(scope *extension.Scope) error {
 		var nilTool *registryTool
-		if err := registry.Register("test", echoTool("partial"), nilTool); err == nil {
+		if _, err := registry.Add(echoTool("partial"), nilTool); err == nil {
 			t.Fatal("accepted typed nil")
 		}
-		if err := registry.Register("test", echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
+		if _, err := registry.Add(echoTool("duplicate"), echoTool("duplicate")); !errors.Is(err, toolset.ErrDuplicate) {
 			t.Fatal(err)
 		}
-		return registry.Register("test", echoTool("partial"))
+		return extension.Add[tool.Tool](scope, echoTool("partial"))
 	}}
 	set, err := extension.New(
-		extension.Entry{ID: "tools", Extension: value},
-		extension.Entry{ID: "registry", DependsOn: []string{"tools"}, Extension: registry},
+		extension.Provided[*hooks.Registry](hooks.New()),
+		registry,
+		value,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -217,9 +218,9 @@ func TestRegistryDrainProtectsContributorResources(t *testing.T) {
 			}
 			return nil, ctx.Err()
 		}
-		registry, set := registrySet(t, extension.Entry{ID: "resource", Extension: &contributor{
+		registry, set := registrySet(t, &contributor{
 			values: []tool.Tool{value}, close: func(context.Context) error { closed = true; return nil },
-		}})
+		})
 		if err := set.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +256,7 @@ func TestRegistryDrainProtectsContributorResources(t *testing.T) {
 func TestRegistryPanicReleasesAdmission(t *testing.T) {
 	value := echoTool("panic")
 	value.run = func(context.Context, string) (*tool.Result, error) { panic("private data") }
-	registry, set := registrySet(t, extension.Entry{ID: "tools", Extension: &contributor{values: []tool.Tool{value}}})
+	registry, set := registrySet(t, &contributor{values: []tool.Tool{value}})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

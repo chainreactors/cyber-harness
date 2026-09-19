@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -22,7 +22,6 @@ type ScanBackend interface {
 	GetScan(context.Context, string) (*types.Scan, error)
 	ListScans(context.Context) ([]*types.Scan, error)
 	CancelScan(string) error
-	GetReport(context.Context, string, string) (string, error)
 }
 
 type ScanEvents interface {
@@ -91,23 +90,6 @@ func (s *Scans) CancelScan(ctx context.Context, request *types.CancelScanRequest
 		return nil, scanError(err)
 	}
 	return &types.CancelScanResponse{RequestId: request.RequestId, Outcome: &types.CancelScanResponse_Accepted{Accepted: scan}}, nil
-}
-
-func (s *Scans) GetScanReport(ctx context.Context, request *types.GetScanReportRequest) (*types.GetScanReportResponse, error) {
-	if s == nil || s.backend == nil {
-		return nil, Errorf(CodeUnavailable, "scan service is unavailable")
-	}
-	if request == nil || strings.TrimSpace(request.ScanId) == "" {
-		return nil, Errorf(CodeInvalidArgument, "scan_id is required")
-	}
-	markdown, err := s.backend.GetReport(ctx, request.ScanId, request.Language)
-	if err != nil {
-		return nil, scanError(err)
-	}
-	if markdown == "" {
-		return nil, Errorf(CodeFailedPrecondition, "scan report is not ready")
-	}
-	return &types.GetScanReportResponse{Markdown: markdown, MediaType: "text/markdown; charset=utf-8"}, nil
 }
 
 func (s *Scans) WatchScanEvents(request *types.WatchScanEventsRequest, ctx context.Context, send func(*types.ScanEvent) error) error {

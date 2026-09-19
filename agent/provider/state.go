@@ -3,8 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	"strings"
 	"sync"
 	"time"
@@ -28,11 +28,21 @@ type Entry struct {
 	Provider Provider
 	Model    string
 }
+
+// StartupMode expresses whether a Profile omits, requires, or opportunistically
+// initializes its provider.
+type StartupMode uint8
+
+const (
+	StartupDisabled StartupMode = iota
+	StartupRequired
+	StartupOptional
+)
+
 type StartupConfig struct {
-	Enabled   bool
+	Mode      StartupMode
 	Config    ProviderConfig
 	Fallbacks []ProviderConfig
-	Optional  bool
 }
 
 // State is provider business state. The profile owns its initialization.
@@ -99,13 +109,17 @@ func (s *State) initialize(ctx context.Context, config StartupConfig, logger tel
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !config.Enabled {
+	switch config.Mode {
+	case StartupDisabled:
 		return nil
+	case StartupRequired, StartupOptional:
+	default:
+		return fmt.Errorf("invalid provider startup mode %d", config.Mode)
 	}
 	s.install(nil, config.Config, Health{State: HealthNotConfigured})
 	if _, _, err := s.Reload(ctx, config.Config, logger); err != nil {
 		s.install(nil, config.Config, Health{State: HealthNotConfigured, Error: err.Error(), CheckedAt: time.Now()})
-		if !config.Optional {
+		if config.Mode != StartupOptional {
 			return err
 		}
 		logger.Debugf("provider not configured: %s", err)

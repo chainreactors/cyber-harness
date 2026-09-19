@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 type recordingSession struct {
@@ -83,7 +83,7 @@ func (t *Tool) start(ctx context.Context, args Args, duration time.Duration) (*r
 	return session, nil
 }
 
-func (t *Tool) runSession(ctx context.Context, session *recordingSession, target resolvedTarget) {
+func (t *Tool) runSession(ctx context.Context, session *recordingSession, target ResolvedTarget) {
 	defer session.cancel()
 	started := time.Now().UTC()
 	session.update(func(info *SessionInfo) {
@@ -128,7 +128,7 @@ func (t *Tool) runSession(ctx context.Context, session *recordingSession, target
 	close(session.done)
 }
 
-func callBackendRecord(backend captureBackend, ctx context.Context, target resolvedTarget, output string, fps int) (media mediaInfo, err error) {
+func callBackendRecord(backend Backend, ctx context.Context, target ResolvedTarget, output string, fps int) (media MediaInfo, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("capture backend panicked: %v", recovered)
@@ -137,7 +137,7 @@ func callBackendRecord(backend captureBackend, ctx context.Context, target resol
 	return backend.Record(ctx, target, output, fps)
 }
 
-func callBackendResolve(backend captureBackend, ctx context.Context, req captureRequest) (target resolvedTarget, err error) {
+func callBackendResolve(backend Backend, ctx context.Context, req CaptureRequest) (target ResolvedTarget, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("capture backend panicked while resolving target: %v", recovered)
@@ -146,7 +146,7 @@ func callBackendResolve(backend captureBackend, ctx context.Context, req capture
 	return backend.Resolve(ctx, req)
 }
 
-func callBackendScreenshot(backend captureBackend, ctx context.Context, target resolvedTarget) (img image.Image, err error) {
+func callBackendScreenshot(backend Backend, ctx context.Context, target ResolvedTarget) (img image.Image, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("capture backend panicked while taking screenshot: %v", recovered)

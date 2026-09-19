@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	"github.com/invopop/jsonschema"
 )
 

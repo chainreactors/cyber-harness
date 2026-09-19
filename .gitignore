@@ -21,6 +21,7 @@ dist/
 *.db
 *.db-*
 *.sock.lock
+/cyber
 /aiscan
 /spray
 out/
@@ -34,13 +35,16 @@ web/frontend/test-results/
 community.yaml
 
 # Local runtime state / operator artifacts
+.cyber/
 .aiscan/
+/cyber-deploy.yaml
 /aiscan-deploy.yaml
 /*.log
 /.claude/
 /.codex/
 /.playwright-cli/
 /.cache/
+/.buildcheck/
 # operator scan outputs dumped at repo root (screenshots, IP lists, app dumps, findings/reports)
 /*.png
 /*_ips.txt
@@ -61,5 +65,6 @@ web/static-stale/
 /monitor/
 /scripts/
 /scan_report.md
+cyber.yaml
 aiscan.yaml
 .runlogs/harness/

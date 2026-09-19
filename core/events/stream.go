@@ -7,8 +7,8 @@ import (
 	"runtime/debug"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/eventbus"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/eventbus"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

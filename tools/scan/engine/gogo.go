@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/sdk/gogo"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"

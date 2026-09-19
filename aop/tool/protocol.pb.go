@@ -7,7 +7,7 @@
 package tool
 
 import (
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -159,8 +159,8 @@ func (x *Progress) GetCallId() string {
 	return ""
 }
 
-// Artifact carries one scanner-native structured record. Nodes remain thin:
-// only the server normalizes these records into canonical SCO documents.
+// Artifact carries one scanner-native structured record. Consumers normalize
+// these records through the CSTX ABI without introducing another wire shape.
 type Artifact struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tool          string                 `protobuf:"bytes,1,opt,name=tool,proto3" json:"tool,omitempty"`
@@ -476,7 +476,7 @@ const file_aop_tool_protocol_proto_rawDesc = "" +
 	"\bprogress\x18\n" +
 	" \x01(\v2\x12.aop.tool.ProgressH\x00R\bprogress\x12$\n" +
 	"\x04call\x18\v \x01(\v2\x0e.aop.tool.CallH\x00R\x04callB\t\n" +
-	"\amessageJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eB/Z-github.com/chainreactors/aiscan/aop/tool;toolb\x06proto3"
+	"\amessageJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eB.Z,github.com/chainreactors/cyber/aop/tool;toolb\x06proto3"
 
 var (
 	file_aop_tool_protocol_proto_rawDescOnce sync.Once

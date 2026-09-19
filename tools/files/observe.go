@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
 // observe emits at the actual file-operation boundary, including failures.
@@ -30,14 +30,14 @@ func (f *Files) observe(ctx context.Context, op filepb.AccessOp, path string, da
 		Err:       operationErr,
 	}
 	var cancellation error
-	if f.hooks.Has(toolhooks.FileAccessControl.Kind) {
+	if toolhooks.FileAccessControl.Has(f.hooks) {
 		response, hookErr := toolhooks.FileAccessControl.Emit(ctx, f.hooks, event)
 		cancellation = toolhooks.CancellationCause(response, hookErr)
 		if cancellation != nil {
 			operation.RequestCancel(ctx, cancellation)
 		}
 	}
-	if f.hooks.Has(toolhooks.FileAccessObserved.Kind) {
+	if toolhooks.FileAccessObserved.Has(f.hooks) {
 		corehooks.Notify(ctx, f.hooks, toolhooks.FileAccessObserved, event)
 	}
 	return cancellation

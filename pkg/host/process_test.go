@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/pkg/host"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/pkg/host"
 	"google.golang.org/protobuf/proto"
 )
 
 // Use a real child process to verify framing and shutdown without a model,
-// tools, product configuration, or external network dependencies.
+// tools, application configuration, or external network dependencies.
 func TestStdioChildProcess(t *testing.T) {
 	const helper = "CYBER_HARNESS_HOST_TEST_CHILD"
 	if os.Getenv(helper) == "1" {
 		mux := aop.NewNamespaceMux(t.Context())
-		err := mux.Register("test", &aop.ProtocolMessage{}, func(_ context.Context, request *aop.Envelope, message proto.Message, send aop.SendFunc) error {
+		err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, request *aop.Envelope, message proto.Message, send aop.SendFunc) error {
 			return send(aop.Reply(request.Id, message))
 		})
 		if err == nil {

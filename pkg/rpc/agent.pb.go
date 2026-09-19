@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,18 +25,18 @@ var File_rpc_agent_proto protoreflect.FileDescriptor
 
 const file_rpc_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x0frpc/agent.proto\x12\x10aiscan.rpc.agent\x1a\x11types/agent.proto2_\n" +
-	"\fAgentService\x12O\n" +
+	"\x0frpc/agent.proto\x12\x0fcyber.rpc.agent\x1a\x11types/agent.proto2]\n" +
+	"\fAgentService\x12M\n" +
 	"\n" +
-	"ListAgents\x12\x1f.aiscan.agent.ListAgentsRequest\x1a .aiscan.agent.ListAgentsResponseB-Z+github.com/chainreactors/aiscan/pkg/rpc;rpcb\x06proto3"
+	"ListAgents\x12\x1e.cyber.agent.ListAgentsRequest\x1a\x1f.cyber.agent.ListAgentsResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_agent_proto_goTypes = []any{
-	(*types.ListAgentsRequest)(nil),  // 0: aiscan.agent.ListAgentsRequest
-	(*types.ListAgentsResponse)(nil), // 1: aiscan.agent.ListAgentsResponse
+	(*types.ListAgentsRequest)(nil),  // 0: cyber.agent.ListAgentsRequest
+	(*types.ListAgentsResponse)(nil), // 1: cyber.agent.ListAgentsResponse
 }
 var file_rpc_agent_proto_depIdxs = []int32{
-	0, // 0: aiscan.rpc.agent.AgentService.ListAgents:input_type -> aiscan.agent.ListAgentsRequest
-	1, // 1: aiscan.rpc.agent.AgentService.ListAgents:output_type -> aiscan.agent.ListAgentsResponse
+	0, // 0: cyber.rpc.agent.AgentService.ListAgents:input_type -> cyber.agent.ListAgentsRequest
+	1, // 1: cyber.rpc.agent.AgentService.ListAgents:output_type -> cyber.agent.ListAgentsResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

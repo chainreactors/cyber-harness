@@ -6,8 +6,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/chainreactors/aiscan/skills"
 )
 
 var Version = "dev"
@@ -46,7 +44,7 @@ type SearchConfigOptions struct {
 type LLMOptions struct {
 	Provider      string             `long:"provider" config:"provider" description:"LLM protocol: openai (OpenAI-compatible, default) or anthropic"`
 	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
-	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, AISCAN_API_KEY)"`
+	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, CYBER_API_KEY)"`
 	Model         string             `long:"model" config:"model" description:"LLM model name"`
 	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
 	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
@@ -75,7 +73,7 @@ type ScannerOptions struct {
 	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
 	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
 	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
-	Mitm         *bool  `long:"mitm" config:"mitm" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
+	Mitm         *bool  `long:"mitm" config:"mitm" init_default:"true" config_optional:"true" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
 }
 
 type TrafficOptions struct {
@@ -94,8 +92,8 @@ type AgentOptions struct {
 	Timeout               int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
-	EvalMaxRetries        int      `long:"eval-retries" config:"eval_retries" description:"Max goal evaluation retry rounds" default:"3"`
-	ServerURL             string   `long:"server-url" config:"server_url" description:"AIScan Web server URL for AOP, remote REPL and PTY access"`
+	EvalRounds            string   `long:"eval-rounds" config:"eval_rounds" description:"How long goal evaluation may keep going: a number (hard ceiling) or plain language the evaluator follows, e.g. \"dig deep, up to ten rounds\" (empty uses the default ceiling)"`
+	ServerURL             string   `long:"server-url" config:"server_url" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
 	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
@@ -142,9 +140,9 @@ type NodeOptions struct {
 }
 
 type MiscOptions struct {
-	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./aiscan.yaml, <binary_dir>/aiscan.yaml)"`
-	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.aiscan)"`
-	InitConfig   bool   `long:"init" description:"Generate default aiscan.yaml and exit"`
+	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./cyber.yaml, <binary_dir>/cyber.yaml)"`
+	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.cyber)"`
+	InitConfig   bool   `long:"init" description:"Generate default cyber.yaml and exit"`
 	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
 	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
 	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
@@ -272,42 +270,4 @@ func FormatInputs(inputs []string) string {
 		sb.WriteString("\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-func ApplySelectedSkills(text string, selected []string, store *skills.Store) (string, error) {
-	if len(selected) == 0 {
-		return text, nil
-	}
-	var sb strings.Builder
-	for _, name := range selected {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		if skill, ok := store.ByName(name); ok {
-			if sb.Len() > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(store.FormatInvocation(skill, ""))
-			continue
-		}
-		body := skills.ReadFile("skills/" + name + ".md")
-		if body == "" {
-			body = skills.ReadFile(name)
-		}
-		if body == "" {
-			return "", fmt.Errorf("unknown skill %q", name)
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(body)
-	}
-	if strings.TrimSpace(text) != "" {
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(strings.TrimSpace(text))
-	}
-	return sb.String(), nil
 }

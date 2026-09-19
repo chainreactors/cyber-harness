@@ -1,6 +1,6 @@
 """Fixtures for playwright comparison harness.
 
-The aiscan 'playwright' is a pseudo-command (not a standalone CLI).
+The cyber 'playwright' is a pseudo-command (not a standalone CLI).
 This harness drives it through pw_driver — a persistent Go process that
 wraps Command.Execute() and speaks JSON-line over stdin/stdout.
 """
@@ -75,7 +75,7 @@ def pw_page(pw_browser):
 
 
 class PWDriver:
-    """Persistent driver for aiscan playwright pseudo-command."""
+    """Persistent driver for cyber playwright pseudo-command."""
 
     def __init__(self, bin_path: str):
         self.proc = subprocess.Popen(

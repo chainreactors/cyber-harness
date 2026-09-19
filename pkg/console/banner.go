@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	outputpkg "github.com/chainreactors/aiscan/core/output"
+	cfg "github.com/chainreactors/cyber/core/config"
+	outputpkg "github.com/chainreactors/cyber/core/output"
 	runewidth "github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )

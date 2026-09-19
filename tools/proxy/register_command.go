@@ -3,7 +3,7 @@
 package proxy
 
 import (
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 
 	// Register extra proxy protocols so proxyclient.NewClient can handle them.
 	_ "github.com/chainreactors/proxyclient/extra/anytls"
@@ -28,7 +28,7 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 	cmd.SetCommandExecutor(execute)
 	proxyCommand := commands.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/proxy.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/proxy.md",
 		Run:             cmd.Run,
 	}
 
@@ -36,7 +36,7 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 	mitmCmd.SetCommandExecutor(execute)
 	mitmCommand := commands.Command{
 		Name: mitmCmd.Name(), Usage: mitmCmd.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/mitm.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/mitm.md",
 		Run:             mitmCmd.Run,
 	}
 	return []commands.Command{proxyCommand, mitmCommand}

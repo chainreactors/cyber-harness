@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils/parsers"

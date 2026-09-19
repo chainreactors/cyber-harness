@@ -3,23 +3,84 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/agent/provider"
-	"github.com/chainreactors/aiscan/agent/tmux"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/aiscan/core/truncate"
+	agenthooks "github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func TestSystemPromptResolvesOnceBeforeRunHooks(t *testing.T) {
+	registry := hooks.New()
+	var hookSaw string
+	agenthooks.BeforeRun.On(registry, "test", func(_ context.Context, event agenthooks.RunStartEvent) (agenthooks.RunStartResult, error) {
+		hookSaw = event.SystemPrompt
+		updated := event.SystemPrompt + "\nhook"
+		return agenthooks.RunStartResult{SystemPrompt: &updated}, nil
+	})
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(ChatMessage{Role: "assistant", ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function", Function: FunctionCall{Name: "echo", Arguments: "{}"},
+		}}}),
+		chatResponse(NewTextMessage("assistant", "done")),
+	}}
+	resolved := 0
+	agent := NewAgent(Config{
+		Loop: StandardLoop{}, Provider: llm, Model: "test", Hooks: registry,
+		Tools: newTestTools(t, &recordingTool{name: "echo", output: "ok"}),
+		SystemPromptFn: func(context.Context, *Config) (string, error) {
+			resolved++
+			return fmt.Sprintf("resolved-%d", resolved), nil
+		},
+	})
+	if _, err := agent.Run(t.Context(), TextInput("run")); err != nil {
+		t.Fatal(err)
+	}
+	if resolved != 1 || hookSaw != "resolved-1" {
+		t.Fatalf("resolved=%d hook saw=%q", resolved, hookSaw)
+	}
+	for index, request := range llm.requestsSnapshot() {
+		if len(request.Messages) == 0 || provider.MessageText(request.Messages[0]) != "resolved-1\nhook" {
+			t.Fatalf("request %d system prompt = %#v", index, request.Messages)
+		}
+	}
+}
+
+func TestSystemPromptResolutionFailureEndsRun(t *testing.T) {
+	llm := &callbackProvider{fn: func(context.Context, *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		t.Fatal("provider should not be called")
+		return nil, nil
+	}}
+	agent := NewAgent(Config{
+		Loop: StandardLoop{}, Provider: llm,
+		SystemPromptFn: func(context.Context, *Config) (string, error) {
+			return "", errors.New("prompt failed")
+		},
+	})
+	result, err := agent.Run(t.Context(), TextInput("run"))
+	if err == nil || !strings.Contains(err.Error(), "resolve system prompt: prompt failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if result == nil || result.Stop != StopReasonError || result.Err == nil {
+		t.Fatalf("result = %#v", result)
+	}
+}
 
 func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 	registry := hooks.New()
@@ -29,7 +90,7 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 		}
 		return toolhooks.Admission{}, nil
 	})
-	tools := testToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
+	tools := hosttest.ToolsWithHooks(t, registry, &recordingTool{name: "first", output: "first ok"}, &recordingTool{name: "second", output: "second ok"})
 	var logs bytes.Buffer
 	cfg := Config{
 		Tools:  tools,
@@ -392,11 +453,10 @@ func TestStreamingToolCallDeltasAreAggregated(t *testing.T) {
 
 func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	echo := &recordingTool{name: "echo", output: "must not run"}
-	tools := newTestTools(t, echo)
 	beforeCalled := false
 	afterCalled := false
 	registry := hooks.New()
-	tools = testToolsWithHooks(t, registry, echo)
+	tools := hosttest.ToolsWithHooks(t, registry, echo)
 	toolhooks.Before.On(registry, "test", func(context.Context, toolhooks.CallEvent) (toolhooks.Admission, error) {
 		beforeCalled = true
 		return toolhooks.Admission{}, nil
@@ -576,7 +636,6 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 
 func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	echo := &recordingTool{name: "echo", output: "raw"}
-	tools := newTestTools(t, echo)
 	llm := &scriptedProvider{
 		responses: []*ChatCompletionResponse{
 			chatResponse(ChatMessage{
@@ -594,7 +653,7 @@ func TestToolHookRewritesFullResultAndTerminates(t *testing.T) {
 	}
 	rewritten := "rewritten result"
 	registry := hooks.New()
-	tools = testToolsWithHooks(t, registry, echo)
+	tools := hosttest.ToolsWithHooks(t, registry, echo)
 	toolhooks.After.On(registry, "test", func(_ context.Context, event toolhooks.ResultEvent) (struct{}, error) {
 		event.Result.Output = []*aop.Content{aop.Text(rewritten)}
 		event.Result.IsError = false
@@ -1106,17 +1165,18 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 	tools := newTestTools(t, &recordingTool{name: "echo", output: "tool output"})
 
 	ib := inbox.NewBuffered(8)
-	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info tmux.Info) {
+	sessMgr := procbus.NewManager()
+	sessMgr.SetOnDone(func(info proc.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			tmux.FormatCompletion(info, tail))
+			terminaltool.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{"session_id": info.ID}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := sessMgr.Create(dir, "echo background-result", "bg-scan", 10*time.Second, nil, "")
+	_, err := sessMgr.Start(t.Context(), proc.Spec{Name: "bg-scan", Command: "echo background-result", Timeout: 10 * time.Second},
+		proc.TTY(proc.ProcOptions{Line: "echo background-result", Dir: dir}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -1182,21 +1242,22 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 
 func TestSessionCompletionMetadata(t *testing.T) {
 	ib := inbox.NewBuffered(4)
-	sessMgr := tmux.NewManager()
-	sessMgr.SetOnDone(func(info tmux.Info) {
+	sessMgr := procbus.NewManager()
+	sessMgr.SetOnDone(func(info proc.Info) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			tmux.FormatCompletion(info, tail))
+			terminaltool.FormatCompletion(info, tail))
 		msg.Meta = map[string]any{
 			"session_id":   info.ID,
 			"session_name": info.Name,
-			"exit_code":    info.ExitCode,
+			"exit_code":    info.ExitStatus(),
 		}
 		ib.Push(msg)
 	})
 
 	dir := t.TempDir()
-	_, err := sessMgr.Create(dir, "echo done", "test-session", 10*time.Second, nil, "")
+	_, err := sessMgr.Start(t.Context(), proc.Spec{Name: "test-session", Command: "echo done", Timeout: 10 * time.Second},
+		proc.TTY(proc.ProcOptions{Line: "echo done", Dir: dir}))
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

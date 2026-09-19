@@ -1,7 +1,7 @@
 id: test-login-check
 info:
   name: Login Page Title Check
-  author: aiscan
+  author: cyber
   severity: info
   description: Verify login page renders with expected title
 

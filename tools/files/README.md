@@ -22,4 +22,4 @@ Read 返回自有字节；Write 在返回前借用输入。所有本地路径必
 | --- | --- |
 | `tools/files` | 文件实现与 Tool 声明 |
 | `pkg/exts/files` | 生命周期与 Registry 贡献 |
-| `cmd/runner` | runner 的 files/observe/skills 显式组合 |
+| `cmd/agent` | 最小本地 Agent 的 files/bash 显式组合 |

@@ -3,28 +3,30 @@ package commands
 import (
 	"context"
 	"errors"
+	"github.com/chainreactors/cyber/core/hooks"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/tool"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
 )
 
 func TestRegistryRejectsDuplicateCommands(t *testing.T) {
-	registry := NewRegistry(nil)
+	registry := NewRegistry()
 	first := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register("test", "one", Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
+		return extension.Add(scope, Command{Name: "scan", Usage: "first", Run: func(context.Context, *Execution) (any, error) { return nil, nil }})
 	}}
 	duplicate := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return registry.Register("test", "two",
+		return extension.Add(scope,
 			Command{Name: "fresh", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 			Command{Name: "scan", Run: func(context.Context, *Execution) (any, error) { return nil, nil }},
 		)
 	}}
 	set, err := extension.New(
-		extension.Entry{ID: "one", Extension: first},
-		extension.Entry{ID: "two", DependsOn: []string{"one"}, Extension: duplicate},
-		extension.Entry{ID: "registry", DependsOn: []string{"two"}, Extension: registry},
+		extension.Provided[*hooks.Registry](hooks.New()),
+		registry,
+		first,
+		duplicate,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -36,8 +38,8 @@ func TestRegistryRejectsDuplicateCommands(t *testing.T) {
 	if registry.Has("fresh") {
 		t.Fatal("failed command group was partially published")
 	}
-	if names := registry.GroupNames("two"); len(names) != 0 {
-		t.Fatalf("failed registration acquired group ownership: %v", names)
+	if names := registry.Names(); len(names) != 0 {
+		t.Fatalf("failed composition retained commands: %v", names)
 	}
 }
 

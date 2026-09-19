@@ -1,4 +1,4 @@
-//go:build full && record_ffmpeg && cgo && (windows || linux)
+//go:build record && cgo && (windows || linux)
 
 package record
 
@@ -9,9 +9,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/toolset"
-	"github.com/chainreactors/aiscan/tools/record"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/toolset"
+	"github.com/chainreactors/cyber/tools/record"
 )
 
 type Extension struct {
@@ -19,7 +20,7 @@ type Extension struct {
 	workDir    string
 	directory  string
 	maximum    int
-	registry   toolset.Registrar
+	backend    *nativeBackend
 	tool       *record.Tool
 	registered bool
 	closed     bool
@@ -27,11 +28,11 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry toolset.Registrar, workDir, directory string, maximum int) (*Extension, error) {
-	if registry == nil || strings.TrimSpace(workDir) == "" || !filepath.IsAbs(directory) || maximum < 1 || maximum > record.MaxConcurrentLimit {
-		return nil, fmt.Errorf("record extension requires directories, registry, and maximum between 1 and 16")
+func New(workDir, directory string, maximum int) (*Extension, error) {
+	if strings.TrimSpace(workDir) == "" || !filepath.IsAbs(directory) || maximum < 1 || maximum > record.MaxConcurrentLimit {
+		return nil, fmt.Errorf("record extension requires directories and maximum between 1 and 16")
 	}
-	return &Extension{registry: registry, workDir: workDir, directory: directory, maximum: maximum}, nil
+	return &Extension{workDir: workDir, directory: directory, maximum: maximum}, nil
 }
 
 func (m *Extension) Load(scope *extension.Scope) error {
@@ -47,14 +48,17 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	recorder, err := record.NewConfigured(m.workDir, m.directory, m.maximum)
+	backend, err := newNativeBackend()
 	if err != nil {
 		return err
 	}
-	if err := m.registry.Register("record", recorder); err != nil {
+	recorder := record.New(m.workDir, m.directory, m.maximum, backend)
+	if err := extension.Add[tool.Tool](scope, recorder); err != nil {
 		recorder.Close()
+		_ = backend.Close()
 		return fmt.Errorf("register record tool: %w", err)
 	}
+	m.backend = backend
 	m.tool = recorder
 	m.registered = true
 	return nil
@@ -67,14 +71,21 @@ func (m *Extension) Close(ctx context.Context) error {
 		return nil
 	}
 	value := m.tool
+	backend := m.backend
 	m.mu.Unlock()
 	if value != nil {
 		if err := value.CloseContext(ctx); err != nil {
 			return err
 		}
 	}
+	if backend != nil {
+		if err := backend.Close(); err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	m.tool = nil
+	m.backend = nil
 	m.closed = true
 	m.mu.Unlock()
 	return nil

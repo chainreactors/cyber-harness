@@ -1,4 +1,5 @@
-import { useMemo, type ComponentType, type ReactNode } from 'react'
+import { useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { Check, Copy } from 'lucide-react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@cyber/theme'
@@ -42,6 +43,36 @@ function nodeText(node: ReactNode): string {
     return nodeText((node as { props?: { children?: ReactNode } }).props?.children)
   }
   return ''
+}
+
+// React-markdown hands `pre` the still-unrendered `code` element, so the raw
+// source is reachable from its props. Mirror the inline/block split the `code`
+// renderer uses: a language class or a contained newline means a fenced block.
+function blockCodeText(children: ReactNode): string | null {
+  const child = Array.isArray(children) ? children[0] : children
+  if (child == null || typeof child !== 'object' || !('props' in child)) return null
+  const props = (child as { props?: { className?: string; children?: ReactNode } }).props
+  const text = nodeText(props?.children)
+  if (!props?.className?.includes('language-') && !text.includes('\n')) return null
+  return text
+}
+
+function BlockCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-label="Copy code"
+      onClick={async () => {
+        await navigator.clipboard.writeText(code.replace(/\n$/, ''))
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded border border-border bg-card text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+    >
+      {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+    </button>
+  )
 }
 
 function anchorSlug(value: string) {
@@ -198,16 +229,20 @@ export function MarkdownContent({
           {children}
         </blockquote>
       ),
-      pre: ({ children }) => (
-        <pre
-          className={cn(
-            'overflow-x-auto rounded-md border border-border leading-relaxed',
-            compact ? 'my-1.5 bg-input p-2' : 'my-4 bg-muted/40 p-3',
-          )}
-        >
-          {children}
-        </pre>
-      ),
+      pre: ({ children }) => {
+        const code = blockCodeText(children)
+        return (
+          <pre
+            className={cn(
+              'group relative overflow-x-auto rounded-md border border-border leading-relaxed',
+              compact ? 'my-1.5 bg-input p-2' : 'my-4 bg-muted/40 p-3',
+            )}
+          >
+            {code !== null && <BlockCopyButton code={code} />}
+            {children}
+          </pre>
+        )
+      },
       code: ({ className: codeClassName, children }) => {
         const langMatch = codeClassName?.match(/language-(\w+)/)
         // A fenced block with no info string gets no className from react-markdown,

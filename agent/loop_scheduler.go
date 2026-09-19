@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 type LoopMode int

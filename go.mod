@@ -1,4 +1,4 @@
-module github.com/chainreactors/aiscan
+module github.com/chainreactors/cyber
 
 go 1.26
 
@@ -11,7 +11,6 @@ require (
 	connectrpc.com/connect v1.20.0
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.14.0
-	github.com/asticode/go-astiav v0.41.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
@@ -33,7 +32,7 @@ require (
 	github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d
 	github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873
 	github.com/chainreactors/utils/parsers v0.0.3
-	github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059
+	github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2
 	github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v0.8.0
@@ -66,7 +65,6 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.20.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4 // indirect
-	github.com/asticode/go-astikit v0.42.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.7 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7 // indirect
@@ -143,7 +141,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/carapace-sh/carapace-shlex v1.1.1 // indirect
 	github.com/censys/censys-sdk-go v0.19.1 // indirect
-	github.com/chainreactors/aiscan/aop v0.0.0-20260818112202-76d90a72b2c5
+	github.com/chainreactors/cyber/aop v0.0.0-20260818112202-76d90a72b2c5
 	github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 // indirect
 	github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 // indirect
 	github.com/chainreactors/parsers v0.0.0-20260608085142-3d2c51baa8fe // indirect
@@ -292,7 +290,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.0 // indirect
-	github.com/tetratelabs/wazero v1.11.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tidwall/btree v1.6.0 // indirect
 	github.com/tidwall/buntdb v1.3.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -323,7 +321,7 @@ require (
 	github.com/ysmood/goob v0.4.0 // indirect
 	github.com/ysmood/got v0.40.0 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
-	github.com/yuin/goldmark v1.7.4 // indirect
+	github.com/yuin/goldmark v1.7.4
 	github.com/yuin/goldmark-emoji v1.0.3 // indirect
 	github.com/zmap/rc2 v0.0.0-20190804163417-abaa70531248 // indirect
 	github.com/zmap/zcrypto v0.0.0-20240803002437-3a861682ac77 // indirect
@@ -349,8 +347,8 @@ require (
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
-replace github.com/wasilibs/go-re2 => github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6
+replace github.com/wasilibs/go-re2 => github.com/chainreactors/native v1.11.1-native.1
 
 replace github.com/projectdiscovery/katana => github.com/chainreactors/katana v1.7.0-aiscan.1
 
-replace github.com/chainreactors/aiscan/aop => ./aop
+replace github.com/chainreactors/cyber/aop => ./aop

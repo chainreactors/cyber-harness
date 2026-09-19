@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chainreactors/aiscan/agent/inbox"
-	providerpkg "github.com/chainreactors/aiscan/agent/provider"
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent/inbox"
+	providerpkg "github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -239,10 +239,15 @@ func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.Delegat
 
 func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
 	return NewAgent(Config{
-		Loop:                  cfg.Loop,
-		Provider:              cfg.Provider,
-		Tools:                 cfg.Tools,
-		Model:                 cfg.Model,
+		Loop:     cfg.Loop,
+		Provider: cfg.Provider,
+		Tools:    cfg.Tools,
+		Model:    cfg.Model,
+		// Children inherit either the explicit prompt or its run-scoped resolver,
+		// along with the environment, tool, and skill context it renders.
+		SystemPrompt:          cfg.SystemPrompt,
+		SystemPromptFn:        cfg.SystemPromptFn,
+		PromptResolver:        cfg.PromptResolver,
 		MaxTokens:             cfg.MaxTokens,
 		ContextWindow:         cfg.ContextWindow,
 		Logger:                cfg.Logger,
@@ -263,13 +268,13 @@ func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ty
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state string, detail proto.Message, turnID ...string) {
+func (a *Agent) EmitStatus(state string, detail proto.Message, turnID string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
 	if em != nil {
-		if len(turnID) > 0 && turnID[0] != "" {
-			em = em.turn(turnID[0])
+		if turnID != "" {
+			em = em.turn(turnID)
 		}
 		em.status(state, detail)
 	}

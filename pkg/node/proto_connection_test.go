@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"io"
 	"net"
 	"net/http"
@@ -18,23 +20,25 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	execpb "github.com/chainreactors/aiscan/aop/exec"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	trafficpb "github.com/chainreactors/aiscan/aop/traffic"
-	"github.com/chainreactors/aiscan/cmd/harness"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/eventbus"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	coretool "github.com/chainreactors/aiscan/core/tool"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	proxytool "github.com/chainreactors/aiscan/tools/proxy"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	execpb "github.com/chainreactors/cyber/aop/exec"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	trafficpb "github.com/chainreactors/cyber/aop/traffic"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/eventbus"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/aopws"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/pkg/commands"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	"github.com/chainreactors/cyber/pkg/hosttest"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
+	proxytool "github.com/chainreactors/cyber/tools/proxy"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -45,7 +49,7 @@ var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { re
 
 func testToolExecutor(t *testing.T, tools ...coretool.Tool) coretool.Executor {
 	t.Helper()
-	return harness.Tools(t, tools...)
+	return hosttest.Tools(t, tools...)
 }
 
 func (singleDeliveryProbeTool) Name() string { return "single_delivery_probe" }
@@ -118,7 +122,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 	cc := connectionConfig{
 		Name:     "runner-1",
 		NodeID:   "runner-1",
-		Registry: commands.NewRegistry(nil),
+		Registry: commands.NewRegistry(),
 		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
@@ -155,7 +159,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(nil), Logger: logger, Agent: panicAgentEndpoint{}},
+		connectionConfig{Registry: commands.NewRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
 		send, &operationsMu, operations, make(map[string]time.Time),
@@ -190,15 +194,13 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 	canceled := false
 	operations["op-1"] = func() { canceled = true }
 
-	handleAgentCoreMessage(
-		context.Background(),
-		nil,
-		&aop.Envelope{Id: "cancel-1"},
-		&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}},
-		func(string, protobuf.Message) { t.Error("cancel must not answer on the wire") },
-		func(*aop.Envelope) { t.Error("cancel must not reach the runtime") },
+	intercepted, err := interceptCancelOperation(
+		aop.MustWrap("cancel-1", "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: "op-1"}}}),
 		&operationsMu, operations, sealed,
 	)
+	if err != nil || !intercepted {
+		t.Fatalf("intercept cancel: intercepted=%v err=%v", intercepted, err)
+	}
 
 	if !canceled {
 		t.Fatal("cancel did not reach the operation")
@@ -213,19 +215,10 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := newTestApp(t, apppkg.Config{
-		SkipEngines: true,
-		Logger:      telemetry.NopLogger(),
-	}, apppkg.AppServices{})
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
 
-	appSet := loadNodeTestApplication(t, ctx, app)
-	defer appSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -426,9 +419,9 @@ func TestFileReadDoesNotDecodePathEncodedRanges(t *testing.T) {
 }
 
 func TestUploadWritesAbsolutePath(t *testing.T) {
-	const filename = "aiscan_test_upload_probe.txt"
+	const filename = "cyber_test_upload_probe.txt"
 	const body = "codex public proof\nkey=appImage/probe"
-	dest := filepath.Join(os.TempDir(), "aiscan-uploads", filename)
+	dest := filepath.Join(os.TempDir(), "cyber-uploads", filename)
 	t.Cleanup(func() { _ = os.Remove(dest) })
 	result, err := (&chatAgentHandler{}).Upload(&filepb.UploadRequest{SessionId: "sess-1", Filename: filename, Data: []byte(body)})
 	if err != nil {
@@ -502,7 +495,7 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 		done <- serveAgentConnection(context.Background(), connectionConfig{
 			Name:     "runner-1",
 			NodeID:   "runner-1",
-			Registry: commands.NewRegistry(nil),
+			Registry: commands.NewRegistry(),
 			Agent:    newSilentAgentEndpoint(),
 			Menu:     func() []*types.CommandSpec { return nil },
 		}, telemetry.NopLogger(), stream)
@@ -583,7 +576,12 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 	if response != nil && response.Body != nil {
 		response.Body.Close()
 	}
-	stream, err := newWebSocketEnvelopeStream(wsConn, false)
+	stream, err := aopws.New(context.Background(), wsConn, aopws.Options{
+		Encoding:     aopws.Binary,
+		WriteTimeout: websocketWriteWait,
+		PingInterval: websocketPingPeriod,
+		PongTimeout:  websocketPongWait,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +600,7 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 	}
 }
 
-func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
+func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -613,34 +611,23 @@ func TestWebSocketStreamTimesOutSilentPeer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	stream, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	stream, err := dialProtoWebSocket(ctx, connectionConfig{ServerURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
-	if err := stream.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
-		t.Fatal(err)
-	}
 	_, err = stream.Recv()
-	var netErr net.Error
-	if !errors.As(err, &netErr) || !netErr.Timeout() {
-		t.Fatalf("Recv error = %v, want timeout", err)
+	if err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("Recv error = %v, context error = %v; want context deadline closure", err, ctx.Err())
 	}
-}
-
-func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.Resource) *extension.Set {
-	return harness.AppLoad(t, ctx, application)
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := newTestApp(t, apppkg.Config{SkipEngines: true, Logger: telemetry.NopLogger()}, apppkg.AppServices{})
-	appSet := loadNodeTestApplication(t, t.Context(), app)
-	defer appSet.Close(context.Background())
-	rt, err := agentext.New(agentext.Config{Application: app.App, Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rtSet := harness.Set(t, extension.Entry{ID: "rt", Extension: rt})
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
+	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -651,8 +638,16 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 			OpenSessionRequest: &aop.OpenSessionRequest{SessionId: "embedded"},
 		}}),
 	}
-	err = serveAgentConnection(context.Background(), connectionConfig{
-		Name: "embedded", NodeID: "embedded", Registry: app.App.Commands, Agent: rt.Runtime(), Control: rt.Runtime(),
+	err := serveAgentConnection(context.Background(), connectionConfig{
+		Name: "embedded", NodeID: "embedded", Registry: rt.Runtime().CommandRegistry(), Agent: rt.Runtime(),
+		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
+			for _, binding := range rt.Runtime().NamespaceBindings() {
+				if err := binding.Register(mux); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
 	}, telemetry.NopLogger(), stream)
 	if err != io.EOF {
 		t.Fatalf("connection: %v", err)
@@ -718,9 +713,13 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 	defer hub.Close(context.Background())
 	cc := connectionConfig{
 		Name: "runner-1", NodeID: "runner-1",
-		Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint(),
-		RegisterResourceNamespaces: func(mux *aop.NamespaceMux) error {
-			return proxytool.RegisterTrafficNamespace(mux, hub.ProxyHub)
+		Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint(),
+		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
+			binding, err := proxytool.TrafficNamespace(hub.ProxyHub)
+			if err != nil {
+				return err
+			}
+			return binding.Register(mux)
 		},
 	}
 	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {

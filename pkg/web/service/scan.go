@@ -13,13 +13,14 @@ import (
 	"runtime/debug"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/output"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	managementapi "github.com/chainreactors/aiscan/pkg/web/api"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/commands"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -144,20 +145,9 @@ func (s *Service) CancelScan(id string) error {
 	}
 	s.hub.BroadcastScan(managementapi.ScanFailedEvent(id, "scan canceled", true), true)
 	if nodeID != "" && s.agents != nil {
-		_ = s.agents.CancelTask(nodeID, id)
+		_ = s.agents.CancelTask(nodeID, id, "")
 	}
 	return nil
-}
-
-// GetReport returns the report frozen when the scan completed. Canonical scan
-// artifacts live in the libcstx SCO store, not inside Scan.
-func (s *Service) GetReport(ctx context.Context, id, lang string) (string, error) {
-	_ = lang
-	scan, err := s.GetScan(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	return scan.Report, nil
 }
 
 func (s *Service) runScan(runCtx context.Context, scanID string) {
@@ -238,13 +228,13 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
 	var ok bool
 	select {
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(agent.NodeID(), scan.Id)
+		_ = s.agents.CancelTask(agent.NodeID(), scan.Id, "")
 		s.finishScanContext(scan, ctx.Err())
 		return
 	case res, ok = <-resultCh:
 	}
 	if ctx.Err() != nil {
-		_ = s.agents.CancelTask(agent.NodeID(), scan.Id)
+		_ = s.agents.CancelTask(agent.NodeID(), scan.Id, "")
 		s.finishScanContext(scan, ctx.Err())
 		return
 	}
@@ -308,13 +298,8 @@ func (s *Service) finishScanContext(scan *types.Scan, err error) {
 }
 
 func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, error) {
-	nodes, err := s.store.ListSCONodesByScanID(ctx, scan.Id, "", 100000)
-	if err != nil {
-		return false, fmt.Errorf("load scan SCO facts: %w", err)
-	}
 	next := proto.CloneOf(scan)
 	next.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
-	next.Report = managementapi.BuildMarkdownReport(scan.Target, scan.Mode, nodes, managementapi.DefaultReportLang)
 	next.Error = ""
 	next.UpdatedAt = nowProto()
 	changed, err := s.store.TransitionScan(ctx, next, types.ScanStatus_SCAN_STATUS_RUNNING)
@@ -357,14 +342,14 @@ func scanArgsForScan(scan *types.Scan) []string {
 }
 
 func (s *Service) executeScan(ctx context.Context, args []string, stream io.Writer) (string, error) {
-	app, release := s.acquireApp()
+	runtime, release := s.acquireRuntime()
 	defer release()
-	if app == nil || app.Bash == nil {
-		return "", fmt.Errorf("aiscan runtime is not ready")
+	if runtime == nil || runtime.Bash() == nil {
+		return "", fmt.Errorf("cyber runtime is not ready")
 	}
-	bash := app.Bash
+	bash := runtime.Bash()
 	var text strings.Builder
-	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), commands.BashExecOptions{
+	if _, err := bash.RunForeground(ctx, commands.JoinCommandLine("scan", args), terminaltool.BashExecOptions{
 		OnOutput: func(data []byte) {
 			_, _ = text.Write(data)
 			if stream != nil {

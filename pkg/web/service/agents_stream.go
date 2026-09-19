@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
-	web "github.com/chainreactors/aiscan/pkg/web"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
+	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -60,7 +60,6 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		runtime:      runtimeInfo,
 		status:       &aop.AgentStatus{},
 		stats:        &aop.AgentStats{},
-		done:         make(chan struct{}),
 	}
 	namespaceMux, err := p.newAgentNamespaceMux(ctx, agent)
 	if err != nil {
@@ -93,7 +92,6 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 	p.register(agent)
 	defer func() {
 		p.unregister(agent)
-		close(agent.done)
 	}()
 
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, send aop.SendFunc) error {

@@ -1,262 +1,101 @@
-# Scan 模式详解
+# 安全扫描
 
-`scan` 是 aiscan 最常用的入口命令。它将多个扫描引擎编排为一条事件驱动的流水线，自动完成从端口发现到漏洞检测的全流程，无需 LLM 即可运行。本文档详细说明其内部流程、参数、AI 增强能力和输出格式。
+[使用者指南](user/README.md) · 前一篇：[Skills 与知识](user/knowledge.md) · 下一篇：[Web 与协作](user/web.md)
 
----
+`scan` 将多个扫描引擎连接成规则驱动的流水线。从输入目标开始，发现的服务、Web 资产和指纹决定后续工作。规则扫描无需模型；需要 AI 时，可以对发现做后续验证或搜索补充情报。
 
-## 目录
+## 开始扫描
 
-- [扫描流程](#扫描流程)
-- [扫描模式](#扫描模式)
-- [scan 参数参考](#scan-参数参考)
-- [AI 增强扫描](#ai-增强扫描)
-- [输出格式](#输出格式)
-- [示例](#示例)
+对你有权测试的本地靶场执行：
 
----
+```sh
+aiscan scan -i http://127.0.0.1:3000 --verify=off -o lab-scan.jsonl
+```
+
+URL 直接进入 Web 探测；IP、IP:port 和 CIDR 会按目标类型进入服务发现或相应探测。可以重复 `-i`，或用 `-l targets.txt` 从每行一个目标的文件读取。扫描会产生主动探测，也可能包含认证检测。
+
+执行时观察发现与错误，完成后读取汇总。没有发现可能来自目标不可达、规则未匹配或引擎不可用，不能直接解释为不存在风险。
 
 ## 扫描流程
 
-scan 采用 capability 驱动的事件流水线架构。各扫描阶段并非简单的顺序调用，而是通过事件队列连接——上游产生的发现自动触发下游对应的处理逻辑。
+流水线将工作拆成接受特定事件的能力。gogo 发现 HTTP 服务后，spray 探测页面与指纹；可认证服务进入弱口令检测；指纹再用于选择 neutron POC。爬取结果也可以进入后续探测。输入 URL 可以直接进入 Web 分支，无需重新遍历完整端口发现。
 
-```
-输入目标
-  │
-  ▼
-gogo 端口发现          ← 主机存活 + 端口 + 服务 + banner + 指纹
-  │
-  ├─ 发现 HTTP 服务 ──▶ spray Web 探测/指纹/插件/爬取
-  ├─ 发现可认证服务 ──▶ zombie 弱口令检测
-  │
-  ▼
-spray 识别指纹 ────────▶ neutron 按指纹选择 POC 模板
-  │
-  ▼
-可选：AI 验证 / sniper 漏洞搜索 / deep 动态测试
-  │
-  ▼
-输出结果（流式终端 / JSON Lines / Markdown 报告）
+```mermaid
+flowchart TD
+    Input[输入目标] --> Discovery[服务发现]
+    Input --> Web[Web 探测与爬取]
+    Discovery --> Web
+    Discovery --> Auth[认证检测]
+    Web --> Auth
+    Discovery --> POC[指纹匹配与 POC]
+    Web --> POC
+    Auth --> Results[发现与原始产物]
+    POC --> Results
+    Web --> Results
+    Results --> AI[可选后续验证与情报搜索]
 ```
 
-### 事件驱动机制
+各阶段通过事件队列连接，可以交错执行。流水线建立时检查路由是否形成有向无环图，运行时按路由与目标键去重；同一目标仍可被不同能力处理。结束需要等待队列和在途工作全部排空，而不是第一个引擎返回就退出。
 
-各阶段之间的关键衔接逻辑：
-
-| 上游事件 | 下游动作 |
-| --- | --- |
-| gogo 发现 HTTP 端口 | 目标进入 spray 进行 Web 探测和指纹识别 |
-| gogo 发现 SSH/FTP/MySQL 等可认证服务 | 目标进入 zombie 进行弱口令检测 |
-| spray 识别到 Web 指纹（如 nginx、tomcat） | neutron 根据指纹自动筛选并执行匹配的 POC 模板 |
-| neutron/spray 产生漏洞发现 | 若启用 `--verify`，触发 AI 验证 |
-| spray 识别到指纹 | 若启用 `--sniper`，触发公开 CVE/Exploit 搜索 |
-| spray 发现 Web 资产 | 若启用 `--deep`，触发 AI 动态测试 |
-
-这种事件驱动设计意味着 scan 的行为会随目标的实际情况自适应——只有发现了 HTTP 服务才会做 Web 探测，只有识别到指纹才会做对应 POC 检测。
-
----
+引擎是否安装、资源是否加载都会影响可用能力。需要观察调度时使用 `--trace`；`--debug` 还启用底层扫描器日志。装配与路由实现分别见[扫描能力](../tools/scan/capability.go)和[流水线](../tools/scan/pipeline/pipeline.go)。
 
 ## 扫描模式
 
-scan 提供 `quick` 和 `full` 两种预设模式，通过 `--mode` 参数选择。
+默认 `quick` 包含服务发现、Web 探测、爬取、认证检测及按指纹选择的 POC。`full` 增加 common、bak、active 插件和默认字典路径探测，并将默认端口范围从资源定义的 `all` 改为 `-` 全端口。更大范围意味着更多请求和更长时间。
 
-### quick 模式（默认）
+```sh
+aiscan scan -i 127.0.0.1 --ports 80,443,3000 --verify=off
+aiscan scan -i http://127.0.0.1:3000 --mode full --verify=off
+```
 
-面向快速暴露面发现，覆盖主要风险点，适合日常巡检和初步评估。
+扫描模式 full 和发行版 aiscan-full 是两个选择。完整发行版另外编译 Katana：quick 加入普通爬取，full 再加入浏览器深度爬取。浏览器爬取仍依赖可用的浏览器运行环境，不能等同于 `--deep` 的 AI 动态测试。
 
-| Capability | 说明 |
-| --- | --- |
-| `gogo_portscan` | 端口扫描，默认 ports=all |
-| `spray_check` | Web 基础探测和 HTTP 指纹识别 |
-| `core_web` | Web 结果关联分析 |
-| `spray_plugins` | 合并执行 common、bak、active 插件探测 |
-| `spray_crawl` | 网页爬取（depth 2） |
-| `zombie_weakpass` | 弱口令检测 |
-| `neutron_poc` | 基于指纹的 POC 检测 |
+## 规则与资源
 
-### full 模式
+端口集合、指纹、字典和 POC 影响实际覆盖范围。`--ports` 可以指定资源中的端口集合或明确列表；`--dict`、`--rule` 和 `--word` 调整 Web 路径生成。`--user`、`--pwd` 和 `--zombie-top` 调整认证检测的候选凭据。
 
-在 quick 基础上增加路径爆破和更深层的探测，适合需要更全面覆盖的场景。
+neutron 默认根据识别到的指纹选择模板，并受每个指纹的模板上限约束。`--broad-poc` 允许没有指纹匹配时也运行模板，会扩大工作量。扫描结论应保留所用资源和范围，方便后续复核。具体参数见[扫描参数参考](reference.md#scan-参数)，资源配置见 [Cyberhub](reference.md#cyberhub-资源)。
 
-| Capability | 说明 |
-| --- | --- |
-| （包含 quick 的全部 capability） | |
-| `spray_brute` | 默认字典路径爆破 |
+## 并发与超时
 
-### 对比
+`--thread` 是各引擎容量的缩放基准，不是所有活动连接的总硬上限。当前分配为 gogo 80%、spray 10%、zombie 10%、neutron 10%，合计 110%；各能力还依据单次调用的线程数计算 worker 数量。
 
-| 维度 | quick | full |
-| --- | --- | --- |
-| 端口范围 | all | all（`-` 全端口） |
-| spray 插件 | common, bak, active | common, bak, active |
-| 路径爆破 | 不执行 | 默认字典 |
-| 爬取深度 | depth 2 | depth 2 |
-| 弱口令 | 执行 | 执行 |
-| POC | 基于指纹 | 基于指纹 |
-| 耗时 | 较快 | 较长（增加路径爆破） |
+例如默认基准 1000 对应 gogo 容量 800、spray 100。gogo 单次默认最多 500 线程，spray 单次默认最多 20；实际活动量还取决于就绪目标和引擎。需要降低压力时同时缩小目标范围、并发与探测范围，不要把 `--thread 1000` 当作连接数严格不超过 1000 的保证。
 
----
-
-## scan 参数参考
-
-| 参数 | 说明 | 默认值 |
-| --- | --- | --- |
-| `-i, --input` | 目标（IP/IP:port/CIDR/URL），可重复 | |
-| `-l, --list` | 从文件读取目标，每行一个 | |
-| `--mode` | 扫描模式：`quick` 或 `full` | `quick` |
-| `--thread` | 总并发预算，自动按比例分配给各引擎 | `1000` |
-| `--timeout` | 每个探测的超时秒数 | `5` |
-| `--ports` | gogo 端口集合（当前资源的 `top1`/`top2`/`top3`/`all`/`-`/自定义） | quick: `all` |
-| `--dict` | spray 字典文件，可重复 | |
-| `--rule` | spray 变形规则文件，可重复 | |
-| `--word` | spray 词汇生成 DSL 表达式 | |
-| `--default-dict` | 使用 spray 内置默认字典 | |
-| `--advance` | 启用 spray advance 插件 | |
-| `--user` | 弱口令用户名，可重复 | |
-| `--pwd` | 弱口令密码，可重复 | |
-| `--zombie-top` | 使用 top N 默认弱口令组合 | |
-| `--max-neutron-per-finger` | 每个指纹最大 neutron 模板数 | `20` |
-| `--broad-poc` | 无指纹匹配时也运行 POC 模板 | |
-| `--verify` | AI 验证模式（详见 [AI 增强扫描](#ai-增强扫描)） | `auto` |
-| `--sniper` | 对发现的指纹搜索公开 CVE/Exploit | |
-| `--deep` | 对发现的 Web 资产进行 AI 动态测试 | |
-| `-j, --json` | JSON Lines 输出 | |
-| `--report` | Markdown 报告输出 | |
-| `-o, --output` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件 | |
-| `-F, --view` | 读取并渲染 AOP ProtoJSONL | |
-| `--view-format` | `--view` 的渲染格式：`terminal` 或 `markdown` | `terminal` |
-| `-f, --file` | `--view` 的渲染文件；不参与实时事件持久化 | |
-| `--trace` | 显示内部 pipeline 事件流（调试用） | |
-| `--no-color` | 禁用终端颜色 | |
-| `--debug` | 启用 trace + 底层扫描器 debug 日志 | |
-
-### 并发分配策略
-
-`--thread` 设置的是总预算上限，各引擎按比例获得自己的并发额度：
-
-| 引擎 | 分配比例 | 默认并发 |
-| --- | --- | --- |
-| gogo | 80% | 500/次 |
-| spray | 10% | 20/次 |
-| zombie | 10% | 100/次 |
-| neutron | 10% | - |
-
----
+`--timeout` 是单个探测的超时秒数，默认 5，不限制整条流水线的总时长。Agent 通过 bash 启动扫描时，还会受到该工具的运行期限约束，见[工具与环境](user/tools.md)。
 
 ## AI 增强扫描
 
-scan 提供三种 AI 增强能力，均需要配置 LLM Provider（参考 [参考手册](reference.md)）。这些能力可以单独使用，也可以组合使用。
+显式使用 `--verify=low|medium|high|critical` 时，CLI 要求可用的模型，规则流水线完成后对达到阈值的发现运行验证。验证结果应与原始发现一起阅读；模型判断无法替代证据。
 
-### --verify：AI 验证
+```sh
+aiscan scan -i http://127.0.0.1:3000 --verify=high
+aiscan scan -i http://127.0.0.1:3000 --verify=off --sniper
+```
 
-对扫描发现的漏洞和风险进行 LLM 主动验证，减少误报。验证级别控制哪些优先级的发现需要被验证。
+`--sniper` 在流水线之后针对已识别指纹搜索公开漏洞情报，也要求模型。已知 CVE 与目标实际受影响是两个判断，需要结合版本、配置和验证结果。
 
-| 值 | 说明 |
-| --- | --- |
-| `off` | 关闭验证（CLI 显式传 `--verify` 时的默认值） |
-| `low` | 验证所有优先级的发现 |
-| `medium` | 验证 medium 及以上优先级 |
-| `high` | 验证 high 及以上优先级 |
-| `critical` | 仅验证 critical 优先级 |
-| `auto` | 编译时默认值；等效于 `high`，但 LLM 不可用时自动跳过 |
+当前源码有几个与旧文档不同的边界。默认配置中的 `auto` 允许 Provider 不可用，但 CLI 会移除这个参数，扫描命令没有进一步将其转换为 high 阈值；因此目前不能承诺“默认自动验证 high”。显式传 `--verify=auto` 还会进入要求模型的启动路径。需要确定性地启用或关闭验证，请明确指定级别或 off。
 
-**auto 行为说明：**
-
-当命令行未显式传入 `--verify` 时，aiscan 使用编译时固化的 `auto` 策略。`auto` 等效于 `high` 级别验证，但如果 LLM Provider 未配置或不可用，验证阶段会被静默跳过，不影响扫描主体流程的正常运行。这意味着即使没有 LLM，scan 依然可以完整运行。
-
-### --sniper：漏洞情报搜索
-
-对扫描过程中识别到的指纹（如 nginx、tomcat、spring 等），通过 web search 搜索已知的公开 CVE 和 Exploit 信息。搜索结果会作为补充情报输出，帮助评估目标的潜在风险。
-
-### --deep：AI 动态测试
-
-对发现的 Web 资产和指纹进行更深层的 AI 驱动动态测试。与 `--verify`（验证已有发现）不同，`--deep` 会主动尝试发现新的安全问题。
-
-### 组合使用
-
-三种 AI 能力可以自由组合。更多组合示例见 [示例](#示例) 一节。
-
----
+`--deep` 仍在帮助和启动选项中，但当前 scan 执行路径没有调用 AI deep 阶段；不应将传入该参数当作已经完成动态测试。它也不控制完整发行版的 Katana 深度爬取。实现依据是[模式选择](../pkg/runner/scanner.go)、[启动入口](../pkg/runner/modes.go)和[扫描执行](../tools/scan/command.go)。
 
 ## 输出格式
 
-### 终端流式输出（默认）
+终端默认随工作推进显示发现，结束时显示汇总。`--no-color` 关闭颜色；需要保存终端文本时使用 shell 重定向。
 
-默认输出为带颜色的结构化文本，边扫描边实时输出。每行是一个事件，前缀 `[capability.子类型]` 标识来源，指纹统一为 `[name]` 短格式：
+`-j` 在扫描完成后输出 gogo 与 spray 的原生 JSON Lines，适合消费这两类结果的程序。它不是全部漏洞、弱口令和验证结果的统一导出格式，也不是可以直接恢复的会话历史。
 
-```
-[gogo_portscan.web] http://192.168.1.10:80 200 http "Welcome" [nginx]
-[gogo_portscan.web] http://192.168.1.10:8080 200 http "Tomcat" [tomcat]
-[spray_plugins.word] http://192.168.1.10/admin 200 532 41ms "Admin Panel" [nginx]
-[zombie_weakpass] ssh://192.168.1.10:22 admin:admin123
-[neutron_poc] http://192.168.1.10:8080 [CVE-2021-42013] critical
-[scan.summary] completed inputs 1 services 3 web 2 probes 15 fingerprints 2 weakpass 1 vulns 1 ...
+`-o` 保存实际发出的 AOP 事件和结构化产物到新文件。回放只读取记录，不重复探测：
+
+```sh
+aiscan -F lab-scan.jsonl
+aiscan -F lab-scan.jsonl --view-format markdown -f lab-scan.md
 ```
 
-### JSON Lines（-j）
+`-f` 是回放的渲染文件。当前 scan 参数解析器没有 `--report`，需要 Markdown 时使用上述回放渲染入口；得到的是事件记录的可读版本，不是额外一次模型审计报告。事件、原生产物与 Web 资产的关系见[事件与数据](architecture/data.md)。
 
-每行一个 JSON 对象，适合管道处理和程序化分析。使用 `-j` 时关闭流式输出，等待扫描完成后一次性输出。
+## 与 Agent 配合
 
-### Markdown 报告（--report）
+已知要执行哪些探测时，直接扫描可以固定范围与参数。需要根据结果继续调查时，可以打开 Agent，让模型结合工具与知识推进；单扫描器的 `--ai` 入口见 [Agent 指南](agent.md#agent-与扫描)。
 
-生成结构化的 Markdown 报告，包含扫描摘要、发现列表和风险评估。同样等待扫描完成后一次性输出。
-
-### 事件输出（-o/--output）
-
-将 Agent、Scan、观测和结构化 tool artifact 的 canonical AOP 事件流写入一个新建的 ProtoJSONL 文件。该文件不会覆盖已有文件。终端文本、scan 原生 `-j` 输出和 AOP 事件持久化是不同输出面。
-
-### 回放扫描记录（-F/--view）
-
-使用 `-o` 保存的 JSONL 扫描记录可以通过 `-F` 回放：
-
-```bash
-aiscan scan -i 192.168.1.0/24 -o scan_result.jsonl          # 保存事件
-aiscan -F scan_result.jsonl                                # 终端回放
-aiscan -F scan_result.jsonl --view-format markdown          # 转 Markdown 到 stdout
-aiscan -F scan_result.jsonl --view-format markdown -f report.md
-```
-
----
-
-## 示例
-
-以下示例展示 scan 的进阶用法。基础用法参见 [README](../README.md)。
-
-```bash
-# 自定义端口范围
-aiscan scan -i 10.0.0.0/24 --ports top3
-aiscan scan -i 10.0.0.0/24 --ports 80,443,8080,8443,9090
-aiscan scan -i 10.0.0.10 --ports -
-
-# 自定义字典和规则
-aiscan scan -i http://target.example --dict /path/to/wordlist.txt
-aiscan scan -i http://target.example --dict paths.txt --dict backup.txt --rule rules.txt
-aiscan scan -i http://target.example --default-dict
-
-# 自定义弱口令
-aiscan scan -i 10.0.0.0/24 --user admin --user root --pwd password --pwd admin123
-aiscan scan -i 10.0.0.0/24 --zombie-top 10
-
-# 无指纹时也运行 POC / 增加 POC 上限
-aiscan scan -i http://target.example --broad-poc
-aiscan scan -i http://target.example --max-neutron-per-finger 50
-
-# 输出与回放
-aiscan scan -i 10.0.0.0/24 -j
-aiscan scan -i 10.0.0.0/24 -o result.jsonl
-aiscan -F result.jsonl
-aiscan -F result.jsonl --view-format markdown -f report.md
-
-# 并发与超时
-aiscan scan -i 10.0.0.0/16 --thread 200
-aiscan scan -i 10.0.0.0/24 --timeout 10
-
-# 调试
-aiscan scan -i 192.168.1.1 --trace
-aiscan scan -i 192.168.1.1 --debug
-aiscan scan -i 192.168.1.0/24 --no-color > scan.log
-
-# AI 增强组合
-aiscan scan -i http://target.example --mode full --verify=high --sniper --deep --report
-aiscan scan -i http://target.example --verify=critical
-aiscan scan -i http://target.example --verify=off
-```
+无论采用哪种入口，都应分别保存扫描发现、验证结论和未覆盖范围。原始证据与最终自然语言回答承担不同职责。

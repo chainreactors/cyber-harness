@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/telemetry"
+	"github.com/chainreactors/cyber/core/telemetry"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
 	"github.com/chainreactors/utils/parsers"

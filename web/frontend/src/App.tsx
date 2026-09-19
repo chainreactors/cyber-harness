@@ -14,7 +14,7 @@ import BrandLogo from './components/brand/BrandLogo'
 const IOAConsole = lazy(() => import('./components/IOAConsole'))
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider } from '@cyber/theme'
-import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, listSCONodes, logout } from './api'
+import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, logout } from './api'
 import type { IOAMessage, IOANode, LLMProviderView, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
 import type { MentionPopupApi } from './viewer'
@@ -23,8 +23,9 @@ import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
 import type { IOAConsoleTarget } from './lib/ioa-navigation'
 import { cn } from '@cyber/theme'
+import { listSCONodes, subscribeCSTXChanges, syncCSTXArtifacts } from './lib/cstx-runtime'
 
-const sidebarStorageKey = 'aiscan-sidebar-open'
+const sidebarStorageKey = 'cyber-sidebar-open'
 
 const EMPTY_SEED = { text: '', nonce: 0 }
 type ToolPanel = 'assets' | 'ioa' | 'agents' | 'tools' | 'settings'
@@ -35,7 +36,7 @@ type ToolPanel = 'assets' | 'ioa' | 'agents' | 'tools' | 'settings'
 // otherwise every reload snaps back to the light default.
 function getInitialTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined') return 'light'
-  const v = window.localStorage.getItem('aiscan-theme')
+  const v = window.localStorage.getItem('cyber-theme')
   return v === 'dark' || v === 'light' ? v : 'light'
 }
 
@@ -116,9 +117,17 @@ export default function App() {
     } catch { /* non-critical — the hub may be unconfigured or offline */ }
   }, [])
 
-  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [refreshSCONodes, refreshIOA])
+  useEffect(() => {
+    const unsubscribe = subscribeCSTXChanges(() => { void refreshSCONodes() })
+    void syncCSTXArtifacts().then(() => refreshSCONodes()).catch(() => {})
+    void refreshIOA()
+    return unsubscribe
+  }, [refreshSCONodes, refreshIOA])
   // Refresh mentionables when scans finish (timeline changes often signal new results)
-  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [chat.timeline.length, refreshSCONodes, refreshIOA])
+  useEffect(() => {
+    void syncCSTXArtifacts().then(() => refreshSCONodes()).catch(() => {})
+    void refreshIOA()
+  }, [chat.timeline.length, refreshSCONodes, refreshIOA])
 
   const mentionables = useMemo(() => assetMentionables(scoNodes), [scoNodes])
 
@@ -137,6 +146,9 @@ export default function App() {
   )
 
   const model = serverStatus?.llmModel || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  // Agents that already joined a collaboration space are where a newly connected
+  // node belongs; with none connected there is nothing to align to.
+  const agentSpace = chat.agents.find((a) => a.status?.space)?.status?.space
   const bashToolCount = useMemo(() => chat.agents.reduce(
     (total, agent) => total + agent.commands.filter((command) => command.name.startsWith('!')).length,
     0,
@@ -211,7 +223,7 @@ export default function App() {
   }
 
   return (
-    <ThemeProvider initial={getInitialTheme()} storageKey="aiscan-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
+    <ThemeProvider initial={getInitialTheme()} storageKey="cyber-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
     <TooltipProvider delayDuration={300}>
       <div className="flex h-[100dvh] flex-col overflow-hidden">
         <header className="relative z-[60] flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 pt-safe sm:px-4">
@@ -228,7 +240,7 @@ export default function App() {
               <Menu className="h-4 w-4" />
             </Button>
             <BrandLogo size={22} />
-            <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">AIScan</span>
+            <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">Cyber</span>
             <LLMProfileSwitcher
               profiles={llmProfiles}
               activeProfileID={activeLLMProfile}
@@ -246,7 +258,7 @@ export default function App() {
             }} />
             <AgentsButton count={chat.agents.length} open={activeToolPanel === 'agents'} onClick={handleOpenAgentPanel} />
             <ToolsButton count={bashToolCount} open={activeToolPanel === 'tools'} onClick={() => toggleToolPanel('tools')} />
-            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} />
+            <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} space={agentSpace} />
             {/* Separate workspace nav (assets / IOA / agents / connect) from the
                 account utilities (settings / logout) so the row reads as two groups. */}
             <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
@@ -325,6 +337,7 @@ export default function App() {
         open={activeToolPanel === 'assets'}
         onClose={() => setActiveToolPanel(null)}
         onSendToChat={handleAssetSendToChat}
+        onChanged={refreshSCONodes}
       />
 
       {activeToolPanel === 'ioa' && (
@@ -358,6 +371,8 @@ function LLMProfileSwitcher({
   disabled: boolean
   onChange: (profileID: string) => void
 }) {
+  const { t } = useTranslation('app')
+
   if (profiles.length === 0) {
     return <span className="ml-1 hidden font-mono text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">{fallbackModel}</span>
   }
@@ -365,7 +380,7 @@ function LLMProfileSwitcher({
   return (
     <Select value={activeProfileID || profiles[0].id} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
-        aria-label="Switch LLM profile"
+        aria-label={t('switchLLMProfile')}
         className="ml-1 hidden h-7 w-auto min-w-[120px] max-w-[230px] gap-1 border-0 bg-transparent px-2 font-mono text-[10px] text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground sm:flex"
       >
         <SelectValue placeholder={fallbackModel} />

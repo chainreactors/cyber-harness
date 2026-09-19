@@ -1,0 +1,135 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// buildManifestFile is the tag contract shared with the Makefile and the CI
+// workflows; it is resolved relative to this package directory.
+const buildManifestFile = "../../editions.env"
+
+func readBuildManifest(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.FromSlash(buildManifestFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", buildManifestFile, err)
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("%s: %q is not a KEY=VALUE line", buildManifestFile, line)
+		}
+		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return values
+}
+
+func manifestValue(t *testing.T, values map[string]string, key string) string {
+	t.Helper()
+	value, ok := values[key]
+	if !ok {
+		t.Fatalf("%s does not declare %s", buildManifestFile, key)
+	}
+	return value
+}
+
+func sortedTags(value string) []string {
+	tags := strings.Fields(value)
+	slices.Sort(tags)
+	return tags
+}
+
+func buildSetting(t *testing.T, key string) string {
+	t.Helper()
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("the test binary carries no build info")
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == key {
+			return setting.Value
+		}
+	}
+	return ""
+}
+
+// assertManifestTags compares the tags this test binary was built with against
+// the declared sets for one manifest. It is an exact comparison on purpose: a
+// tag that goes missing does not break a build, it silently stops the files it
+// gates from compiling, so the suites those files carry disappear while CI
+// stays green. Comparing the whole set is the only thing that notices.
+//
+// Two spellings are legitimate: the manifest's full tag set, and the
+// capability-only set the CI suites use, which omits the base policy tags.
+func assertManifestTags(t *testing.T, manifest string) {
+	t.Helper()
+	values := readBuildManifest(t)
+	got := sortedTags(strings.ReplaceAll(buildSetting(t, "-tags"), ",", " "))
+
+	var declared []string
+	for _, suffix := range []string{"_TAGS", "_CAPS_TAGS"} {
+		key := manifest + suffix
+		want := sortedTags(manifestValue(t, values, key))
+		if slices.Equal(got, want) {
+			return
+		}
+		declared = append(declared, key+" = ["+strings.Join(want, " ")+"]")
+	}
+	t.Fatalf("built with tags [%s], which is not the declared %s manifest\n  %s",
+		strings.Join(got, " "), manifest, strings.Join(declared, "\n  "))
+}
+
+// assertManifestCGO checks the declared CGO policy for editions whose compiled
+// feature set requires it. Only record has that constraint; standard and full
+// may be tested with either host setting.
+func assertManifestCGO(t *testing.T, manifest string) { //nolint:unused // called by the full-tag and record-tag files, which the lint build tags exclude
+	t.Helper()
+	want := manifestValue(t, readBuildManifest(t), manifest+"_CGO")
+	if got := buildSetting(t, "CGO_ENABLED"); got != want {
+		t.Fatalf("CGO_ENABLED = %q, want %q for the %s manifest", got, want, manifest)
+	}
+}
+
+// TestBuildManifestIsConsistent covers what editions.env cannot express for
+// itself: the file is read without expansion, so every complete tag set is
+// spelled out and has to be kept in step with the base and capability groups.
+func TestBuildManifestIsConsistent(t *testing.T) {
+	values := readBuildManifest(t)
+	base := sortedTags(manifestValue(t, values, "BASE_TAGS"))
+
+	for _, manifest := range []string{"STANDARD", "FULL", "RECORD"} {
+		full := sortedTags(manifestValue(t, values, manifest+"_TAGS"))
+		caps := sortedTags(manifestValue(t, values, manifest+"_CAPS_TAGS"))
+
+		want := slices.Concat(base, caps)
+		slices.Sort(want)
+		if !slices.Equal(full, want) {
+			t.Errorf("%s_TAGS = [%s], want BASE_TAGS + %s_CAPS_TAGS = [%s]",
+				manifest, strings.Join(full, " "), manifest, strings.Join(want, " "))
+		}
+	}
+
+	// RECORD_TAGS is the widest set, so it is the yardstick for catching a tag
+	// that was misspelled into matching nothing anywhere.
+	widest := sortedTags(manifestValue(t, values, "RECORD_TAGS"))
+	for _, key := range []string{
+		"BASE_TAGS", "STANDARD_CAPS_TAGS", "FULL_CAPS_TAGS", "RECORD_CAPS_TAGS",
+		"STANDARD_TAGS", "FULL_TAGS",
+	} {
+		for _, tag := range sortedTags(manifestValue(t, values, key)) {
+			if !slices.Contains(widest, tag) {
+				t.Errorf("%s contains %q, which no manifest enables", key, tag)
+			}
+		}
+	}
+}

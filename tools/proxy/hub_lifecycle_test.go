@@ -9,7 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/chainreactors/aiscan/core/eventbus"
+	"github.com/chainreactors/cyber/core/eventbus"
 )
 
 func TestHubShutdownReportsStorageFailureOnce(t *testing.T) {

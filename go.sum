@@ -139,10 +139,6 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=
 github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2/go.mod h1:WaHUgvxTVq04UNunO+XhnAqY/wQc+bxr74GqbsZ/Jqw=
-github.com/asticode/go-astiav v0.41.0 h1:HZCQ71lPqRQHHIQ5cShrHEq9HtX0NiWIHm7FZ2Jk+x8=
-github.com/asticode/go-astiav v0.41.0/go.mod h1:GI0pHw6K2/pl/o8upCtT49P/q4KCwhv/8nGLlCsZLdA=
-github.com/asticode/go-astikit v0.42.0 h1:pnir/2KLUSr0527Tv908iAH6EGYYrYta132vvjXsH5w=
-github.com/asticode/go-astikit v0.42.0/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aws/aws-sdk-go-v2 v1.41.7 h1:DWpAJt66FmnnaRIOT/8ASTucrvuDPZASqhhLey6tLY8=
@@ -215,8 +211,6 @@ github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0 h1:cU3sGEODXZs
 github.com/chainreactors/files v0.0.0-20240716182835-7884ee1e77f0/go.mod h1:NSxGNMRWryAyrDzZpVwmujI22wbGw6c52bQOd5zEvyU=
 github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45 h1:wIKAvAPjQUXqAKDYG0UnpLTwn/+fwT7ipwFgNPxz88M=
 github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45/go.mod h1:ba7u/7/I9yV7TvuWj+VV9QYz9NmlLdh6UK9kxRRft+E=
-github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6 h1:FwRFQILG9Q7N4pQ6uSSKEKwMNbea5WcOIscGfj3qaUY=
-github.com/chainreactors/go-re2 v1.11.1-0.20260803043001-2e8338def4c6/go.mod h1:4qC68vqWSuPTct3spuTrWBqCpm00mQ707JKLS1izVjI=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744 h1:5Bj73ddSftvWEgjo3dEOUis1CuwPaX8JsSAIZCujfxE=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744/go.mod h1:Em8DiV1Rh59FCd9zN4RQBi3RnUt9yPWD/oxPEPTyXIk=
 github.com/chainreactors/ioa v0.1.2-0.20260914080230-0fff59a906db h1:7yRkOKWklK/sABXbqGJqUqM4s/3bckzjDo6o8dGME5g=
@@ -227,6 +221,8 @@ github.com/chainreactors/libcstx/go v0.4.2-0.20260915062605-a4bd085cbb12 h1:LhIf
 github.com/chainreactors/libcstx/go v0.4.2-0.20260915062605-a4bd085cbb12/go.mod h1:NckMfaO1f60buIRJKrbWBF4m8qMbJDZtVazvpOY4thE=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc h1:e6rjnU8dmfhAnkFzLp/R5gta0LbFM13L27djxbC/i4I=
 github.com/chainreactors/logs v0.0.0-20260624034259-9aaea4aa52cc/go.mod h1:VrXmYPbNN5AVoo1sc5aeyPVBYqubMdb3KO/tn5rRZpo=
+github.com/chainreactors/native v1.11.1-native.1 h1:A8423ayl6zLIfa5AgWZfVmxeQKmXCuFezw/iS8tRbfw=
+github.com/chainreactors/native v1.11.1-native.1/go.mod h1:2W+7GrrdO4NHv7ITHz8Yy3a1IxzjZCk8JR5zgTprxZs=
 github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6 h1:apEDnJeZ5fe2AaEJHV6TRDldoy2t/d7E1maxmUz2tfU=
 github.com/chainreactors/neutron v0.1.1-0.20260714062907-716c6b167cb6/go.mod h1:zok/CDxut71iw8NQTHKPvy0f+1G5639zr9GgDsXGnOs=
 github.com/chainreactors/neutron/operators/full v0.1.1-0.20260704194031-f57d0a560e32 h1:q14uQiXYcizQqkHraBghJEPzcE5StLQLIWF0HvNFKhY=
@@ -262,8 +258,8 @@ github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873 h1:e
 github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/parsers v0.0.3 h1:3ld7xG5TSvzikVOCkQHjqjHO3otjODwSwHQDkMKbu5o=
 github.com/chainreactors/utils/parsers v0.0.3/go.mod h1:bE/znJWt08n9QOORWsWu0ggB8GWfOg3+dfUMMITmwV4=
-github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059 h1:jnBzt8QOl9ekFKR2sBQsZdaeYUJlpA9PAky/KYmSwjg=
-github.com/chainreactors/utils/pty v0.0.0-20260819053645-5ed8693f0059/go.mod h1:RW1v+8hFMeO9+TJyQ1iIx9Ea37s+B7BaDf9fyJ0OEC4=
+github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2 h1:gqvdOz6JuP3ciqsQQ8IETJRvK7OT0Qnm6368pGjhg0I=
+github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2/go.mod h1:fwBG9qg5mG7LARtlh7Lhz3n1+90CGXW08kX3Vf7nyWA=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5 h1:GB3a4+i5Yb1yO8eg9bTXtQUcttHOEs9KF75yq2a9EU4=
@@ -959,8 +955,8 @@ github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
 github.com/syndtr/goleveldb v1.0.0 h1:fBdIW9lB4Iz0n9khmH8w27SJ3QEJ7+IgjPEwGSZiFdE=
 github.com/syndtr/goleveldb v1.0.0/go.mod h1:ZVVdQEZoIme9iO1Ch2Jdy24qqXrMMOU6lpPAyBWyWuQ=
-github.com/tetratelabs/wazero v1.11.0 h1:+gKemEuKCTevU4d7ZTzlsvgd1uaToIDtlQlmNbwqYhA=
-github.com/tetratelabs/wazero v1.11.0/go.mod h1:eV28rsN8Q+xwjogd7f4/Pp4xFxO7uOGbLcD/LzB1wiU=
+github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
+github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/things-go/go-socks5 v0.0.5 h1:qvKaGcBkfDrUL33SchHN93srAmYGzb4CxSM2DPYufe8=
 github.com/things-go/go-socks5 v0.0.5/go.mod h1:mtzInf8v5xmsBpHZVbIw2YQYhc4K0jRwzfsH64Uh0IQ=
 github.com/tidwall/assert v0.1.0 h1:aWcKyRBUAdLoVebxo95N7+YZVTFF/ASTr7BN4sLP6XI=

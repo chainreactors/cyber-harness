@@ -10,7 +10,6 @@ import (
 type Handler struct{ handler http.Handler }
 
 type Route struct {
-	Source  string
 	Pattern string
 	Handler http.Handler
 }
@@ -20,36 +19,36 @@ func NewHandler(auth Auth, static http.Handler, routes ...Route) (handler *Handl
 	if auth == nil {
 		return nil, fmt.Errorf("HTTP authentication policy is required")
 	}
-	source := "auth"
+	pattern := "authentication routes"
 	defer func() {
 		if value := recover(); value != nil {
 			handler = nil
-			err = fmt.Errorf("register HTTP route from %s: %v", source, value)
+			err = fmt.Errorf("register HTTP route %s: %v", pattern, value)
 		}
 	}()
 	mux := http.NewServeMux()
 	auth.RegisterRoutes(mux)
 	selected := []Route{
-		{Source: "web", Pattern: "GET /health", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		{Pattern: "GET /health", Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})},
-		{Source: "web", Pattern: "/api/", Handler: http.NotFoundHandler()},
+		{Pattern: "/api/", Handler: http.NotFoundHandler()},
 	}
 	if static != nil {
-		selected = append(selected, Route{Source: "web.static", Pattern: "/", Handler: static})
+		selected = append(selected, Route{Pattern: "/", Handler: static})
 	}
 	selected = append(selected, routes...)
-	owners := map[string]string{}
+	patterns := map[string]bool{}
 	for _, route := range selected {
-		source = route.Source
-		if strings.TrimSpace(source) == "" || route.Handler == nil {
-			return nil, fmt.Errorf("HTTP route %q requires source and handler", route.Pattern)
+		pattern = route.Pattern
+		if strings.TrimSpace(pattern) == "" || route.Handler == nil {
+			return nil, fmt.Errorf("HTTP route requires pattern and handler")
 		}
-		if previous, exists := owners[route.Pattern]; exists {
-			return nil, fmt.Errorf("duplicate HTTP route %q (sources %s and %s)", route.Pattern, previous, source)
+		if patterns[pattern] {
+			return nil, fmt.Errorf("duplicate HTTP route %q", pattern)
 		}
-		mux.Handle(route.Pattern, route.Handler)
-		owners[route.Pattern] = source
+		mux.Handle(pattern, route.Handler)
+		patterns[pattern] = true
 	}
 	return &Handler{handler: auth.Middleware(mux)}, nil
 }

@@ -49,8 +49,8 @@ func TestMediaHelpersPreserveDataAndURI(t *testing.T) {
 	if media := image.GetMedia(); media.GetKind() != "image" || media.GetResource().GetFilename() != "shot.png" || string(media.GetResource().GetData()) != "png" {
 		t.Fatalf("image media = %+v", media)
 	}
-	video := MediaURI("video", "video/mp4", "capture.mp4", ".aiscan/record/capture.mp4")
-	if media := video.GetMedia(); media.GetKind() != "video" || media.GetResource().GetMediaType() != "video/mp4" || media.GetResource().GetUri() != ".aiscan/record/capture.mp4" {
+	video := MediaURI("video", "video/mp4", "capture.mp4", ".cyber/record/capture.mp4")
+	if media := video.GetMedia(); media.GetKind() != "video" || media.GetResource().GetMediaType() != "video/mp4" || media.GetResource().GetUri() != ".cyber/record/capture.mp4" {
 		t.Fatalf("video media = %+v", media)
 	}
 }

@@ -1,7 +1,7 @@
 package server
 
 import (
-	webservice "github.com/chainreactors/aiscan/pkg/web/service"
+	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	"net/http"
 	"net/http/httptest"
 	"testing"

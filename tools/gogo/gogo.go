@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	toolpb "github.com/chainreactors/aiscan/aop/tool"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	"github.com/chainreactors/aiscan/tools/toolargs"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
 	"github.com/chainreactors/sdk/gogo"
 	"github.com/chainreactors/utils/parsers"
@@ -63,7 +63,7 @@ func (c *Command) QuickReference() string {
   -P port        Print the current runtime port presets
   NOTE: Do not infer top100/top1000/top2k/top12k/full as port presets from another release; use -P port for the current runtime list.
   NOTE: "total ports: 1" means the normalized plan has one port; it does not mean a complete port scan.
-  See aiscan://skills/aiscan/okf/easm/gogo.md for the full command contract.
+  See cyber://skills/cyber/okf/easm/gogo.md for the full command contract.
   -e             Enable exploit/neutron scan
   -v             Enable active fingerprint scan
   Examples:

@@ -9,6 +9,6 @@ import (
 // cannot turn the already observed operation into a different result.
 func Notify[E any](ctx context.Context, r *Registry, point Point[E, struct{}], event E) {
 	if _, err := point.Emit(ctx, r, event); err != nil {
-		slog.WarnContext(ctx, "hook notification failed", "kind", point.Kind, "error", err)
+		slog.WarnContext(ctx, "hook notification failed", "kind", point.Name(), "error", err)
 	}
 }

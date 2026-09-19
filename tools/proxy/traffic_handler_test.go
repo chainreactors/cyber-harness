@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	aop "github.com/chainreactors/cyber/aop"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
 )
 
 // dispatchTraffic installs one connection-owned namespace and returns every
@@ -15,12 +15,16 @@ func dispatchTraffic(t *testing.T, hub *ProxyHub, msg *traffic.ProtocolMessage) 
 	t.Helper()
 	mux := aop.NewNamespaceMux(t.Context())
 	defer mux.Close(context.Background())
-	if err := RegisterTrafficNamespace(mux, hub); err != nil {
+	binding, err := TrafficNamespace(hub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Register(mux); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	env := aop.MustWrap("req-1", "", msg)
 	var replies []*traffic.ProtocolMessage
-	_, err := mux.Dispatch(env, func(reply *aop.Envelope) error {
+	_, err = mux.Dispatch(env, func(reply *aop.Envelope) error {
 		m, err := aop.Unwrap(reply)
 		if err != nil {
 			return err
@@ -45,10 +49,14 @@ func TestTrafficNamespaceRegistration(t *testing.T) {
 	if handled, err := mux.Dispatch(request, nil); handled || err != nil {
 		t.Fatalf("constructor published namespace: %v %v", handled, err)
 	}
-	if err := RegisterTrafficNamespace(mux, hub); err != nil {
+	binding, err := TrafficNamespace(hub)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RegisterTrafficNamespace(mux, hub); err == nil {
+	if err := binding.Register(mux); err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Register(mux); err == nil {
 		t.Fatal("duplicate namespace installation succeeded")
 	}
 	replies := 0

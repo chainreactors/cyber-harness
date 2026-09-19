@@ -9,17 +9,16 @@ import (
 	"fmt"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	filepb "github.com/chainreactors/aiscan/aop/file"
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	ptypb "github.com/chainreactors/aiscan/aop/pty"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
-	corehooks "github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	toolhooks "github.com/chainreactors/aiscan/core/tool/hooks"
-	"github.com/chainreactors/utils/pty"
+	procbus "github.com/chainreactors/cyber/agent/proc"
+	aop "github.com/chainreactors/cyber/aop"
+	filepb "github.com/chainreactors/cyber/aop/file"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -50,7 +49,6 @@ type Extension struct {
 	file      FileOptions
 	subs      []*corehooks.Subscription
 	snapshots map[string]Snapshot
-	loaded    bool
 	closing   bool
 	closed    bool
 	logger    telemetry.Logger
@@ -58,10 +56,7 @@ type Extension struct {
 
 var _ extension.Extension = (*Extension)(nil)
 
-func New(registry *corehooks.Registry, stream *coreevents.Stream, options Options) (*Extension, error) {
-	if registry == nil || stream == nil {
-		return nil, fmt.Errorf("observe requires shared hooks and AOP stream")
-	}
+func New(options Options) (*Extension, error) {
 	kinds := make(map[Kind]bool, len(options.Kinds))
 	for _, kind := range options.Kinds {
 		switch kind {
@@ -83,7 +78,7 @@ func New(registry *corehooks.Registry, stream *coreevents.Stream, options Option
 		logger = telemetry.NopLogger()
 	}
 	return &Extension{
-		hooks: registry, events: stream, kinds: kinds, file: fileOptions,
+		kinds: kinds, file: fileOptions,
 		snapshots: make(map[string]Snapshot), logger: logger,
 	}, nil
 }
@@ -94,13 +89,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e.closed || e.closing {
 		return fmt.Errorf("observe is closed")
 	}
-	if e.loaded {
-		return nil
-	}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	e.loaded = true
+	registry, err := extension.Use[*corehooks.Registry](scope)
+	if err != nil {
+		return err
+	}
+	stream, err := extension.Use[*coreevents.Stream](scope)
+	if err != nil {
+		return err
+	}
+	e.hooks, e.events = registry, stream
 	const source = "observe"
 	if e.kinds[Tools] {
 		e.subs = append(e.subs,
@@ -209,33 +209,12 @@ func (e *Extension) processCompleted(ctx context.Context, event toolhooks.Proces
 	}
 	if e.kinds[Processes] {
 		if event.Session != nil {
-			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, processSession(event.Session))
+			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle, procbus.SessionToProto(event.Session))
 		} else {
 			e.emitCompleted(ctx, "process", event.Process.Command, event.Lifecycle)
 		}
 	}
 	return struct{}{}, nil
-}
-
-func processSession(value *pty.Info) *ptypb.Session {
-	if value == nil {
-		return nil
-	}
-	result := &ptypb.Session{
-		Id: value.ID, Kind: value.Kind, Name: value.Name, Command: value.Command,
-		Pid: int32(value.PID), ActivitySeq: value.ActivitySeq, OutputBytes: value.OutputBytes,
-		ExitCode: int32(value.ExitCode), State: string(value.State), KillCause: value.KillCause,
-	}
-	if !value.StartedAt.IsZero() {
-		result.StartedAt = timestamppb.New(value.StartedAt)
-	}
-	if !value.LastActivityAt.IsZero() {
-		result.LastActivityAt = timestamppb.New(value.LastActivityAt)
-	}
-	if !value.EndedAt.IsZero() {
-		result.EndedAt = timestamppb.New(value.EndedAt)
-	}
-	return result
 }
 
 func (e *Extension) fileAccess(ctx context.Context, event toolhooks.FileEvent) (struct{}, error) {

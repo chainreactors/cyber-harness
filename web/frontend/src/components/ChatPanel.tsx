@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import i18n from '../i18n'
 import {
   AlertTriangle,
@@ -25,7 +26,7 @@ import {
 import { cn } from '@cyber/theme'
 import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import BrandMark from './brand/BrandMark'
-import { MarkdownContent } from '@/markdown'
+import { CodeBlock, MarkdownContent } from '@/markdown'
 import {
   AssistantResponse,
   ChatPanel as ViewerChatPanel,
@@ -45,6 +46,8 @@ import {
   type AOPEvent,
 } from '@/viewer'
 import { fetchSessionCommands, uploadChatFile } from '../api'
+import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
+import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
 import InstrumentIdle from './InstrumentIdle'
@@ -52,19 +55,10 @@ import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
-const webUserAgent = 'aiscan.web'
+const webUserAgent = 'cyber.web'
 
 function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
   switch (item.kind) {
-    case 'scan_started':
-    case 'scan_progress':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'scan_started',
-        data: { scanID: item.scanID || '', lines: item.scanLines || [] },
-      }
     case 'scan_complete':
       return {
         id: item.id,
@@ -76,14 +70,6 @@ function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
     default:
       return null
   }
-}
-
-// Scan-result markers are persisted as AOP `message` events (role=system with
-// ext metadata.event_type) so they survive reload — but the platform timeline
-// already renders them as scan cards. Drop them from the stream handed to the
-// AOP reducer so they don't also appear as bare "scan complete" bubbles.
-function isPlatformMarkerEvent(event: AOPEvent): boolean {
-  return false
 }
 
 // Agent and evaluator prompts also use role=user in AOP, but they are internal
@@ -116,6 +102,172 @@ function eventTimestamp(event: AOPEvent): number {
   return Number(event.emittedAt.seconds) * 1000 + event.emittedAt.nanos / 1_000_000
 }
 
+// Evaluator/compaction/budget banners ride on `status` events with a typed
+// detail in the Any extension. The detail schemas are app-owned (cmd/gen routes
+// types/agent.proto to this side only), so the shared reducer cannot decode
+// them — it drops `status` outright and would otherwise leave EvalNote and
+// friends unreachable. Translate the events here, where the schemas live, into
+// the same extension timeline items the renderers already expect.
+function statusTimelineItem(event: AOPEvent, index: number): ExtensionTimelineItem | null {
+  if (event.payload.case !== 'status') return null
+  const state = event.payload.value.state
+  const base = {
+    id: `${event.id || index}:${state}`,
+    kind: 'extension' as const,
+    timestamp: eventTimestamp(event),
+    actorName: event.emitter,
+  }
+  switch (state) {
+    case 'eval_end':
+    case 'eval_error': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, EvalDetailSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'eval',
+        data: {
+          round: value.round,
+          pass: state === 'eval_end' && value.pass,
+          reason: state === 'eval_error' ? value.error : value.reason,
+        },
+      }
+    }
+    case 'compact_end': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, CompactDetailSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'compact',
+        data: {
+          tokens_before: value.tokensBefore,
+          tokens_after: value.tokensAfter,
+          kept_messages: value.keptMessages,
+        },
+      }
+    }
+    case 'token_budget_warning': {
+      const value = event.extensions.map((extension) => anyUnpack(extension, BudgetWarningSchema))
+        .find((candidate) => candidate !== undefined)
+      if (!value) return null
+      return {
+        ...base,
+        extensionType: 'token_budget',
+        data: { context_tokens: value.contextTokens, token_budget: value.tokenBudget },
+      }
+    }
+    default:
+      return null
+  }
+}
+
+// The shared AOP reducer renders a system message from its text alone and never
+// decodes the cyber.web extension, so the hub's translatable code never reaches
+// SystemMessageContent and every backend notice falls back to English. Decode
+// the extensions here, where the schema lives, and hand the codes back by
+// message id so the reducer's items can be annotated in place.
+function systemMetadataByMessageID(events: AOPEvent[]): Map<string, Record<string, unknown>> {
+  const byMessageID = new Map<string, Record<string, unknown>>()
+  for (const event of events) {
+    if (event.payload.case !== 'message') continue
+    const messageID = event.payload.value.id
+    if (!messageID) continue
+    for (const extension of event.extensions) {
+      const decoded = anyUnpack(extension, WebMessageMetadataSchema)
+      if (!decoded) continue
+      byMessageID.set(messageID, {
+        code: decoded.code,
+        params: decoded.params,
+        agentList: decoded.agentList,
+        commands: decoded.commands,
+      })
+      break
+    }
+  }
+  return byMessageID
+}
+
+function statusTimelineItems(events: AOPEvent[]): ViewerTimelineItem[] {
+  return events
+    .map((event, index) => statusTimelineItem(event, index))
+    .filter((item): item is ExtensionTimelineItem => item !== null)
+}
+
+// A command result is the output of an operator slash command, identified by its
+// CommandDetail extension. It carries no turn id, so the shared reducer folds
+// every one of them into the single turn-less assistant card at the position of
+// the first result — and because that card is keyed by message id, any id the
+// node reuses collapses two results into one. CommandDetail is an app-owned
+// schema, so render these here, one item each, and keep them out of the reducer.
+function commandResultItem(event: AOPEvent, index: number): ViewerTimelineItem | null {
+  if (event.payload.case !== 'message' || event.payload.value.role !== 'assistant') return null
+  const detail = event.extensions
+    .map((extension) => anyUnpack(extension, CommandDetailSchema))
+    .find((candidate) => candidate !== undefined)
+  if (!detail) return null
+  return {
+    id: event.id || `command:${event.seq ?? index}`,
+    kind: 'message',
+    timestamp: eventTimestamp(event),
+    actorName: event.emitter,
+    role: 'assistant',
+    content: eventText(event),
+    streaming: false,
+    metadata: { commandLine: detail.line, presentation: detail.presentation },
+  }
+}
+
+// Split command results out of the event stream the reducer consumes. Their
+// order is preserved on both sides, so each result still renders at the point it
+// was emitted, right after the operator's command.
+function splitCommandResults(events: AOPEvent[]): {
+  messages: AOPEvent[]
+  commands: ViewerTimelineItem[]
+} {
+  const messages: AOPEvent[] = []
+  const commands: ViewerTimelineItem[] = []
+  events.forEach((event, index) => {
+    const item = commandResultItem(event, index)
+    if (item) commands.push(item)
+    else messages.push(event)
+  })
+  return { messages, commands }
+}
+
+// mergeTimelineItems walks `extra` in ascending time order, so a set assembled
+// from two sources has to be re-sorted before it is woven back in.
+function orderedTimelineItems(...groups: ViewerTimelineItem[][]): ViewerTimelineItem[] {
+  return groups.flat().sort((left, right) => left.timestamp - right.timestamp)
+}
+
+// A failed turn is published twice: once as a bare `error` event and again as
+// the `turnEnded.error` of the same turn. The shared reducer renders an error
+// divider for each, back to back, so every LLM failure shows up as the same
+// warning line twice. Drop a divider that repeats the one before it.
+function collapseRepeatedDividers(items: ViewerTimelineItem[]): ViewerTimelineItem[] {
+  const collapsed: ViewerTimelineItem[] = []
+  for (const item of items) {
+    const previous = collapsed[collapsed.length - 1]
+    if (item.kind === 'divider' && previous?.kind === 'divider' && previous.label === item.label) continue
+    collapsed.push(item)
+  }
+  return collapsed
+}
+
+// Weave the status items back into the reduced timeline at their emitted
+// position, leaving the existing items in their relative order.
+function mergeTimelineItems(base: ViewerTimelineItem[], extra: ViewerTimelineItem[]): ViewerTimelineItem[] {
+  if (!extra.length) return base
+  const merged: ViewerTimelineItem[] = []
+  let next = 0
+  for (const item of base) {
+    while (next < extra.length && extra[next].timestamp <= item.timestamp) merged.push(extra[next++])
+    merged.push(item)
+  }
+  return merged.concat(extra.slice(next))
+}
+
 function reduceConversationAOP(
   events: AOPEvent[],
   sourceEvents: AOPEvent[],
@@ -137,10 +289,15 @@ function reduceConversationAOP(
   }
 
   const childIDs = new Set(childStarts.keys())
-  const topLevel = reduceAOPToTimeline(
-    events.filter((event) => !childIDs.has(event.sessionId)).map(presentAOPEvent),
-    { streaming, lifecycle: 'errors' },
-  ) as ViewerTimelineItem[]
+  const topLevelEvents = events.filter((event) => !childIDs.has(event.sessionId))
+  const topLevelSplit = splitCommandResults(topLevelEvents)
+  const topLevel = collapseRepeatedDividers(mergeTimelineItems(
+    reduceAOPToTimeline(
+      topLevelSplit.messages.map(presentAOPEvent),
+      { streaming, lifecycle: 'errors' },
+    ) as ViewerTimelineItem[],
+    orderedTimelineItems(statusTimelineItems(topLevelSplit.messages), topLevelSplit.commands),
+  ))
 
   const childRuns: ViewerTimelineItem[] = []
   for (const [sessionID, start] of childStarts) {
@@ -163,10 +320,14 @@ function reduceConversationAOP(
           ? 'canceled'
           : 'completed'
     const timestamp = eventTimestamp(start)
-    const items = reduceAOPToTimeline(childEvents.map(presentAOPEvent), {
-      streaming: streaming && !end,
-      lifecycle: 'errors',
-    }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[]
+    const childSplit = splitCommandResults(childEvents)
+    const items = collapseRepeatedDividers(mergeTimelineItems(
+      reduceAOPToTimeline(childSplit.messages.map(presentAOPEvent), {
+        streaming: streaming && !end,
+        lifecycle: 'errors',
+      }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
+      orderedTimelineItems(statusTimelineItems(childSplit.messages), childSplit.commands),
+    ))
 
     childRuns.push({
       id: `subagent:${sessionID}`,
@@ -225,10 +386,6 @@ function toViewerTimelineItem(
         role: 'thinking',
         content: item.content || '',
       }
-    case 'scan_started':
-    case 'scan_progress':
-      if (item.scanID && scanResults.has(item.scanID)) return null
-      return toExtensionItem(item)
     case 'scan_complete':
       return toExtensionItem(item)
     default:
@@ -259,7 +416,7 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalMaxRounds?: number }) => void
+  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) => void
   onPause: () => void
   onClearError: () => void
 }
@@ -289,7 +446,7 @@ export default function ChatPanel({
 }: Props) {
   const { t, i18n } = useTranslation('chat')
   const agentEvents = useMemo(
-    () => aopEvents.filter((event) => !isPlatformMarkerEvent(event) && !isInternalUserEvent(event)),
+    () => aopEvents.filter((event) => !isInternalUserEvent(event)),
     [aopEvents],
   )
   const liveThinkingItem = useMemo<TimelineItem | null>(() => {
@@ -305,6 +462,12 @@ export default function ChatPanel({
         || item.kind === 'extension'
         || (item.kind === 'message' && item.role === 'user'))
     const aopItems = reduceConversationAOP(agentEvents, aopEvents, isBusy)
+    const systemMetadata = systemMetadataByMessageID(agentEvents)
+    for (const item of aopItems) {
+      if (item.kind !== 'message' || item.role !== 'system') continue
+      const metadata = systemMetadata.get(item.id)
+      if (metadata) item.metadata = metadata
+    }
 
     // The optimistic user bubble is stamped with the browser clock (Date.now at
     // send time); every agent event is stamped by the agent host. This merged
@@ -343,16 +506,18 @@ export default function ChatPanel({
   const [persist, setPersist] = useState(false)
   // Goal mode: describe done-when criteria in natural language and let an
   // independent evaluator judge completion each round, re-driving the agent
-  // until it passes or the round budget is spent. (evalMaxRounds is the whole
-  // budget — it subsumes the old standalone "fixed turns" mode.)
+  // until it passes or the evaluator itself says further rounds won't help.
+  // evalRounds is optional and free-form: a number is a hard ceiling, plain
+  // language ("dig deep, up to ten rounds") is handed to the evaluator to
+  // follow, and empty leaves the stop decision entirely to it.
   const [evalCriteria, setEvalCriteria] = useState('')
-  const [evalMaxRounds, setEvalMaxRounds] = useState(3)
+  const [evalRounds, setEvalRounds] = useState('')
   const evalRef = useRef<HTMLTextAreaElement>(null)
   // Screen-reader turn status. Streamed replies mutate the DOM silently, so
   // mirror the coarse turn phase into a polite live region below. It announces
   // transitions (thinking → responding → done), never the token stream itself
   // (a live region on the growing text would restart the reader on every delta).
-  const [liveStatus, setLiveStatus] = useState('')
+  const [livePhase, setLivePhase] = useState<'thinking' | 'done' | null>(null)
   const wasActiveRef = useRef(false)
 
   // Composer seed — the mobile greeting's capability cards push a starter prompt
@@ -372,7 +537,7 @@ export default function ChatPanel({
   function sendOpts() {
     if (!persist) return undefined
     const criteria = evalCriteria.trim()
-    if (criteria) return { persist: true, evalCriteria: criteria, evalMaxRounds }
+    if (criteria) return { persist: true, evalCriteria: criteria, evalRounds: evalRounds.trim() }
     // Goal toggled on but no criteria typed → nothing for the evaluator to
     // judge, so send as a plain one-off message rather than an open-ended run.
     return undefined
@@ -384,12 +549,12 @@ export default function ChatPanel({
   function resetGoal() {
     setPersist(false)
     setEvalCriteria('')
-    setEvalMaxRounds(3)
+    setEvalRounds('')
   }
 
   // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
   // commands merged with the bound node's reported runtime, skill, and registry
-  // commands, so both menus mirror what that AIScan node can actually run.
+  // commands, so both menus mirror what that Cyber node can actually run.
   // Descriptions prefer the local i18n string (keyed cmd<Name>) and fall back to
   // the server's (used for dynamic skill commands that have no i18n key).
   const [chatCommands, setChatCommands] = useState<CommandHint[]>([])
@@ -429,12 +594,11 @@ export default function ChatPanel({
       return
     }
     let cancelled = false
-    const toHint = (spec: CommandSpec): CommandHint => {
-      const base = spec.name.startsWith('/') ? spec.name.slice(1) : ''
-      const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
-      const localized = key ? t(key, { defaultValue: '' }) : ''
-      return { cmd: spec.name, desc: localized || spec.description || '', usage: spec.usage }
-    }
+    const toHint = (spec: CommandSpec): CommandHint => ({
+      cmd: spec.name,
+      desc: commandDescription(t, spec.name, spec.description || ''),
+      usage: spec.usage,
+    })
     fetchSessionCommands(activeSessionID)
       .then((specs) => {
         if (cancelled) return
@@ -460,7 +624,7 @@ export default function ChatPanel({
     // session B (an unexpected multi-round agentic run against stale criteria).
     setPersist(false)
     setEvalCriteria('')
-    setEvalMaxRounds(3)
+    setEvalRounds('')
   }, [activeSessionID])
 
   // Auto-grow the goal criteria textarea (min ~2 rows, capped) so long
@@ -478,10 +642,10 @@ export default function ChatPanel({
   // every pause between tool calls.
   useEffect(() => {
     const active = isBusy || isThinking
-    if (active) setLiveStatus(t('a11yThinking'))
-    else if (wasActiveRef.current) setLiveStatus(t('a11yTurnDone'))
+    if (active) setLivePhase('thinking')
+    else if (wasActiveRef.current) setLivePhase('done')
     wasActiveRef.current = active
-  }, [isBusy, isThinking, t])
+  }, [isBusy, isThinking])
 
   const activeThinkingResponseID = useMemo(
     () => isThinking ? latestStreamingResponseID(viewerTimeline) : null,
@@ -610,7 +774,7 @@ export default function ChatPanel({
             eyebrow={t('readyEyebrow')}
             title={t('ready')}
             subtitle={
-              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">/scan &lt;target&gt;</code>{t('readyHintAfter')}</>
+              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan -i &lt;target&gt;</code>{t('readyHintAfter')}</>
             }
           />
         </div>
@@ -640,7 +804,9 @@ export default function ChatPanel({
           </div>
         </ViewerChatPanel.ErrorBar>
       )}
-      <div className="sr-only" role="status" aria-live="polite">{liveStatus}</div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {livePhase ? t(livePhase === 'thinking' ? 'a11yThinking' : 'a11yTurnDone') : ''}
+      </div>
       <ViewerChatPanel.Timeline
         className="overscroll-contain !px-0 !py-0"
         contentClassName={cn(workspaceClass, 'py-4')}
@@ -685,12 +851,11 @@ export default function ChatPanel({
                         <label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
                           {t('evalRoundsLabel')}
                           <input
-                            type="number"
-                            min={1}
-                            max={10}
-                            value={evalMaxRounds}
-                            onChange={(e) => setEvalMaxRounds(Math.min(10, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                            className="w-12 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
+                            type="text"
+                            value={evalRounds}
+                            placeholder={t('evalRoundsAuto')}
+                            onChange={(e) => setEvalRounds(e.target.value)}
+                            className="w-36 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
                           />
                         </label>
                       </div>
@@ -703,7 +868,7 @@ export default function ChatPanel({
                         className="block max-h-36 min-h-[3.25rem] w-full resize-none overflow-y-auto rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
                       />
                       <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                        {t('evalModeHint', { rounds: evalMaxRounds })}
+                        {evalRounds.trim() ? t('evalModeHintCapped', { rounds: evalRounds.trim() }) : t('evalModeHint')}
                       </p>
                     </div>
                   ) : undefined}
@@ -736,6 +901,14 @@ export default function ChatPanel({
                   renderMentionPopup={renderMentionPopup}
                   injectText={composerSeed}
                   placeholder={t('typeMessageWithCommands')}
+                  labels={{
+                    dropFiles: t('dropFiles'),
+                    attachFiles: t('attachFiles'),
+                    sendMessage: t('sendMessage'),
+                    pauseResponse: t('pauseResponse'),
+                    injectAsContext: t('injectAsContext'),
+                    uploadToRemote: t('uploadToRemote'),
+                  }}
                   enableAttachments={!!activeSessionID}
                 />
               </div>
@@ -770,6 +943,8 @@ function timelineContent(
         >
           {item.role === 'system' && systemCode(item.metadata) ? (
             <SystemMessageContent metadata={item.metadata!} fallback={item.content} />
+          ) : item.content && isPreformattedCommand(item) ? (
+            <CodeBlock code={item.content} copyable />
           ) : item.content ? (
             <MessageBody content={item.content} compact={item.role !== 'system'} />
           ) : null}
@@ -854,6 +1029,14 @@ function systemCode(metadata?: Record<string, unknown>): string {
   return typeof metadata?.code === 'string' ? metadata.code : ''
 }
 
+// Command output is a terminal dump, so markdown would collapse its line
+// structure into one paragraph. CommandDetail.presentation marks the dumps.
+function isPreformattedCommand(item: ViewerTimelineItem): boolean {
+  if (item.kind !== 'message') return false
+  const presentation = item.metadata?.presentation
+  return typeof presentation === 'string' && presentation === 'preformatted'
+}
+
 function systemParams(metadata: Record<string, unknown>): Record<string, unknown> {
   const p = metadata.params
   if (p && typeof p === 'object') return p as Record<string, unknown>
@@ -866,13 +1049,47 @@ function systemParams(metadata: Record<string, unknown>): Record<string, unknown
   return params && typeof params === 'object' ? params as Record<string, unknown> : {}
 }
 
+// A command's description arrives in the server's own language, so the catalog
+// is the only place it can be translated. Keyed by the command name, the way
+// the composer menu already resolves its own entries; dynamic agent-reported
+// commands (skills) have no key and keep the server's text.
+function commandDescription(t: TFunction<'chat'>, name: string, description: string): string {
+  const base = name.startsWith('/') ? name.slice(1) : ''
+  const key = base ? `cmd${base.charAt(0).toUpperCase()}${base.slice(1)}` : ''
+  const localized = key ? t(key, { defaultValue: '' }) : ''
+  return localized || description
+}
+
 function SystemMessageContent({ metadata, fallback }: { metadata: Record<string, unknown>; fallback: string }) {
   const { t } = useTranslation('chat')
   const code = systemCode(metadata)
   const params = systemParams(metadata)
   if (code === 'agents_list') return <AgentsListContent agentList={metadata.agentList as AgentListMetadata | undefined} fallback={fallback} />
+  if (code === 'help') return <HelpContent commands={metadata.commands} fallback={fallback} />
   const text = t(`sys.${code}`, { ...params, defaultValue: fallback })
   return <MarkdownContent content={trimDisplayContent(text)} />
+}
+
+// The server sends the session menu alongside a `help` code and leaves the body
+// untranslated, so the catalog here is what makes /help read in the user's
+// language. Fall back to the server's body when the catalog is absent (an older
+// server) or empty.
+function HelpContent({ commands, fallback }: { commands: unknown; fallback: string }) {
+  const { t } = useTranslation('chat')
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return <MarkdownContent content={trimDisplayContent(fallback)} />
+  }
+  const lines = [`**${t('sys.help_commands')}**`]
+  for (const entry of commands) {
+    if (!entry || typeof entry !== 'object') continue
+    const spec = entry as CommandSpec
+    if (!spec.name) continue
+    const usage = spec.usage || spec.name
+    const description = commandDescription(t, spec.name, spec.description ?? '')
+    lines.push(description ? `- \`${usage}\` — ${description}` : `- \`${usage}\``)
+  }
+  lines.push('', t('sys.help_hint'))
+  return <MarkdownContent content={trimDisplayContent(lines.join('\n'))} />
 }
 
 function AgentsListContent({ agentList, fallback }: { agentList?: AgentListMetadata; fallback: string }) {
@@ -1201,15 +1418,15 @@ function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: stri
   return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} />
 }
 
-// Phone-only greeting for a fresh, empty session: an AIScan hello + a 2×2 grid of
+// Phone-only greeting for a fresh, empty session: an Cyber hello + a 2×2 grid of
 // capability cards, each seeding the composer with a starter prompt (Doubao's
-// home pattern). Kept in AIScan's own skin — blue accent, warm reserved for
-// severity, no mascot. The scan card seeds the real "/scan " command; the others
+// home pattern). Kept in Cyber's own skin — blue accent, warm reserved for
+// severity, no mascot. The scan card seeds the real "!scan " command; the others
 // seed editable natural-language templates the operator completes.
 function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
   const { t } = useTranslation('chat')
   const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
-    { key: 'scan', Icon: Radar, seed: '/scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
+    { key: 'scan', Icon: Radar, seed: '!scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
     { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
     { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
     { key: 'swarm', Icon: Network, seedKey: 'cardSwarmSeed', titleKey: 'cardSwarmTitle', subKey: 'cardSwarmSub' },

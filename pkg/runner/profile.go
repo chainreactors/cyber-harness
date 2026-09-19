@@ -2,35 +2,38 @@ package runner
 
 import (
 	"context"
+	"fmt"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	apppkg "github.com/chainreactors/aiscan/pkg/app"
-	agentext "github.com/chainreactors/aiscan/pkg/exts/session"
-	profile "github.com/chainreactors/aiscan/pkg/profile"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/telemetry"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
-func loadAgentProfile(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, runtimeConfig *agentext.Config) (profile.Application, *agentext.Runtime, error) {
-	product, err := factory.Build(profile.Request{
-		Option: option,
-		Features: apppkg.RuntimeFeatures{
-			ProviderEnabled: true,
-			ToolsEnabled:    true, AIEnabled: true,
-		},
-		Runtime: runtimeConfig,
-		Logger:  logger,
+func loadAgentProfile(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, sessionConfig *agentsession.Config) (profile.Profile, *agentsession.Runtime, error) {
+	if newProfile == nil {
+		return nil, nil, fmt.Errorf("profile constructor is required")
+	}
+	p, err := newProfile(profile.Request{
+		Option:       option,
+		ProviderMode: profile.ProviderRequired,
+		Session:      sessionConfig,
+		Logger:       logger,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := product.Load(ctx); err != nil {
-		_ = product.Close(context.Background())
+	if p == nil {
+		return nil, nil, fmt.Errorf("profile constructor returned nil")
+	}
+	if err := p.Load(ctx); err != nil {
+		_ = p.Close(context.Background())
 		return nil, nil, err
 	}
-	run, err := product.Runtime()
+	run, err := p.Runtime()
 	if err != nil {
-		_ = product.Close(context.Background())
+		_ = p.Close(context.Background())
 		return nil, nil, err
 	}
-	return product, run, nil
+	return p, run, nil
 }

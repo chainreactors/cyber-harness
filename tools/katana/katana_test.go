@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
-	browserutil "github.com/chainreactors/aiscan/pkg/headless"
+	"github.com/chainreactors/cyber/pkg/commands"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	"github.com/projectdiscovery/katana/pkg/navigation"
 	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
 	katanatypes "github.com/projectdiscovery/katana/pkg/types"
@@ -207,7 +207,7 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 	t.Setenv(browserutil.PathEnv, binary.Path)
 
 	const (
-		sessionToken  = "aiscan-session-42"
+		sessionToken  = "cyber-session-42"
 		workspacePath = "/workspace/session-42?view=issues"
 	)
 	var rootHits atomic.Int32
@@ -223,7 +223,7 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 		rootHits.Add(1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html>
-<html><head><title>AIScan Workspace Login</title></head>
+<html><head><title>Cyber Workspace Login</title></head>
 <body><main id="app">Signing in...</main>
 <script>
 (async () => {
@@ -233,8 +233,8 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
     body: JSON.stringify({username: 'analyst', workspace: 'security'})
   });
   const session = await response.json();
-  localStorage.setItem('aiscan.token', session.token);
-  document.cookie = 'aiscan_session=' + session.token + '; Path=/; SameSite=Lax';
+  localStorage.setItem('cyber.token', session.token);
+  document.cookie = 'cyber_session=' + session.token + '; Path=/; SameSite=Lax';
   location.assign(session.next);
 })();
 </script></body></html>`)
@@ -249,7 +249,7 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 		fmt.Fprintf(w, `{"token":%q,"next":%q}`, sessionToken, workspacePath)
 	})
 	mux.HandleFunc("/workspace/session-42", func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("aiscan_session")
+		cookie, err := r.Cookie("cyber_session")
 		if err != nil || cookie.Value != sessionToken {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return

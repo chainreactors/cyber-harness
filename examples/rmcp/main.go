@@ -8,24 +8,21 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/core/tool"
-	"github.com/chainreactors/aiscan/pkg/commands"
-	toolnode "github.com/chainreactors/aiscan/pkg/node/tool"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/core/tool"
+	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 
-	"github.com/chainreactors/aiscan/pkg/toolset"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
-func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.Set) {
-	bash := commands.NewBashTool(workDir, 300, nil)
-	registry := toolset.NewRegistry(nil)
-	if err := registry.Register("terminal", bash); err != nil {
-		panic(err)
-	}
-	set, err := extension.New(
-		extension.Entry{ID: "tool-registry", Extension: registry},
-	)
+func newRegistry(workDir string) (tool.Executor, *terminaltool.BashTool, *extension.Set) {
+	bash := terminaltool.NewBashTool(workDir, 300, nil)
+	registry := toolset.NewRegistry()
+	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[tool.Tool](scope, bash) }}
+	set, err := extension.New(extension.Provided[*hooks.Registry](hooks.New()), registry, contribution)
 	if err != nil {
 		panic(err)
 	}
@@ -37,7 +34,7 @@ func newRegistry(workDir string) (tool.Executor, *commands.BashTool, *extension.
 }
 
 func main() {
-	if code, handled := commands.RunShellCommandProxy(); handled {
+	if code, handled := terminaltool.RunShellCommandProxy(); handled {
 		os.Exit(code)
 	}
 	var (

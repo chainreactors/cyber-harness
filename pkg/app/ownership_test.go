@@ -4,51 +4,20 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	aop "github.com/chainreactors/aiscan/aop"
-	coreevents "github.com/chainreactors/aiscan/core/events"
-	"github.com/chainreactors/aiscan/core/extension"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestResourceDoesNotPromoteAppBusinessMethods(t *testing.T) {
-	resource := reflect.TypeFor[*Resource]()
-	for _, method := range []string{"Publish", "ObserveEvents", "ProviderState", "SetProvider"} {
-		if _, exists := resource.MethodByName(method); exists {
-			t.Errorf("App Resource promotes business method %s", method)
-		}
-	}
-	if !resource.Implements(reflect.TypeFor[extension.Extension]()) {
-		t.Fatal("App Resource does not implement extension lifecycle")
-	}
-}
-
-func TestNewIsInertUntilLoad(t *testing.T) {
-	resource := newTestApp(t, Config{SkipEngines: true}, AppServices{})
-	a := resource.App
-	if len(a.Skills.Skills) != 0 || a.Bash != nil || len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
-		t.Fatal("New exposed initialized application resources before Load")
-	}
-	set := testSet(t, extension.Entry{ID: "app", Extension: resource})
-	if len(a.Commands.Names()) != 0 || len(a.Tools.ToolDefinitions()) != 0 {
-		t.Fatal("construction published registries before Set.Load")
-	}
-	if err := set.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if len(a.Skills.Skills) != 0 {
-		t.Fatal("App initialized skills without a profile dependency")
-	}
-}
-
 func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 	stream := coreevents.New()
-	a := &App{events: stream}
+	a := &State{events: stream}
 	var mu sync.Mutex
 	seen := make(map[uint64]*aop.Event)
 	a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
@@ -94,7 +63,7 @@ func TestReloadProviderPreservesNewerStateAndBuildFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer unblock.Do(func() { close(release) })
-	a := &App{}
+	a := &State{}
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := a.ReloadProvider(context.Background(), agent.ProviderConfig{
@@ -109,7 +78,7 @@ func TestReloadProviderPreservesNewerStateAndBuildFailure(t *testing.T) {
 		t.Fatal("provider probe did not start")
 	}
 	_, pending := a.ProviderState()
-	if pending.Model != "old" || a.LLMHealth().State != LLMHealthConfigured {
+	if pending.Model != "old" || a.ProviderHealth().State != provider.HealthConfigured {
 		t.Fatal("valid provider must be installed while the probe is pending")
 	}
 	newConfig := agent.ProviderConfig{Provider: "openai", Model: "new", BaseURL: srv.URL + "/v1", APIKey: "test"}
@@ -124,14 +93,14 @@ func TestReloadProviderPreservesNewerStateAndBuildFailure(t *testing.T) {
 		t.Fatalf("probe failure rejected valid configuration: %v", err)
 	}
 	current, config := a.ProviderState()
-	if current != newProvider || config.Model != "new" || a.LLMHealth().State != LLMHealthConfigured {
+	if current != newProvider || config.Model != "new" || a.ProviderHealth().State != provider.HealthConfigured {
 		t.Fatal("late probe overwrote a newer provider or its health")
 	}
 	if _, _, err := a.ReloadProvider(context.Background(), agent.ProviderConfig{Provider: "unsupported"}); err == nil {
 		t.Fatal("unsupported provider was accepted")
 	}
 	current, config = a.ProviderState()
-	if current != newProvider || config.Model != "new" || a.LLMHealth().State != LLMHealthConfigured {
+	if current != newProvider || config.Model != "new" || a.ProviderHealth().State != provider.HealthConfigured {
 		t.Fatal("failed construction changed the working provider")
 	}
 }

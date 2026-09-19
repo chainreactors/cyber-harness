@@ -5,9 +5,8 @@ import (
 	"strings"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/truncate"
-	"github.com/chainreactors/aiscan/core/util"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/truncate"
 )
 
 const (
@@ -383,7 +382,7 @@ func (l *LiveStatus) formatTurnDetails() string {
 				contextTokens = int(l.turnUsage.InputTokens)
 			}
 		} else if l.outputEstimate > 0 {
-			parts = append(parts, outputTokenMarker+"≈"+util.FormatNumber(l.outputEstimate))
+			parts = append(parts, outputTokenMarker+"≈"+truncate.FormatNumber(l.outputEstimate))
 		}
 		if context := l.ContextUsage(contextTokens); context != "" {
 			parts = append(parts, context)
@@ -405,8 +404,8 @@ func (l *LiveStatus) ContextUsage(tokens int) string {
 	}
 	return fmt.Sprintf("%s%s/%s (%s)",
 		contextMarker,
-		util.FormatNumber(tokens),
-		util.FormatNumber(l.contextWindow),
+		truncate.FormatNumber(tokens),
+		truncate.FormatNumber(l.contextWindow),
 		formatUsagePercent(tokens, l.contextWindow))
 }
 

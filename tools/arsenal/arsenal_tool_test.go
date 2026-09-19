@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
 	crtm "github.com/chainreactors/crtm/pkg"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // run executes arsenal as a Command and returns stdout.
@@ -40,7 +40,7 @@ func newTestCmd(t *testing.T) *ArsenalCommand {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "bin")
-	configPath := filepath.Join(dir, "aiscan.yaml")
+	configPath := filepath.Join(dir, "cyber.yaml")
 
 	mgr, err := crtm.NewManager(crtm.ManagerOption{
 		BinPath:    binPath,

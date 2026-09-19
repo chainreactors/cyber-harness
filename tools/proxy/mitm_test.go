@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	traffic "github.com/chainreactors/aiscan/aop/traffic"
+	traffic "github.com/chainreactors/cyber/aop/traffic"
 	"github.com/chainreactors/proxyclient"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
@@ -66,7 +66,7 @@ func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
 	if got := len(flows[0].Response.Body); got > maxBodySnip {
 		t.Fatalf("preview size = %d, want <= %d", got, maxBodySnip)
 	}
-	id, err := strconv.Atoi(flows[0].ID)
+	id, err := strconv.Atoi(flows[0].Id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +92,11 @@ func TestLargeResponseBodyIsCappedOnDisk(t *testing.T) {
 	if len(flows) != 1 || flows[0].Response == nil {
 		t.Fatalf("captured flow missing response: %#v", flows)
 	}
-	stored := hub.store.files[flows[0].ID][1]
+	stored := hub.store.files[flows[0].Id][1]
 	if stored < 0 || stored > maxBodyCaptureBytes {
 		t.Fatalf("stored bytes = %d", stored)
 	}
-	info, err := os.Stat(hub.store.bodyPath(flows[0].ID, 1))
+	info, err := os.Stat(hub.store.bodyPath(flows[0].Id, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,14 +145,14 @@ func TestFlowStoreEvictionRemovesBodyFiles(t *testing.T) {
 		return path
 	}
 	firstPath := writeBody("first.resp")
-	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
-		Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-		Response: &traffic.Response{StatusCode: 200},
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
+		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
+		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, firstPath)
 	secondPath := writeBody("second.resp")
-	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
-		Request:  traffic.Request{Method: "GET", URL: "https://example.test/2"},
-		Response: &traffic.Response{StatusCode: 200},
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
+		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/2"},
+		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, secondPath)
 
 	if _, err := os.Stat(store.bodyPath("1", 1)); !os.IsNotExist(err) {
@@ -183,14 +183,14 @@ func TestFlowStoreBodyBudgetEvictsOldest(t *testing.T) {
 		return path
 	}
 	firstPath := write("budget-first.resp", 6)
-	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
-		Request:  traffic.Request{Method: "GET", URL: "https://example.test/1"},
-		Response: &traffic.Response{StatusCode: 200},
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
+		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/1"},
+		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, firstPath)
 	secondPath := write("budget-second.resp", 6)
-	addTestBody(t, store, Flow{Exchange: traffic.Exchange{
-		Request:  traffic.Request{Method: "GET", URL: "https://example.test/2"},
-		Response: &traffic.Response{StatusCode: 200},
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
+		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/2"},
+		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, secondPath)
 
 	if got := store.Count(); got != 1 {
@@ -220,9 +220,9 @@ func TestFlowStoreStartupPrunesUnreferencedBodies(t *testing.T) {
 	if err := os.WriteFile(path, []byte("live"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	addTestBody(t, first, Flow{Exchange: traffic.Exchange{
-		Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-		Response: &traffic.Response{StatusCode: 200},
+	addTestBody(t, first, Flow{Flow: &traffic.Flow{
+		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
+		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, path)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
@@ -263,9 +263,9 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 	hub.storage.BodyMaxBytes = 4
 	state := &captureState{
 		hub: hub,
-		flow: Flow{Exchange: traffic.Exchange{
-			Request:  traffic.Request{Method: "GET", URL: "https://example.test/"},
-			Response: &traffic.Response{StatusCode: 200},
+		flow: Flow{Flow: &traffic.Flow{
+			Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
+			Response: &traffic.HttpResponse{StatusCode: 200},
 		}},
 	}
 	_, _ = io.Copy(io.Discard, state.bodyReader(strings.NewReader("abcdefgh"), "resp"))
@@ -314,9 +314,9 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = file.Close()
-			hub.ingestFiles(Flow{Host: "drop.test", Exchange: traffic.Exchange{
-				Request:  traffic.Request{Method: "GET", URL: "https://drop.test/"},
-				Response: &traffic.Response{StatusCode: 200},
+			hub.ingestFiles(Flow{Host: "drop.test", Flow: &traffic.Flow{
+				Request:  &traffic.HttpRequest{Method: "GET", Url: "https://drop.test/"},
+				Response: &traffic.HttpResponse{StatusCode: 200},
 			}}, [2]*os.File{nil, file})
 			if got := store.Count(); got != 0 {
 				t.Fatalf("rejected flow count = %d, want 0", got)
@@ -697,9 +697,9 @@ func TestMITMThroughput(t *testing.T) {
 func BenchmarkFlowStore_Add(b *testing.B) {
 	store := NewFlowStore(10000)
 	f := Flow{
-		Exchange: traffic.Exchange{
-			Request:  traffic.Request{Method: "GET", URL: "http://example.com/"},
-			Response: &traffic.Response{StatusCode: 200},
+		Flow: &traffic.Flow{
+			Request:  &traffic.HttpRequest{Method: "GET", Url: "http://example.com/"},
+			Response: &traffic.HttpResponse{StatusCode: 200},
 		},
 		Host: "example.com",
 	}
@@ -713,9 +713,9 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Exchange: traffic.Exchange{
-				Request:  traffic.Request{Method: "GET", URL: fmt.Sprintf("http://host%d.com/path%d", i%10, i)},
-				Response: &traffic.Response{StatusCode: 200 + (i%5)*100},
+			Flow: &traffic.Flow{
+				Request:  &traffic.HttpRequest{Method: "GET", Url: fmt.Sprintf("http://host%d.com/path%d", i%10, i)},
+				Response: &traffic.HttpResponse{StatusCode: int32(200 + (i%5)*100)},
 			},
 			Host: fmt.Sprintf("host%d.com", i%10),
 		})
@@ -737,15 +737,15 @@ func TestFlowStoreMemory(t *testing.T) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Exchange: traffic.Exchange{
-				Request: traffic.Request{
+			Flow: &traffic.Flow{
+				Request: &traffic.HttpRequest{
 					Method:  "GET",
-					URL:     fmt.Sprintf("http://example.com/path/%d", i),
-					Headers: []traffic.Pair{{Name: "User-Agent", Value: "test"}},
+					Url:     fmt.Sprintf("http://example.com/path/%d", i),
+					Headers: []*traffic.Header{{Name: "User-Agent", Value: "test"}},
 				},
-				Response: &traffic.Response{
+				Response: &traffic.HttpResponse{
 					StatusCode: 200,
-					Headers:    []traffic.Pair{{Name: "Content-Type", Value: "text/html"}},
+					Headers:    []*traffic.Header{{Name: "Content-Type", Value: "text/html"}},
 					Body:       make([]byte, 4096),
 				},
 			},

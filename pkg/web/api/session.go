@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	aop "github.com/chainreactors/cyber/aop"
+	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -383,7 +383,7 @@ func (s *Sessions) CloseSession(ctx context.Context, requestID string, request *
 	if !connected {
 		s.runtime.BroadcastAOPEvent(request.SessionId, &aop.Event{
 			SessionId: request.SessionId,
-			Emitter:   "aiscan.web",
+			Emitter:   "cyber.web",
 			Payload:   &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: request.Reason}},
 		})
 	}

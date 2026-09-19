@@ -4,17 +4,19 @@ import (
 	"context"
 	"testing"
 
-	"github.com/chainreactors/aiscan/core/extension"
-	telemetry "github.com/chainreactors/aiscan/pkg/exts/telemetry"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
 )
 
-func loadtelemetry(t *testing.T, output *telemetry.Extension) error {
+// loadtelemetry mounts a recorder against the stream it should observe. The
+// recorder borrows that stream, so the host has to publish it.
+func loadtelemetry(t *testing.T, stream *coreevents.Stream, output *telemetry.Extension) error {
 	t.Helper()
-	set, err := extension.New(extension.Entry{ID: "output", Extension: output})
+	set, err := extension.New(extension.Provided[*coreevents.Stream](stream), output)
 	if err != nil {
 		return err
 	}
 	t.Cleanup(func() { _ = set.Close(context.Background()) })
 	return set.Load(t.Context())
 }
-

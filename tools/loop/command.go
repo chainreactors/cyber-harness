@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/aiscan/agent"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // LoopCommand is a pseudo-command invoked via bash:
@@ -23,7 +23,7 @@ func NewCommand() commands.Command {
 	value := &loopCommand{}
 	return commands.Command{
 		Name: value.Name(), Usage: value.Usage(),
-		DescriptionPath: "aiscan://skills/aiscan/okf/runtime/loop.md",
+		DescriptionPath: "cyber://skills/cyber/okf/runtime/loop.md",
 		Run:             value.Run,
 	}
 }

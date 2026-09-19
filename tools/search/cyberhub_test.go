@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/fingers/common"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"

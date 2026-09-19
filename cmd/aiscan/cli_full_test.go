@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	cfg "github.com/chainreactors/aiscan/core/config"
+	cfg "github.com/chainreactors/cyber/core/config"
 )
 
 func TestParseCLIReconCommandsAndFlags(t *testing.T) {

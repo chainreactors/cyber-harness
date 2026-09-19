@@ -10,7 +10,7 @@ def test_dispatch_custom_event(test_server, pw_page, pw_driver):
     pw_page.dispatch_event("#dispatch-target", "custom-ping")
     assert pw_page.text_content("#dispatch-target") == "pinged"
 
-    # aiscan
+    # cyber
     pw_driver.execute("open", url, "--session", "disp-t", "--timeout", "10")
     before = pw_driver.execute("inner-text", "disp-t", "#dispatch-target")
     assert "waiting" in before

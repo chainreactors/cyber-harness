@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-// stdioClient speaks the public JSONL protocol to a separately built product.
-// No product implementation or transport helper is imported by the harness.
+// stdioClient speaks the public JSONL protocol to a separately built executable.
+// No application implementation or transport helper is imported by the harness.
 type stdioClient struct {
 	input   io.WriteCloser
 	replies chan map[string]any
@@ -53,40 +53,26 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 		}
 		args = append(args, "--provider", "openai", "--base-url", modes[0].providerURL, "--model", modes[0].model, "--api-key", "harness-gateway-token", "--max-tokens", "1024")
 	}
-	cmd := exec.CommandContext(ctx, productBinary, args...)
-	cmd.Dir, cmd.Env = dir, productEnvironment(!internalAgent)
+	cmd := exec.CommandContext(ctx, executablePath, args...)
+	cmd.Dir, cmd.Env = dir, testEnvironment(!internalAgent)
 	p := &stdioClient{replies: make(chan map[string]any, 16), done: make(chan struct{})}
-	errFile, err := os.Create(filepath.Join(dir, "stderr.log"))
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	errLog := &productLog{file: errFile}
+	errLog := newLog(t, filepath.Join(dir, "stderr.log"))
+	trace := newLog(t, filepath.Join(dir, "protocol.jsonl"))
 	cmd.Stderr = errLog
-	p.input, err = cmd.StdinPipe()
+	input, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		errLog.Close()
 		t.Fatal(err)
 	}
+	p.input = input
 	output, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		errLog.Close()
 		t.Fatal(err)
 	}
-	traceFile, err := os.Create(filepath.Join(dir, "protocol.jsonl"))
-	if err != nil {
-		cancel()
-		errLog.Close()
-		t.Fatal(err)
-	}
-	trace := &productLog{file: traceFile}
-	configureProductProcess(cmd)
+	configureProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		cancel()
-		trace.Close()
-		errLog.Close()
 		t.Fatal(err)
 	}
 	go func() {
@@ -101,15 +87,15 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 			}
 			var envelope map[string]any
 			if err := json.Unmarshal(line, &envelope); err != nil {
-				p.err = fmt.Errorf("invalid product JSONL: %w", err)
+				p.err = fmt.Errorf("invalid application JSONL: %w", err)
 				cancel()
 				break
 			}
 			// Manual IOA membership and the runtime's startup inbox are separate.
-			// These operators explicitly poll the work space, while each product
+			// These operators explicitly poll the work space, while each application
 			// subscribes to its own empty inbox. Unexpected internal turns fail.
 			if !internalAgent && field(envelope, "payload", "event", "turnStarted") != nil {
-				p.err = fmt.Errorf("unexpected product Agent turn in external-operator scenario")
+				p.err = fmt.Errorf("unexpected application Agent turn in external-operator scenario")
 				cancel()
 				break
 			}
@@ -146,7 +132,7 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 		}
 		cancel()
 		if p.err != nil {
-			t.Errorf("stdio product %s: %v; see %s", name, p.err, dir)
+			t.Errorf("stdio application %s: %v; see %s", name, p.err, dir)
 		}
 	})
 	response := p.request(t, "aop.ProtocolMessage", "openSessionRequest", map[string]any{"sessionId": "operator"})
@@ -181,16 +167,16 @@ func (p *stdioClient) request(t *testing.T, namespace, operation string, value a
 		}
 		return payload
 	case <-p.done:
-		t.Fatalf("product exited before %s: %v", operation, p.err)
+		t.Fatalf("application exited before %s: %v", operation, p.err)
 	case <-time.After(35 * time.Second):
-		t.Fatalf("product did not answer %s", operation)
+		t.Fatalf("application did not answer %s", operation)
 	}
 	return nil
 }
 
 func (p *stdioClient) command(t *testing.T, line string) (string, error) {
 	t.Helper()
-	response := p.request(t, "aiscan.command.CommandProtocolMessage", "request", map[string]any{"sessionId": "operator", "line": "!" + line})
+	response := p.request(t, "cyber.command.CommandProtocolMessage", "request", map[string]any{"sessionId": "operator", "line": "!" + line})
 	if failure := field(response, "protocolError"); failure != nil {
 		return "", fmt.Errorf("%v", failure)
 	}

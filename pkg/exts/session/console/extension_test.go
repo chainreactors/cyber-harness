@@ -2,13 +2,20 @@ package console_test
 
 import (
 	"context"
-	"github.com/chainreactors/aiscan/core/commandline"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	sessionext "github.com/chainreactors/aiscan/pkg/exts/session"
-	contributor "github.com/chainreactors/aiscan/pkg/exts/session/console"
-	tuiext "github.com/chainreactors/aiscan/pkg/exts/tui"
-	"github.com/chainreactors/aiscan/pkg/types"
+	"github.com/chainreactors/cyber/agent"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/types"
+	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	contributor "github.com/chainreactors/cyber/pkg/exts/session/console"
+	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	"github.com/spf13/cobra"
 	"strings"
 	"testing"
@@ -16,23 +23,23 @@ import (
 
 func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	tui := tuiext.New()
-	session, err := sessionext.New(sessionext.Config{Commands: []sessionext.Command{{
+	session := sessionext.New(agentsession.Config{Commands: []agentsession.Command{{
 		Spec:    &types.CommandSpec{Name: "/inspect", Aliases: []string{"/i"}},
-		Handler: func(context.Context, *sessionext.Session, []string) (*types.CommandResult, error) { return nil, nil },
+		Handler: func(context.Context, *agentsession.Session, []string) (*types.CommandResult, error) { return nil, nil },
 	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	presentation, err := contributor.New(tui.Registrar(), session.Runtime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Deliberately reverse declaration order; the graph supplies ordering.
-	set, err := extension.New(
-		extension.Entry{ID: "session.repl", DependsOn: []string{"tui", "session"}, Extension: presentation},
-		extension.Entry{ID: "session", Extension: session},
-		extension.Entry{ID: "tui", Extension: tui},
-	)
+	presentation := contributor.New()
+	var registry *api.Registry
+	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		var err error
+		registry, err = extension.Use[*api.Registry](scope)
+		return err
+	}}
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), promptext.New(), loopext.New(agent.StandardLoop{}),
+		tui,
+		session,
+		presentation,
+		borrow,
+	)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +51,7 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	bindings := tui.Bindings()
+	bindings := registry.Bindings()
 	for _, terminal := range []string{"first", "second"} {
 		var received string
 		root := &cobra.Command{Use: terminal}
@@ -53,7 +60,7 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 		if err := root.Execute(); err != nil {
 			t.Fatal(err)
 		}
-		args, err := commandline.SplitCommandLine(received)
+		args, err := commands.SplitCommandLine(received)
 		if err != nil || len(args) != 3 || args[0] != "/inspect" || args[1] != "two words" || args[2] != "--literal" {
 			t.Fatalf("%s: %q %v", terminal, received, err)
 		}
@@ -61,30 +68,32 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 	if err := set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if tui.Bindings() != nil {
+	if registry.Bindings() != nil {
 		t.Fatal("closed TUI published bindings")
 	}
 }
 
 func TestMissingProviderLoadFailsContribution(t *testing.T) {
-	tui := tuiext.New() // Not included in this graph.
-	session, err := sessionext.New(sessionext.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	presentation, err := contributor.New(tui.Registrar(), session.Runtime())
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(extension.Entry{ID: "session.repl", Extension: presentation})
+	presentation := contributor.New()
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), loopext.New(agent.StandardLoop{}), presentation)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer set.Close(context.Background())
-	if err := set.Load(t.Context()); err == nil || !strings.Contains(err.Error(), "not accepting") {
+	if err := set.Load(t.Context()); err == nil || !strings.Contains(err.Error(), "resource type is not defined") {
 		t.Fatalf("missing TUI provider: %v", err)
 	}
 	if set.Active() {
 		t.Fatal("failed profile published")
 	}
+}
+
+// newTestApplication is the application this package's tests run against.
+func newTestApplication(t *testing.T) *apppkg.State {
+	t.Helper()
+	application, err := apppkg.New(nil, coreevents.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application
 }

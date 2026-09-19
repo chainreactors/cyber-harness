@@ -84,7 +84,7 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
       <header className="relative z-10 flex h-14 items-center justify-between px-5 sm:px-8">
         <div className="flex items-center gap-2.5">
           <BrandLogo size={24} />
-          <span className="text-sm font-semibold tracking-tight">AIScan</span>
+          <span className="text-sm font-semibold tracking-tight">Cyber</span>
         </div>
         <LanguageToggle />
       </header>
@@ -100,7 +100,7 @@ function LoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <input type="text" name="username" value="aiscan" readOnly autoComplete="username" className="hidden" aria-hidden="true" tabIndex={-1} />
+            <input type="text" name="username" value="cyber" readOnly autoComplete="username" className="hidden" aria-hidden="true" tabIndex={-1} />
             <div className="space-y-2">
               <label htmlFor="access-token" className="text-sm font-medium">{t('loginTokenLabel')}</label>
               <div className="relative">

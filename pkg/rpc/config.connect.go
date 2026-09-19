@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	types "github.com/chainreactors/aiscan/pkg/types"
+	types "github.com/chainreactors/cyber/core/types"
 	http "net/http"
 	strings "strings"
 )
@@ -22,7 +22,7 @@ const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// ConfigServiceName is the fully-qualified name of the ConfigService service.
-	ConfigServiceName = "aiscan.rpc.config.ConfigService"
+	ConfigServiceName = "cyber.rpc.config.ConfigService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -34,24 +34,24 @@ const (
 // period.
 const (
 	// ConfigServiceGetConfigProcedure is the fully-qualified name of the ConfigService's GetConfig RPC.
-	ConfigServiceGetConfigProcedure = "/aiscan.rpc.config.ConfigService/GetConfig"
+	ConfigServiceGetConfigProcedure = "/cyber.rpc.config.ConfigService/GetConfig"
 	// ConfigServiceUpdateConfigProcedure is the fully-qualified name of the ConfigService's
 	// UpdateConfig RPC.
-	ConfigServiceUpdateConfigProcedure = "/aiscan.rpc.config.ConfigService/UpdateConfig"
+	ConfigServiceUpdateConfigProcedure = "/cyber.rpc.config.ConfigService/UpdateConfig"
 	// ConfigServiceActivateProfileProcedure is the fully-qualified name of the ConfigService's
 	// ActivateProfile RPC.
-	ConfigServiceActivateProfileProcedure = "/aiscan.rpc.config.ConfigService/ActivateProfile"
+	ConfigServiceActivateProfileProcedure = "/cyber.rpc.config.ConfigService/ActivateProfile"
 	// ConfigServiceTestLLMProcedure is the fully-qualified name of the ConfigService's TestLLM RPC.
-	ConfigServiceTestLLMProcedure = "/aiscan.rpc.config.ConfigService/TestLLM"
+	ConfigServiceTestLLMProcedure = "/cyber.rpc.config.ConfigService/TestLLM"
 	// ConfigServiceListModelsProcedure is the fully-qualified name of the ConfigService's ListModels
 	// RPC.
-	ConfigServiceListModelsProcedure = "/aiscan.rpc.config.ConfigService/ListModels"
+	ConfigServiceListModelsProcedure = "/cyber.rpc.config.ConfigService/ListModels"
 	// ConfigServiceTestConnectionProcedure is the fully-qualified name of the ConfigService's
 	// TestConnection RPC.
-	ConfigServiceTestConnectionProcedure = "/aiscan.rpc.config.ConfigService/TestConnection"
+	ConfigServiceTestConnectionProcedure = "/cyber.rpc.config.ConfigService/TestConnection"
 )
 
-// ConfigServiceClient is a client for the aiscan.rpc.config.ConfigService service.
+// ConfigServiceClient is a client for the cyber.rpc.config.ConfigService service.
 type ConfigServiceClient interface {
 	GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error)
 	UpdateConfig(context.Context, *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error)
@@ -61,7 +61,7 @@ type ConfigServiceClient interface {
 	TestConnection(context.Context, *connect.Request[types.TestConnectionRequest]) (*connect.Response[types.TestConnectionResponse], error)
 }
 
-// NewConfigServiceClient constructs a client for the aiscan.rpc.config.ConfigService service. By
+// NewConfigServiceClient constructs a client for the cyber.rpc.config.ConfigService service. By
 // default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
 // and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
 // connect.WithGRPC() or connect.WithGRPCWeb() options.
@@ -121,37 +121,37 @@ type configServiceClient struct {
 	testConnection  *connect.Client[types.TestConnectionRequest, types.TestConnectionResponse]
 }
 
-// GetConfig calls aiscan.rpc.config.ConfigService.GetConfig.
+// GetConfig calls cyber.rpc.config.ConfigService.GetConfig.
 func (c *configServiceClient) GetConfig(ctx context.Context, req *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
 	return c.getConfig.CallUnary(ctx, req)
 }
 
-// UpdateConfig calls aiscan.rpc.config.ConfigService.UpdateConfig.
+// UpdateConfig calls cyber.rpc.config.ConfigService.UpdateConfig.
 func (c *configServiceClient) UpdateConfig(ctx context.Context, req *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error) {
 	return c.updateConfig.CallUnary(ctx, req)
 }
 
-// ActivateProfile calls aiscan.rpc.config.ConfigService.ActivateProfile.
+// ActivateProfile calls cyber.rpc.config.ConfigService.ActivateProfile.
 func (c *configServiceClient) ActivateProfile(ctx context.Context, req *connect.Request[types.ActivateProfileRequest]) (*connect.Response[types.ActivateProfileResponse], error) {
 	return c.activateProfile.CallUnary(ctx, req)
 }
 
-// TestLLM calls aiscan.rpc.config.ConfigService.TestLLM.
+// TestLLM calls cyber.rpc.config.ConfigService.TestLLM.
 func (c *configServiceClient) TestLLM(ctx context.Context, req *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.LLMProbeResult], error) {
 	return c.testLLM.CallUnary(ctx, req)
 }
 
-// ListModels calls aiscan.rpc.config.ConfigService.ListModels.
+// ListModels calls cyber.rpc.config.ConfigService.ListModels.
 func (c *configServiceClient) ListModels(ctx context.Context, req *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.ListModelsResult], error) {
 	return c.listModels.CallUnary(ctx, req)
 }
 
-// TestConnection calls aiscan.rpc.config.ConfigService.TestConnection.
+// TestConnection calls cyber.rpc.config.ConfigService.TestConnection.
 func (c *configServiceClient) TestConnection(ctx context.Context, req *connect.Request[types.TestConnectionRequest]) (*connect.Response[types.TestConnectionResponse], error) {
 	return c.testConnection.CallUnary(ctx, req)
 }
 
-// ConfigServiceHandler is an implementation of the aiscan.rpc.config.ConfigService service.
+// ConfigServiceHandler is an implementation of the cyber.rpc.config.ConfigService service.
 type ConfigServiceHandler interface {
 	GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error)
 	UpdateConfig(context.Context, *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error)
@@ -204,7 +204,7 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("TestConnection")),
 		connect.WithHandlerOptions(opts...),
 	)
-	return "/aiscan.rpc.config.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/cyber.rpc.config.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
 			configServiceGetConfigHandler.ServeHTTP(w, r)
@@ -228,25 +228,25 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 type UnimplementedConfigServiceHandler struct{}
 
 func (UnimplementedConfigServiceHandler) GetConfig(context.Context, *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.GetConfig is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.GetConfig is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) UpdateConfig(context.Context, *connect.Request[types.UpdateConfigRequest]) (*connect.Response[types.UpdateConfigResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.UpdateConfig is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.UpdateConfig is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) ActivateProfile(context.Context, *connect.Request[types.ActivateProfileRequest]) (*connect.Response[types.ActivateProfileResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.ActivateProfile is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.ActivateProfile is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) TestLLM(context.Context, *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.LLMProbeResult], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.TestLLM is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.TestLLM is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) ListModels(context.Context, *connect.Request[types.LLMProbeRequest]) (*connect.Response[types.ListModelsResult], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.ListModels is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.ListModels is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) TestConnection(context.Context, *connect.Request[types.TestConnectionRequest]) (*connect.Response[types.TestConnectionResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiscan.rpc.config.ConfigService.TestConnection is not implemented"))
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.config.ConfigService.TestConnection is not implemented"))
 }

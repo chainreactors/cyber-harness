@@ -3,7 +3,7 @@ package agent
 import (
 	"strings"
 
-	aop "github.com/chainreactors/aiscan/aop"
+	aop "github.com/chainreactors/cyber/aop"
 )
 
 var contextOverflowPatterns = []string{

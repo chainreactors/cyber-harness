@@ -1,31 +1,28 @@
 package console
 
 import (
-	"context"
 	"fmt"
-	"github.com/chainreactors/aiscan/core/extension"
-	"github.com/chainreactors/aiscan/pkg/console/api"
-	"github.com/chainreactors/aiscan/tools/ioa"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/pkg/console/api"
+	"github.com/chainreactors/cyber/tools/ioa"
 )
 
 // Extension installs IOA presentation only when a profile selects a TUI.
 type Extension struct {
-	target   api.Registrar
 	bindings *api.Bindings
 }
 
-func New(target api.Registrar, reader ioa.Reader, space, endpoint string) (*Extension, error) {
-	if target == nil || reader == nil {
-		return nil, fmt.Errorf("IOA presentation requires TUI registrar and IOA reader")
+func New(reader ioa.Reader, space, endpoint string) (*Extension, error) {
+	if reader == nil {
+		return nil, fmt.Errorf("IOA presentation requires IOA reader")
 	}
-	return &Extension{target: target, bindings: Bind(reader, space, endpoint)}, nil
+	return &Extension{bindings: Bind(reader, space, endpoint)}, nil
 }
 func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	return e.target.Register(api.Contribution{Source: "ioa.client", Bindings: e.bindings})
+	return extension.Add(scope, e.bindings)
 }
-func (*Extension) Close(context.Context) error { return nil }
 
 var _ extension.Extension = (*Extension)(nil)

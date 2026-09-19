@@ -7,176 +7,74 @@ import (
 	"testing"
 )
 
-func TestExchangeFromHTTPUsesCanonicalPairs(t *testing.T) {
+func TestFlowFromHTTPUsesCanonicalHeaders(t *testing.T) {
 	u, _ := url.Parse("https://example.test/a")
 	req := &http.Request{Method: "POST", URL: u, Proto: "HTTP/1.1", Header: http.Header{"X-Test": {"a", "b"}}}
 	resp := &http.Response{StatusCode: 201, Status: "201 Created", Header: http.Header{"Content-Type": {"application/json"}}}
-	e := ExchangeFromHTTP(req, resp, []byte("req"), []byte("resp"))
-	if e.Request.Method != "POST" || e.Request.URL != u.String() || !e.Complete {
-		t.Fatalf("unexpected exchange: %+v", e)
+	flow := FlowFromHTTP(req, resp, []byte("req"), []byte("resp"))
+	if flow.GetRequest().GetMethod() != "POST" || flow.GetRequest().GetUrl() != u.String() || !flow.GetComplete() {
+		t.Fatalf("unexpected flow: %+v", flow)
 	}
-	if len(e.Request.Headers) != 2 || e.Response.StatusCode != 201 || string(e.Response.Body) != "resp" {
-		t.Fatalf("unexpected canonical exchange: %+v", e)
+	if len(flow.GetRequest().GetHeaders()) != 2 || flow.GetResponse().GetStatusCode() != 201 || string(flow.GetResponse().GetBody()) != "resp" {
+		t.Fatalf("unexpected canonical flow: %+v", flow)
 	}
 }
 
-func TestPairsFromHTTPWithHost(t *testing.T) {
-	// net/http keeps Host out of the header map, so a pair sequence built from
-	// the map alone lacks it; the helper prepends it.
-	got := PairsFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, "example.test:8090")
-	if len(got) != 2 || got[0] != (Pair{Name: "Host", Value: "example.test:8090"}) {
+func TestHeadersFromHTTPWithHost(t *testing.T) {
+	got := HeadersFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, "example.test:8090")
+	if len(got) != 2 || got[0].GetName() != "Host" || got[0].GetValue() != "example.test:8090" {
 		t.Fatalf("Host not prepended: %#v", got)
 	}
-
-	// Empty host: nothing to add, sequence is unchanged.
-	if got := PairsFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, ""); len(got) != 1 {
+	if got := HeadersFromHTTPWithHost(http.Header{"Accept": {"*/*"}}, ""); len(got) != 1 {
 		t.Fatalf("empty host should not add a header: %#v", got)
 	}
-
-	// An existing Host header (any case) is never duplicated.
-	got = PairsFromHTTPWithHost(http.Header{"host": {"already.test"}}, "example.test")
+	got = HeadersFromHTTPWithHost(http.Header{"host": {"already.test"}}, "example.test")
 	if len(got) != 1 || !containsHeaderName(got, "Host") {
 		t.Fatalf("existing Host must not be duplicated: %#v", got)
 	}
 }
 
-func TestExchangeFromHTTPAddsHost(t *testing.T) {
+func TestFlowFromHTTPAddsHost(t *testing.T) {
 	u, _ := url.Parse("https://example.test:8443/a")
 	req := &http.Request{Method: "GET", URL: u, Host: "example.test:8443", Proto: "HTTP/1.1", Header: http.Header{"Accept": {"*/*"}}}
-	e := ExchangeFromHTTP(req, nil, nil, nil)
-	if len(e.Request.Headers) == 0 || e.Request.Headers[0] != (Pair{Name: "Host", Value: "example.test:8443"}) {
-		t.Fatalf("Host header not synthesized from req.Host: %#v", e.Request.Headers)
+	flow := FlowFromHTTP(req, nil, nil, nil)
+	headers := flow.GetRequest().GetHeaders()
+	if len(headers) == 0 || headers[0].GetName() != "Host" || headers[0].GetValue() != "example.test:8443" {
+		t.Fatalf("Host header not synthesized from req.Host: %#v", headers)
 	}
 }
 
-func TestFlowExchangeRoundTrip(t *testing.T) {
-	flow := &Flow{
+func TestFlowFromHTTPRequestOnly(t *testing.T) {
+	flow := FlowFromHTTP(&http.Request{Method: "GET"}, nil, nil, nil)
+	if flow.GetResponse() != nil || flow.GetComplete() {
+		t.Fatalf("request-only flow gained a response: %#v", flow)
+	}
+}
+
+func TestFlowJSONPersistenceUsesProtoShape(t *testing.T) {
+	want := &Flow{
 		Id: "flow-1",
 		Request: &HttpRequest{
-			Method:   "POST",
-			Url:      "https://example.test/login",
-			Protocol: "HTTP/2.0",
+			Method: "GET",
+			Url:    "https://example.test/",
 			Headers: []*Header{
-				{Name: "X-Trace", Value: "a"},
-				{Name: "X-Trace", Value: "b"},
-				{Name: "Content-Type", Value: "application/json"},
+				{Name: "Accept", Value: "text/html"},
+				{Name: "X-Trace-Id", Value: "a"},
+				{Name: "X-Trace-Id", Value: "b"},
 			},
-			Body: []byte(`{"u":"n"}`),
 		},
-		Response: &HttpResponse{
-			StatusCode:   302,
-			ReasonPhrase: "Found",
-			Headers:      []*Header{{Name: "Location", Value: "/home"}},
-		},
+		Response: &HttpResponse{StatusCode: 200, Body: []byte("hello")},
 		Complete: true,
 	}
-
-	exchange := ExchangeFromFlow(flow)
-	if exchange.ID != "flow-1" || exchange.Response == nil || exchange.Response.StatusCode != 302 || !exchange.Complete {
-		t.Fatalf("scalar fields did not cross: %#v", exchange)
-	}
-	if len(exchange.Request.Headers) != 3 || exchange.Request.Headers[1] != (Pair{Name: "X-Trace", Value: "b"}) {
-		t.Fatalf("duplicate headers lost order or values: %#v", exchange.Request.Headers)
-	}
-
-	back := exchange.Proto()
-	if back.GetId() != flow.GetId() || back.GetResponse().GetReasonPhrase() != "Found" || len(back.GetRequest().GetHeaders()) != 3 {
-		t.Fatalf("proto round-trip mismatch: %#v", back)
-	}
-}
-
-func TestExchangeRequestOnly(t *testing.T) {
-	flow := &Flow{
-		Id:      "flow-2",
-		Request: &HttpRequest{Method: "GET", Url: "http://unreachable.test/"},
-		Error:   "dial tcp: connection refused",
-	}
-	exchange := ExchangeFromFlow(flow)
-	if exchange.Response != nil {
-		t.Fatalf("request-only flow gained a response: %#v", exchange.Response)
-	}
-	if exchange.Complete {
-		t.Fatal("request-only flow must not be complete")
-	}
-	back := exchange.Proto()
-	if back.GetResponse() != nil {
-		t.Fatal("response must stay absent on the wire")
-	}
-}
-
-func TestExchangeNilSafety(t *testing.T) {
-	if ExchangeFromFlow(nil) != nil {
-		t.Fatal("nil flow produced a non-nil exchange")
-	}
-	var exchange *Exchange
-	if exchange.Proto() != nil {
-		t.Fatal("nil exchange produced a non-nil flow")
-	}
-}
-
-// TestExchangeJSONUsesCanonicalHeaderPairs pins direct persistence of the
-// canonical exchange without a second JSON-only transport shape.
-func TestExchangeJSONUsesCanonicalHeaderPairs(t *testing.T) {
-	const encoded = `{"id":"flow-1","request":{"method":"GET","url":"https://example.test/",` +
-		`"headers":[{"name":"Accept","value":"text/html"},{"name":"X-Trace-Id","value":"a"},{"name":"X-Trace-Id","value":"b"}]},` +
-		`"response":{"status_code":200,"body":"aGVsbG8="},"complete":true}`
-
-	var exchange Exchange
-	if err := json.Unmarshal([]byte(encoded), &exchange); err != nil {
-		t.Fatalf("decode flow: %v", err)
-	}
-	if len(exchange.Request.Headers) != 3 {
-		t.Fatalf("headers did not unfold to pairs: %#v", exchange.Request.Headers)
-	}
-	if exchange.Response == nil || exchange.Response.StatusCode != 200 {
-		t.Fatalf("response did not cross: %#v", exchange.Response)
-	}
-
-	data, err := json.Marshal(exchange)
+	data, err := json.Marshal(want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != encoded {
-		t.Fatalf("persisted shape drifted:\n got %s\nwant %s", data, encoded)
-	}
-}
-
-// TestExchangeJSONRequestOnly pins the persisted form of an exchange that never
-// got a response: no response key at all.
-func TestExchangeJSONRequestOnly(t *testing.T) {
-	data, err := json.Marshal(Exchange{
-		ID:      "f",
-		Request: Request{Method: "GET", URL: "http://x/"},
-		Error:   "dial tcp: timeout",
-	})
-	if err != nil {
+	var got Flow
+	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"id":"f","request":{"method":"GET","url":"http://x/"},"error":"dial tcp: timeout","complete":false}`
-	if string(data) != want {
-		t.Fatalf(" got %s\nwant %s", data, want)
-	}
-
-	var exchange Exchange
-	if err := json.Unmarshal([]byte(want), &exchange); err != nil {
-		t.Fatal(err)
-	}
-	if exchange.Response != nil {
-		t.Fatal("absent response key must stay nil")
-	}
-}
-
-func TestExchangeJSONOmitsEmptyFields(t *testing.T) {
-	data, err := json.Marshal(Exchange{
-		ID:       "f",
-		Request:  Request{Method: "GET", URL: "http://x/"},
-		Response: &Response{StatusCode: 200},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const want = `{"id":"f","request":{"method":"GET","url":"http://x/"},"response":{"status_code":200},"complete":false}`
-	if string(data) != want {
-		t.Fatalf(" got %s\nwant %s", data, want)
+	if got.GetId() != want.GetId() || got.GetResponse().GetStatusCode() != 200 || len(got.GetRequest().GetHeaders()) != 3 {
+		t.Fatalf("persisted flow mismatch: %#v", &got)
 	}
 }

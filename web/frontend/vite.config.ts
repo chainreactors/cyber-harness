@@ -2,12 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-const backendURL = process.env.AISCAN_BACKEND_URL || 'http://127.0.0.1:8080'
+const backendURL = process.env.CYBER_BACKEND_URL || 'http://127.0.0.1:8080'
 
 // Shared UI and IOA components are consumed directly from the cyber-ui
-// submodule (single source of truth for what aiscan contributes upstream). The
+// submodule (single source of truth for what cyber contributes upstream). The
 // remaining composite views (markdown/viewer) stay vendored under @/ because
-// aiscan still diverges them.
+// cyber still diverges them.
 const cyberUI = path.resolve(__dirname, './cyber-ui/packages')
 
 export default defineConfig({
@@ -28,9 +28,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // The backend serves three top-level families: the auth + AOP-websocket
+      // JSON API, the IOA read API, and the ConnectRPC services. Missing any of
+      // them leaves the dev server rendering an app with no data.
       '/api': {
         target: backendURL,
         ws: true,
+      },
+      '/ioa': {
+        target: backendURL,
+      },
+      '/cyber.rpc.': {
+        target: backendURL,
       },
     },
   },

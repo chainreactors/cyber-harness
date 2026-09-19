@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/aiscan/pkg/commands"
+	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func execFetch(t *testing.T, cmd *FetchCommand, args []string) string {

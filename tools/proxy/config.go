@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	operationpb "github.com/chainreactors/aiscan/aop/operation"
-	cfg "github.com/chainreactors/aiscan/core/config"
-	"github.com/chainreactors/aiscan/core/hooks"
-	"github.com/chainreactors/aiscan/core/operation"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/proxyclient"
 	"google.golang.org/protobuf/proto"
 )
@@ -44,7 +44,7 @@ func NewHub(workDir, originalProxy string, capture bool, registry *hooks.Registr
 	}
 
 	store := NewFlowStoreWithLimits(10000, config.BodyRetentionBytes)
-	caRoot := filepath.Join(workDir, ".aiscan", "mitm")
+	caRoot := filepath.Join(workDir, ".cyber", "mitm")
 	hub := NewProxyHub(state, store, caRoot, capture, registry)
 	hub.ProxyHub.storage = config
 

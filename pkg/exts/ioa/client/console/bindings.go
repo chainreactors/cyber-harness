@@ -3,8 +3,8 @@ package console
 import (
 	"context"
 	"fmt"
-	consoleapi "github.com/chainreactors/aiscan/pkg/console/api"
-	ioatools "github.com/chainreactors/aiscan/tools/ioa"
+	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	ioatools "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/spf13/cobra"
 	"strings"
 )

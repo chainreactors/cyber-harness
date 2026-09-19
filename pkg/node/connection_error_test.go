@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/aiscan/aop"
-	"github.com/chainreactors/aiscan/core/telemetry"
-	"github.com/chainreactors/aiscan/pkg/commands"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/gorilla/websocket"
 )
 
@@ -121,7 +121,7 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 	go func() {
 		errCh <- connectGenerated(ctx, connectionConfig{
 			ServerURL: server.URL,
-			Registry:  commands.NewRegistry(nil),
+			Registry:  commands.NewRegistry(),
 			Logger:    logger,
 		})
 	}()
@@ -164,7 +164,7 @@ func TestDialProtoWebSocketPreservesHandshakeStatus(t *testing.T) {
 func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		new(rejectingEnvelopeStream),
 	)
@@ -179,7 +179,7 @@ func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(nil), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		&rejectingEnvelopeStream{replyTo: "another-request"},
 	)
