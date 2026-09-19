@@ -45,7 +45,7 @@ func (p *gateProvider) ChatCompletion(ctx context.Context, req *agent.ChatComple
 	}
 	return &agent.ChatCompletionResponse{Choices: []agent.Choice{{Message: agent.TextMessage("assistant", "done")}}}, nil
 }
-func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer) (*AgentConsole, *apppkg.App) {
+func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer) (*AgentConsole, *apppkg.State) {
 	t.Helper()
 	if option == nil {
 		option = &cfg.Option{}

@@ -62,7 +62,7 @@ Profile 决定。
 - `core/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
 - `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
 - IOA client 声明拥有 `ioa` section 的连接测试；Web Config API 通过 Config Sections 分发。
-- `pkg/profile.Application` 只发布通用 ConsoleBindings、Capabilities 和完整 AgentStatus。
+- `pkg/profile.Profile` 只发布通用 ConsoleBindings、共享 State 和完整 AgentStatus。
 - `pkg/web.Route` 是 typed resource；Web 扩展定义目录，IOA server 扩展在启用浏览器桥接时自行贡献 `/ioa/`。
 
 新配置使用独立命名空间：
@@ -100,7 +100,7 @@ Web protobuf 增加 `extensions` 数据及脱敏视图；旧 IOA protobuf 字段
 
 ## Skills
 
-客户端提供静态 `skills.Bundle`，由 Profile 在构造 App 时选择。
+客户端提供静态 `skills.Bundle`，由 Profile 在构造发行版图时选择。
 未安装客户端时，不加载 IOA 使用说明或协议 skills。
 
 - 使用说明：`cyber://skills/ioa/SKILL.md`

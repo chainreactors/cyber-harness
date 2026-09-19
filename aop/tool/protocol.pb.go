@@ -159,8 +159,8 @@ func (x *Progress) GetCallId() string {
 	return ""
 }
 
-// Artifact carries one scanner-native structured record. Nodes remain thin:
-// only the server normalizes these records into canonical SCO documents.
+// Artifact carries one scanner-native structured record. Consumers normalize
+// these records through the CSTX ABI without introducing another wire shape.
 type Artifact struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tool          string                 `protobuf:"bytes,1,opt,name=tool,proto3" json:"tool,omitempty"`

@@ -4,14 +4,14 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { CancelScanRequestSchema, CancelScanResponseSchema, GetScanReportRequestSchema, GetScanReportResponseSchema, GetScanRequestSchema, GetScanResponseSchema, ListScansRequestSchema, ListScansResponseSchema, SubmitScanRequestSchema, SubmitScanResponseSchema } from "../types/scan_pb.js";
+import type { CancelScanRequestSchema, CancelScanResponseSchema, GetScanRequestSchema, GetScanResponseSchema, ListScansRequestSchema, ListScansResponseSchema, SubmitScanRequestSchema, SubmitScanResponseSchema } from "../types/scan_pb.js";
 import { file_types_scan } from "../types/scan_pb.js";
 
 /**
  * Describes the file rpc/scan.proto.
  */
 export const file_rpc_scan: GenFile = /*@__PURE__*/
-  fileDesc("Cg5ycGMvc2Nhbi5wcm90bxIOY3liZXIucnBjLnNjYW4yiwMKC1NjYW5TZXJ2aWNlEksKClN1Ym1pdFNjYW4SHS5jeWJlci5zY2FuLlN1Ym1pdFNjYW5SZXF1ZXN0Gh4uY3liZXIuc2Nhbi5TdWJtaXRTY2FuUmVzcG9uc2USQgoHR2V0U2NhbhIaLmN5YmVyLnNjYW4uR2V0U2NhblJlcXVlc3QaGy5jeWJlci5zY2FuLkdldFNjYW5SZXNwb25zZRJICglMaXN0U2NhbnMSHC5jeWJlci5zY2FuLkxpc3RTY2Fuc1JlcXVlc3QaHS5jeWJlci5zY2FuLkxpc3RTY2Fuc1Jlc3BvbnNlEksKCkNhbmNlbFNjYW4SHS5jeWJlci5zY2FuLkNhbmNlbFNjYW5SZXF1ZXN0Gh4uY3liZXIuc2Nhbi5DYW5jZWxTY2FuUmVzcG9uc2USVAoNR2V0U2NhblJlcG9ydBIgLmN5YmVyLnNjYW4uR2V0U2NhblJlcG9ydFJlcXVlc3QaIS5jeWJlci5zY2FuLkdldFNjYW5SZXBvcnRSZXNwb25zZUIsWipnaXRodWIuY29tL2NoYWlucmVhY3RvcnMvY3liZXIvcGtnL3JwYztycGNiBnByb3RvMw", [file_types_scan]);
+  fileDesc("Cg5ycGMvc2Nhbi5wcm90bxIOY3liZXIucnBjLnNjYW4ytQIKC1NjYW5TZXJ2aWNlEksKClN1Ym1pdFNjYW4SHS5jeWJlci5zY2FuLlN1Ym1pdFNjYW5SZXF1ZXN0Gh4uY3liZXIuc2Nhbi5TdWJtaXRTY2FuUmVzcG9uc2USQgoHR2V0U2NhbhIaLmN5YmVyLnNjYW4uR2V0U2NhblJlcXVlc3QaGy5jeWJlci5zY2FuLkdldFNjYW5SZXNwb25zZRJICglMaXN0U2NhbnMSHC5jeWJlci5zY2FuLkxpc3RTY2Fuc1JlcXVlc3QaHS5jeWJlci5zY2FuLkxpc3RTY2Fuc1Jlc3BvbnNlEksKCkNhbmNlbFNjYW4SHS5jeWJlci5zY2FuLkNhbmNlbFNjYW5SZXF1ZXN0Gh4uY3liZXIuc2Nhbi5DYW5jZWxTY2FuUmVzcG9uc2VCLFoqZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2N5YmVyL3BrZy9ycGM7cnBjYgZwcm90bzM", [file_types_scan]);
 
 /**
  * @generated from service cyber.rpc.scan.ScanService
@@ -48,14 +48,6 @@ export const ScanService: GenService<{
     methodKind: "unary";
     input: typeof CancelScanRequestSchema;
     output: typeof CancelScanResponseSchema;
-  },
-  /**
-   * @generated from rpc cyber.rpc.scan.ScanService.GetScanReport
-   */
-  getScanReport: {
-    methodKind: "unary";
-    input: typeof GetScanReportRequestSchema;
-    output: typeof GetScanReportResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_rpc_scan, 0);

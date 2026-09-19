@@ -12,14 +12,14 @@ import (
 func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
 	var second provider.State
 	second.Set(nil, provider.ProviderConfig{Model: "other"})
-	application := &apppkg.App{}
+	application := &apppkg.State{}
 	resource := New(provider.StartupConfig{Mode: provider.StartupOptional, Config: provider.ProviderConfig{Provider: "unsupported"}}, nil)
 	if application.Providers.Health().Error != "" {
 		t.Fatal("constructor initialized provider")
 	}
 	first := &application.Providers
 	failure := errors.New("later extension failed")
-	set, err := extension.New(extension.Provided[*apppkg.App](application), resource,
+	set, err := extension.New(extension.Provided[*apppkg.State](application), resource,
 		extension.Func{LoadFunc: func(*extension.Scope) error { return failure }})
 	if err != nil {
 		t.Fatal(err)

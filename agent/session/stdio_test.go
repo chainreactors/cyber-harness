@@ -16,7 +16,6 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/host"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -32,7 +31,7 @@ type stdioHost struct {
 	rt     *Runtime
 }
 
-func newStdioHost(ctx context.Context, _ any, _ telemetry.Logger, output io.Writer) *stdioHost {
+func newStdioHost(ctx context.Context, output io.Writer) *stdioHost {
 	return &stdioHost{ctx: ctx, stream: host.NewStdio(strings.NewReader(""), output)}
 }
 
@@ -72,7 +71,7 @@ func (h *stdioHost) drain() {
 }
 
 func newTestStdioHost(output io.Writer) *stdioHost {
-	return newStdioHost(context.Background(), nil, telemetry.NopLogger(), output)
+	return newStdioHost(context.Background(), output)
 }
 
 func protocolLine(t *testing.T, id string, message protobuf.Message) string {
@@ -303,7 +302,7 @@ func newStdioTestSession(t *testing.T, h *stdioHost, output *bytes.Buffer, id st
 
 func newRuntimeStdioHost(t *testing.T, output *bytes.Buffer, prov agent.Provider) *stdioHost {
 	t.Helper()
-	h := newStdioHost(context.Background(), nil, nil, output)
+	h := newStdioHost(context.Background(), output)
 	initRuntimeStdioHost(t, h, prov)
 	return h
 }

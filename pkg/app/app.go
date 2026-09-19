@@ -11,11 +11,11 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 )
 
-// App owns what no extension does: the provider state a host reconfigures at
+// State owns what no extension does: the provider state a host reconfigures at
 // runtime, the progress bus, the event stream it publishes on, and the logger.
 // It borrows nothing. Everything an extension owns is reached as a capability,
 // by the extension that needs it, rather than parked here for others to read.
-type App struct {
+type State struct {
 	Providers provider.State
 	Progress  *eventbus.Bus[*toolpb.Progress]
 	events    *coreevents.Stream
@@ -23,35 +23,35 @@ type App struct {
 	logger    telemetry.Logger
 }
 
-// New constructs an inert application around the event stream its host owns.
-func New(logger telemetry.Logger, stream *coreevents.Stream) (*App, error) {
+// New constructs inert shared state around the event stream its host owns.
+func New(logger telemetry.Logger, stream *coreevents.Stream) (*State, error) {
 	if stream == nil {
 		return nil, fmt.Errorf("application requires an event stream")
 	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &App{
+	return &State{
 		logger: logger, events: stream,
 		Progress: eventbus.New[*toolpb.Progress](),
 	}, nil
 }
 
-// Events is the stream this application publishes on. A host publishes the
-// same stream as a capability, so that consumers and the application observe
+// Events is the stream this state publishes on. A host publishes the same
+// stream as a capability, so that consumers and the state observe
 // one sequence rather than two.
-func (a *App) Events() *coreevents.Stream {
+func (a *State) Events() *coreevents.Stream {
 	if a == nil {
 		return nil
 	}
 	return a.events
 }
 
-func (a *App) Logger() telemetry.Logger {
+func (a *State) Logger() telemetry.Logger {
 	return appLogger{app: a}
 }
 
-func (a *App) SetLogger(logger telemetry.Logger) {
+func (a *State) SetLogger(logger telemetry.Logger) {
 	if a == nil {
 		return
 	}
@@ -66,7 +66,7 @@ func (a *App) SetLogger(logger telemetry.Logger) {
 	a.loggerMu.Unlock()
 }
 
-func (a *App) currentLogger() telemetry.Logger {
+func (a *State) currentLogger() telemetry.Logger {
 	if a == nil {
 		return telemetry.NopLogger()
 	}
@@ -80,7 +80,7 @@ func (a *App) currentLogger() telemetry.Logger {
 }
 
 type appLogger struct {
-	app *App
+	app *State
 }
 
 func (l appLogger) Debugf(format string, args ...any) { l.app.currentLogger().Debugf(format, args...) }

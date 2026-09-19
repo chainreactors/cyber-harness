@@ -1,4 +1,4 @@
-package main
+package aiscan
 
 import (
 	"context"
@@ -23,6 +23,26 @@ type profileLoop func(context.Context, agent.Config) (*agent.Result, error)
 
 func (f profileLoop) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
 	return f(ctx, config)
+}
+
+func TestNewRejectsInvalidRequests(t *testing.T) {
+	tests := []struct {
+		name    string
+		request Request
+		want    string
+	}{
+		{name: "nil option", request: Request{}, want: "option is required"},
+		{name: "unresolved option", request: Request{Option: &cfg.Option{}}, want: "must be resolved"},
+		{name: "invalid provider mode", request: Request{ProviderMode: provider.StartupMode(99)}, want: "invalid provider mode"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := New(test.request)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("New() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
 }
 
 // The selected test Loop never calls this provider or any tool.
@@ -56,7 +76,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	})
-	p, err := newCyberProfile(config)
+	p, err := newProfile(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +134,8 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("profile shutdown did not cancel the run")
 	}
-	if _, err := p.App(); err == nil {
-		t.Fatal("closing profile still published App")
+	if _, err := p.State(); err == nil {
+		t.Fatal("closing profile still published State")
 	}
 	if _, err := second.Run(t.Context(), agentsession.RunInput{Message: agent.TextInput("too late")}); err == nil {
 		t.Fatal("manager admitted work after shutdown began")
@@ -135,7 +155,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	config := minimalConfig(nil)
 	config.Session = &agentsession.Config{} // Sessions are selected, reasoning is not.
-	p, err := newCyberProfile(config)
+	p, err := newProfile(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,23 +181,23 @@ func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	}
 }
 
-func minimalConfig(runtime *agentsession.Config) cyberProfileConfig {
+func minimalConfig(runtime *agentsession.Config) config {
 	if runtime != nil {
 		runtime.Loop = agent.StandardLoop{}
 	}
-	return cyberProfileConfig{
+	return config{
 		Option: &cfg.Option{}, Session: runtime,
-		Application: appConfig{SkipEngines: true, Logger: telemetry.NopLogger()},
+		Base: appConfig{SkipEngines: true, Logger: telemetry.NopLogger()},
 	}
 }
 
 func TestApplicationOnlyProfile(t *testing.T) {
-	p, err := newCyberProfile(minimalConfig(nil))
+	p, err := newProfile(minimalConfig(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.App(); err == nil {
-		t.Fatal("App available before Load")
+	if _, err := p.State(); err == nil {
+		t.Fatal("State available before Load")
 	}
 	if err := p.RegisterNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
 		t.Fatal("resource namespaces available before Load")
@@ -185,7 +205,7 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.App(); err != nil {
+	if _, err := p.State(); err != nil {
 		t.Fatal(err)
 	}
 	mux := aop.NewNamespaceMux(t.Context())
@@ -198,8 +218,8 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	if err := p.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.App(); err == nil {
-		t.Fatal("App available after Close")
+	if _, err := p.State(); err == nil {
+		t.Fatal("State available after Close")
 	}
 	if err := p.RegisterNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
 		t.Fatal("resource namespaces available after Close")
@@ -207,14 +227,14 @@ func TestApplicationOnlyProfile(t *testing.T) {
 }
 
 func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
-	p, err := newCyberProfile(minimalConfig(&agentsession.Config{}))
+	p, err := newProfile(minimalConfig(&agentsession.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	application, err := p.App()
+	application, err := p.State()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +275,7 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 }
 
 func TestLoadContextDoesNotOwnProfileLifetime(t *testing.T) {
-	p, err := newCyberProfile(minimalConfig(&agentsession.Config{}))
+	p, err := newProfile(minimalConfig(&agentsession.Config{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +312,7 @@ func TestFromOptionOwnsEventOutputSelection(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			config, err := profileConfigFromOption(test.option, profilepkg.ProviderDisabled, nil, telemetry.NopLogger())
+			config, err := configFromOption(test.option, profilepkg.ProviderDisabled, nil, telemetry.NopLogger())
 			if err != nil {
 				t.Fatal(err)
 			}

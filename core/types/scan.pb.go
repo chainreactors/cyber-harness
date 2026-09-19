@@ -149,7 +149,6 @@ type Scan struct {
 	Options       *ScanOptions           `protobuf:"bytes,4,opt,name=options,proto3" json:"options,omitempty"`
 	Status        ScanStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=cyber.scan.ScanStatus" json:"status,omitempty"`
 	Progress      string                 `protobuf:"bytes,6,opt,name=progress,proto3" json:"progress,omitempty"`
-	Report        string                 `protobuf:"bytes,7,opt,name=report,proto3" json:"report,omitempty"`
 	Error         string                 `protobuf:"bytes,9,opt,name=error,proto3" json:"error,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
@@ -225,13 +224,6 @@ func (x *Scan) GetStatus() ScanStatus {
 func (x *Scan) GetProgress() string {
 	if x != nil {
 		return x.Progress
-	}
-	return ""
-}
-
-func (x *Scan) GetReport() string {
-	if x != nil {
-		return x.Report
 	}
 	return ""
 }
@@ -1238,110 +1230,6 @@ func (*ScanProtocolMessage_WatchEventsRequest) isScanProtocolMessage_Message() {
 
 func (*ScanProtocolMessage_Event) isScanProtocolMessage_Message() {}
 
-type GetScanReportRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ScanId        string                 `protobuf:"bytes,1,opt,name=scan_id,json=scanId,proto3" json:"scan_id,omitempty"`
-	Language      string                 `protobuf:"bytes,2,opt,name=language,proto3" json:"language,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetScanReportRequest) Reset() {
-	*x = GetScanReportRequest{}
-	mi := &file_types_scan_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetScanReportRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetScanReportRequest) ProtoMessage() {}
-
-func (x *GetScanReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetScanReportRequest.ProtoReflect.Descriptor instead.
-func (*GetScanReportRequest) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *GetScanReportRequest) GetScanId() string {
-	if x != nil {
-		return x.ScanId
-	}
-	return ""
-}
-
-func (x *GetScanReportRequest) GetLanguage() string {
-	if x != nil {
-		return x.Language
-	}
-	return ""
-}
-
-type GetScanReportResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Markdown      string                 `protobuf:"bytes,1,opt,name=markdown,proto3" json:"markdown,omitempty"`
-	MediaType     string                 `protobuf:"bytes,2,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetScanReportResponse) Reset() {
-	*x = GetScanReportResponse{}
-	mi := &file_types_scan_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetScanReportResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetScanReportResponse) ProtoMessage() {}
-
-func (x *GetScanReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_types_scan_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetScanReportResponse.ProtoReflect.Descriptor instead.
-func (*GetScanReportResponse) Descriptor() ([]byte, []int) {
-	return file_types_scan_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *GetScanReportResponse) GetMarkdown() string {
-	if x != nil {
-		return x.Markdown
-	}
-	return ""
-}
-
-func (x *GetScanReportResponse) GetMediaType() string {
-	if x != nil {
-		return x.MediaType
-	}
-	return ""
-}
-
 var File_types_scan_proto protoreflect.FileDescriptor
 
 const file_types_scan_proto_rawDesc = "" +
@@ -1351,21 +1239,20 @@ const file_types_scan_proto_rawDesc = "" +
 	"\vScanOptions\x12\x16\n" +
 	"\x06verify\x18\x01 \x01(\bR\x06verify\x12\x16\n" +
 	"\x06sniper\x18\x02 \x01(\bR\x06sniper\x12\x12\n" +
-	"\x04deep\x18\x03 \x01(\bR\x04deep\"\xeb\x02\n" +
+	"\x04deep\x18\x03 \x01(\bR\x04deep\"\xd9\x02\n" +
 	"\x04Scan\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\tR\x04mode\x121\n" +
 	"\aoptions\x18\x04 \x01(\v2\x17.cyber.scan.ScanOptionsR\aoptions\x12.\n" +
 	"\x06status\x18\x05 \x01(\x0e2\x16.cyber.scan.ScanStatusR\x06status\x12\x1a\n" +
-	"\bprogress\x18\x06 \x01(\tR\bprogress\x12\x16\n" +
-	"\x06report\x18\a \x01(\tR\x06report\x12\x14\n" +
+	"\bprogress\x18\x06 \x01(\tR\bprogress\x12\x14\n" +
 	"\x05error\x18\t \x01(\tR\x05error\x129\n" +
 	"\n" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtJ\x04\b\b\x10\t\"\x91\x01\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtJ\x04\b\a\x10\bJ\x04\b\b\x10\t\"\x91\x01\n" +
 	"\x11SubmitScanRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
@@ -1425,14 +1312,7 @@ const file_types_scan_proto_rawDesc = "" +
 	"\x14watch_events_request\x18\n" +
 	" \x01(\v2\".cyber.scan.WatchScanEventsRequestH\x00R\x12watchEventsRequest\x12-\n" +
 	"\x05event\x18\v \x01(\v2\x15.cyber.scan.ScanEventH\x00R\x05eventB\t\n" +
-	"\amessage\"K\n" +
-	"\x14GetScanReportRequest\x12\x17\n" +
-	"\ascan_id\x18\x01 \x01(\tR\x06scanId\x12\x1a\n" +
-	"\blanguage\x18\x02 \x01(\tR\blanguage\"R\n" +
-	"\x15GetScanReportResponse\x12\x1a\n" +
-	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown\x12\x1d\n" +
-	"\n" +
-	"media_type\x18\x02 \x01(\tR\tmediaType*\xa7\x01\n" +
+	"\amessage*\xa7\x01\n" +
 	"\n" +
 	"ScanStatus\x12\x1b\n" +
 	"\x17SCAN_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -1455,7 +1335,7 @@ func file_types_scan_proto_rawDescGZIP() []byte {
 }
 
 var file_types_scan_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_types_scan_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_types_scan_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_types_scan_proto_goTypes = []any{
 	(ScanStatus)(0),                // 0: cyber.scan.ScanStatus
 	(*ScanOptions)(nil),            // 1: cyber.scan.ScanOptions
@@ -1476,25 +1356,23 @@ var file_types_scan_proto_goTypes = []any{
 	(*SessionScanEvent)(nil),       // 16: cyber.scan.SessionScanEvent
 	(*ScanEvent)(nil),              // 17: cyber.scan.ScanEvent
 	(*ScanProtocolMessage)(nil),    // 18: cyber.scan.ScanProtocolMessage
-	(*GetScanReportRequest)(nil),   // 19: cyber.scan.GetScanReportRequest
-	(*GetScanReportResponse)(nil),  // 20: cyber.scan.GetScanReportResponse
-	(*timestamppb.Timestamp)(nil),  // 21: google.protobuf.Timestamp
-	(*aop.Rejection)(nil),          // 22: aop.Rejection
+	(*timestamppb.Timestamp)(nil),  // 19: google.protobuf.Timestamp
+	(*aop.Rejection)(nil),          // 20: aop.Rejection
 }
 var file_types_scan_proto_depIdxs = []int32{
 	1,  // 0: cyber.scan.Scan.options:type_name -> cyber.scan.ScanOptions
 	0,  // 1: cyber.scan.Scan.status:type_name -> cyber.scan.ScanStatus
-	21, // 2: cyber.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
-	21, // 3: cyber.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
+	19, // 2: cyber.scan.Scan.created_at:type_name -> google.protobuf.Timestamp
+	19, // 3: cyber.scan.Scan.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 4: cyber.scan.SubmitScanRequest.options:type_name -> cyber.scan.ScanOptions
 	2,  // 5: cyber.scan.SubmitScanResponse.accepted:type_name -> cyber.scan.Scan
-	22, // 6: cyber.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
+	20, // 6: cyber.scan.SubmitScanResponse.rejected:type_name -> aop.Rejection
 	2,  // 7: cyber.scan.GetScanResponse.scan:type_name -> cyber.scan.Scan
 	2,  // 8: cyber.scan.ListScansResponse.scans:type_name -> cyber.scan.Scan
 	2,  // 9: cyber.scan.CancelScanResponse.accepted:type_name -> cyber.scan.Scan
-	22, // 10: cyber.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
+	20, // 10: cyber.scan.CancelScanResponse.rejected:type_name -> aop.Rejection
 	0,  // 11: cyber.scan.SessionScanEvent.status:type_name -> cyber.scan.ScanStatus
-	21, // 12: cyber.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
+	19, // 12: cyber.scan.ScanEvent.emitted_at:type_name -> google.protobuf.Timestamp
 	2,  // 13: cyber.scan.ScanEvent.snapshot:type_name -> cyber.scan.Scan
 	0,  // 14: cyber.scan.ScanEvent.status:type_name -> cyber.scan.ScanStatus
 	12, // 15: cyber.scan.ScanEvent.progress:type_name -> cyber.scan.ScanProgress
@@ -1539,7 +1417,7 @@ func file_types_scan_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_scan_proto_rawDesc), len(file_types_scan_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   20,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

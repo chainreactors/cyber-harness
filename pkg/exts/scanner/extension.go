@@ -25,7 +25,7 @@ type Config struct {
 }
 
 type Extension struct {
-	application *app.App
+	application *app.State
 	config      Config
 	workDir     string
 	logger      telemetry.Logger
@@ -43,7 +43,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || scope == nil {
 		return fmt.Errorf("scanner extension is not configured")
 	}
-	application, err := extension.Use[*app.App](scope)
+	application, err := extension.Use[*app.State](scope)
 	if err != nil {
 		return err
 	}

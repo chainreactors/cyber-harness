@@ -275,7 +275,7 @@ type captureState struct {
 func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
 	correlation := hub.resolveCorrelation(correlationTokenOf(f))
 	flow := Flow{
-		Flow: traffic.Flow{Timestamp: timestamppb.New(f.StartTime)}, Operation: correlation.operation, Invocation: correlation.invocation,
+		Flow: &traffic.Flow{Timestamp: timestamppb.New(f.StartTime)}, Operation: correlation.operation, Invocation: correlation.invocation,
 		cancel: correlation.cancel, release: correlation.finish,
 	}
 	if f.ConnContext != nil && f.ConnContext.ClientConn != nil {
@@ -425,7 +425,9 @@ func appendPreview(dst, src []byte, max int) []byte {
 // metadata (attribution, timing, TLS) the mitm query verbs filter and format
 // on. Operation is the sole wire correlation authority.
 type Flow struct {
-	traffic.Flow
+	// By pointer: a canonical Flow is a protobuf message, so copying one by
+	// value copies its internal mutex, and the store moves Flow constantly.
+	*traffic.Flow
 	Operation   *operationpb.Ref
 	Invocation  operation.Invocation
 	Host        string

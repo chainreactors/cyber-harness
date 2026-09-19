@@ -13,17 +13,17 @@ import (
 
 // runAgentTransport selects exactly one Agent transport. Session, provider and
 // PTY state stay inside the single Manager created by that transport.
-func runAgentTransport(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer, setInterrupt func(func() bool)) error {
+func runAgentTransport(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer, setInterrupt func(func() bool)) error {
 	selected, err := cfg.ResolveAgentTransport(option)
 	if err != nil {
 		return err
 	}
 	switch selected {
 	case cfg.AgentTransportWeb:
-		return node.RunWebSocket(ctx, factory, option, logger)
+		return node.RunWebSocket(ctx, newProfile, option, logger)
 	case cfg.AgentTransportStdio:
-		return runner.RunStdio(ctx, factory, option, logger, input, output)
+		return runner.RunStdio(ctx, newProfile, option, logger, input, output)
 	default:
-		return runner.RunAgentMode(ctx, factory, option, logger, setInterrupt)
+		return runner.RunAgentMode(ctx, newProfile, option, logger, setInterrupt)
 	}
 }

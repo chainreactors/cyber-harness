@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -249,7 +248,7 @@ func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
-	err := runner.RunDirectScannerMode(context.Background(), cyberProfileFactory, &cfg.Option{
+	err := runner.RunDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {
@@ -266,7 +265,7 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
-	err := runner.RunDirectScannerMode(context.Background(), cyberProfileFactory, &cfg.Option{
+	err := runner.RunDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{Debug: true, NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {
@@ -710,7 +709,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 func TestResolveScannerModeForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
 		cfg.DefaultVerify = "off"
-		mode, args, err := runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1"})
+		mode, args, err := runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -721,7 +720,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -732,7 +731,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -743,7 +742,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"})
+		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -751,7 +750,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("mode = %#v", mode)
 		}
 
-		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"})
+		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -759,7 +758,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("sniper mode = %#v", mode)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"})
+		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -783,16 +782,6 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 
 		opt := &cfg.Option{}
 		cfg.ApplyDefaults(opt)
-		appCfg := appConfigFromOption(opt, profile.ProviderOptional, telemetry.NopLogger())
-		if appCfg.Scanner.Resources.CyberhubURL != cfg.DefaultCyberhubURL || appCfg.Scanner.Resources.APIKey != cfg.DefaultCyberhubKey || appCfg.Scanner.Resources.Mode != cfg.DefaultCyberhubMode {
-			t.Fatalf("scanner cyberhub config = %#v", appCfg.Scanner)
-		}
-		if appCfg.Tools.TavilyKeys != cfg.DefaultTavilyKeys {
-			t.Fatalf("tool search config = %#v", appCfg.Tools)
-		}
-		if appCfg.Provider.Mode != provider.StartupOptional {
-			t.Fatalf("provider config = %#v", appCfg.Provider)
-		}
 		if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {
 			t.Fatal("compiled node defaults were not resolved")
 		}

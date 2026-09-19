@@ -78,9 +78,9 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	sent := bindAgentQueue(fake, 8)
 	pool.agents[fake.nodeID] = fake
 	server := service.api.Sessions
 	ctx := context.Background()
@@ -99,7 +99,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 	if err != nil || !proto.Equal(first, second) {
 		t.Fatalf("replay = %v, %v; want %v", second, err, first)
 	}
-	if got := len(fake.sendCh); got != 1 {
+	if got := len(sent); got != 1 {
 		t.Fatalf("agent frames = %d, want one run", got)
 	}
 	events, err := store.ListAOPEvents(ctx, "session-1", 10)
@@ -133,9 +133,9 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	bindAgentQueue(fake, 1)
 	pool.agents[fake.nodeID] = fake
 	value, err := anypb.New(&types.SessionBinding{ScanId: "scan-1"})
 	if err != nil {
@@ -155,8 +155,11 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 }
 
 func acceptCancelTurnRequests(pool *AgentPool, agent *remoteAgent) {
+	send := agent.send
 	agent.send = func(envelope *aop.Envelope) error {
-		agent.sendCh <- envelope
+		if err := send(envelope); err != nil {
+			return err
+		}
 		message, err := aop.Unwrap(envelope)
 		if err != nil {
 			return err
@@ -189,9 +192,9 @@ func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: newNodeState(),
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	sent := bindAgentQueue(fake, 1)
 	fake.openSessions["session-1"] = struct{}{}
 	pool.agents[fake.nodeID] = fake
 	acceptCancelTurnRequests(pool, fake)
@@ -209,7 +212,7 @@ func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
 	if err != nil || canceled.GetAccepted().GetTurnId() != "automatic-turn" {
 		t.Fatalf("CancelTurn = %v, %v", canceled, err)
 	}
-	message, err := aop.Unwrap(<-fake.sendCh)
+	message, err := aop.Unwrap(<-sent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,9 +234,9 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 8),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	sent := bindAgentQueue(fake, 8)
 	pool.agents[fake.nodeID] = fake
 	acceptCancelTurnRequests(pool, fake)
 	server := service.api.Sessions
@@ -258,9 +261,9 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	// The cancel shares the single FIFO with the two run dispatches; drain it
 	// and locate the cancel_turn envelope.
 	var request *aop.CancelTurnRequest
-	drain := len(fake.sendCh)
+	drain := len(sent)
 	for i := 0; i < drain; i++ {
-		message, err := aop.Unwrap(<-fake.sendCh)
+		message, err := aop.Unwrap(<-sent)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -314,11 +317,12 @@ func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 	service := NewService(ServiceConfig{Store: store})
 	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
-	pool.agents["agent-1"] = &remoteAgent{
+	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	bindAgentQueue(fake, 1)
+	pool.agents["agent-1"] = fake
 	request := &aop.OpenSessionRequest{SessionId: "session-1", NodeId: "agent-1", Title: "original"}
 	first, err := service.api.Sessions.OpenSession(context.Background(), "open-durable", request)
 	if err != nil || first.GetAccepted() == nil {
@@ -359,11 +363,13 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 	defer store.Close()
 
 	pool := NewAgentPool(NewHub(), nil)
-	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
+	svc := NewService(ServiceConfig{Store: store})
+	svc.SetAgentPool(pool)
 	remote := &remoteAgent{
 		nodeState: newNodeState(),
-		nodeID:    "agent-1", name: "worker", sendCh: make(chan *aop.Envelope, 8), done: make(chan struct{}),
+		nodeID:    "agent-1", name: "worker",
 	}
+	sent := bindAgentQueue(remote, 8)
 	taskCh := make(chan taskResult, 1)
 	remote.tasks["task-1"] = taskCh
 	pool.register(remote)
@@ -398,7 +404,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 		}
 	}
 	select {
-	case frame := <-remote.sendCh:
+	case frame := <-sent:
 		t.Fatalf("replay dispatched a frame: %v", frame)
 	default:
 	}
@@ -469,9 +475,9 @@ func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{
 		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{"session-1": {}}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
-		nodeID:    "agent-1", name: "agent-1", sendCh: make(chan *aop.Envelope, 1),
-		done: make(chan struct{}),
+		nodeID:    "agent-1", name: "agent-1",
 	}
+	bindAgentQueue(fake, 1)
 	pool.agents[fake.nodeID] = fake
 
 	ctx := context.Background()
@@ -512,9 +518,10 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 	}
 
 	pool := NewAgentPool(NewHub(), nil)
-	remote := newFakeAgent(session.GetSession().GetNodeId(), 1)
+	remote, sent := newFakeAgent(session.GetSession().GetNodeId(), 1)
 	pool.register(remote)
-	svc := NewService(ServiceConfig{Store: store, AgentPool: pool})
+	svc := NewService(ServiceConfig{Store: store})
+	svc.SetAgentPool(pool)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -525,7 +532,7 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 
 	var upload *aop.Envelope
 	select {
-	case upload = <-remote.sendCh:
+	case upload = <-sent:
 	case <-time.After(time.Second):
 		t.Fatal("upload was not dispatched")
 	}
@@ -554,7 +561,7 @@ func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
 		t.Fatal("canceled upload remained in the agent task map")
 	}
 	select {
-	case envelope := <-remote.sendCh:
+	case envelope := <-sent:
 		message, err := aop.Unwrap(envelope)
 		if err != nil {
 			t.Fatal(err)

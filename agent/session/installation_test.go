@@ -18,7 +18,7 @@ type Extension struct {
 }
 
 func New(c Config) (*Extension, error) {
-	sessions := c.Application != nil
+	sessions := c.State != nil
 	var loop *loopext.Extension
 	if c.Loop != nil || !sessions {
 		loop = loopext.New(c.Loop)
@@ -63,7 +63,7 @@ func (r *Runtime) Run(ctx context.Context, c agent.Config) (*agent.Result, error
 	return result, err
 }
 
-func testEnvironment(value any) *apppkg.App {
-	application, _ := value.(*apppkg.App)
+func testEnvironment(value any) *apppkg.State {
+	application, _ := value.(*apppkg.State)
 	return application
 }

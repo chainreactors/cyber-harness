@@ -20,7 +20,7 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 		http.Error(w, "unauthorized\ninvalid API key", http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	app := &apppkg.App{}
+	app := &apppkg.State{}
 	if _, _, err := app.ReloadProvider(context.Background(), agent.ProviderConfig{
 		Provider: "openai", Model: "gpt-test", BaseURL: server.URL + "/v1", APIKey: "test",
 	}); err != nil {
@@ -51,7 +51,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
 	}
 
-	resource, err := session.NewResource(session.Config{Application: &apppkg.App{}, CommandRegistry: registry, Skills: store})
+	resource, err := session.NewResource(session.Config{State: &apppkg.State{}, CommandRegistry: registry, Skills: store})
 	if err != nil {
 		t.Fatal(err)
 	}

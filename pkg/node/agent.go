@@ -20,11 +20,11 @@ import (
 	profile "github.com/chainreactors/cyber/pkg/profile"
 )
 
-func RunWebSocket(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, factory, option, logger)
+func RunWebSocket(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
+	return runRemoteAgent(ctx, newProfile, option, logger)
 }
 
-func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
+func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
 	if err := resolveRemoteAgentURLs(option); err != nil {
 		return err
 	}
@@ -33,19 +33,25 @@ func runRemoteAgent(ctx context.Context, factory profile.Factory, option *cfg.Op
 		return err
 	}
 
-	p, err := factory.Build(profile.Request{
+	if newProfile == nil {
+		return fmt.Errorf("profile constructor is required")
+	}
+	p, err := newProfile(profile.Request{
 		Option: option, ProviderMode: profile.ProviderOptional, Logger: logger,
 		Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
 	})
 	if err != nil {
 		return err
 	}
+	if p == nil {
+		return fmt.Errorf("profile constructor returned nil")
+	}
 	if err := p.Load(ctx); err != nil {
 		_ = p.Close(context.Background())
 		return err
 	}
 	defer p.Close(context.Background())
-	application, err := p.App()
+	application, err := p.State()
 	if err != nil {
 		return err
 	}
@@ -152,7 +158,7 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 
 type chatAgentHandler struct {
 	rt        *agentsession.Runtime
-	app       *apppkg.App
+	app       *apppkg.State
 	option    *cfg.Option
 	logger    telemetry.Logger
 	ready     chan struct{}

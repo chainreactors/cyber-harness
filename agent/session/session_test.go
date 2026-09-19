@@ -21,6 +21,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
 	"github.com/chainreactors/cyber/pkg/hosttest"
@@ -676,7 +677,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	application := newTestApp(t, nil, nil)
+	application := apptest.NewState(t, nil, nil)
 	rt := &Runtime{
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
 		commandRegistry: reg, tools: tools, bash: bash,

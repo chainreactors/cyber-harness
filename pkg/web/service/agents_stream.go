@@ -60,7 +60,6 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		runtime:      runtimeInfo,
 		status:       &aop.AgentStatus{},
 		stats:        &aop.AgentStats{},
-		done:         make(chan struct{}),
 	}
 	namespaceMux, err := p.newAgentNamespaceMux(ctx, agent)
 	if err != nil {
@@ -93,7 +92,6 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 	p.register(agent)
 	defer func() {
 		p.unregister(agent)
-		close(agent.done)
 	}()
 
 	dispatch := func(dispatchCtx context.Context, envelope *aop.Envelope, send aop.SendFunc) error {

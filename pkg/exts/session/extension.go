@@ -39,7 +39,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || scope == nil {
 		return fmt.Errorf("session extension is unavailable")
 	}
-	application, err := extension.Use[*apppkg.App](scope)
+	application, err := extension.Use[*apppkg.State](scope)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	config := e.config
 	config.Loop = loop
-	config.Application = application
+	config.State = application
 	config.Hooks, config.Tools, config.CommandRegistry = hookRegistry, tools, commandRegistry
 	config.Skills, config.Bash = store, bash
 	config.PromptResolver = promptResolver

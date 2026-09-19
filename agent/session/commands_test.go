@@ -12,7 +12,7 @@ import (
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
 	spec := &types.CommandSpec{Name: "/inspect", Aliases: []string{"/peek"}, Description: "Inspect this session"}
-	owner, err := New(Config{Application: testEnvironment(runtime.app), Option: &cfg.Option{}, Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}, Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 		return commandText("/inspect", CommandPresentationPlain, s.ID()+":"+strings.Join(args, "|")).result, nil
 	}}}})
 	// Use the already-loaded minimal test host; no provider or transport starts.
@@ -109,7 +109,7 @@ func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
 // session hands it to the next run.
 func TestEvalRoundsCommandSetsSessionPacing(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
-	owner, err := New(Config{Application: testEnvironment(runtime.app), Option: &cfg.Option{}})
+	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -520,7 +520,7 @@ cyberhub:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 
@@ -559,7 +559,7 @@ llm:
 		option.Model = "cli-model"
 		option.BaseURL = "https://cli.example/v1"
 		option.APIKey = "cli-key"
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "cli-model" || option.BaseURL != "https://cli.example/v1" || option.APIKey != "cli-key" {
@@ -584,7 +584,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.Provider != "openai" || option.BaseURL != "https://openai-proxy.example/v1" || option.Model != "gpt-env" || option.APIKey != "openai-key" {
@@ -630,7 +630,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.Provider != "anthropic" || option.BaseURL != "https://anthropic-proxy.example/v1" || option.Model != "claude-env" || option.APIKey != "anthropic-key" {
@@ -654,7 +654,7 @@ func TestResolveRuntimeConfigRejectsUnsupportedProvider(t *testing.T) {
 		defer os.Chdir(origDir)
 
 		option := Option{LLMOptions: LLMOptions{Provider: "bogus-vendor"}}
-		if _, err := ResolveRuntimeConfig(&option, true); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		if _, err := ResolveRuntimeConfig(&option); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 			t.Fatalf("ResolveRuntimeConfig() error = %v", err)
 		}
 	})
@@ -723,7 +723,7 @@ func TestResolveRuntimeConfigTavilyPriority(t *testing.T) {
 		defer os.Chdir(origDir)
 
 		option := Option{ReconOptions: ReconOptions{TavilyKey: "cli-key"}}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.TavilyKey != "cli-key" || option.SearchConfig.TavilyKeys != "config-key" {
@@ -755,7 +755,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "kimi-for-coding" {
@@ -772,7 +772,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.Model != "claude-opus-4-8" {
@@ -804,7 +804,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.BaseURL != "https://kiro.example/v1" {
@@ -825,7 +825,7 @@ llm:
 		defer os.Chdir(origDir)
 
 		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option, true); err != nil {
+		if _, err := ResolveRuntimeConfig(&option); err != nil {
 			t.Fatal(err)
 		}
 		if option.BaseURL != "https://fallback.example/v1" {
@@ -837,7 +837,7 @@ llm:
 	})
 }
 
-func TestResolveRuntimeConfigCandidateUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
+func TestResolveRuntimeConfigUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
 	for _, key := range []string{
 		"CYBER_PROVIDER", "CYBER_MODEL", "CYBER_BASE_URL", "CYBER_API_KEY",
 		"OPENAI_MODEL", "OPENAI_BASE_URL", "OPENAI_API_KEY",
@@ -862,7 +862,7 @@ llm:
 	path := filepath.Join(dir, "cyber.yaml")
 
 	staged := Option{MiscOptions: MiscOptions{ConfigFile: path}}
-	if _, err := ResolveRuntimeConfig(&staged, false); err != nil {
+	if _, err := ResolveRuntimeConfig(&staged); err != nil {
 		t.Fatal(err)
 	}
 	if staged.ActiveProfile != "staged" || len(staged.Providers) != 2 || staged.Providers[1].Model != "staged-model" {
@@ -873,7 +873,7 @@ llm:
 		MiscOptions: MiscOptions{ConfigFile: path},
 		LLMOptions:  LLMOptions{Provider: "openai", Model: "cli-model", APIKey: "cli-key"},
 	}
-	if _, err := ResolveRuntimeConfig(&explicit, false); err != nil {
+	if _, err := ResolveRuntimeConfig(&explicit); err != nil {
 		t.Fatal(err)
 	}
 	if explicit.Provider != "openai" || explicit.Model != "cli-model" || explicit.APIKey != "cli-key" {

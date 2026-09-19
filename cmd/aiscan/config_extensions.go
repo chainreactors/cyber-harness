@@ -13,7 +13,25 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 	"net/url"
+	"strings"
 )
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func tavilyKeys(primary string, fallbacks ...string) string {
+	keys := make([]string, 0, len(fallbacks)+1)
+	for _, raw := range append([]string{primary}, fallbacks...) {
+		if raw = strings.TrimSpace(raw); raw != "" {
+			keys = append(keys, raw)
+		}
+	}
+	return strings.Join(keys, ",")
+}
 
 // cyber.yaml is wider than the shared proto schema: --init also emits local
 // sections and switches (misc, output, traffic, the flat LLM

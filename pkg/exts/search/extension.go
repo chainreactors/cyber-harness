@@ -34,7 +34,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	application, err := extension.Use[*app.App](scope)
+	application, err := extension.Use[*app.State](scope)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 // providerWebSearch adapts the configured model's own web search, when it has
 // one, to the search tool's signature. It lives here because it is search
 // behaviour, not composition.
-func providerWebSearch(application *app.App) func(context.Context, string, int) (string, error) {
+func providerWebSearch(application *app.State) func(context.Context, string, int) (string, error) {
 	model, _ := application.ProviderState()
 	searcher, ok := model.(provider.WebSearchProvider)
 	if !ok {

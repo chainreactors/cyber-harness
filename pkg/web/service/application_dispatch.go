@@ -19,7 +19,7 @@ type applicationPTYRoute struct {
 	unsubscribe func()
 }
 
-func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelope) error {
+func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelope, registerNamespaces func(*aop.NamespaceMux) error) error {
 	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil || first == nil {
 		return fmt.Errorf("application AOP connection is unavailable")
 	}
@@ -321,8 +321,8 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 			return fmt.Errorf("register application namespace: %w", err)
 		}
 	}
-	if s.applicationNamespaces != nil {
-		if err := s.applicationNamespaces(mux); err != nil {
+	if registerNamespaces != nil {
+		if err := registerNamespaces(mux); err != nil {
 			return fmt.Errorf("register application extension namespace: %w", err)
 		}
 	}

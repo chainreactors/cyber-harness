@@ -29,6 +29,9 @@ Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CL
 
 - 每个 `pkg/exts/<feature>` 子树至少声明一个 Extension，由 `pkg/exts` 的守卫测试强制。
   不属于任何功能树的胶水应该移回拥有该资源的功能包，而不是留在这里当裸函数。
-- 按连接的协议用 `aop.ConnectionBinding` 贡献：Extension 只提供 opener，每个连接建立时由
-  Namespace Registry 打开自己的 handler。宿主（`pkg/node`、`pkg/web`）不得再硬编码协议注册，
-  也不需要为这类协议追踪实例或生命周期。
+- 协议统一用 `aop.Binding` 贡献，只有一个类型：Extension 提供 opener，每个连接建立时由
+  Namespace Registry 打开自己的 handler；共享一个 handler 的用 `aop.Shared` 表达，它的
+  owner 自己决定何时停止服务。Extension 不需要为这类协议追踪实例或生命周期。
+- 由 Extension 资源支撑的协议不得再由宿主（`pkg/node`、`pkg/web`）硬编码注册，走 Registry。
+  宿主自己连接态支撑的协议是另一回事：它们的 handler 闭包捕获的是连接自己的状态，本来就
+  该由宿主注册，`RegisterNamespaces` 就是两者的接缝。

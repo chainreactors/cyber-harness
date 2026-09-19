@@ -32,28 +32,27 @@ var aopProtos = []string{
 	"aop/exec/protocol.proto",
 	"aop/pty/protocol.proto",
 	"aop/tool/protocol.proto",
-	"aop/sco/protocol.proto",
 	"aop/traffic/protocol.proto",
 }
 
 var typeProtos = []string{
 	"types/agent.proto",
+	"types/artifact.proto",
 	"types/chat.proto",
 	"types/command.proto",
 	"types/config.proto",
 	"types/reload.proto",
 	"types/scan.proto",
-	"types/sco.proto",
 	"types/system.proto",
 }
 
 var rpcProtos = []string{
 	"rpc/aop.proto",
 	"rpc/agent.proto",
+	"rpc/artifact.proto",
 	"rpc/chat.proto",
 	"rpc/config.proto",
 	"rpc/scan.proto",
-	"rpc/sco.proto",
 	"rpc/system.proto",
 }
 

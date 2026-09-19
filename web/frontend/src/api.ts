@@ -22,7 +22,7 @@ import {
   LLMProbeRequestSchema,
   ReloadProtocolMessageSchema,
   AgentRunOptionsSchema,
-  SCOService,
+  ArtifactService,
   ScanProtocolMessageSchema,
   ScanService,
   ScanStatus,
@@ -75,7 +75,7 @@ const cyberRPC = {
   config: createClient(ConfigService, connectTransport),
   agents: createClient(AgentService, connectTransport),
   system: createClient(SystemService, connectTransport),
-  sco: createClient(SCOService, connectTransport),
+  artifacts: createClient(ArtifactService, connectTransport),
 }
 const aopClient = new AOPClient()
   .register(CommandProtocolMessageSchema)
@@ -421,18 +421,6 @@ export async function listChatMessages(sessionID: string): Promise<EventDelivery
   }
 }
 
-// Fetch a scan's markdown report, re-rendered server-side in the given language
-// ('en' | 'zh'). Returns '' when the report isn't ready yet (404) so callers can
-// just show a placeholder.
-export async function fetchScanReport(scanID: string, lang: string): Promise<string> {
-	try {
-		const response = await cyberRPC.scans.getScanReport({ scanId: scanID, language: lang })
-		return response.markdown
-	} catch {
-		return ''
-	}
-}
-
 export function subscribeAOPEvents(
   sessionID: string,
   onEvent: (event: AOPEvent) => void,
@@ -487,28 +475,13 @@ function newRPCID(): string {
 
 export { aopClient }
 
-// ── SCO Nodes ──
-
-export async function listSCONodes(opts?: { type?: string; scanId?: string; limit?: number }): Promise<SCONode[]> {
-  const response = await cyberRPC.sco.listNodes({ type: opts?.type || '', operationId: opts?.scanId || '', limit: opts?.limit || 0 })
-  return (response.nodes?.nodes || []).map(decodeSCONode)
-}
-
-export async function getSupportedArtifacts(): Promise<string[]> {
-  return (await cyberRPC.sco.listArtifacts({})).artifacts
-}
-
-export async function importSCOData(
-  file: File,
-  artifact: string,
-  scanId = 'import',
-): Promise<{ status: string; nodes: number; artifact: string; duplicates: number }> {
-  const response = await cyberRPC.sco.importNodes({ data: new Uint8Array(await file.arrayBuffer()), artifact, operationId: scanId })
-  return { status: 'ok', nodes: Number(response.nodes), artifact: response.artifact, duplicates: Number(response.duplicates) }
-}
-
-function decodeSCONode(data: Uint8Array): SCONode {
-  return JSON.parse(new TextDecoder().decode(data)) as SCONode
+export async function syncArtifactEvents(afterCursor = '', artifacts: AOPEvent[] = []): Promise<EventDelivery[]> {
+  try {
+    const response = await cyberRPC.artifacts.syncArtifacts({ afterCursor, artifacts })
+    return response.artifacts
+  } catch (error) {
+    throw connectFailure(error, 'Failed to sync artifacts')
+  }
 }
 
 async function apiJSON<T>(path: string, fallbackMessage: string, init?: RequestInit): Promise<T> {

@@ -47,7 +47,12 @@ func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
 }
 
 func cloneFlowMetadata(flow Flow) Flow {
-	flow.Flow = *proto.Clone(&flow.Flow).(*traffic.Flow)
+	// The canonical flow is held by pointer, so the zero Flow is nil; normalize
+	// here to keep the zero value valid for callers and for proto.Clone.
+	if flow.Flow == nil {
+		flow.Flow = &traffic.Flow{}
+	}
+	flow.Flow = proto.Clone(flow.Flow).(*traffic.Flow)
 	if flow.Operation != nil {
 		flow.Operation = proto.Clone(flow.Operation).(*operationpb.Ref)
 	}
@@ -104,5 +109,5 @@ func (s *FlowStore) flowToProto(flow *Flow) *traffic.Flow {
 			copy.Error += fmt.Sprintf("; body unavailable: %v", err)
 		}
 	}
-	return &copy.Flow
+	return copy.Flow
 }

@@ -13,7 +13,7 @@ import (
 func TestAgentTokenRequiresAuthenticatedSessionAndDisablesCaching(t *testing.T) {
 	service := NewService(ServiceConfig{AccessKey: "test-token"})
 	defer service.Close(context.Background())
-	server := httptest.NewServer(newHandler(service, nil, nil))
+	server := httptest.NewServer(newHandler(service, nil))
 	defer server.Close()
 
 	jar, err := cookiejar.New(nil)
@@ -80,7 +80,7 @@ func TestAccessKeyAuthBrowserSession(t *testing.T) {
 func TestServiceOwnsHandlerAuthentication(t *testing.T) {
 	service := NewService(ServiceConfig{AccessKey: "test-token"})
 	defer service.Close(context.Background())
-	server := httptest.NewServer(newHandler(service, nil, nil))
+	server := httptest.NewServer(newHandler(service, nil))
 	defer server.Close()
 
 	assertStatus(t, server.Client(), http.MethodGet, server.URL+"/api/missing", nil, http.StatusUnauthorized)

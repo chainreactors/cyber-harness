@@ -1,4 +1,4 @@
-package main
+package aiscan
 
 import (
 	"context"
@@ -17,27 +17,27 @@ import (
 func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		build func(t *testing.T) cyberProfileConfig
+		build func(t *testing.T) config
 	}{
 		{
 			name:  "application only",
-			build: func(*testing.T) cyberProfileConfig { return minimalConfig(nil) },
+			build: func(*testing.T) config { return minimalConfig(nil) },
 		},
 		{
 			name:  "with a session runtime",
-			build: func(*testing.T) cyberProfileConfig { return minimalConfig(&agentsession.Config{}) },
+			build: func(*testing.T) config { return minimalConfig(&agentsession.Config{}) },
 		},
 		{
 			name: "with the scan engines",
-			build: func(*testing.T) cyberProfileConfig {
+			build: func(*testing.T) config {
 				config := minimalConfig(&agentsession.Config{})
-				config.Application.SkipEngines = false
+				config.Base.SkipEngines = false
 				return config
 			},
 		},
 		{
 			name: "with event output",
-			build: func(t *testing.T) cyberProfileConfig {
+			build: func(t *testing.T) config {
 				config := minimalConfig(&agentsession.Config{})
 				config.Output = t.TempDir() + "/events.jsonl"
 				return config
@@ -45,7 +45,7 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 		},
 		{
 			name: "with observation",
-			build: func(*testing.T) cyberProfileConfig {
+			build: func(*testing.T) config {
 				config := minimalConfig(&agentsession.Config{})
 				config.Observe = []observeext.Kind{observeext.Tools}
 				return config
@@ -53,7 +53,7 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			profile, err := newCyberProfile(test.build(t))
+			profile, err := newProfile(test.build(t))
 			if err != nil {
 				t.Fatalf("construct: %v", err)
 			}
@@ -70,11 +70,11 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 // The composition root reads what the graph assembled, rather than holding the
 // parts it threaded in.
 func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
-	profile, err := newCyberProfile(minimalConfig(&agentsession.Config{Loop: agent.StandardLoop{}}))
+	profile, err := newProfile(minimalConfig(&agentsession.Config{Loop: agent.StandardLoop{}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if application, err := profile.App(); err == nil && application != nil {
+	if application, err := profile.State(); err == nil && application != nil {
 		t.Fatal("the application existed before the graph loaded")
 	}
 	if err := profile.Load(t.Context()); err != nil {
@@ -82,7 +82,7 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = profile.Close(context.Background()) })
 
-	if _, err := profile.App(); err != nil {
+	if _, err := profile.State(); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := profile.Runtime()

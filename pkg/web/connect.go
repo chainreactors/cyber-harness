@@ -13,7 +13,7 @@ import (
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 )
 
-// Protobuf JSON base64-encodes SCO import bytes, so the 50 MiB business limit
+// Protobuf JSON base64-encodes raw artifact bytes, so the 50 MiB business limit
 // needs roughly 67 MiB on the management wire.
 const connectMaxMessageBytes = 72 << 20
 
@@ -71,9 +71,9 @@ func SystemRoute(service Service) Route {
 	path, handler := rpc.NewSystemServiceHandler(server, connectOptions(service)...)
 	return Route{Pattern: path, Handler: handler}
 }
-func SCORoute(service Service) Route {
+func ArtifactRoute(service Service) Route {
 	server := &connectServer{api: service.API(), service: service}
-	path, handler := rpc.NewSCOServiceHandler(server, connectOptions(service)...)
+	path, handler := rpc.NewArtifactServiceHandler(server, connectOptions(service)...)
 	return Route{Pattern: path, Handler: handler}
 }
 
@@ -98,8 +98,8 @@ func ManagementRoutes(service Service) []Route {
 		if api.Status != nil {
 			routes = append(routes, SystemRoute(service))
 		}
-		if api.SCO != nil {
-			routes = append(routes, SCORoute(service))
+		if api.Artifacts != nil {
+			routes = append(routes, ArtifactRoute(service))
 		}
 	}
 	if handler := service.ApplicationWebSocketHandler(); handler != nil {
@@ -159,10 +159,6 @@ func (s *connectServer) CancelScan(ctx context.Context, req *connect.Request[typ
 	return connectCall(s.api.Scans.CancelScan(ctx, req.Msg))
 }
 
-func (s *connectServer) GetScanReport(ctx context.Context, req *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
-	return connectCall(s.api.Scans.GetScanReport(ctx, req.Msg))
-}
-
 func (s *connectServer) GetConfig(ctx context.Context, req *connect.Request[types.GetConfigRequest]) (*connect.Response[types.GetConfigResponse], error) {
 	return connectCall(s.api.Config.GetConfig(ctx, req.Msg))
 }
@@ -195,28 +191,8 @@ func (s *connectServer) GetStatus(_ context.Context, req *connect.Request[types.
 	return connect.NewResponse(s.api.GetStatus(req.Msg)), nil
 }
 
-func (s *connectServer) ListNodes(ctx context.Context, req *connect.Request[types.ListNodesRequest]) (*connect.Response[types.ListNodesResponse], error) {
-	return connectCall(s.api.SCO.ListNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) GetNode(ctx context.Context, req *connect.Request[types.GetNodeRequest]) (*connect.Response[types.GetNodeResponse], error) {
-	return connectCall(s.api.SCO.GetNode(ctx, req.Msg))
-}
-
-func (s *connectServer) GetStats(ctx context.Context, req *connect.Request[types.GetStatsRequest]) (*connect.Response[types.GetStatsResponse], error) {
-	return connectCall(s.api.SCO.GetStats(ctx, req.Msg))
-}
-
-func (s *connectServer) DeleteNodes(ctx context.Context, req *connect.Request[types.DeleteNodesRequest]) (*connect.Response[types.DeleteNodesResponse], error) {
-	return connectCall(s.api.SCO.DeleteNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) ImportNodes(ctx context.Context, req *connect.Request[types.ImportNodesRequest]) (*connect.Response[types.ImportNodesResponse], error) {
-	return connectCall(s.api.SCO.ImportNodes(ctx, req.Msg))
-}
-
-func (s *connectServer) ListArtifacts(ctx context.Context, req *connect.Request[types.ListArtifactsRequest]) (*connect.Response[types.ListArtifactsResponse], error) {
-	return connectCall(s.api.SCO.ListArtifacts(ctx, req.Msg))
+func (s *connectServer) SyncArtifacts(ctx context.Context, req *connect.Request[types.SyncArtifactsRequest]) (*connect.Response[types.SyncArtifactsResponse], error) {
+	return connectCall(s.api.Artifacts.SyncArtifacts(ctx, req.Msg))
 }
 
 func connectCall[T any](response *T, err error) (*connect.Response[T], error) {
@@ -288,11 +264,11 @@ func connectAuthenticated(header http.Header, auth Auth) bool {
 }
 
 var (
-	_ rpc.AOPServiceHandler     = (*connectServer)(nil)
-	_ rpc.SessionServiceHandler = (*connectServer)(nil)
-	_ rpc.ScanServiceHandler    = (*connectServer)(nil)
-	_ rpc.ConfigServiceHandler  = (*connectServer)(nil)
-	_ rpc.AgentServiceHandler   = (*connectServer)(nil)
-	_ rpc.SystemServiceHandler  = (*connectServer)(nil)
-	_ rpc.SCOServiceHandler     = (*connectServer)(nil)
+	_ rpc.AOPServiceHandler      = (*connectServer)(nil)
+	_ rpc.SessionServiceHandler  = (*connectServer)(nil)
+	_ rpc.ScanServiceHandler     = (*connectServer)(nil)
+	_ rpc.ConfigServiceHandler   = (*connectServer)(nil)
+	_ rpc.AgentServiceHandler    = (*connectServer)(nil)
+	_ rpc.SystemServiceHandler   = (*connectServer)(nil)
+	_ rpc.ArtifactServiceHandler = (*connectServer)(nil)
 )

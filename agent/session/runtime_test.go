@@ -73,12 +73,12 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 }
 
 func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := newTestApp(t, nil, nil)
+	application := apptest.NewState(t, nil, nil)
 	application.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
 	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
 	release := make(chan struct{})
 	var once sync.Once
-	owner, err := New(Config{Application: testEnvironment(application), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+	owner, err := New(Config{State: testEnvironment(application), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
 		started <- struct{}{}
 		<-ctx.Done()
 		canceled <- struct{}{}
@@ -386,13 +386,13 @@ type lifecycleOutput struct {
 	kinds []string
 }
 
-func loadTestApplication(t *testing.T, application *apppkg.App) *extension.Set {
+func loadTestApplication(t *testing.T, application *apppkg.State) *extension.Set {
 	return apptest.Load(t, t.Context(), application)
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := newTestApp(t, nil, nil)
-	rt, err := New(Config{Application: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	a := apptest.NewState(t, nil, nil)
+	rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	app := newTestApp(t, telemetry.NopLogger(), nil)
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
 	// The terminal owns the tool and publishes it; nothing parks it on the
 	// application for others to read, so the test borrows it too.
 	var bash *terminaltool.BashTool
@@ -460,7 +460,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
-	rt, err := New(Config{Application: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	rt, err := New(Config{State: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +476,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// This work belongs to the terminal extension, not the Runtime or App.
+	// This work belongs to the terminal extension, not the Runtime or State.
 	// No shell or subprocess is used.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -493,7 +493,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	select {
 	case <-started:
 	case <-ctx.Done():
-		t.Fatal("App work did not start")
+		t.Fatal("State work did not start")
 	}
 
 	_ = rtSet.Close(context.Background())
@@ -503,13 +503,13 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatalf("output detached before session end: %v", seen)
 	}
 	if current, ok := bash.Manager().Get(info.ID); !ok || current.State != proc.StateRunning {
-		t.Fatalf("Runtime closed App-owned work: %+v, found=%v", current, ok)
+		t.Fatalf("Runtime closed State-owned work: %+v, found=%v", current, ok)
 	}
 
 	_ = rtSet.Close(context.Background())
 	app.Publish(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Role: "user"}}})
 	if got := output.snapshot(); len(got) != len(seen) {
-		t.Fatalf("closed Runtime still receives App events: before=%v after=%v", seen, got)
+		t.Fatalf("closed Runtime still receives State events: before=%v after=%v", seen, got)
 	}
 
 	_ = appSet.Close(context.Background())
@@ -859,16 +859,15 @@ func assertRotationEvents(t *testing.T, events []*aop.Event, oldID, newID, reaso
 	}
 }
 
-func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.App, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.State, *Runtime, *telemetryext.Extension) {
 	return newPersistenceRuntimeWithMode(t, option, llm, false)
 }
 
-func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.App, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.State, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := newTestApp(t, telemetry.NopLogger(), stream)
+	appResource := apptest.NewState(t, telemetry.NopLogger(), stream)
 	app := appResource
-	var dependencies []string
 	var entries []extension.Extension
 	var output *telemetryext.Extension
 	if option.OutputFile != "" {
@@ -877,9 +876,8 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 		if outputErr != nil {
 			t.Fatal(outputErr)
 		}
-		dependencies = append(dependencies, "output")
 	}
-	applicationEntries := apptest.Entries(t, appResource, dependencies...)
+	applicationEntries := apptest.Entries(t, appResource)
 	entries = append(entries, applicationEntries...)
 	// The recorder borrows the event stream, so it loads after whoever
 	// publishes it.
@@ -895,7 +893,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	if interactive {
 		primary = "main-repl"
 	}
-	runtimeResource, err := New(Config{Application: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
+	runtimeResource, err := New(Config{State: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
 	if err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -992,8 +990,8 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := newTestApp(t, nil, bus)
-	applicationEntries := apptest.Entries(t, a, "output")
+	a := apptest.NewState(t, nil, bus)
+	applicationEntries := apptest.Entries(t, a)
 	aSet := hosttest.Set(t, append(applicationEntries, output)...)
 	if err := aSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1009,7 +1007,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer unsubscribe.Cancel()
 	var runtimes []*Extension
 	for range 2 {
-		rt, err := New(Config{Application: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+		rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1030,7 +1028,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := session.Command(context.Background(), "/status"); err != nil {
-		t.Fatalf("closing sibling runtime broke shared App: %v", err)
+		t.Fatalf("closing sibling runtime broke shared State: %v", err)
 	}
 	_ = runtimes[1].Close(context.Background())
 	if output.Path() == "" {
@@ -1090,7 +1088,7 @@ func TestProviderSwapKeepsInFlightSnapshotAndUpdatesExistingSession(t *testing.T
 	}
 	provider, config := rt.app.ProviderState()
 	if next.callCount() != 1 || provider != next || config.Model != "new" {
-		t.Fatal("provider change did not reach App and existing session")
+		t.Fatal("provider change did not reach State and existing session")
 	}
 }
 

@@ -1,4 +1,4 @@
-package main
+package aiscan
 
 import (
 	"testing"
@@ -42,5 +42,31 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 	}
 	if config.Scanner.Recon.Credentials["SHODAN_API_KEY"] != "shodan-key" {
 		t.Fatalf("scanner extras = %+v", config.Scanner)
+	}
+}
+
+func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
+	oldURL, oldKey, oldMode := cfg.DefaultCyberhubURL, cfg.DefaultCyberhubKey, cfg.DefaultCyberhubMode
+	oldTavily := cfg.DefaultTavilyKeys
+	t.Cleanup(func() {
+		cfg.DefaultCyberhubURL, cfg.DefaultCyberhubKey, cfg.DefaultCyberhubMode = oldURL, oldKey, oldMode
+		cfg.DefaultTavilyKeys = oldTavily
+	})
+	cfg.DefaultCyberhubURL = "http://hub:8080"
+	cfg.DefaultCyberhubKey = "HUBKEY"
+	cfg.DefaultCyberhubMode = "override"
+	cfg.DefaultTavilyKeys = "BUILTIN_TAVILY"
+
+	option := &cfg.Option{}
+	cfg.ApplyDefaults(option)
+	config := appConfigFromOption(option, profilepkg.ProviderOptional, telemetry.NopLogger())
+	if config.Scanner.Resources.CyberhubURL != cfg.DefaultCyberhubURL || config.Scanner.Resources.APIKey != cfg.DefaultCyberhubKey || config.Scanner.Resources.Mode != cfg.DefaultCyberhubMode {
+		t.Fatalf("scanner cyberhub config = %#v", config.Scanner)
+	}
+	if config.Tools.TavilyKeys != cfg.DefaultTavilyKeys {
+		t.Fatalf("tool search config = %#v", config.Tools)
+	}
+	if config.Provider.Mode != provider.StartupOptional {
+		t.Fatalf("provider config = %#v", config.Provider)
 	}
 }

@@ -21,9 +21,8 @@ import (
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
+	cyberdist "github.com/chainreactors/cyber/pkg/aiscan"
 	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	node "github.com/chainreactors/cyber/pkg/node"
 	profile "github.com/chainreactors/cyber/pkg/profile"
@@ -35,34 +34,16 @@ import (
 	"github.com/chainreactors/ioa/protocols"
 )
 
-func init() {
-	webServeFunc = runWeb
-}
-
-func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) (resultErr error) {
+func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) (resultErr error) {
 	store, err := webservice.NewSQLiteStore(opts.DB)
 	if err != nil {
 		return fmt.Errorf("open database: %s", err)
 	}
 	defer store.Close()
-	artifactExt, err := cstxext.New(store)
-	if err != nil {
-		return fmt.Errorf("init artifact normalization: %w", err)
-	}
-	artifactSet, err := extension.New(artifactExt)
-	if err != nil {
-		return err
-	}
-	defer func() { resultErr = errors.Join(resultErr, artifactSet.Close(context.Background())) }()
-	if err := artifactSet.Load(ctx); err != nil {
-		return err
-	}
-	ingestor := artifactExt.Importer()
-
 	// The initial app must use the fully resolved option, including values loaded
 	// from the config file and environment. explicitOption is only the seed for
 	// later staged reloads, where the candidate config is resolved independently.
-	p, err := initWebProfile(ctx, option, logger, ingestor)
+	p, err := initWebProfile(ctx, option, logger)
 	if err != nil {
 		if p != nil {
 			err = errors.Join(err, p.Close(context.Background()))
@@ -74,7 +55,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 			resultErr = errors.Join(resultErr, p.Close(context.Background()))
 		}
 	}()
-	application, err := p.App()
+	application, err := p.State()
 	if err != nil {
 		return err
 	}
@@ -92,24 +73,22 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		ConfigAPI:   configAPI(),
 		Store:       store,
 		Profile:     p,
-		Artifacts:   ingestor,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile, runtime: option},
-		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Application, error) {
+		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Profile, error) {
 			candidateOption := cfg.Option{}
 			if explicitOption != nil {
 				candidateOption = *explicitOption
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
 			candidateOption.Sections = defaultSections()
-			if _, err := runner.ResolveRuntimeConfigCandidate(&candidateOption); err != nil {
+			if _, err := runner.ResolveRuntimeConfig(&candidateOption); err != nil {
 				return nil, err
 			}
 			// The staged YAML is resolved into the flags config, which stays the
 			// truth for the candidate runtime; the proto is only the settings
 			// payload that produced it.
-			appCfg := appConfigFromOption(&candidateOption, profile.ProviderOptional, logger)
-			candidateProfile, err := initWebProfileFromConfig(ctx, &candidateOption, appCfg, ingestor)
+			candidateProfile, err := initWebProfile(ctx, &candidateOption, logger)
 			if err != nil {
 				return candidateProfile, err
 			}
@@ -123,9 +102,9 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 
 	var pool *webservice.AgentPool
 	if option.Debug {
-		pool = webservice.NewAgentPool(service.Hub(), ingestor, "*")
+		pool = webservice.NewAgentPool(service.Hub(), store, "*")
 	} else {
-		pool = webservice.NewAgentPool(service.Hub(), ingestor)
+		pool = webservice.NewAgentPool(service.Hub(), store)
 	}
 	service.SetAgentPool(pool)
 
@@ -181,7 +160,7 @@ func runWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCom
 		}
 		telemetry.SafeGo("embedded-agent", func() {
 			defer close(embeddedDone)
-			if err := node.RunWebSocket(embeddedCtx, cyberProfileFactory, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(embeddedCtx, newCyberProfileFromRequest, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		})
@@ -252,26 +231,23 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*cyberdist.Profile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
 	}
-	appCfg := appConfigFromOption(&option, profile.ProviderOptional, logger)
-	return initWebProfileFromConfig(ctx, &option, appCfg, artifacts)
-}
-
-func initWebProfileFromConfig(ctx context.Context, option *cfg.Option, appCfg appConfig, artifacts coretool.ArtifactImporter) (*cyberProfile, error) {
-	appCfg.SkipEngines = true
-
-	profileConfig, err := profileConfigFromOption(option, profile.ProviderDisabled, nil, appCfg.Logger)
-	if err != nil {
-		return nil, err
+	if option.Resolved == nil {
+		resolved, err := defaultSections().ResolveValues(option.Extensions, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		option.Resolved = resolved
+		option.Extensions = resolved.Values()
 	}
-	profileConfig.Application = appCfg
-	profileConfig.IOA = nil
-	profileConfig.Artifacts = artifacts
-	p, err := newCyberProfile(profileConfig)
+	p, err := cyberdist.New(cyberdist.Request{
+		Option: &option, ProviderMode: profile.ProviderOptional, Logger: logger,
+		SkipEngines: true, DisableIOA: true,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -16,10 +16,10 @@ import (
 )
 
 // RunStdio assembles a Profile around the transport-only host.
-func RunStdio(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
+func RunStdio(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
+	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}

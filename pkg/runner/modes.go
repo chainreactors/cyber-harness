@@ -24,37 +24,34 @@ import (
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/cyber/tools/toolargs"
+	"github.com/chainreactors/utils/proc"
 )
 
 // ---------------------------------------------------------------------------
 // Mode dispatch
 // ---------------------------------------------------------------------------
 
-func RunAgentMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt ...func(func() bool)) error {
-	var si func(func() bool)
-	if len(setInterrupt) > 0 {
-		si = setInterrupt[0]
-	}
+func RunAgentMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
 	if !cfg.HasAgentOneShotInput(option) {
 		if option != nil && option.OutputFormat != "" && option.OutputFormat != "text" {
 			return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
 		}
-		return runInteractiveMode(ctx, factory, option, logger, si)
+		return runInteractiveMode(ctx, newProfile, option, logger, setInterrupt)
 	}
-	return runOneShotMode(ctx, factory, option, logger)
+	return runOneShotMode(ctx, newProfile, option, logger)
 }
 
 // ---------------------------------------------------------------------------
 // Agent one-shot
 // ---------------------------------------------------------------------------
 
-func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger) error {
+func runOneShotMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
 	task, err := cfg.ResolveTask(option)
 	if err != nil {
 		return err
 	}
 
-	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
+	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
@@ -75,8 +72,8 @@ func runOneShotMode(ctx context.Context, factory profile.Factory, option *cfg.Op
 // Agent interactive (REPL)
 // ---------------------------------------------------------------------------
 
-func runInteractiveMode(ctx context.Context, factory profile.Factory, option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
-	p, rt, err := loadAgentProfile(ctx, factory, option, logger, &agentsession.Config{
+func runInteractiveMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) error {
+	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -106,9 +103,9 @@ type shellHost interface {
 	Shell() (commands.Executor, *terminaltool.BashTool)
 }
 
-func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
+func RunDirectScannerMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
 	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
-	mode, scannerArgs, err := ResolveScannerModeWithDefault(rest, defaultVerify)
+	mode, scannerArgs, err := ResolveScannerMode(rest, defaultVerify)
 	if err != nil {
 		return err
 	}
@@ -137,17 +134,23 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 			Loop: agent.StandardLoop{}, PromptTarget: prompt.ScannerSystem, ScannerName: scannerArgs[0],
 		}
 	}
-	p, err := factory.Build(profile.Request{
+	if newProfile == nil {
+		return fmt.Errorf("profile constructor is required")
+	}
+	p, err := newProfile(profile.Request{
 		Option: option, ProviderMode: mode.Provider, Session: sessionConfig, Logger: scannerLogger,
 	})
 	if err != nil {
 		return fmt.Errorf("construct scanner profile: %w", err)
 	}
+	if p == nil {
+		return fmt.Errorf("profile constructor returned nil")
+	}
 	if err := p.Load(ctx); err != nil {
 		return fmt.Errorf("load scanner profile: %w", err)
 	}
 	defer p.Close(context.Background())
-	application, err := p.App()
+	application, err := p.State()
 	if err != nil {
 		return err
 	}
@@ -254,8 +257,14 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	if !retained && execution.ID != "" {
 		return fmt.Errorf("command session %s is no longer available", execution.ID)
 	}
-	if info.ExitStatus() != 0 {
-		return fmt.Errorf("%s exited with code %d", scannerArgs[0], info.ExitStatus())
+	// A built-in command runs in-process, so it has no exit code and the exit
+	// status reads zero however the command ended. The unit's terminal state is
+	// the failure, and Reason carries the tool's own error text.
+	if retained && info.State != proc.StateCompleted {
+		if info.Reason != "" {
+			return errors.New(info.Reason)
+		}
+		return fmt.Errorf("%s %s (exit code %d)", scannerArgs[0], info.State, info.ExitStatus())
 	}
 	return nil
 }
@@ -279,11 +288,11 @@ func scannerCommandSupportsDebug(name string) bool {
 	}
 }
 
-func emitSessionStarted(application *apppkg.App, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+func emitSessionStarted(application *apppkg.State, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
 	application.Publish(event)
 }
-func emitSessionEnded(application *apppkg.App, sessionID, agentName, reason string) {
+func emitSessionEnded(application *apppkg.State, sessionID, agentName, reason string) {
 	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }

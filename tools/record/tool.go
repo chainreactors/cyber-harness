@@ -22,14 +22,14 @@ type Tool struct {
 	workDir       string
 	outputDir     string
 	maxConcurrent int
-	backend       captureBackend
+	backend       Backend
 
 	mu       sync.RWMutex
 	sessions map[string]*recordingSession
 	closed   bool
 }
 
-func New(workDir, outputDir string, maxConcurrent int, backend captureBackend) *Tool {
+func New(workDir, outputDir string, maxConcurrent int, backend Backend) *Tool {
 	if maxConcurrent <= 0 {
 		maxConcurrent = DefaultMaxConcurrent
 	}

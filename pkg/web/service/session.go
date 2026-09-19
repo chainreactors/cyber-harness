@@ -225,7 +225,7 @@ func (s *Service) Upload(ctx context.Context, sessionID, filename string, data [
 			map[string]any{"filename": filename, "path": result.Path})
 		return result, nil
 	case <-ctx.Done():
-		_ = s.agents.CancelTask(nodeID, taskID)
+		_ = s.agents.CancelTask(nodeID, taskID, "")
 		return nil, ctx.Err()
 	}
 }

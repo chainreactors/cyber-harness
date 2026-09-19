@@ -142,7 +142,7 @@ func commandDescription(store *skills.Store, location string) string {
 }
 
 // AgentStatus reports Agent provider/model health; the Profile adds its status.
-func AgentStatus(app *apppkg.App) *aop.AgentStatus {
+func AgentStatus(app *apppkg.State) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
 	if app != nil {
 		_, providerConfig := app.ProviderState()

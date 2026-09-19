@@ -3,6 +3,7 @@ package katana
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -207,6 +208,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	defer crawler.Close()
 
 	// Crawl each URL.
+	var failed []error
 	for _, u := range options.URLs {
 		if ctx.Err() != nil {
 			break
@@ -216,16 +218,20 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, fmt.Errorf("katana: %w", ctxErr)
 			}
-			c.Logger.Warnf("katana: crawl %s: %v", u, crawlErr)
+			failed = append(failed, fmt.Errorf("crawl %s: %w", u, crawlErr))
 		}
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, fmt.Errorf("katana: %w", ctxErr)
 	}
 
-	// Write collected results.
+	// Write collected results. An input that failed is reported after the
+	// results it did produce, so a partly readable crawl still yields them.
 	for _, line := range collector.lines() {
 		fmt.Fprint(execution.Stdout, string(line)+"\n")
+	}
+	if len(failed) > 0 {
+		return nil, fmt.Errorf("katana: %w", errors.Join(failed...))
 	}
 	return nil, nil
 }

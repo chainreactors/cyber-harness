@@ -145,12 +145,12 @@ func TestFlowStoreEvictionRemovesBodyFiles(t *testing.T) {
 		return path
 	}
 	firstPath := writeBody("first.resp")
-	addTestBody(t, store, Flow{Flow: traffic.Flow{
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
 		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
 		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, firstPath)
 	secondPath := writeBody("second.resp")
-	addTestBody(t, store, Flow{Flow: traffic.Flow{
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
 		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/2"},
 		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, secondPath)
@@ -183,12 +183,12 @@ func TestFlowStoreBodyBudgetEvictsOldest(t *testing.T) {
 		return path
 	}
 	firstPath := write("budget-first.resp", 6)
-	addTestBody(t, store, Flow{Flow: traffic.Flow{
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
 		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/1"},
 		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, firstPath)
 	secondPath := write("budget-second.resp", 6)
-	addTestBody(t, store, Flow{Flow: traffic.Flow{
+	addTestBody(t, store, Flow{Flow: &traffic.Flow{
 		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/2"},
 		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, secondPath)
@@ -220,7 +220,7 @@ func TestFlowStoreStartupPrunesUnreferencedBodies(t *testing.T) {
 	if err := os.WriteFile(path, []byte("live"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	addTestBody(t, first, Flow{Flow: traffic.Flow{
+	addTestBody(t, first, Flow{Flow: &traffic.Flow{
 		Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
 		Response: &traffic.HttpResponse{StatusCode: 200},
 	}}, path)
@@ -263,7 +263,7 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 	hub.storage.BodyMaxBytes = 4
 	state := &captureState{
 		hub: hub,
-		flow: Flow{Flow: traffic.Flow{
+		flow: Flow{Flow: &traffic.Flow{
 			Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
 			Response: &traffic.HttpResponse{StatusCode: 200},
 		}},
@@ -314,7 +314,7 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = file.Close()
-			hub.ingestFiles(Flow{Host: "drop.test", Flow: traffic.Flow{
+			hub.ingestFiles(Flow{Host: "drop.test", Flow: &traffic.Flow{
 				Request:  &traffic.HttpRequest{Method: "GET", Url: "https://drop.test/"},
 				Response: &traffic.HttpResponse{StatusCode: 200},
 			}}, [2]*os.File{nil, file})
@@ -697,7 +697,7 @@ func TestMITMThroughput(t *testing.T) {
 func BenchmarkFlowStore_Add(b *testing.B) {
 	store := NewFlowStore(10000)
 	f := Flow{
-		Flow: traffic.Flow{
+		Flow: &traffic.Flow{
 			Request:  &traffic.HttpRequest{Method: "GET", Url: "http://example.com/"},
 			Response: &traffic.HttpResponse{StatusCode: 200},
 		},
@@ -713,7 +713,7 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Flow: traffic.Flow{
+			Flow: &traffic.Flow{
 				Request:  &traffic.HttpRequest{Method: "GET", Url: fmt.Sprintf("http://host%d.com/path%d", i%10, i)},
 				Response: &traffic.HttpResponse{StatusCode: int32(200 + (i%5)*100)},
 			},
@@ -737,7 +737,7 @@ func TestFlowStoreMemory(t *testing.T) {
 	store := NewFlowStore(10000)
 	for i := 0; i < 10000; i++ {
 		store.Add(Flow{
-			Flow: traffic.Flow{
+			Flow: &traffic.Flow{
 				Request: &traffic.HttpRequest{
 					Method:  "GET",
 					Url:     fmt.Sprintf("http://example.com/path/%d", i),

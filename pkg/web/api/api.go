@@ -75,7 +75,7 @@ type API struct {
 	Sessions  *Sessions
 	Config    *Config
 	Scans     *Scans
-	SCO       *SCO
+	Artifacts *Artifacts
 	Agents    AgentReader
 	Status    StatusReader
 	ServerURL string

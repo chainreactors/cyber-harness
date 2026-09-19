@@ -268,13 +268,13 @@ func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ty
 
 // EmitStatus emits an AOP status event on the agent's session. Used by
 // out-of-kernel helpers (evaluator) so their events carry session/seq.
-func (a *Agent) EmitStatus(state string, detail proto.Message, turnID ...string) {
+func (a *Agent) EmitStatus(state string, detail proto.Message, turnID string) {
 	a.mu.Lock()
 	em := a.Cfg.emitter
 	a.mu.Unlock()
 	if em != nil {
-		if len(turnID) > 0 && turnID[0] != "" {
-			em = em.turn(turnID[0])
+		if turnID != "" {
+			em = em.turn(turnID)
 		}
 		em.status(state, detail)
 	}

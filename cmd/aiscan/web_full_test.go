@@ -4,23 +4,14 @@ package main
 
 import (
 	"context"
-	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
-	"time"
 
-	aop "github.com/chainreactors/cyber/aop"
-	operationpb "github.com/chainreactors/cyber/aop/operation"
-	toolpb "github.com/chainreactors/cyber/aop/tool"
 	cfg "github.com/chainreactors/cyber/core/config"
-	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
@@ -86,83 +77,6 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 	}
 }
 
-func TestArtifactProjectionOwnsRawArtifactObservation(t *testing.T) {
-	events := coreevents.New()
-	ingestor := &recordingArtifactImporter{}
-	projection, err := newArtifactProjection(ingestor, telemetry.NopLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(projection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := set.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = set.Close(context.Background()) })
-	event := &aop.Event{SessionId: "session-1"}
-	encoded, err := anypb.New(&toolpb.Artifact{
-		Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: []byte(`{"ip":"127.0.0.1"}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	event.Payload = &aop.Event_Extension{Extension: encoded}
-	if err := aop.SetTypedExtension(event, &operationpb.Ref{
-		CallId: "scan-1", Correlation: operationpb.Correlation_CORRELATION_EXPLICIT,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	events.Publish(event)
-	if err := projection.Flush(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if ingestor.operationID != "scan-1" || ingestor.artifact == nil || ingestor.artifact.Tool != "gogo" {
-		t.Fatalf("artifact was not forwarded: %+v", ingestor.artifact)
-	}
-}
-
-func TestArtifactProjectionDoesNotBlockAOPPublisher(t *testing.T) {
-	events := coreevents.New()
-	importer := &blockingArtifactImporter{started: make(chan struct{}), release: make(chan struct{})}
-	projection, err := newArtifactProjection(importer, telemetry.NopLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-	set, err := extension.New(projection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := set.Load(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	defer set.Close(context.Background())
-	encoded, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Data: []byte(`{"ip":"127.0.0.1"}`)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	published := make(chan struct{})
-	go func() {
-		events.Publish(&aop.Event{Payload: &aop.Event_Extension{Extension: encoded}})
-		close(published)
-	}()
-	select {
-	case <-published:
-	case <-time.After(time.Second):
-		t.Fatal("artifact importer blocked AOP publication")
-	}
-	select {
-	case <-importer.started:
-	case <-time.After(time.Second):
-		t.Fatal("artifact consumer did not start")
-	}
-	close(importer.release)
-	if err := projection.Flush(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
 	base := &cfg.Option{Extensions: cfg.Values{clientext.ConfigKey: {"space": "case-1"}}}
 	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
@@ -196,32 +110,6 @@ func TestEmbeddedAgentOptionPreservesExplicitIOAAndNode(t *testing.T) {
 		t.Fatalf("explicit IOA configuration was not preserved: %+v", option.Extensions)
 	}
 }
-
-type recordingArtifactImporter struct {
-	operationID string
-	artifact    *toolpb.Artifact
-}
-
-func (i *recordingArtifactImporter) ImportArtifact(_ context.Context, operationID string, artifact *toolpb.Artifact) (uint64, uint64, error) {
-	i.operationID = operationID
-	i.artifact = proto.Clone(artifact).(*toolpb.Artifact)
-	return 0, 0, nil
-}
-
-func (*recordingArtifactImporter) ArtifactTypes() []string { return nil }
-
-type blockingArtifactImporter struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (i *blockingArtifactImporter) ImportArtifact(context.Context, string, *toolpb.Artifact) (uint64, uint64, error) {
-	close(i.started)
-	<-i.release
-	return 0, 0, nil
-}
-
-func (*blockingArtifactImporter) ArtifactTypes() []string { return nil }
 
 func configForWebStore(model, apiKey string) *types.DistributeConfig {
 	return &types.DistributeConfig{

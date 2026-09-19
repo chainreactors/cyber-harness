@@ -13,7 +13,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
@@ -168,15 +167,10 @@ type remoteAgent struct {
 	commandsMenu []*types.CommandSpec
 	close        func()
 	send         aop.SendFunc
-	// sendCh is retained for isolated AgentPool tests; live nodes bind send to
-	// the shared Connection mechanism instead of running a second write pump.
-	sendCh    chan *aop.Envelope
-	connectAt time.Time
-	runtime   *aop.AgentRuntimeInfo
-	status    *aop.AgentStatus
-	stats     *aop.AgentStats
-
-	done chan struct{}
+	connectAt    time.Time
+	runtime      *aop.AgentRuntimeInfo
+	status       *aop.AgentStatus
+	stats        *aop.AgentStats
 }
 
 func (a *remoteAgent) NodeID() string    { return a.nodeID }
@@ -240,7 +234,7 @@ type AgentPool struct {
 	agents         map[string]*remoteAgent
 	hub            *Hub
 	sessions       SessionLookup
-	artifacts      coretool.ArtifactImporter
+	store          *SQLiteStore
 	config         func(context.Context) (*types.DistributeConfig, error)
 	ptyMu          sync.RWMutex
 	ptySubs        map[string]chan *ptypb.ProtocolMessage
@@ -250,11 +244,11 @@ type AgentPool struct {
 	upgrader       websocket.Upgrader
 }
 
-func NewAgentPool(hub *Hub, artifacts coretool.ArtifactImporter, allowedOrigins ...string) *AgentPool {
+func NewAgentPool(hub *Hub, store *SQLiteStore, allowedOrigins ...string) *AgentPool {
 	return &AgentPool{
 		agents:         make(map[string]*remoteAgent),
 		hub:            hub,
-		artifacts:      artifacts,
+		store:          store,
 		ptySubs:        make(map[string]chan *ptypb.ProtocolMessage),
 		ptyNodeIDs:     make(map[string]string),
 		upgrader:       buildUpgrader(allowedOrigins),
@@ -521,24 +515,13 @@ func (p *AgentPool) sendAgentMessage(nodeID, id, replyTo string, message protobu
 }
 
 func (a *remoteAgent) enqueue(envelope *aop.Envelope) error {
-	if a == nil {
+	if a == nil || a.send == nil {
 		return fmt.Errorf("agent connection is unavailable")
 	}
-	if a.send != nil {
-		return a.send(envelope)
-	}
-	if a.sendCh == nil {
-		return fmt.Errorf("agent connection is unavailable")
-	}
-	select {
-	case a.sendCh <- envelope:
-		return nil
-	case <-a.done:
-		return fmt.Errorf("agent disconnected")
-	}
+	return a.send(envelope)
 }
 
-func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error {
+func (p *AgentPool) CancelTask(nodeID, taskID, sessionID string) error {
 	a := p.get(nodeID)
 	if a == nil {
 		return nil
@@ -551,13 +534,9 @@ func (p *AgentPool) CancelTask(nodeID, taskID string, sessionID ...string) error
 	if !pending {
 		return nil
 	}
-	var chatSessionID string
-	if len(sessionID) > 0 {
-		chatSessionID = sessionID[0]
-	}
 	requestID := generateID()
 	cancelMessage := protobuf.Message(&aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnRequest{CancelTurnRequest: &aop.CancelTurnRequest{
-		SessionId: chatSessionID, TurnId: taskID,
+		SessionId: sessionID, TurnId: taskID,
 	}}})
 	if isToolCall {
 		cancelMessage = &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelOperation{CancelOperation: &aop.CancelOperation{TargetId: taskID}}}

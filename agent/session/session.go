@@ -125,8 +125,8 @@ type commandOutcome struct {
 	err    error
 }
 
-// Session lifecycle payloads belong to this extension; App only stamps and publishes events.
-func emitSessionStarted(application *apppkg.App, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+// Session lifecycle payloads belong to this extension; State only stamps and publishes events.
+func emitSessionStarted(application *apppkg.State, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
 		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
@@ -134,7 +134,7 @@ func emitSessionStarted(application *apppkg.App, sessionID, agentName string, st
 	application.Publish(event)
 }
 
-func emitSessionEnded(application *apppkg.App, sessionID, agentName, reason string) {
+func emitSessionEnded(application *apppkg.State, sessionID, agentName, reason string) {
 	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }
 
@@ -360,7 +360,7 @@ func statusOneLine(value string, limit int) string {
 
 func (s *commandSession) executeBash(ctx context.Context, line, command string) commandOutcome {
 	if command == "" {
-		return commandOutcome{err: fmt.Errorf("command is required after !")}
+		return commandOutcome{err: fmt.Errorf("command is required after the ! prefix")}
 	}
 	bash := s.state.runtime.bash
 	if bash == nil {
@@ -713,7 +713,7 @@ func (rt *Runtime) Observe(observer coreevents.Observer) *eventbus.Subscription[
 	return rt.app.ObserveEvents(observer)
 }
 
-// Publish publishes an already-formed runtime event through the App-owned
+// Publish publishes an already-formed runtime event through the State-owned
 // AOP bus, applying the same timestamp and sequence stamping as agent events.
 func (rt *Runtime) Publish(event *aop.Event) {
 	if rt == nil || rt.app == nil || event == nil {

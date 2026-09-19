@@ -29,8 +29,7 @@ message Scan {
   ScanOptions options = 4;
   ScanStatus status = 5;
   string progress = 6;
-  string report = 7;
-  reserved 8;
+  reserved 7, 8;
   string error = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
@@ -126,14 +125,4 @@ message ScanProtocolMessage {
     WatchScanEventsRequest watch_events_request = 10;
     ScanEvent event = 11;
   }
-}
-
-message GetScanReportRequest {
-  string scan_id = 1;
-  string language = 2;
-}
-
-message GetScanReportResponse {
-  string markdown = 1;
-  string media_type = 2;
 }

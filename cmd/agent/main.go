@@ -75,7 +75,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		fmt.Fprintf(stdout, "agent v%s\n", cfg.Version)
 		return nil
 	}
-	if _, err := cfg.ResolveRuntimeConfig(&option, true); err != nil {
+	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
 		return err
 	}
 	if parsed.JSON {

@@ -5,7 +5,7 @@ import { EasmResultFromNodes, type SCONode } from '@cyber/cstx-easm'
 import { Badge, DisclosureCard } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ToolCallDisplay, formatArgs, stripAnsiControl, summarizeArgs } from '@/viewer'
-import { listSCONodes } from '../../api'
+import { listSCONodes, syncCSTXArtifacts } from '../../lib/cstx-runtime'
 
 const SCANNER_COMMANDS = new Set(['gogo', 'spray', 'zombie', 'neutron', 'katana', 'proton', 'scan'])
 
@@ -50,7 +50,7 @@ export default function ScannerToolCall({
     if (!command || !id || pending || error) return
     let disposed = false
     setLoading(true)
-    void listSCONodes({ scanId: id }).then((value) => {
+    void syncCSTXArtifacts().then(() => listSCONodes({ scanId: id })).then((value) => {
       if (!disposed) setNodes(value.length > 0 ? value : null)
     }).catch(() => {
       if (!disposed) setNodes(null)

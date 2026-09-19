@@ -11,8 +11,8 @@ export {
   ScanService,
 } from './gen/rpc/scan_pb.js'
 export {
-  SCOService,
-} from './gen/rpc/sco_pb.js'
+  ArtifactService,
+} from './gen/rpc/artifact_pb.js'
 export {
   SystemService,
 } from './gen/rpc/system_pb.js'

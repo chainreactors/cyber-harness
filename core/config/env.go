@@ -9,7 +9,7 @@ import (
 type envLookup func(string) (string, bool)
 
 // ResolveRuntimeConfig resolves parsed configuration with environment and defaults.
-func ResolveRuntimeConfig(option *Option, _ bool) (string, error) {
+func ResolveRuntimeConfig(option *Option) (string, error) {
 	explicit := *option
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {

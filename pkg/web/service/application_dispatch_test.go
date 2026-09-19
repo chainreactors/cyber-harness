@@ -42,12 +42,15 @@ func TestSessionOnlyApplicationCanAddItsOwnNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	svc := NewService(ServiceConfig{RegisterApplicationNamespaces: func(mux *aop.NamespaceMux) error {
+	p, _, _ := newRecordingProfile(t)
+	p.registerNamespaces = func(mux *aop.NamespaceMux) error {
 		return mux.Register(&toolpb.ProtocolMessage{}, func(context.Context, *aop.Envelope, protobuf.Message, aop.SendFunc) error {
 			called = true
 			return nil
 		})
-	}})
+	}
+	svc := NewService(ServiceConfig{Profile: p})
+	defer svc.Close(context.Background())
 	stream := &applicationTestStream{received: []*aop.Envelope{first}}
 	if err := svc.ServeApplication(t.Context(), stream); !errors.Is(err, io.EOF) {
 		t.Fatalf("ServeApplication() error = %v, want EOF", err)
@@ -56,7 +59,7 @@ func TestSessionOnlyApplicationCanAddItsOwnNamespace(t *testing.T) {
 		t.Fatal("session-only application did not dispatch its extension")
 	}
 
-	svc.applicationNamespaces = func(mux *aop.NamespaceMux) error {
+	p.registerNamespaces = func(mux *aop.NamespaceMux) error {
 		return mux.Register(&aop.ProtocolMessage{}, func(context.Context, *aop.Envelope, protobuf.Message, aop.SendFunc) error { return nil })
 	}
 	rejected := &applicationTestStream{received: []*aop.Envelope{first}}

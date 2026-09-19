@@ -89,7 +89,7 @@ func TestMissingProviderLoadFailsContribution(t *testing.T) {
 }
 
 // newTestApplication is the application this package's tests run against.
-func newTestApplication(t *testing.T) *apppkg.App {
+func newTestApplication(t *testing.T) *apppkg.State {
 	t.Helper()
 	application, err := apppkg.New(nil, coreevents.New())
 	if err != nil {

@@ -25,7 +25,7 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 )
 
-func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...string) *web.Handler {
+func newHandler(service web.Service, static http.Handler) *web.Handler {
 	handler, err := web.NewHandler(service.Auth(), static, loadedRoutes(service)...)
 	if err != nil {
 		panic(err)
@@ -33,7 +33,7 @@ func newHandler(service web.Service, _ http.Handler, static http.Handler, _ ...s
 	return handler
 }
 
-func registerConnectServices(mux *http.ServeMux, _ string, service web.Service) {
+func registerConnectServices(mux *http.ServeMux, service web.Service) {
 	for _, route := range loadedRoutes(service) {
 		mux.Handle(route.Pattern, route.Handler)
 	}
@@ -68,7 +68,7 @@ func newEndpointTestServer(t *testing.T) (*httptest.Server, *Service) {
 	service := NewService(ServiceConfig{})
 	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
-	server := httptest.NewServer(newHandler(service, nil, nil, ""))
+	server := httptest.NewServer(newHandler(service, nil))
 	t.Cleanup(func() {
 		server.Close()
 		service.Close(context.Background())
@@ -131,7 +131,7 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -171,7 +171,7 @@ func TestHandlerTestConnRouting(t *testing.T) {
 	resources.Freeze()
 	svc := NewService(ServiceConfig{ConfigAPI: managementapi.ConfigOptions{Sections: sections}})
 	defer svc.Close(context.Background())
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 	client := rpc.NewConfigServiceClient(srv.Client(), srv.URL)
 
@@ -211,7 +211,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
@@ -270,13 +270,13 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 	defer service.Close(context.Background())
 
 	mux := http.NewServeMux()
-	registerConnectServices(mux, "", service)
+	registerConnectServices(mux, service)
 	server := httptest.NewUnstartedServer(mux)
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	defer server.Close()
 	nodeMux := http.NewServeMux()
-	nodeMux.HandleFunc(NodeWebSocketPath, pool.HandleNodeWebSocket)
+	nodeMux.Handle(NodeWebSocketPath, service.NodeWebSocketHandler())
 	nodeServer := httptest.NewServer(nodeMux)
 	defer nodeServer.Close()
 

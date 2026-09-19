@@ -16,7 +16,7 @@ type indexedLoot struct {
 	loot  output.Loot
 }
 
-func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill SkillReader, coll *collector, level priority, logger telemetry.Logger) {
+func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill func(string) string, coll *collector, level priority, logger telemetry.Logger) {
 	if readSkill == nil {
 		return
 	}
@@ -51,7 +51,7 @@ func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill SkillRead
 	}
 }
 
-func runSniperPass(ctx context.Context, parent *agent.Agent, readSkill SkillReader, coll *collector, logger telemetry.Logger) {
+func runSniperPass(ctx context.Context, parent *agent.Agent, readSkill func(string) string, coll *collector, logger telemetry.Logger) {
 	if readSkill == nil {
 		return
 	}

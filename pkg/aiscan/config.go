@@ -1,4 +1,4 @@
-package main
+package aiscan
 
 import (
 	"strings"
@@ -13,8 +13,8 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-// appConfig is composition input. It stays in cmd/aiscan so the shared
-// App contains runtime state rather than scanner settings.
+// appConfig selects the reusable capability packs in the reference
+// distribution. Shared runtime state remains in app.State.
 type appConfig struct {
 	Resolved      *cfg.Resolved
 	DataDir       string

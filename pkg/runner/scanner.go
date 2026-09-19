@@ -22,11 +22,7 @@ type ScannerMode struct {
 	Agent    bool
 }
 
-func ResolveScannerMode(rest []string) (ScannerMode, []string, error) {
-	return ResolveScannerModeWithDefault(rest, cfg.DefaultVerify)
-}
-
-func ResolveScannerModeWithDefault(rest []string, defaultVerify string) (ScannerMode, []string, error) {
+func ResolveScannerMode(rest []string, defaultVerify string) (ScannerMode, []string, error) {
 	if len(rest) == 0 {
 		return ScannerMode{}, nil, fmt.Errorf("missing scanner command")
 	}

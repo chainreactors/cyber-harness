@@ -41,9 +41,6 @@ const (
 	ScanServiceListScansProcedure = "/cyber.rpc.scan.ScanService/ListScans"
 	// ScanServiceCancelScanProcedure is the fully-qualified name of the ScanService's CancelScan RPC.
 	ScanServiceCancelScanProcedure = "/cyber.rpc.scan.ScanService/CancelScan"
-	// ScanServiceGetScanReportProcedure is the fully-qualified name of the ScanService's GetScanReport
-	// RPC.
-	ScanServiceGetScanReportProcedure = "/cyber.rpc.scan.ScanService/GetScanReport"
 )
 
 // ScanServiceClient is a client for the cyber.rpc.scan.ScanService service.
@@ -52,7 +49,6 @@ type ScanServiceClient interface {
 	GetScan(context.Context, *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error)
 	ListScans(context.Context, *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error)
 	CancelScan(context.Context, *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error)
-	GetScanReport(context.Context, *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error)
 }
 
 // NewScanServiceClient constructs a client for the cyber.rpc.scan.ScanService service. By default,
@@ -90,22 +86,15 @@ func NewScanServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(scanServiceMethods.ByName("CancelScan")),
 			connect.WithClientOptions(opts...),
 		),
-		getScanReport: connect.NewClient[types.GetScanReportRequest, types.GetScanReportResponse](
-			httpClient,
-			baseURL+ScanServiceGetScanReportProcedure,
-			connect.WithSchema(scanServiceMethods.ByName("GetScanReport")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
 // scanServiceClient implements ScanServiceClient.
 type scanServiceClient struct {
-	submitScan    *connect.Client[types.SubmitScanRequest, types.SubmitScanResponse]
-	getScan       *connect.Client[types.GetScanRequest, types.GetScanResponse]
-	listScans     *connect.Client[types.ListScansRequest, types.ListScansResponse]
-	cancelScan    *connect.Client[types.CancelScanRequest, types.CancelScanResponse]
-	getScanReport *connect.Client[types.GetScanReportRequest, types.GetScanReportResponse]
+	submitScan *connect.Client[types.SubmitScanRequest, types.SubmitScanResponse]
+	getScan    *connect.Client[types.GetScanRequest, types.GetScanResponse]
+	listScans  *connect.Client[types.ListScansRequest, types.ListScansResponse]
+	cancelScan *connect.Client[types.CancelScanRequest, types.CancelScanResponse]
 }
 
 // SubmitScan calls cyber.rpc.scan.ScanService.SubmitScan.
@@ -128,18 +117,12 @@ func (c *scanServiceClient) CancelScan(ctx context.Context, req *connect.Request
 	return c.cancelScan.CallUnary(ctx, req)
 }
 
-// GetScanReport calls cyber.rpc.scan.ScanService.GetScanReport.
-func (c *scanServiceClient) GetScanReport(ctx context.Context, req *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
-	return c.getScanReport.CallUnary(ctx, req)
-}
-
 // ScanServiceHandler is an implementation of the cyber.rpc.scan.ScanService service.
 type ScanServiceHandler interface {
 	SubmitScan(context.Context, *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error)
 	GetScan(context.Context, *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error)
 	ListScans(context.Context, *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error)
 	CancelScan(context.Context, *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error)
-	GetScanReport(context.Context, *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error)
 }
 
 // NewScanServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -173,12 +156,6 @@ func NewScanServiceHandler(svc ScanServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(scanServiceMethods.ByName("CancelScan")),
 		connect.WithHandlerOptions(opts...),
 	)
-	scanServiceGetScanReportHandler := connect.NewUnaryHandler(
-		ScanServiceGetScanReportProcedure,
-		svc.GetScanReport,
-		connect.WithSchema(scanServiceMethods.ByName("GetScanReport")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/cyber.rpc.scan.ScanService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ScanServiceSubmitScanProcedure:
@@ -189,8 +166,6 @@ func NewScanServiceHandler(svc ScanServiceHandler, opts ...connect.HandlerOption
 			scanServiceListScansHandler.ServeHTTP(w, r)
 		case ScanServiceCancelScanProcedure:
 			scanServiceCancelScanHandler.ServeHTTP(w, r)
-		case ScanServiceGetScanReportProcedure:
-			scanServiceGetScanReportHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -214,8 +189,4 @@ func (UnimplementedScanServiceHandler) ListScans(context.Context, *connect.Reque
 
 func (UnimplementedScanServiceHandler) CancelScan(context.Context, *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.CancelScan is not implemented"))
-}
-
-func (UnimplementedScanServiceHandler) GetScanReport(context.Context, *connect.Request[types.GetScanReportRequest]) (*connect.Response[types.GetScanReportResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.scan.ScanService.GetScanReport is not implemented"))
 }

@@ -13,12 +13,12 @@ import {
   listAgents,
   listChatMessages,
   listChatSessions,
-  listSCONodes,
   resetChatSession,
   sendChatMessage,
   subscribeAOPEvents,
 } from '../api'
 import type { AgentView, AOPEvent, AOPSession, EventDelivery, SCONode, SessionRecord } from '../api'
+import { listSCONodes, syncCSTXArtifacts } from '../lib/cstx-runtime'
 import {
   isRootPath,
   parseRoute,
@@ -354,7 +354,7 @@ export function useChatSession() {
             : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
           // A completed scan's result is the SCO node set persisted under its
           // scan_id — load it so the timeline card can render.
-          void listSCONodes({ scanId: scan.scanId, limit: 2000 }).then((nodes) => {
+          void syncCSTXArtifacts().then(() => listSCONodes({ scanId: scan.scanId, limit: 2000 })).then((nodes) => {
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
           }).catch(() => {})
@@ -446,6 +446,8 @@ export function useChatSession() {
       const session = await getChatSession(id)
       if (activation !== activationRef.current) return
       if (session.scanIds.length) {
+		await syncCSTXArtifacts()
+		if (activation !== activationRef.current) return
         // Fetch every linked scan's SCO nodes at once instead of awaiting them
         // one after another — a session with N scans used to cost N serial
         // round-trips before its results deck filled in.

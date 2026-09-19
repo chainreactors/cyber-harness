@@ -56,9 +56,9 @@ func NewResource(config Config) (*Resource, error) {
 	if config.History == nil {
 		config.History = JSONLHistory{}
 	}
-	application := config.Application
+	application := config.State
 	if application == nil {
-		application = &apppkg.App{}
+		application = &apppkg.State{}
 	}
 	tools := config.Tools
 	if tools == nil {

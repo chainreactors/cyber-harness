@@ -410,18 +410,14 @@ func agentComposerPrompt(output *AgentOutput, bridge *readlineConsoleBridge) str
 }
 
 func (r *AgentConsole) fastInputEnabled() bool {
-	isTerminal := false
-	if r != nil && r.terminal != nil && r.terminal.Control != nil {
-		isTerminal = r.terminal.Control.IsTerminal()
-	}
 	mode := ""
 	if r != nil && r.option != nil {
 		mode = r.option.REPLMode
 	}
-	return fastInputEnabledForMode(mode, isTerminal)
+	return fastInputEnabledForMode(mode)
 }
 
-func fastInputEnabledForMode(mode string, _ bool) bool {
+func fastInputEnabledForMode(mode string) bool {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	switch mode {
 	case "rich", "readline", "console":

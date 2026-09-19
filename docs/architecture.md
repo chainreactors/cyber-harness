@@ -87,7 +87,7 @@ scope.release(borrows)    释放它借来的东西（Use）
 | `agent/proc.Sessions` | terminal ext | pty |
 | `agent.Loop` | loop ext，profile 不选推理时是 `agent.NoLoop()` | scanner、session |
 | `prompt.Resolver` | prompt ext | scanner、session；经 Agent 传给 evaluator、compact |
-| `*app.App` | app ext | provider、scanner、search、session |
+| `*app.State` | app ext | provider、scanner、search、session |
 | `*console/api.Registry` | tui ext | 装配根（加载后封存并读取贡献） |
 | `*agentsession.Runtime` | session ext | 装配根 |
 
@@ -126,7 +126,7 @@ Point 与它提供、借用的能力。
 按必须加载的顺序。
 
 > **它的返回值只能是这两个。** 如果它需要回传一个 `*hooks.Registry`、一个 `*BashTool`
-> 或一个 `*app.App`，说明还有能力没迁完。这条签名是读侧是否真的生效的测试。
+> 或一个 `*app.State`，说明还有能力没迁完。这条签名是读侧是否真的生效的测试。
 
 同一条测试适用于每个装配根：构造一个扩展、再把它的内部读回来交给下一个扩展，说明那个值
 是能力而不是构造参数。`agent.Loop` 曾经这样穿过两个 profile，`*association.Index` 曾经这样
@@ -134,9 +134,11 @@ Point 与它提供、借用的能力。
 命令搬回了索引的拥有者。空索引和没有索引在这里语义不同（后者要告诉用户怎么配置），所以
 它不能用空对象表达，也就不该是能力。
 
-组合仍然属于可执行文件：`base` 只交回一个切片，host 拥有 `Set`、决定追加什么、决定顺序。
+组合属于发行版：`base` 只交回一个切片，发行版拥有 `Set`、决定追加什么、决定顺序。
 
-- **`cmd/aiscan`** —— 完整产品。按 build tag 选装 scanner、search、proxy、browser、record、Web、IOA。
+- **`pkg/aiscan`** —— 可嵌入的参考发行版组合，按 build tag 显式选装 scanner、search、proxy、
+  browser、record 和 IOA；公开 `New(Request)`。
+- **`cmd/aiscan`** —— CLI host，只负责声明/解析配置、Web 监听与进程控制。
 - **`cmd/agent`** —— 最小本地 Agent。它不装代理，于是发布 `base.NoEgress()`；Go 的 import
   图因此免费给了它隔离性——`base` 不 import `pkg/exts/scanner`，它也就永远链接不到。
   `cmd/agent/main_test.go` 的依赖闭包守卫把这条钉死。
@@ -148,13 +150,13 @@ Point 与它提供、借用的能力。
 **顺序不做推导。** 拓扑排序排的是加载序，而真正需要的是关闭序，后者不是依赖图的逆——
 "遥测最后 flush""TUI 先于它渲染的东西停"这类约束，依赖关系表达不了。显式切片让启动序列
 在一个地方读得完；代价是顺序错误从编译期挪到了启动期，补偿是每个 profile 形态的
-加载/关闭测试（`cmd/aiscan/composition_test.go`、`cmd/agent/composition_test.go`）。
+加载/关闭测试（`pkg/aiscan/composition_test.go`、`cmd/agent/composition_test.go`）。
 
-## `app.App`
+## `app.State`
 
-App **借用字段为零**。它只拥有自己的东西：provider 状态、progress bus、事件流、logger。
+State **借用字段为零**。它只拥有自己的东西：provider 状态、progress bus、事件流、logger。
 
-每个扩展拥有的东西，由需要它的扩展按能力取，而不是停在 App 上供人读取。这条不变式是
+每个扩展拥有的东西，由需要它的扩展按能力取，而不是停在 State 上供人读取。这条不变式是
 二元的——读一眼结构体就能查——也是 `pkg/app` 不再随每个新依赖增加 import 的原因。
 
 非扩展消费者（`pkg/node`、`pkg/console`、`pkg/runner`）没有 `Scope`，它们从构造自己的那个

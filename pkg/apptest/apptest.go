@@ -15,6 +15,7 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
 	app "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
@@ -23,12 +24,25 @@ import (
 	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
+// NewState builds the shared application state owned by a test.
+func NewState(t testing.TB, logger telemetry.Logger, stream *coreevents.Stream) *app.State {
+	t.Helper()
+	if stream == nil {
+		stream = coreevents.New()
+	}
+	application, err := app.New(logger, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application
+}
+
 // Entries returns the extensions a test host owns, in load order. It publishes
 // the same capabilities a profile does -- hooks, events, the executors, the
 // skill store, a routing endpoint that routes nothing, and the application
 // itself -- so an extension under test borrows them exactly as it would in
 // production.
-func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extension {
+func Entries(t testing.TB, application *app.State) []extension.Extension {
 	t.Helper()
 	if application == nil {
 		t.Fatal("test application is required")
@@ -45,7 +59,7 @@ func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extens
 		extension.Provided[*coreevents.Stream](stream),
 		extension.Provided[*skills.Store](library),
 		extension.Provided[egress.Endpoint](egress.Disabled()),
-		extension.Provided[*app.App](application),
+		extension.Provided[*app.State](application),
 		commands.NewRegistry(),
 		toolset.NewRegistry(),
 		terminalext.New(terminalext.Config{Directory: t.TempDir(), Timeout: 1}),
@@ -54,7 +68,7 @@ func Entries(t testing.TB, application *app.App, _ ...string) []extension.Extens
 }
 
 // Load builds the host graph and loads it.
-func Load(t testing.TB, ctx context.Context, application *app.App, dependencies ...string) *extension.Set {
+func Load(t testing.TB, ctx context.Context, application *app.State) *extension.Set {
 	t.Helper()
-	return hosttest.Load(t, ctx, Entries(t, application, dependencies...)...)
+	return hosttest.Load(t, ctx, Entries(t, application)...)
 }

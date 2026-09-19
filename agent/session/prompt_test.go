@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 )
@@ -59,17 +60,17 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := newTestApp(t, telemetry.NopLogger(), nil)
+			application := apptest.NewState(t, telemetry.NopLogger(), nil)
 			resolver := defaultPromptResolver(t)
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"cyber"}, Application: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
+			rt, err := New(Config{BaseSkills: []string{"cyber"}, State: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := hosttest.Set(t, extension.Provided[*apppkg.App](application), rt)
+			rtSet := hosttest.Set(t, extension.Provided[*apppkg.State](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

@@ -1,6 +1,6 @@
 //go:build full && record && cgo && (windows || linux)
 
-package main
+package aiscan
 
 import (
 	"path/filepath"
@@ -9,11 +9,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/exts/record"
 )
 
-func init() {
-	registerApp(newRecordExtension)
-}
-
-func newRecordExtension(config appConfig, workDir string) (extension.Extension, error) {
+func recordExtension(config appConfig, workDir string) (extension.Extension, error) {
 	if !optionalToolEnabled(config.Tools.OptionalTools, "record") {
 		return nil, nil
 	}

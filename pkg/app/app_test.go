@@ -101,7 +101,7 @@ func TestLogLLMProbeStatusUnready(t *testing.T) {
 
 func TestAppLoggerCanBeRetargeted(t *testing.T) {
 	var first, second bytes.Buffer
-	app := &App{}
+	app := &State{}
 	app.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &first}))
 	logger := app.Logger()
 

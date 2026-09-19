@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 )
 
-// App owns the event stream it publishes on; there is nothing else to check,
+// State owns the event stream it publishes on; there is nothing else to check,
 // because it borrows nothing. Every other part a host once handed it is now a
 // capability its owner publishes.
 func TestNewRequiresAnEventStream(t *testing.T) {

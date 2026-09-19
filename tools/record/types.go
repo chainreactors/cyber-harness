@@ -75,8 +75,3 @@ type Backend interface {
 	Screenshot(context.Context, ResolvedTarget) (image.Image, error)
 	Record(context.Context, ResolvedTarget, string, int) (MediaInfo, error)
 }
-
-type captureRequest = CaptureRequest
-type resolvedTarget = ResolvedTarget
-type mediaInfo = MediaInfo
-type captureBackend = Backend

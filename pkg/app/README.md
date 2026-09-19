@@ -1,15 +1,11 @@
-# App
+# Shared state
 
-`app.New(logger, dependencies)` 通过直接构造注入接收 Hooks、Events、Tool/Command Registry、
-Skills 和 Bash。它不持有应用配置或 Scanner 状态，不读取 Service 表，不按 capability 选择
-插件，也不创建子 Set。
+`app.State` 是一个 Profile 内供扩展共享的非生命周期状态：provider 状态、progress 通知、
+规范 AOP 事件流以及可替换 logger。
 
-构造直接返回不含 Load/Close 的 `App`。Profile 只在唯一的线性 `extension.Set` 完整激活后
-向入口发布 App。Terminal、Scanner、Provider 等 Extension 保留各自资源所有权；App 只借用
-业务接口，不伪装成没有实际资源的生命周期对象。
+`State` 不拥有 `extension.Set`、配置、scanner、tool、command、skill 或 session。这些资源留在
+各自的 Extension 中，并通过类型化 capability 使用。`pkg/exts/app` 创建并发布 `*app.State`；
+Profile 唯一的 `extension.Set` 负责启动和关闭。
 
-App 统一暴露 Provider 状态、Tool Executor、Command Registry、Skills、Hooks 和 AOP Event
-Stream。Provider 更新按 Run 快照隔离，迟到的健康探测不会覆盖后续配置。
-
-应用配置留在 `cmd/aiscan` / `cmd/agent` 组合根，Scanner 配置归 Scanner Extension；扫描能力
-直接由其注册的 Command/Tool 资源表达，不维护第二份状态。
+Provider 更新使用快照，迟到的健康检查不会覆盖更新后的配置。事件发布者和观察者共享同一条
+事件流和序号。

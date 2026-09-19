@@ -34,32 +34,20 @@ func serveEnvelopeWebSocket(upgrader websocket.Upgrader, serve func(context.Cont
 	_ = serve(r.Context(), stream)
 }
 
-func (s *Service) HandleApplicationWebSocket(w http.ResponseWriter, r *http.Request) {
-	if s == nil || s.agents == nil {
-		http.Error(w, "application AOP WebSocket is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	serveEnvelopeWebSocket(s.agents.upgrader, s.ServeApplication, w, r)
-}
-
 func (s *Service) ApplicationWebSocketHandler() http.Handler {
 	if s == nil || s.agents == nil {
 		return nil
 	}
-	return http.HandlerFunc(s.HandleApplicationWebSocket)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveEnvelopeWebSocket(s.agents.upgrader, s.ServeApplication, w, r)
+	})
 }
 
 func (s *Service) NodeWebSocketHandler() http.Handler {
 	if s == nil || s.agents == nil {
 		return nil
 	}
-	return http.HandlerFunc(s.agents.HandleNodeWebSocket)
-}
-
-func (p *AgentPool) HandleNodeWebSocket(w http.ResponseWriter, r *http.Request) {
-	if p == nil {
-		http.Error(w, "node AOP WebSocket is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	serveEnvelopeWebSocket(p.upgrader, p.ServeNode, w, r)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveEnvelopeWebSocket(s.agents.upgrader, s.agents.ServeNode, w, r)
+	})
 }

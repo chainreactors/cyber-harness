@@ -11,6 +11,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
+	cyberdist "github.com/chainreactors/cyber/pkg/aiscan"
 )
 
 func TestRecordFullScannerSet(t *testing.T) {
@@ -28,7 +29,7 @@ func TestRecordManifestTags(t *testing.T) {
 // The tool registry is a capability, so this borrows it the way an extension
 // would instead of reading it off the application.
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
-	graph, err := newAppGraph(appConfig{Logger: telemetry.NopLogger(), SkipEngines: true}, agent.NoLoop(), t.TempDir(), nil)
+	graph, err := cyberdist.Extensions(cyberdist.AppConfig{Logger: telemetry.NopLogger(), SkipEngines: true}, agent.NoLoop(), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -269,14 +269,8 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 			p.sessions.BroadcastAOPEvent(sessionID, event)
 		}
 	}
-	if extension := event.GetExtension(); extension != nil && p.artifacts != nil {
-		artifact, operationID, found, err := toolpb.FromEvent(event)
-		if err == nil && found {
-			if operationID == "" {
-				operationID = correlationID
-			}
-			_, _, _ = p.artifacts.ImportArtifact(context.Background(), operationID, artifact)
-		}
+	if extension := event.GetExtension(); extension != nil && p.store != nil && extension.MessageIs(new(toolpb.Artifact)) {
+		_, _ = p.store.SyncArtifactEvents(context.Background(), []*aop.Event{event}, int64(1<<63-1))
 	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:

@@ -122,7 +122,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 	}
 	addTestBody(t, first, Flow{
 		Operation: &operationpb.Ref{CallId: "call-1"}, Host: "example.test", ContentType: "text/plain",
-		Flow: traffic.Flow{
+		Flow: &traffic.Flow{
 			Request:  &traffic.HttpRequest{Method: "GET", Url: "https://example.test/"},
 			Response: &traffic.HttpResponse{StatusCode: 200},
 		},

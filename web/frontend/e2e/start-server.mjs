@@ -107,8 +107,11 @@ if (frontendBuild.status !== 0) {
   process.exit(frontendBuild.status ?? 1)
 }
 
-// The full edition's tags come from editions.env: `full` gates web_full.go,
-// which imports the cstx extension, so a build tagged `full` alone cannot link.
+// The full edition's tags and cgo settings come from editions.env, the file the
+// Makefile and the CI workflows build from. `full` alone cannot link — it gates
+// web_full.go, which imports the cstx extension — and the capability set is used
+// rather than FULL_TAGS because it omits the base policy tags that keep the
+// resource templates outside the binary.
 const editions = new Map()
 for (const line of readFileSync(join(root, 'editions.env'), 'utf8').split('\n')) {
   const entry = line.trim()
@@ -117,18 +120,30 @@ for (const line of readFileSync(join(root, 'editions.env'), 'utf8').split('\n'))
   if (separator < 0) continue
   editions.set(entry.slice(0, separator).trim(), entry.slice(separator + 1).trim())
 }
-const buildTags = editions.get('FULL_CAPS_TAGS')
-if (!buildTags) throw new Error('editions.env does not declare FULL_CAPS_TAGS')
+const editionValue = (key) => {
+  const value = editions.get(key)
+  if (!value) throw new Error(`editions.env does not declare ${key}`)
+  return value
+}
+
+// The static RE2 SDK contributes its library search path and nothing else, so
+// derive it the way the Makefile's RE2_PREFIX and .github/native/sdk.sh do
+// instead of requiring the caller to have exported it.
+const nativeOS = { win32: 'windows', darwin: 'darwin' }[process.platform] ?? 'linux'
+const nativeArch = { x64: 'amd64', arm64: 'arm64' }[process.arch] ?? process.arch
+const re2Prefix = (process.env.CYBER_RE2_PREFIX
+  || join(root, '.cache/native/re2', `${nativeOS}_${nativeArch}`)).replaceAll('\\', '/')
 
 const build = spawnSync('go', [
   'build',
-  '-tags', buildTags,
+  '-tags', editionValue('FULL_CAPS_TAGS'),
   '-ldflags', '-X github.com/chainreactors/cyber/core/config.Version=1.0.0-rc1',
   '-o', binary,
   './cmd/aiscan',
 ], {
   cwd: root,
   stdio: 'inherit',
+  env: { ...process.env, CGO_ENABLED: editionValue('FULL_CGO'), CGO_LDFLAGS: `-L${re2Prefix}/lib` },
 })
 if (build.status !== 0) {
   mockLLM?.close()

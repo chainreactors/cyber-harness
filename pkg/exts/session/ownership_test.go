@@ -29,7 +29,7 @@ func (inertProvider) ChatCompletion(context.Context, *provider.ChatCompletionReq
 }
 
 func TestSessionCloseDoesNotCloseBorrowedLoop(t *testing.T) {
-	application := &apppkg.App{}
+	application := &apppkg.State{}
 	l := loopext.New(loopFunc(func(context.Context, agent.Config) (*agent.Result, error) { return &agent.Result{Output: "alive"}, nil }))
 	s := sessionext.New(agentsession.Config{})
 	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), l, s)...)
@@ -66,10 +66,10 @@ func TestLoopPrecedesSessionInCompositionOrder(t *testing.T) {
 		managed <- loop
 		return &agent.Result{Stop: agent.StopReasonCompleted}, nil
 	})
-	application := &apppkg.App{}
+	application := &apppkg.State{}
 	application.SetProvider(inertProvider{}, agent.ProviderConfig{})
 	loop := loopext.New(selected)
-	sessions := sessionext.New(agentsession.Config{Application: application})
+	sessions := sessionext.New(agentsession.Config{State: application})
 	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), loop, sessions)...)
 	if err != nil {
 		t.Fatal(err)

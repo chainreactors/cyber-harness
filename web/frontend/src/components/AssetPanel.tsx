@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, Import, RefreshCw, Upload } from 'lucide-react'
-import { listSCONodes, getSupportedArtifacts, importSCOData } from '../api'
+import { getSupportedCSTXArtifacts, importCSTXArtifact, listSCONodes } from '../lib/cstx-runtime'
 import type { SCONode } from '@cyber/cstx-easm'
 import { CSTXTable } from '@cyber/cstx'
 import { CstxImportDialog, type ImportFileEntry, type ArtifactOption } from '@cyber/cstx'
@@ -175,7 +175,7 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
   const loadArtifacts = useCallback(async () => {
     setArtifactsLoading(true)
     try {
-      const arts = await getSupportedArtifacts()
+      const arts = await getSupportedCSTXArtifacts()
       setArtifactOptions((arts ?? []).map((a) => ({ value: a, label: a })))
     } catch { /* non-critical */ }
     finally { setArtifactsLoading(false) }
@@ -235,7 +235,7 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
   const handleImportSubmit = useCallback(async (entries: ImportFileEntry[]) => {
     let written = 0
     for (const entry of entries) {
-      written += (await importSCOData(entry.file, entry.artifactType)).nodes
+      written += (await importCSTXArtifact(entry.file, entry.artifactType)).nodes
     }
     void load()
     onChanged?.()

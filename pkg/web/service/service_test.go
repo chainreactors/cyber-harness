@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/apptest"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
@@ -73,9 +74,9 @@ func TestRemovedChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
 	}
 	defer store.Close()
 	svc := NewService(ServiceConfig{Store: store})
-	handler := newHandler(svc, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := newHandler(svc, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}), "")
+	}))
 	for _, test := range []struct {
 		method string
 		path   string
@@ -159,7 +160,7 @@ func TestSessionMenuMergeAndFallback(t *testing.T) {
 // frontend "/" menu uses and proves it returns the protobuf command catalog.
 func TestSessionCommandsConnectRPC(t *testing.T) {
 	svc := newMenuTestService(t)
-	srv := httptest.NewServer(newHandler(svc, nil, nil, ""))
+	srv := httptest.NewServer(newHandler(svc, nil))
 	defer srv.Close()
 
 	client := rpc.NewSessionServiceClient(srv.Client(), srv.URL, connect.WithProtoJSON())
@@ -309,13 +310,14 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 }
 
 type recordingProfile struct {
-	extensions *extension.Set
-	app        *apppkg.App
+	extensions         *extension.Set
+	app                *apppkg.State
+	registerNamespaces func(*aop.NamespaceMux) error
 }
 
 func (p *recordingProfile) Load(ctx context.Context) error  { return p.extensions.Load(ctx) }
 func (p *recordingProfile) Close(ctx context.Context) error { return p.extensions.Close(ctx) }
-func (p *recordingProfile) App() (*apppkg.App, error) {
+func (p *recordingProfile) State() (*apppkg.State, error) {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return nil, errors.New("recording profile is not active")
 	}
@@ -324,18 +326,21 @@ func (p *recordingProfile) App() (*apppkg.App, error) {
 func (p *recordingProfile) Runtime() (*agentsession.Runtime, error) {
 	return nil, errors.New("recording profile has no runtime")
 }
-func (p *recordingProfile) RegisterNamespaces(*aop.NamespaceMux) error {
+func (p *recordingProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return errors.New("recording profile is not active")
+	}
+	if p.registerNamespaces != nil {
+		return p.registerNamespaces(mux)
 	}
 	return nil
 }
 
-var _ profile.Application = (*recordingProfile)(nil)
+var _ profile.Profile = (*recordingProfile)(nil)
 
-func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() bool) {
+func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.State, func() bool) {
 	t.Helper()
-	resource := newTestApp(t, nil, nil)
+	resource := apptest.NewState(t, nil, nil)
 	var closed atomic.Bool
 	extensions, err := extension.New(extension.Func{CloseFunc: func(context.Context) error {
 		closed.Store(true)
@@ -349,7 +354,7 @@ func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.App, func() b
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, err := value.App()
+	app, err := value.State()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +425,7 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 	if err := svc.swapProfile(candidate); err == nil {
 		t.Fatal("closing service accepted a profile")
 	}
-	if _, err := candidate.App(); err != nil {
+	if _, err := candidate.State(); err != nil {
 		t.Fatalf("rejected candidate was closed by service: %v", err)
 	}
 	if closed() {

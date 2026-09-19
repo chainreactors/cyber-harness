@@ -29,48 +29,48 @@ func (s *Service) aiAvailable() bool {
 // acquireApp. Tools that a session owns are reached through it, not through the
 // application.
 func (s *Service) acquireRuntime() (*agentsession.Runtime, func()) {
-	if s == nil {
-		return nil, func() {}
-	}
-	s.appMu.Lock()
-	p := s.profile
-	if profile.IsNil(p) {
-		s.appMu.Unlock()
-		return nil, func() {}
+	p, release := s.acquireProfile()
+	if p == nil {
+		return nil, release
 	}
 	runtime, err := p.Runtime()
 	if err != nil || runtime == nil {
-		s.appMu.Unlock()
+		release()
 		return nil, func() {}
 	}
-	s.profiles[p]++
-	s.appMu.Unlock()
-	return runtime, s.releaseProfile(p)
+	return runtime, release
 }
 
-func (s *Service) acquireApp() (*apppkg.App, func()) {
+func (s *Service) acquireApp() (*apppkg.State, func()) {
+	p, release := s.acquireProfile()
+	if p == nil {
+		return nil, release
+	}
+	app, err := p.State()
+	if err != nil {
+		release()
+		return nil, func() {}
+	}
+	return app, release
+}
+
+func (s *Service) acquireProfile() (profile.Profile, func()) {
 	if s == nil {
 		return nil, func() {}
 	}
 	s.appMu.Lock()
 	p := s.profile
-	if profile.IsNil(p) {
-		s.appMu.Unlock()
-		return nil, func() {}
-	}
-	app, err := p.App()
-	if err != nil {
+	if p == nil {
 		s.appMu.Unlock()
 		return nil, func() {}
 	}
 	s.profiles[p]++
 	s.appMu.Unlock()
-
-	return app, s.releaseProfile(p)
+	return p, s.releaseProfile(p)
 }
 
 // releaseProfile returns the one-shot release for a borrowed profile.
-func (s *Service) releaseProfile(p profile.Application) func() {
+func (s *Service) releaseProfile(p profile.Profile) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -91,11 +91,11 @@ func (s *Service) releaseProfile(p profile.Application) func() {
 
 // swapProfile transfers ownership only after validation. Retirement errors are
 // retained by Service; they do not undo publication of a new profile.
-func (s *Service) swapProfile(next profile.Application) error {
-	if s == nil || profile.IsNil(next) {
+func (s *Service) swapProfile(next profile.Profile) error {
+	if s == nil || next == nil {
 		return fmt.Errorf("service and profile are required")
 	}
-	if _, err := next.App(); err != nil {
+	if _, err := next.State(); err != nil {
 		return err
 	}
 	s.appMu.Lock()
@@ -116,7 +116,7 @@ func (s *Service) swapProfile(next profile.Application) error {
 	s.profiles[next] = 0
 	s.applicationChangedLocked()
 	s.appMu.Unlock()
-	if !profile.IsNil(prev) {
+	if prev != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.closeApplication(ctx, prev)
@@ -129,7 +129,7 @@ func (s *Service) applicationChangedLocked() {
 	s.appChanged = make(chan struct{})
 }
 
-func (s *Service) closeApplication(ctx context.Context, p profile.Application) error {
+func (s *Service) closeApplication(ctx context.Context, p profile.Profile) error {
 	select {
 	case s.profileClose <- struct{}{}:
 		defer func() { <-s.profileClose }()
@@ -185,5 +185,10 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 		}
 	}
 
-	return s.serveApplication(connection, first)
+	p, release := s.acquireProfile()
+	defer release()
+	if p == nil {
+		return s.serveApplication(connection, first, nil)
+	}
+	return s.serveApplication(connection, first, p.RegisterNamespaces)
 }

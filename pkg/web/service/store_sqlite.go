@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
@@ -25,9 +26,6 @@ type SQLiteStore struct {
 	db  *sql.DB
 	orm *bun.DB
 }
-
-// The shipped schema is a single canonical layout. Version drift is an error.
-const sqliteSchemaVersion = 2
 
 var (
 	dbJSONMarshal   = protojson.MarshalOptions{UseProtoNames: true}
@@ -44,7 +42,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	orm := bun.NewDB(db, sqlitedialect.New())
 	if err := initializeSchema(orm, db); err != nil {
 		_ = orm.Close()
-		return nil, fmt.Errorf("initialize sqlite schema v%d: %w", sqliteSchemaVersion, err)
+		return nil, fmt.Errorf("initialize latest sqlite schema: %w", err)
 	}
 	var foreignKeys int
 	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil || foreignKeys != 1 {
@@ -57,36 +55,38 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db, orm: orm}, nil
 }
 
-// initializeSchema creates the only supported schema for a brand-new empty
-// database. It never upgrades or repairs an existing database.
+// initializeSchema creates the only supported schema for an empty database.
+// Existing databases must already match it exactly; there are no migrations
+// or historical schema versions before the first release.
 func initializeSchema(orm *bun.DB, db *sql.DB) error {
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+	var tables []string
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	if err != nil {
 		return err
 	}
-	if version == sqliteSchemaVersion {
-		return nil
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		tables = append(tables, name)
 	}
-	if version != 0 {
-		return fmt.Errorf("unsupported sqlite schema version %d; database must be recreated with canonical schema v%d", version, sqliteSchemaVersion)
-	}
-	var tables int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).Scan(&tables); err != nil {
+	if err := rows.Close(); err != nil {
 		return err
 	}
-	if tables != 0 {
-		return fmt.Errorf("unversioned sqlite schema is not supported; delete the database and restart")
+	if len(tables) != 0 {
+		return validateLatestSchema(db, tables)
 	}
 
-	return orm.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+	if err := orm.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		models := []any{
 			(*scanModel)(nil),
 			(*sessionModel)(nil),
 			(*aopEventModel)(nil),
 			(*sessionScanModel)(nil),
 			(*requestLedgerModel)(nil),
-			(*scoNodeModel)(nil),
-			(*scoObservationModel)(nil),
+			(*rawArtifactModel)(nil),
 		}
 		for _, model := range models {
 			query := tx.NewCreateTable().Model(model).WithForeignKeys()
@@ -99,8 +99,6 @@ func initializeSchema(orm *bun.DB, db *sql.DB) error {
 				query = query.
 					ForeignKey("(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE").
 					ForeignKey("(scan_id) REFERENCES scans(id) ON DELETE CASCADE")
-			case *scoObservationModel:
-				query = query.ForeignKey("(cstx_id) REFERENCES sco_nodes(cstx_id) ON DELETE CASCADE")
 			}
 			if _, err := query.Exec(ctx); err != nil {
 				return err
@@ -112,8 +110,7 @@ func initializeSchema(orm *bun.DB, db *sql.DB) error {
 			tx.NewCreateIndex().Model((*sessionModel)(nil)).Index("idx_sessions_node_id").Column("node_id"),
 			tx.NewCreateIndex().Model((*aopEventModel)(nil)).Index("idx_aop_events_session").Column("session_id", "cursor"),
 			tx.NewCreateIndex().Model((*aopEventModel)(nil)).Index("idx_aop_events_turn").Column("turn_id"),
-			tx.NewCreateIndex().Model((*scoNodeModel)(nil)).Index("idx_sco_nodes_type").Column("cstx_type"),
-			tx.NewCreateIndex().Model((*scoObservationModel)(nil)).Index("idx_sco_observations_node").Column("cstx_id"),
+			tx.NewCreateIndex().Model((*rawArtifactModel)(nil)).Index("idx_raw_artifacts_created").Column("created_at"),
 		}
 		for _, index := range indexes {
 			if _, err := index.Exec(ctx); err != nil {
@@ -123,9 +120,62 @@ func initializeSchema(orm *bun.DB, db *sql.DB) error {
 		if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX idx_aop_events_event_id ON chat_aop_events(session_id, event_id)`); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, sqliteSchemaVersion))
+		return nil
+	}); err != nil {
 		return err
-	})
+	}
+	return validateLatestSchema(db, latestSchemaTables())
+}
+
+func latestSchema() map[string][]string {
+	return map[string][]string{
+		"aop_request_ledger": {"request_id", "method", "request_hash", "response_json", "created_at"},
+		"chat_aop_events":    {"id", "session_id", "event_id", "cursor", "turn_id", "emitter", "sequence", "event_json", "created_at"},
+		"chat_sessions":      {"id", "node_id", "status", "title", "agent_name", "session_json", "created_at", "updated_at"},
+		"raw_artifacts":      {"cursor", "event_id", "event_proto", "created_at"},
+		"scans":              {"id", "target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "created_at", "updated_at"},
+		"session_scans":      {"session_id", "scan_id"},
+	}
+}
+
+func latestSchemaTables() []string {
+	tables := make([]string, 0, len(latestSchema()))
+	for table := range latestSchema() {
+		tables = append(tables, table)
+	}
+	slices.Sort(tables)
+	return tables
+}
+
+func validateLatestSchema(db *sql.DB, tables []string) error {
+	want := latestSchema()
+	if expected := latestSchemaTables(); !slices.Equal(tables, expected) {
+		return fmt.Errorf("database does not match the latest schema: tables %v, want %v; recreate the database", tables, expected)
+	}
+	for _, table := range tables {
+		rows, err := db.Query(`PRAGMA table_info("` + table + `")`)
+		if err != nil {
+			return err
+		}
+		var columns []string
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, columnType string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			columns = append(columns, name)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if !slices.Equal(columns, want[table]) {
+			return fmt.Errorf("database does not match the latest schema: %s columns %v, want %v; recreate the database", table, columns, want[table])
+		}
+	}
+	return nil
 }
 
 func marshalProtoJSON(message protobuf.Message) (string, error) {
@@ -197,7 +247,7 @@ func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
 	var model scanModel
-	if err := s.orm.NewSelect().Model(&model).Column("scan_json", "report").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
+	if err := s.orm.NewSelect().Model(&model).Column("scan_json").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
 		return nil, err
 	}
 	return scanFromModel(model)
@@ -208,7 +258,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error
 		limit = 50
 	}
 	var models []scanModel
-	if err := s.orm.NewSelect().Model(&models).Column("scan_json", "report").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
+	if err := s.orm.NewSelect().Model(&models).Column("scan_json").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
 		return nil, err
 	}
 	scans := make([]*types.Scan, 0, len(models))
@@ -228,7 +278,7 @@ func (s *SQLiteStore) Update(ctx context.Context, scan *types.Scan) error {
 		return err
 	}
 	_, err = s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "report", "error", "scan_json", "updated_at").
+		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
 		WherePK().Exec(ctx)
 	return err
 }
@@ -249,7 +299,7 @@ func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *types.Scan, expe
 		statuses[i] = scanStatusToDB(status)
 	}
 	result, err := s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "report", "error", "scan_json", "updated_at").
+		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
 		Where("id = ?", model.ID).Where("status IN (?)", bun.List(statuses)).Exec(ctx)
 	if err != nil {
 		return false, err
@@ -267,12 +317,7 @@ func scanToModel(scan *types.Scan) (*scanModel, error) {
 	if scan == nil {
 		return nil, fmt.Errorf("scan is required")
 	}
-	// Report is already stored in its dedicated relational column. Omitting it
-	// from the JSON snapshot avoids writing a large completed report twice while
-	// scanFromModel restores it for callers of Get/List.
-	snapshot := protobuf.CloneOf(scan)
-	snapshot.Report = ""
-	raw, err := marshalProtoJSON(snapshot)
+	raw, err := marshalProtoJSON(scan)
 	if err != nil {
 		return nil, err
 	}
@@ -281,20 +326,13 @@ func scanToModel(scan *types.Scan) (*scanModel, error) {
 		ID: scan.GetId(), Target: scan.GetTarget(), Mode: scan.GetMode(),
 		Verify: options.GetVerify(), Sniper: options.GetSniper(), Deep: options.GetDeep(),
 		Status: scanStatusToDB(scan.GetStatus()), Progress: scan.GetProgress(),
-		Report: scan.GetReport(), Error: scan.GetError(), ScanJSON: raw,
+		Error: scan.GetError(), ScanJSON: raw,
 		CreatedAt: formatProtoTime(scan.GetCreatedAt()), UpdatedAt: formatProtoTime(scan.GetUpdatedAt()),
 	}, nil
 }
 
 func scanFromModel(model scanModel) (*types.Scan, error) {
-	scan, err := scanFromJSON(model.ScanJSON)
-	if err != nil {
-		return nil, err
-	}
-	// Report has one authoritative representation: the dedicated relational
-	// projection. The JSON snapshot is deliberately not consulted.
-	scan.Report = model.Report
-	return scan, nil
+	return scanFromJSON(model.ScanJSON)
 }
 
 func scanFromJSON(raw string) (*types.Scan, error) {
@@ -602,85 +640,63 @@ func (s *SQLiteStore) ScanSessionIDs(ctx context.Context, scanID string) ([]stri
 	return ids, err
 }
 
-func (s *SQLiteStore) UpsertSCONodes(ctx context.Context, operationID string, nodes []json.RawMessage) error {
-	return s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		for _, raw := range nodes {
-			var header struct {
-				Type string `json:"cstx_type"`
-				ID   string `json:"cstx_id"`
-			}
-			if json.Unmarshal(raw, &header) != nil || header.ID == "" {
-				continue
-			}
-			node := &scoNodeModel{CSTXID: header.ID, CSTXType: header.Type, Data: string(raw), CreatedAt: now, UpdatedAt: now}
-			if _, err := tx.NewInsert().Model(node).On("CONFLICT (cstx_id) DO UPDATE").
-				Set("cstx_type = EXCLUDED.cstx_type").Set("data = EXCLUDED.data").Set("updated_at = EXCLUDED.updated_at").Exec(ctx); err != nil {
+const artifactSyncBatch = 100
+
+// SyncArtifactEvents appends raw Artifact events and returns the next archive
+// page. CSTX parsing and projection belong to the browser.
+func (s *SQLiteStore) SyncArtifactEvents(ctx context.Context, appended []*aop.Event, after int64) ([]*aop.EventDelivery, error) {
+	models := make([]*rawArtifactModel, 0, len(appended))
+	for index, event := range appended {
+		if event == nil {
+			return nil, fmt.Errorf("artifact event %d is required", index)
+		}
+		if _, _, found, err := toolpb.FromEvent(event); err != nil {
+			return nil, fmt.Errorf("artifact event %d: %w", index, err)
+		} else if !found {
+			return nil, fmt.Errorf("artifact event %d does not contain an aop.tool.Artifact payload", index)
+		}
+		eventID := strings.TrimSpace(event.GetId())
+		if eventID == "" {
+			return nil, fmt.Errorf("artifact event %d has no id", index)
+		}
+		if event.GetEmittedAt() == nil || !event.GetEmittedAt().IsValid() {
+			return nil, fmt.Errorf("artifact event %q has an invalid emitted_at", eventID)
+		}
+		raw, err := (protobuf.MarshalOptions{Deterministic: true}).Marshal(event)
+		if err != nil {
+			return nil, fmt.Errorf("encode artifact event %q: %w", eventID, err)
+		}
+		models = append(models, &rawArtifactModel{
+			EventID:    eventID,
+			EventProto: raw,
+			CreatedAt:  event.GetEmittedAt().AsTime().UTC().Format(time.RFC3339Nano),
+		})
+	}
+
+	var deliveries []*aop.EventDelivery
+	err := s.orm.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, model := range models {
+			if _, err := tx.NewInsert().Model(model).On("CONFLICT (event_id) DO NOTHING").Exec(ctx); err != nil {
 				return err
 			}
-			if operationID != "" {
-				if _, err := tx.NewInsert().Model(&scoObservationModel{OperationID: operationID, CSTXID: header.ID, ObservedAt: now}).
-					On("CONFLICT (operation_id, cstx_id) DO NOTHING").Exec(ctx); err != nil {
-					return err
-				}
+		}
+		var archived []rawArtifactModel
+		if err := tx.NewSelect().Model(&archived).Where("cursor > ?", after).
+			OrderExpr("cursor ASC").Limit(artifactSyncBatch).Scan(ctx); err != nil {
+			return err
+		}
+		deliveries = make([]*aop.EventDelivery, 0, len(archived))
+		for _, model := range archived {
+			event := new(aop.Event)
+			if err := protobuf.Unmarshal(model.EventProto, event); err != nil {
+				return fmt.Errorf("decode artifact event %q: %w", model.EventID, err)
 			}
+			deliveries = append(deliveries, &aop.EventDelivery{
+				Cursor: strconv.FormatInt(model.Cursor, 10),
+				Event:  event,
+			})
 		}
 		return nil
 	})
-}
-
-func (s *SQLiteStore) ListSCONodes(ctx context.Context, nodeType string, limit int) ([]json.RawMessage, error) {
-	return s.ListSCONodesByScanID(ctx, "", nodeType, limit)
-}
-
-func (s *SQLiteStore) ListSCONodesByScanID(ctx context.Context, scanID, nodeType string, limit int) ([]json.RawMessage, error) {
-	query := s.orm.NewSelect().Model((*scoNodeModel)(nil)).Column("node.data")
-	if scanID != "" {
-		query = query.Join("JOIN sco_observations AS observation ON observation.cstx_id = node.cstx_id").
-			Where("observation.operation_id = ?", scanID)
-	}
-	if nodeType != "" {
-		query = query.Where("node.cstx_type = ?", nodeType)
-	}
-	if limit >= 0 {
-		query = query.Limit(limit)
-	}
-	var models []scoNodeModel
-	if err := query.Model(&models).OrderExpr("node.updated_at DESC").Scan(ctx); err != nil {
-		return nil, err
-	}
-	nodes := make([]json.RawMessage, 0, len(models))
-	for _, model := range models {
-		nodes = append(nodes, json.RawMessage(model.Data))
-	}
-	return nodes, nil
-}
-
-func (s *SQLiteStore) GetSCONode(ctx context.Context, cstxID string) (json.RawMessage, error) {
-	var model scoNodeModel
-	if err := s.orm.NewSelect().Model(&model).Column("data").Where("cstx_id = ?", cstxID).Limit(1).Scan(ctx); err != nil {
-		return nil, err
-	}
-	return json.RawMessage(model.Data), nil
-}
-
-func (s *SQLiteStore) DeleteSCONodesByScan(ctx context.Context, scanID string) error {
-	_, err := s.orm.NewDelete().Model((*scoObservationModel)(nil)).Where("operation_id = ?", scanID).Exec(ctx)
-	return err
-}
-
-func (s *SQLiteStore) SCONodeStats(ctx context.Context) (map[string]int, error) {
-	var rows []struct {
-		CSTXType string `bun:"cstx_type"`
-		Count    int    `bun:"count"`
-	}
-	if err := s.orm.NewSelect().Model((*scoNodeModel)(nil)).Column("cstx_type").
-		ColumnExpr("COUNT(*) AS count").Group("cstx_type").Scan(ctx, &rows); err != nil {
-		return nil, err
-	}
-	stats := make(map[string]int, len(rows))
-	for _, row := range rows {
-		stats[row.CSTXType] = row.Count
-	}
-	return stats, nil
+	return deliveries, err
 }

@@ -1,4 +1,4 @@
-//go:build full && cgo
+//go:build full
 
 package main
 
@@ -6,7 +6,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	cstxext "github.com/chainreactors/cyber/pkg/exts/cstx"
 	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	"net"
 	"net/http"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/web"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
@@ -25,9 +23,9 @@ import (
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, ingestor coretool.ArtifactImporter, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
-	service := webservice.NewService(webservice.ServiceConfig{Store: store, Artifacts: ingestor, AccessKey: token})
-	pool := webservice.NewAgentPool(service.Hub(), ingestor)
+func newHeadlessHandler(store *webservice.SQLiteStore, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
+	service := webservice.NewService(webservice.ServiceConfig{Store: store, AccessKey: token})
+	pool := webservice.NewAgentPool(service.Hub(), store)
 	service.SetAgentPool(pool)
 	routes := webext.New(service)
 	routeSet, err := extension.New(routes)
@@ -81,28 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
-	artifactExt, err := cstxext.New(store)
-	if err != nil {
-		logger.Errorf("init artifact normalization: %v", err)
-		os.Exit(1)
-	}
-	artifactSet, err := extension.New(artifactExt)
-	if err != nil {
-		logger.Errorf("init artifact scope: %v", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if err := artifactSet.Close(context.Background()); err != nil {
-			logger.Errorf("close artifact scope: %v", err)
-		}
-	}()
-	if err := artifactSet.Load(ctx); err != nil {
-		logger.Errorf("load artifact scope: %v", err)
-		os.Exit(1)
-	}
-	ingestor := artifactExt.Importer()
-
-	service, _, handler, err := newHeadlessHandler(store, ingestor, token)
+	service, _, handler, err := newHeadlessHandler(store, token)
 	if err != nil {
 		logger.Errorf("create handler: %v", err)
 		return

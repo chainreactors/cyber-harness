@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/core/extension"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"io"
 	"net"
 	"net/http"
@@ -33,7 +33,6 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/aopws"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/apptest"
 	"github.com/chainreactors/cyber/pkg/commands"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
@@ -216,10 +215,10 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := newTestApp(t, telemetry.NopLogger(), nil)
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
 
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), loopext.New(agent.StandardLoop{}), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -625,14 +624,10 @@ func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 	}
 }
 
-func loadNodeTestApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
-	return apptest.Load(t, ctx, application)
-}
-
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := newTestApp(t, telemetry.NopLogger(), nil)
+	app := apptest.NewState(t, telemetry.NopLogger(), nil)
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), loopext.New(agent.StandardLoop{}), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

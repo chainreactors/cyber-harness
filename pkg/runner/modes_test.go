@@ -45,7 +45,7 @@ func (scannerCommands) Run(context.Context, []string, *commands.Execution) (any,
 }
 
 type scannerProfile struct {
-	app          *apppkg.App
+	app          *apppkg.State
 	runtimeErr   error
 	loaded       bool
 	closed       bool
@@ -57,7 +57,7 @@ func (p *scannerProfile) Close(context.Context) error {
 	p.closed = true
 	return nil
 }
-func (p *scannerProfile) App() (*apppkg.App, error) { return p.app, nil }
+func (p *scannerProfile) State() (*apppkg.State, error) { return p.app, nil }
 func (p *scannerProfile) Runtime() (*agentsession.Runtime, error) {
 	p.runtimeCalls++
 	return nil, p.runtimeErr
@@ -72,18 +72,28 @@ func (p *scannerProfile) Shell() (commands.Executor, *terminaltool.BashTool) {
 }
 func (*scannerProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
 
+func TestLoadAgentProfileRejectsNilConstructorAndResult(t *testing.T) {
+	if _, _, err := loadAgentProfile(t.Context(), nil, nil, telemetry.NopLogger(), nil); err == nil {
+		t.Fatal("nil profile constructor was accepted")
+	}
+	newProfile := func(profilepkg.Request) (profilepkg.Profile, error) { return nil, nil }
+	if _, _, err := loadAgentProfile(t.Context(), newProfile, nil, telemetry.NopLogger(), nil); err == nil {
+		t.Fatal("nil profile result was accepted")
+	}
+}
+
 func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	runtimeErr := errors.New("profile runtime sentinel")
-	application := &apppkg.App{}
+	application := &apppkg.State{}
 	application.SetProvider(scannerProvider{}, provider.ProviderConfig{})
 	p := &scannerProfile{app: application, runtimeErr: runtimeErr}
 	var request profilepkg.Request
-	factory := profilepkg.Factory(func(value profilepkg.Request) (profilepkg.Application, error) {
+	newProfile := func(value profilepkg.Request) (profilepkg.Profile, error) {
 		request = value
 		return p, nil
-	})
+	}
 	option := &cfg.Option{LLMOptions: cfg.LLMOptions{AI: true}}
-	err := RunDirectScannerMode(t.Context(), factory, option, []string{"gogo", "-i", "127.0.0.1"}, telemetry.NopLogger())
+	err := RunDirectScannerMode(t.Context(), newProfile, option, []string{"gogo", "-i", "127.0.0.1"}, telemetry.NopLogger())
 	if !errors.Is(err, runtimeErr) {
 		t.Fatalf("RunDirectScannerMode() error = %v, want Profile.Runtime error", err)
 	}

@@ -1,5 +1,4 @@
-// Package app assembles the application surface from capabilities and
-// publishes it as one.
+// Package app assembles and publishes the shared runtime state.
 package app
 
 import (
@@ -12,18 +11,18 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
-// Extension builds the App once every part it borrows exists, which is why it
+// Extension builds the State once every part it borrows exists, which is why it
 // happens during load rather than in a composition root: a root cannot hold a
 // Bash tool that the terminal extension only builds when it loads.
 type Extension struct {
 	logger      telemetry.Logger
-	application *apppkg.App
+	application *apppkg.State
 }
 
 func New(logger telemetry.Logger) *Extension { return &Extension{logger: logger} }
 
-// App is the assembled surface. It is nil until the extension has loaded.
-func (e *Extension) App() *apppkg.App {
+// State is the assembled surface. It is nil until the extension has loaded.
+func (e *Extension) State() *apppkg.State {
 	if e == nil {
 		return nil
 	}
@@ -43,7 +42,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.application = application
-	return extension.Provide[*apppkg.App](scope, application)
+	return extension.Provide[*apppkg.State](scope, application)
 }
 
 func (e *Extension) Close(context.Context) error { return nil }

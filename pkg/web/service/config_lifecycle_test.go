@@ -20,7 +20,7 @@ func TestConfigShutdownRetainsCandidateWhileCommitIsInProgress(t *testing.T) {
 	}
 	svc := NewService(ServiceConfig{
 		ConfigStore:  store,
-		BuildProfile: func(context.Context, *PreparedConfig) (profile.Application, error) { return candidate, nil },
+		BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return candidate, nil },
 	})
 	done := make(chan error, 1)
 	go func() { _, err := svc.SaveConfig(t.Context(), configForModel("new")); done <- err }()
@@ -58,7 +58,7 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 			store := &transactionalConfigStore{cfg: configForModel("old")}
 			svc := NewService(ServiceConfig{
 				Profile: current, ConfigStore: store,
-				BuildProfile: func(context.Context, *PreparedConfig) (profile.Application, error) { return current, buildErr },
+				BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return current, buildErr },
 			})
 			defer svc.Close(context.Background())
 			_, release := svc.acquireApp()
@@ -71,7 +71,7 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 			if closed() {
 				t.Fatal("candidate cleanup closed the active profile")
 			}
-			if _, err := current.App(); err != nil {
+			if _, err := current.State(); err != nil {
 				t.Fatalf("active profile was revoked: %v", err)
 			}
 			if activeModel(store.cfg) != "old" || svc.pending != nil {

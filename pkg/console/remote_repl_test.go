@@ -17,6 +17,7 @@ import (
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/apptest"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/hosttest"
@@ -88,13 +89,13 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := newTestApp(t, telemetry.NopLogger(), nil)
+	application := apptest.NewState(t, telemetry.NopLogger(), nil)
 
 	rt := sessionext.New(agentsession.Config{Option: option, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), loopext.New(agent.StandardLoop{}), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -212,13 +213,13 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := newTestApp(t, telemetry.NopLogger(), nil)
+	application := apptest.NewState(t, telemetry.NopLogger(), nil)
 
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), loopext.New(agent.StandardLoop{}), rt)...)
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, application), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ import (
 // named so the call below reads as a list of capabilities rather than a run of
 // positional arguments.
 type borrowed struct {
-	application *app.App
+	application *app.State
 	tools       tool.Executor
 	commands    commands.Executor
 	bash        *terminaltool.BashTool
@@ -48,7 +48,7 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 		scannerResources = engineSet.Resources
 	}
 
-	options := manifestScanOptions()
+	var options []scan.Option
 	model, providerConfig := application.ProviderState()
 	if model != nil {
 		if loop == nil {

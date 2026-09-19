@@ -2,9 +2,9 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/apptest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	"os"
 	"path/filepath"
@@ -43,10 +43,6 @@ func TestListSavedSessionsOnlyReadsJSONL(t *testing.T) {
 
 type consoleProvider struct{ usage *aop.TokenUsage }
 
-func loadConsoleApplication(t *testing.T, ctx context.Context, application *apppkg.App) *extension.Set {
-	return apptest.Load(t, ctx, application)
-}
-
 func (*consoleProvider) Name() string { return "console-test" }
 func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 	return &provider.ChatCompletionResponse{
@@ -54,15 +50,15 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apppkg.App) {
+func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apppkg.State) {
 	t.Helper()
-	a := newTestApp(t, telemetry.NopLogger(), nil)
+	a := apptest.NewState(t, telemetry.NopLogger(), nil)
 	// The runtime reads provider state while loading, so the provider is set
 	// first. One graph: the session extension borrows the same capabilities a
 	// profile publishes, so the test publishes them once and mounts it alongside.
 	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
 	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
-	set := hosttest.Set(t, append(apptest.Entries(t, a), loopext.New(agent.StandardLoop{}), rt)...)
+	set := hosttest.Set(t, append(apptest.Entries(t, a), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}

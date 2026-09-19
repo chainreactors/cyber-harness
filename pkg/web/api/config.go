@@ -27,15 +27,11 @@ type Config struct {
 	options ConfigOptions
 }
 
-func NewConfig(backend ConfigBackend, options ...ConfigOptions) *Config {
-	var selected ConfigOptions
-	if len(options) > 0 {
-		selected = options[0]
+func NewConfig(backend ConfigBackend, options ConfigOptions) *Config {
+	if options.Sections != nil {
+		options.Sections.Seal()
 	}
-	if selected.Sections != nil {
-		selected.Sections.Seal()
-	}
-	return &Config{backend: backend, options: selected}
+	return &Config{backend: backend, options: options}
 }
 
 func (c *Config) GetConfig(ctx context.Context, _ *types.GetConfigRequest) (*types.GetConfigResponse, error) {

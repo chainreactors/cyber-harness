@@ -19,22 +19,6 @@ const (
 	capNeutronPOC     = "neutron_poc"
 )
 
-// These aliases expose the existing scan domain to statically supplied builders.
-type Flags = flags
-type ScanOptions = scanOptions
-type Profile = profile
-type CapabilityBuilder func(*Command, Flags, ScanOptions, Profile) []pipeline.Capability[event]
-type ProfileExtender func(string, *Profile)
-
-func WithCapabilityBuilders(builders ...CapabilityBuilder) Option {
-	copied := append([]CapabilityBuilder(nil), builders...)
-	return func(c *Command) { c.builders = append(c.builders, copied...) }
-}
-func WithProfileExtenders(extenders ...ProfileExtender) Option {
-	copied := append([]ProfileExtender(nil), extenders...)
-	return func(c *Command) { c.profileExtenders = append(c.profileExtenders, copied...) }
-}
-
 func acceptsTarget(kinds ...targetKind) func(event) bool {
 	set := make(map[targetKind]struct{}, len(kinds))
 	for _, kind := range kinds {
@@ -188,11 +172,7 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		c.Logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
-	for _, builder := range c.builders {
-		capabilities = append(capabilities, builder(c, flags, opts, profile)...)
-	}
-
-	return capabilities
+	return append(capabilities, c.buildKatanaCapabilities(profile)...)
 }
 
 func sprayCapability(c *Command, flags flags, web webOptions, name string, sources []string, opts engine.SprayCheckOptions, run func(context.Context, flags, webOptions, target, string, engine.SprayCheckOptions, func(event))) pipeline.Capability[event] {

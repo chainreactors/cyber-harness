@@ -14,7 +14,7 @@ import BrandLogo from './components/brand/BrandLogo'
 const IOAConsole = lazy(() => import('./components/IOAConsole'))
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useConfirm } from '@cyber/ui'
 import { ThemeProvider } from '@cyber/theme'
-import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, listSCONodes, logout } from './api'
+import { activateLLMProfile, getConfigStatus, getIOAOverview, getStatus, logout } from './api'
 import type { IOAMessage, IOANode, LLMProviderView, ServerStatus } from './api'
 import type { SCONode } from '@cyber/cstx-easm'
 import type { MentionPopupApi } from './viewer'
@@ -23,6 +23,7 @@ import { usePolling } from './hooks/usePolling'
 import { isSessionAgentOnline } from './lib/session-agent'
 import type { IOAConsoleTarget } from './lib/ioa-navigation'
 import { cn } from '@cyber/theme'
+import { listSCONodes, subscribeCSTXChanges, syncCSTXArtifacts } from './lib/cstx-runtime'
 
 const sidebarStorageKey = 'cyber-sidebar-open'
 
@@ -116,9 +117,17 @@ export default function App() {
     } catch { /* non-critical — the hub may be unconfigured or offline */ }
   }, [])
 
-  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [refreshSCONodes, refreshIOA])
+  useEffect(() => {
+    const unsubscribe = subscribeCSTXChanges(() => { void refreshSCONodes() })
+    void syncCSTXArtifacts().then(() => refreshSCONodes()).catch(() => {})
+    void refreshIOA()
+    return unsubscribe
+  }, [refreshSCONodes, refreshIOA])
   // Refresh mentionables when scans finish (timeline changes often signal new results)
-  useEffect(() => { void refreshSCONodes(); void refreshIOA() }, [chat.timeline.length, refreshSCONodes, refreshIOA])
+  useEffect(() => {
+    void syncCSTXArtifacts().then(() => refreshSCONodes()).catch(() => {})
+    void refreshIOA()
+  }, [chat.timeline.length, refreshSCONodes, refreshIOA])
 
   const mentionables = useMemo(() => assetMentionables(scoNodes), [scoNodes])
 

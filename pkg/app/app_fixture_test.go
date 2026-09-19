@@ -25,9 +25,9 @@ func testSet(t testing.TB, entries ...extension.Extension) *extension.Set {
 	return set
 }
 
-// newTestApp builds the application a test owns. It carries only what App
+// newTestApp builds the shared state a test owns. It carries only what State
 // owns: a stream to publish on, provider state, progress and a logger.
-func newTestApp(t testing.TB, logger telemetry.Logger, stream *events.Stream) *App {
+func newTestApp(t testing.TB, logger telemetry.Logger, stream *events.Stream) *State {
 	t.Helper()
 	if stream == nil {
 		stream = events.New()

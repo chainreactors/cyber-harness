@@ -4,6 +4,11 @@
 
 ### 具体修改
 
+- 按 [组合架构 RFC](rfc-composition.md) 将参考发行版组合提取到公开的 `pkg/aiscan.New`；
+  `pkg/base.New` + `extension.New` 成为自定义发行版的最小入口，新增可编译示例和依赖方向守卫。
+- 删除 browser、record、Web 的 `init()` 注册和全局 factory slice，build tag 改为选择显式调用的
+  同名函数；`app.App` 收敛为非生命周期的 `app.State`，`profile.Application/Factory.Build`
+  收敛为 `profile.Profile` 和直接构造函数调用。
 - 流量模型新增 `Exchange`，一条 Flow 同时保存 request 和 response；代理层支持按订阅选择 Flow，并把超过内存预算的 response body 写入文件。
 - 修复代理捕获中的 Host 丢失问题；切换代理出口只影响新连接，已有连接继续完成；MITM body 文件在 Flow 删除后回收。
 - curl 工具新增 `-x/--proxy`、`-F/--form`、`--data-urlencode`、ASCII trace；补充 `--http1.0/--http1.1/--http2`、HEAD 请求校验、超时返回码 28、TLS/resolve 处理和失败输出保留。

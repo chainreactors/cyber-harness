@@ -30,7 +30,7 @@ func New(config provider.StartupConfig, logger telemetry.Logger) *Extension {
 // App rather than here because the console and the session runtime read it
 // directly; this extension only drives its startup and shutdown.
 func (e *Extension) Load(scope *extension.Scope) error {
-	application, err := extension.Use[*apppkg.App](scope)
+	application, err := extension.Use[*apppkg.State](scope)
 	if err != nil {
 		return err
 	}

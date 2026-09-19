@@ -62,8 +62,13 @@ Close 返回普通错误表示回收已经完成；只有仍需重试时返回�
 
 ## 组合与验证
 
-完整应用的组合根在 `cmd/aiscan`。最小本地 Agent 在 `cmd/agent`，不得依赖 scanner、search、
-proxy、IOA、browser、record 或 Web。`pkg/runner` 保留 aiscan 的共享运行模式逻辑，不是命令。
+通用自定义发行版从 `pkg/base.New` 取得有序基础扩展，显式 append 自己的扩展，再交给
+`extension.New`。参考发行版位于 `pkg/aiscan`，`cmd/aiscan` 只是它的 CLI host。最小本地 Agent
+在 `cmd/agent`，不得依赖 scanner、search、proxy、IOA、browser、record 或 Web。
+`pkg/runner` 保留 aiscan 的共享运行模式逻辑，不是命令。
+
+build tag 只能选择同名函数的实现，组合根必须显式调用；不要用 `init()`、全局 factory slice
+或 import side effect 注册扩展。可运行的最小组合见 `examples/custom`。
 
 新增或修改资源至少验证：
 

@@ -31,7 +31,7 @@ func TestStorageConfigValidation(t *testing.T) {
 }
 
 func TestFlowMetadataAllowsMissingRequest(t *testing.T) {
-	flow := Flow{Flow: traffic.Flow{Id: "incomplete"}}
+	flow := Flow{Flow: &traffic.Flow{Id: "incomplete"}}
 	if size := flowMetadataSize(flow); size <= 0 {
 		t.Fatalf("flowMetadataSize() = %d", size)
 	}
@@ -155,7 +155,7 @@ func TestTrafficMetadataIndexContainsNoBodyBytesAndDrainsOnClose(t *testing.T) {
 	if err := s.SetBodyDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	s.Add(Flow{Flow: traffic.Flow{Request: &traffic.HttpRequest{Body: []byte("private-body")}}})
+	s.Add(Flow{Flow: &traffic.Flow{Request: &traffic.HttpRequest{Body: []byte("private-body")}}})
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestMissingBodyIsReportedAsIncomplete(t *testing.T) {
 	if err := os.WriteFile(path, []byte("body"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	f := addTestBody(t, s, Flow{Flow: traffic.Flow{Complete: true, Request: &traffic.HttpRequest{}, Response: &traffic.HttpResponse{StatusCode: 200}}}, path)
+	f := addTestBody(t, s, Flow{Flow: &traffic.Flow{Complete: true, Request: &traffic.HttpRequest{}, Response: &traffic.HttpResponse{StatusCode: 200}}}, path)
 	if err := os.Remove(s.bodyPath(f.Id, 1)); err != nil {
 		t.Fatal(err)
 	}

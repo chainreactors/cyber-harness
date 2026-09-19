@@ -23,7 +23,6 @@ import (
 
 type agentProfile struct {
 	extensions *extension.Set
-	app        *apppkg.App
 	runtime    *agentsession.Runtime
 	bindings   *consoleapi.Registry
 }
@@ -59,11 +58,7 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 		tuiext.New(),
 		sessionconsole.New(),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			application, err := extension.Use[*apppkg.App](scope)
-			if err != nil {
-				return err
-			}
-			p.app = application
+			var err error
 			if p.runtime, err = extension.Use[*agentsession.Runtime](scope); err != nil {
 				return err
 			}

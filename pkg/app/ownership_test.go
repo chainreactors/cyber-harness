@@ -17,7 +17,7 @@ import (
 
 func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 	stream := coreevents.New()
-	a := &App{events: stream}
+	a := &State{events: stream}
 	var mu sync.Mutex
 	seen := make(map[uint64]*aop.Event)
 	a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
@@ -63,7 +63,7 @@ func TestReloadProviderPreservesNewerStateAndBuildFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer unblock.Do(func() { close(release) })
-	a := &App{}
+	a := &State{}
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := a.ReloadProvider(context.Background(), agent.ProviderConfig{

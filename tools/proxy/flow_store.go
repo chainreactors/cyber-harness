@@ -285,11 +285,10 @@ func (s *FlowStore) appendIndex(f Flow) error {
 	if f.Response != nil {
 		f.Response.Body = nil
 	}
-	canonical := f.Flow
 	record := flowIndexRecord{
 		Operation: f.Operation, Host: f.Host,
 		ContentType: f.ContentType, Duration: int64(f.Duration), TLS: f.TLS,
-		Flow: &canonical, BodySizes: &sizes, OldestID: oldest,
+		Flow: f.Flow, BodySizes: &sizes, OldestID: oldest,
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -443,7 +442,7 @@ func (s *FlowStore) loadIndex(path string) error {
 		f := Flow{
 			Operation: record.Operation, Host: record.Host,
 			ContentType: record.ContentType, Duration: time.Duration(record.Duration),
-			TLS: record.TLS, Flow: *record.Flow,
+			TLS: record.TLS, Flow: record.Flow,
 		}
 		s.mu.Lock()
 		for s.size > 0 && flowSequence(s.flows[s.head].Id) < flowSequence(record.OldestID) {

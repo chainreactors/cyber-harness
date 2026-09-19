@@ -33,9 +33,6 @@ func cliCommandSummary() string {
 	return base + ", " + strings.Join(summaries, ", ")
 }
 
-// webServeFunc is set via init() in web_full.go (full build only).
-var webServeFunc func(ctx context.Context, option, explicitOption *cfg.Option, web webCommand, logger telemetry.Logger) error
-
 type webCommand struct {
 	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
 	DB                 string `long:"db" default:"cyber-web.db" description:"SQLite database path"`
@@ -153,22 +150,18 @@ func cyber() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := runAgentTransport(ctx, cyberProfileFactory, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := runAgentTransport(ctx, newCyberProfileFromRequest, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
 		}
 	case runModeWeb:
-		if webServeFunc == nil {
-			fmt.Fprintln(os.Stderr, "error: web server not available (requires full build)")
-			os.Exit(1)
-		}
-		if err := webServeFunc(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
+		if err := serveWeb(ctx, &option, &explicitOption, parsed.WebOpts, logger); err != nil {
 			logger.Errorf("web server failed: %s", err)
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, cyberProfileFactory, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runner.RunDirectScannerMode(ctx, newCyberProfileFromRequest, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}

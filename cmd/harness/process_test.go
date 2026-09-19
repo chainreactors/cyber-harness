@@ -97,6 +97,61 @@ func repositoryRoot() (string, error) {
 	}
 }
 
+// editionsFile is the build manifest the Makefile and the CI workflows build
+// from; it is resolved from the repository root.
+const editionsFile = "editions.env"
+
+// fullBuildSettings returns the tags and environment a full-edition build needs.
+// They are read from the manifest and the native SDK cache rather than inherited
+// from the caller, so the harness builds the shipped edition however it was
+// started — `make harness` exports neither.
+//
+// The capability tag set is deliberate: it drops the base policy tags that keep
+// the resource templates outside the binary, so the harness drives a binary that
+// stands alone in its artifact directory.
+func fullBuildSettings(root string) (string, []string, error) {
+	raw, err := os.ReadFile(filepath.Join(root, editionsFile))
+	if err != nil {
+		return "", nil, err
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if key, value, ok := strings.Cut(line, "="); ok {
+			values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	tags := values["FULL_CAPS_TAGS"]
+	if tags == "" {
+		return "", nil, fmt.Errorf("%s does not declare FULL_CAPS_TAGS", editionsFile)
+	}
+	cgo := values["FULL_CGO"]
+	if cgo == "" {
+		return "", nil, fmt.Errorf("%s does not declare FULL_CGO", editionsFile)
+	}
+
+	// The static RE2 SDK contributes its library search path and nothing else,
+	// so derive it the way the Makefile's RE2_PREFIX and .github/native/sdk.sh
+	// do. The linker resolves a slash-separated path on every platform.
+	prefix := os.Getenv("CYBER_RE2_PREFIX")
+	if prefix == "" {
+		prefix = filepath.Join(root, ".cache", "native", "re2", runtime.GOOS+"_"+runtime.GOARCH)
+	}
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		switch strings.ToUpper(name) {
+		case "CGO_ENABLED", "CGO_LDFLAGS":
+		default:
+			env = append(env, entry)
+		}
+	}
+	return tags, append(env, "CGO_ENABLED="+cgo, "CGO_LDFLAGS=-L"+filepath.ToSlash(filepath.Join(prefix, "lib"))), nil
+}
+
 func buildExecutable(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
@@ -105,12 +160,16 @@ func buildExecutable(t *testing.T) string {
 			buildErr = err
 			return
 		}
+		tags, env, err := fullBuildSettings(root)
+		if err != nil {
+			buildErr = err
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		// The full manifest includes CSTX, which only compiles with cgo. The
-		// harness runner's default CGO_ENABLED=1 covers that.
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", "full", "-o", executablePath, "./cmd/aiscan")
+		cmd := exec.CommandContext(ctx, "go", "build", "-tags", tags, "-o", executablePath, "./cmd/aiscan")
 		cmd.Dir = root
+		cmd.Env = env
 		data, err := cmd.CombinedOutput()
 		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {
 			buildErr = writeErr

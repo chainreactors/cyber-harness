@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/tool"
-	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/commands"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -37,7 +36,7 @@ type Runtime struct {
 	logger           telemetry.Logger
 	config           Config
 	primarySessionID string
-	app              *apppkg.App
+	app              *apppkg.State
 	hooks            *hooks.Registry
 	tools            tool.Executor
 	commandRegistry  commands.Executor
@@ -70,14 +69,14 @@ type Runtime struct {
 }
 
 type Config struct {
-	History     HistoryStore
-	BaseSkills  []string
-	Commands    []Command
-	Application *apppkg.App
+	History    HistoryStore
+	BaseSkills []string
+	Commands   []Command
+	State      *apppkg.State
 
 	// The runtime borrows these from the host rather than reaching through
-	// Application for them: they belong to the extensions that own them, and
-	// Application is not a place to park other people's things.
+	// State for them: they belong to the extensions that own them, and State is
+	// not a place to park other people's things.
 	Hooks            *hooks.Registry
 	Tools            tool.Executor
 	CommandRegistry  commands.Executor
@@ -199,7 +198,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		nodeName = "cyber"
 	}
 	rt.nodeName = nodeName
-	executor := coretool.EmptyExecutor()
+	executor := tool.EmptyExecutor()
 	if rt.tools != nil {
 		executor = rt.tools
 	}
