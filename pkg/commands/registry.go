@@ -63,7 +63,7 @@ func (r *Registry) Load(scope *extension.Scope) error {
 	}
 	r.hooks = registry
 	// A registry makes two statements about itself: it owns the point that
-	// stores Commands, and it offers the Executor behaviour. They are separate
+	// stores Commands, and it offers the Executor behavior. They are separate
 	// type keys, so neither shadows the other.
 	if err := extension.Define[Command](scope, r); err != nil {
 		return err

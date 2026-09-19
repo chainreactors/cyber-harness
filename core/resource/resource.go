@@ -9,8 +9,8 @@
 //
 // A type is one or the other, never both, because the two are keyed
 // differently: a point is keyed by the type of the value it stores
-// (commands.Command), a capability by the type describing behaviour
-// (commands.Executor). An element type and a behaviour interface can never be
+// (commands.Command), a capability by the type describing behavior
+// (commands.Executor). An element type and a behavior interface can never be
 // the same named type, so the rule holds by construction.
 //
 // A capability key must be a named type declared for the purpose and owned by

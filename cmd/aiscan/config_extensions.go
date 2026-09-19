@@ -16,23 +16,6 @@ import (
 	"strings"
 )
 
-func intValue(value *int) int {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
-func tavilyKeys(primary string, fallbacks ...string) string {
-	keys := make([]string, 0, len(fallbacks)+1)
-	for _, raw := range append([]string{primary}, fallbacks...) {
-		if raw = strings.TrimSpace(raw); raw != "" {
-			keys = append(keys, raw)
-		}
-	}
-	return strings.Join(keys, ",")
-}
-
 // cyber.yaml is wider than the shared proto schema: --init also emits local
 // sections and switches (misc, output, traffic, the flat LLM
 // shorthand, the agent evaluation settings, cyberhub.mitm). The settings page
@@ -170,6 +153,16 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 	if option == nil {
 		return &types.DistributeConfig{}, nil
 	}
+	reconLimit := 0
+	if option.ReconLimit != nil {
+		reconLimit = *option.ReconLimit
+	}
+	keys := make([]string, 0, 2)
+	for _, raw := range []string{option.TavilyKey, option.SearchConfig.TavilyKeys} {
+		if raw = strings.TrimSpace(raw); raw != "" {
+			keys = append(keys, raw)
+		}
+	}
 	extensions, err := cfg.ValuesToProto(option.Extensions)
 	if err != nil {
 		return nil, err
@@ -182,10 +175,10 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 		},
 		Recon: &types.ReconConfig{
 			FofaKey: option.FofaKey, HunterApiKey: option.HunterAPIKey,
-			Proxy: option.ReconProxy, Limit: int32(intValue(option.ReconLimit)),
+			Proxy: option.ReconProxy, Limit: int32(reconLimit),
 		},
 		Scan:       &types.ScanConfig{Verify: option.ScanConfig.Verify},
-		Search:     &types.SearchConfig{TavilyKeys: tavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys)},
+		Search:     &types.SearchConfig{TavilyKeys: strings.Join(keys, ",")},
 		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: int32(option.Timeout)},
 		Node:       &types.NodeConfig{Id: option.NodeID, Name: option.NodeName},
 		Extensions: extensions,

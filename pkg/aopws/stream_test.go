@@ -16,6 +16,18 @@ import (
 
 var testUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 
+func dialTestWebSocket(t *testing.T, serverURL string) *websocket.Conn {
+	t.Helper()
+	conn, response, err := websocket.DefaultDialer.Dial(strings.Replace(serverURL, "http", "ws", 1), nil)
+	if response != nil {
+		_ = response.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
 func TestStreamRoundTripsBothEncodings(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -42,10 +54,7 @@ func TestStreamRoundTripsBothEncodings(t *testing.T) {
 			}))
 			defer server.Close()
 
-			conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(server.URL, "http", "ws", 1), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+			conn := dialTestWebSocket(t, server.URL)
 			stream, err := New(t.Context(), conn, Options{Encoding: test.encoding, WriteTimeout: time.Second})
 			if err != nil {
 				t.Fatal(err)
@@ -88,10 +97,7 @@ func TestStreamSerializesConcurrentWrites(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(server.URL, "http", "ws", 1), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	conn := dialTestWebSocket(t, server.URL)
 	stream, err := New(context.Background(), conn, Options{WriteTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -130,10 +136,7 @@ func TestStreamReportsConsistentDecodeErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(server.URL, "http", "ws", 1), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	conn := dialTestWebSocket(t, server.URL)
 	stream, err := New(t.Context(), conn, Options{Encoding: Binary})
 	if err != nil {
 		t.Fatal(err)

@@ -77,7 +77,7 @@ func (r *Registry) Load(scope *extension.Scope) error {
 		return err
 	}
 	r.hooks = registry
-	// The point stores Tools; the capability offers the Executor behaviour.
+	// The point stores Tools; the capability offers the Executor behavior.
 	if err := extension.Define[tool.Tool](scope, r); err != nil {
 		return err
 	}

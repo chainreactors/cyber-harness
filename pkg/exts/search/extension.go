@@ -66,7 +66,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 
 // providerWebSearch adapts the configured model's own web search, when it has
 // one, to the search tool's signature. It lives here because it is search
-// behaviour, not composition.
+// behavior, not composition.
 func providerWebSearch(application *app.State) func(context.Context, string, int) (string, error) {
 	model, _ := application.ProviderState()
 	searcher, ok := model.(provider.WebSearchProvider)

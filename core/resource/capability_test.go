@@ -209,7 +209,7 @@ func TestProviderCannotCloseWhileBorrowed(t *testing.T) {
 }
 
 // The two directions are keyed differently on purpose: a point by the type of
-// the value it stores, a capability by the type describing behaviour. The same
+// the value it stores, a capability by the type describing behavior. The same
 // object can be both, and that is the normal case for a registry.
 func TestOneObjectCanBeBothPointAndCapability(t *testing.T) {
 	registry := resource.New()

@@ -43,7 +43,7 @@ func loadPTYRegistry(t *testing.T, ctx context.Context, bash *terminaltool.BashT
 }
 
 // ptyTransport models one AOP connection. Binding the registry opens a fresh
-// PTY handler for it, and cancelling its context is what a connection ending
+// PTY handler for it, and canceling its context is what a connection ending
 // looks like now that the router has no teardown of its own.
 type ptyTransport struct {
 	t        *testing.T
