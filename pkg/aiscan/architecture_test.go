@@ -14,7 +14,7 @@ import (
 
 func TestReusableLayersDoNotDependOnDistributionFeatures(t *testing.T) {
 	root := repositoryRoot(t)
-	cmd := exec.Command("go", "list", "-deps", "./core/...", "./agent/...", "./pkg/base")
+	cmd := exec.Command("go", "list", "-deps", "./core/...", "./agent/...", "./pkg/base", "./pkg/harness")
 	cmd.Dir = root
 	output, err := cmd.Output()
 	if err != nil {

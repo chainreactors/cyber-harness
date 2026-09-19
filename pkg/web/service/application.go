@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
@@ -23,22 +22,6 @@ func (s *Service) aiAvailable() bool {
 	}
 	provider, _ := app.ProviderState()
 	return provider != nil
-}
-
-// acquireRuntime borrows the session runtime under the same reference count as
-// acquireApp. Tools that a session owns are reached through it, not through the
-// application.
-func (s *Service) acquireRuntime() (*agentsession.Runtime, func()) {
-	p, release := s.acquireProfile()
-	if p == nil {
-		return nil, release
-	}
-	runtime, err := p.Runtime()
-	if err != nil || runtime == nil {
-		release()
-		return nil, func() {}
-	}
-	return runtime, release
 }
 
 func (s *Service) acquireApp() (*apppkg.State, func()) {

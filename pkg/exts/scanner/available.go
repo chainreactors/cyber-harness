@@ -56,6 +56,10 @@ func UsageLines() []string {
 	return result
 }
 
+func Description(name string) string {
+	return scannerDescription(name)
+}
+
 func scannerDescription(name string) string {
 	switch name {
 	case "curl":

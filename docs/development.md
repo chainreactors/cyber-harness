@@ -46,7 +46,21 @@ go run ./examples/session
 
 ## 构建自己的应用
 
-通用应用可以沿用示例的 `base.New → append → extension.New`。如果需要 aiscan 的完整安全工具组合，使用 [pkg/aiscan](../pkg/aiscan)；它的 `New(Request)` 要求 `Option.Resolved` 已通过配置声明与解析建立，不能把空 Option 当作快捷配置传入。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
+通用应用可以直接使用 `pkg/harness`：`harness.New` 总是安装 `base.Config`，把 `Session` 留空就是工具宿主，提供 `Session` 就会安装 `StandardLoop` 和会话运行时；`Loop` 可以替换为自己的循环，`Extensions` 可以加入场景专属工具或服务。这样可以在同一个 harness 包中组合工具型、对话型和领域型应用，同时由 `Harness.Load`、`Harness.Close` 统一管理生命周期。需要更细的生命周期控制时，仍可沿用示例的 `base.New → append → extension.New`。
+
+```go
+h, err := harness.New(harness.Config{
+    Base: base.Config{Directory: workDir, Provider: provider.StartupConfig{Mode: provider.StartupRequired}},
+    Extensions: []extension.Extension{myScannerExtension},
+    Session: &agentsession.Config{Option: option},
+})
+if err != nil { return err }
+defer h.Close(context.Background())
+if err := h.Load(ctx); err != nil { return err }
+runtime, err := h.Runtime()
+```
+
+如果需要 aiscan 的完整安全工具组合，使用 [pkg/aiscan](../pkg/aiscan)；它的 `New(Request)` 要求 `Option.Resolved` 已通过配置声明与解析建立，不能把空 Option 当作快捷配置传入。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
 
 构建源码发行版时，`make agent` 生成最小本地 Agent，`make` 生成标准版，`make full` 生成包含前端的完整版。标签来自 [editions.env](../editions.env)，实际步骤来自 [Makefile](../Makefile)。full 需要前端工具链；standard 与 full 均使用 CGO_ENABLED=0。原生录屏需要 CGO 工具链，另见 [record](record.md)。
 

@@ -52,7 +52,6 @@ type cliOptions struct {
 	Timeout         int          `long:"timeout" description:"Overall timeout in seconds"`
 	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
 	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
-	cfg.ScannerCommands
 }
 
 type agentCommand struct {
@@ -273,10 +272,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 			return parsedCLI{}, err
 		}
 	} else {
-		scannerArgs, err = applyScannerPersistenceArgs(scannerRest, &option)
-		if err != nil {
-			return parsedCLI{}, err
-		}
+		scannerArgs = append([]string(nil), scannerRest...)
 	}
 	if boolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
@@ -307,31 +303,6 @@ func validateOutputFlags(option *cfg.Option) error {
 	}
 	option.OutputFormat = format
 	return nil
-}
-
-func applyScannerPersistenceArgs(args []string, option *cfg.Option) ([]string, error) {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		key, value, hasValue := strings.Cut(arg, "=")
-		switch key {
-		case "--output", "-o":
-			resolved, err := flagValue(arg, hasValue, value, args, &i)
-			if err != nil {
-				return nil, err
-			}
-			option.OutputFile = resolved
-		case "--resume", "-r":
-			resolved, err := flagValue(arg, hasValue, value, args, &i)
-			if err != nil {
-				return nil, err
-			}
-			option.Resume = resolved
-		default:
-			out = append(out, arg)
-		}
-	}
-	return out, nil
 }
 
 func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
@@ -402,6 +373,11 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
+	for _, name := range scannerext.Names() {
+		if _, err := parser.AddCommand(name, scannerext.Description(name), "", &struct{}{}); err != nil {
+			panic(err)
+		}
+	}
 	cli.registry = hostcli.New(parser)
 	declareResources(cli.registry, &cli.Agent.AgentOptions)
 	if err := cli.registry.Seal(); err != nil {

@@ -88,6 +88,26 @@ test.describe('HTTP shell and authentication', () => {
     expect(ioa.nodes.some((node: { name?: string }) => node.name === 'cyber.web')).toBeTruthy()
   })
 
+  test('mobile header fits and the session drawer can close', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 })
+    await openAuthenticatedApp(page)
+
+    const brand = await page.getByText('Cyber', { exact: true }).first().boundingBox()
+    const assets = await page.getByRole('button', { name: 'Asset pool' }).boundingBox()
+    const logout = await page.getByRole('button', { name: 'Sign out' }).boundingBox()
+    expect(brand).not.toBeNull()
+    expect(assets).not.toBeNull()
+    expect(logout).not.toBeNull()
+    expect(brand!.x + brand!.width).toBeLessThanOrEqual(assets!.x)
+    expect(logout!.x + logout!.width).toBeLessThanOrEqual(320)
+
+    await page.getByRole('button', { name: 'Chat history' }).click()
+    const close = page.getByRole('button', { name: 'Collapse sidebar' })
+    await expect(close).toBeVisible()
+    await close.click()
+    await expect(close).toBeHidden()
+  })
+
   test('agent token is available only to authenticated clients and is not cacheable', async ({ request }) => {
     const unauthorized = await request.get('/api/auth/agent-token')
     expect(unauthorized.status()).toBe(401)

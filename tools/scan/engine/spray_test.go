@@ -48,6 +48,12 @@ func TestBuildSprayOptionAvoidsPerRunGlobalLoggerMutation(t *testing.T) {
 	}
 }
 
+func TestBuildSprayOptionHonorsQuiet(t *testing.T) {
+	if !buildSprayOption(SprayCheckOptions{Quiet: true}).Quiet {
+		t.Fatal("quiet option was not propagated")
+	}
+}
+
 func TestDefaultSprayInvocationTimeoutBoundsCrawl(t *testing.T) {
 	got := defaultSprayInvocationTimeout(SprayCheckOptions{Timeout: 5, Crawl: true, CrawlDepth: 2})
 	if got != 80*time.Second {

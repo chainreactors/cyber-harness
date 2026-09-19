@@ -986,12 +986,17 @@ func writeVerboseResponse(w io.Writer, resp *http.Response) {
 
 // expandWriteOut supports the curl -w variables the agent uses most.
 func expandWriteOut(format string, resp *http.Response, size int64) string {
+	redirects := 0
+	for request := resp.Request; request != nil && request.Response != nil; request = request.Response.Request {
+		redirects++
+	}
 	replacer := strings.NewReplacer(
 		"%{http_code}", strconv.Itoa(resp.StatusCode),
 		"%{response_code}", strconv.Itoa(resp.StatusCode),
 		"%{url_effective}", resp.Request.URL.String(),
 		"%{content_type}", resp.Header.Get("Content-Type"),
 		"%{size_download}", strconv.FormatInt(size, 10),
+		"%{num_redirects}", strconv.Itoa(redirects),
 		"\\n", "\n", "\\t", "\t", "\\r", "\r",
 	)
 	return replacer.Replace(format)

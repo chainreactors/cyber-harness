@@ -226,8 +226,8 @@ export default function App() {
     <ThemeProvider initial={getInitialTheme()} storageKey="cyber-theme" className="aspect-theme-root h-full text-foreground font-sans antialiased">
     <TooltipProvider delayDuration={300}>
       <div className="flex h-[100dvh] flex-col overflow-hidden">
-        <header className="relative z-[60] flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-3 pt-safe sm:px-4">
-          <div className="flex min-w-0 items-center gap-2">
+        <header className="relative z-[60] flex min-h-12 shrink-0 items-center justify-between gap-1 border-b border-border/60 bg-background px-2 pt-safe sm:gap-2 sm:px-4">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
             {/* Phone-only drawer opener — the collapsed sidebar is hidden below md,
                 so the session history opens from here (Doubao-style). */}
             <Button
@@ -239,7 +239,7 @@ export default function App() {
             >
               <Menu className="h-4 w-4" />
             </Button>
-            <BrandLogo size={22} />
+            <BrandLogo size={22} className="hidden shrink-0 sm:block" />
             <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">Cyber</span>
             <LLMProfileSwitcher
               profiles={llmProfiles}
@@ -248,9 +248,11 @@ export default function App() {
               disabled={switchingLLM}
               onChange={handleSwitchLLM}
             />
-            <LLMHealth onOpenSettings={() => setActiveToolPanel('settings')} reloadSignal={healthNonce} />
+            <span className="hidden sm:contents">
+              <LLMHealth onOpenSettings={() => setActiveToolPanel('settings')} reloadSignal={healthNonce} />
+            </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5 sm:gap-2">
             <AssetPoolButton count={scoNodes.length} open={activeToolPanel === 'assets'} onClick={() => toggleToolPanel('assets')} />
             <IOAConsoleButton open={activeToolPanel === 'ioa'} onClick={() => {
               setIOAConsoleTarget(null)
@@ -261,7 +263,7 @@ export default function App() {
             <QuickConnect serverURL={serverStatus?.serverUrl} version={serverStatus?.version} space={agentSpace} />
             {/* Separate workspace nav (assets / IOA / agents / connect) from the
                 account utilities (settings / logout) so the row reads as two groups. */}
-            <span className="mx-0.5 h-5 w-px shrink-0 bg-border/70" aria-hidden="true" />
+            <span className="mx-0.5 hidden h-5 w-px shrink-0 bg-border/70 sm:block" aria-hidden="true" />
             <HeaderIconButton label={t('openSettings')} active={activeToolPanel === 'settings'} toolDrawerTrigger onClick={() => toggleToolPanel('settings')}>
               <Settings className="h-3.5 w-3.5" />
             </HeaderIconButton>
@@ -412,14 +414,14 @@ function AssetPoolButton({ count, open, onClick }: { count: number; open: boolea
           onClick={onClick}
           aria-label={t('openAssets')}
           className={cn(
-            'h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border hover:opacity-80',
+            'h-7 w-7 shrink-0 cursor-pointer gap-0 rounded-md border px-0 hover:opacity-80 sm:w-auto sm:gap-1.5 sm:px-2.5',
             active
               ? 'border-primary/30'
               : 'border-border bg-secondary/50 text-muted-foreground hover:bg-secondary/50 hover:text-muted-foreground',
           )}
         >
           <Box className="h-3 w-3" aria-hidden="true" />
-          <span className="font-mono" aria-hidden="true">{count}</span>
+          <span className="hidden font-mono sm:inline" aria-hidden="true">{count}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{t('openAssets')}</TooltipContent>
@@ -442,7 +444,7 @@ function AgentsButton({ count, open, onClick }: { count: number; open: boolean; 
           onClick={onClick}
           aria-label={active ? t('agentsConnected', { count }) : t('noAgents')}
           className={cn(
-            'h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border hover:opacity-80',
+            'h-7 w-7 shrink-0 cursor-pointer gap-0 rounded-md border px-0 hover:opacity-80 sm:w-auto sm:gap-1.5 sm:px-2.5',
             // A connection count is neutral status, not an alert — keep warm hues for
             // severity only. Blue when connected, quiet neutral when none.
             active
@@ -451,7 +453,7 @@ function AgentsButton({ count, open, onClick }: { count: number; open: boolean; 
           )}
         >
           <Monitor className="h-3 w-3" aria-hidden="true" />
-          <span className="font-mono" aria-hidden="true">{count}</span>
+          <span className="hidden font-mono sm:inline" aria-hidden="true">{count}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{active ? t('agentsConnected', { count }) : t('noAgents')}</TooltipContent>
@@ -474,14 +476,14 @@ function ToolsButton({ count, open, onClick }: { count: number; open: boolean; o
           onClick={onClick}
           aria-label={active ? t('toolsAvailable', { count }) : t('noTools')}
           className={cn(
-            'h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border hover:opacity-80',
+            'h-7 w-7 shrink-0 cursor-pointer gap-0 rounded-md border px-0 hover:opacity-80 sm:w-auto sm:gap-1.5 sm:px-2.5',
             active
               ? 'border-primary/30'
               : 'border-border bg-secondary/50 text-muted-foreground hover:bg-secondary/50 hover:text-muted-foreground',
           )}
         >
           <Wrench className="h-3 w-3" aria-hidden="true" />
-          <span className="font-mono" aria-hidden="true">{count}</span>
+          <span className="hidden font-mono sm:inline" aria-hidden="true">{count}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{t('openTools')}</TooltipContent>
@@ -502,7 +504,7 @@ function IOAConsoleButton({ open, onClick }: { open: boolean; onClick: () => voi
           data-tool-drawer-trigger
           onClick={onClick}
           aria-label={t('openConsole')}
-          className="h-7 shrink-0 cursor-pointer gap-1.5 rounded-md border border-border bg-secondary/50 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+          className="h-7 w-7 shrink-0 cursor-pointer gap-0 rounded-md border border-border bg-secondary/50 px-0 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary sm:w-auto sm:gap-1.5 sm:px-2.5"
         >
           <Network className="h-3 w-3" aria-hidden="true" />
           <span className="hidden font-mono text-[10px] font-semibold sm:inline" aria-hidden="true">IOA</span>

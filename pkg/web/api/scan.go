@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	ErrScanUnavailable   = errors.New("no scan execution nodes connected; connect an external agent or start Web without --no-agent")
 	ErrScanNotFound      = errors.New("scan not found")
 	ErrScanNotCancelable = errors.New("scan cannot be canceled")
 )
@@ -44,7 +45,11 @@ func (s *Scans) SubmitScan(ctx context.Context, request *types.SubmitScanRequest
 	options := request.GetOptions()
 	scan, err := s.backend.SubmitScan(ctx, request.Target, request.Mode, options.GetVerify(), options.GetSniper(), options.GetDeep())
 	if err != nil {
-		return rejectedSubmitScan(request, "INVALID_ARGUMENT", err.Error()), nil
+		code := "INVALID_ARGUMENT"
+		if errors.Is(err, ErrScanUnavailable) {
+			code = "FAILED_PRECONDITION"
+		}
+		return rejectedSubmitScan(request, code, err.Error()), nil
 	}
 	return &types.SubmitScanResponse{RequestId: request.RequestId, Outcome: &types.SubmitScanResponse_Accepted{Accepted: scan}}, nil
 }

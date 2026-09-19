@@ -20,7 +20,7 @@ flowchart TD
 
 `agent/` 提供模型循环和会话机制，`core/` 提供资源、hooks、操作关联和事件等基础设施。业务实现多位于 `tools/`，对应扩展在 `pkg/exts/` 中将实现接入资源与生命周期。
 
-`pkg/base` 返回有序的基础扩展；`pkg/aiscan` 加入扫描器、代理和其他产品能力；`cmd/aiscan` 解析配置并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
+`pkg/base` 返回有序的基础扩展；`pkg/harness` 在此之上提供工具宿主和会话 Agent 的通用组合；`pkg/aiscan` 再加入扫描器、代理和其他产品能力；`cmd/aiscan` 解析配置并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
 
 ## 装配与生命周期
 

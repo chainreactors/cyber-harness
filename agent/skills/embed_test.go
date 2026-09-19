@@ -101,6 +101,26 @@ func TestExpandCommand(t *testing.T) {
 	}
 }
 
+func TestApplySelectedAcceptsCLIFilePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixture.md")
+	raw := "---\nname: fixture\ndescription: A CLI fixture\n---\n# Fixture\nCLI_SKILL_OK"
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, diagnostics, ok := LoadFromFile(path)
+	if !ok || len(diagnostics) != 0 {
+		t.Fatalf("LoadFromFile() = %#v, %#v, %v", loaded, diagnostics, ok)
+	}
+	store := NewStore([]Skill{loaded})
+	selected, err := store.ApplySelected("reply", []string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(selected, "CLI_SKILL_OK") || !strings.HasSuffix(selected, "reply") {
+		t.Fatalf("selected skill = %q", selected)
+	}
+}
+
 func TestReadVirtual(t *testing.T) {
 	store, _ := LoadEmbeddedStore()
 	content, handled, err := store.ReadVirtual("cyber://skills/cyber/SKILL.md")
