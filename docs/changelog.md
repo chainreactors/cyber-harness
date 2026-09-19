@@ -16,6 +16,8 @@ rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力
 - Web 的聊天、会话恢复、Agent 状态、PTY、IOA 控制台、工具目录、配置面板和 Artifact 详情都改为同一条二进制 Connect/AOP 数据路径；前端不再维护旧的 scan/report/SCO 客户端分支。SPA 路由回退到当前 `index.html`，指纹化静态资源可长期缓存，入口文档始终禁止缓存。
 - 流量工具使用 canonical protobuf `traffic.Flow`/`traffic.Exchange`；MITM Hub 支持按调用选择订阅、限制捕获大小，并把响应 body 流式写入持久文件。代理切换、Host 重建、取消请求和尾随 Artifact 的处理都绑定到实际 operation，而不是时间窗口或临时 sink。
 - 纯 Go `curl` 支持常用请求、重定向、表单、cookie jar、代理、`--resolve`、超时、HTTP 版本、trace、输出文件和 `--write-out`；默认注入浏览器请求头并继续经过 Runner egress/HTTP 观察链。
+- 直接扫描器拥有命令后的原生参数：`curl -o`、`gogo -o jl`、`neutron -o` 和 `zombie -o json` 不再被根 CLI 误当成 AOP 事件文件；全局事件输出放在命令前，例如 `aiscan -o events.jsonl gogo ... -o jl`。gogo 的 JSONL stdout 会过滤进度行，`-j <file>` 仍只表示历史结果输入。
+- standard/full 的帮助目录直接从 edition manifest 生成：standard 不再展示不可执行的 `katana`/`passive`，此前遗漏的 `curl` 会正常列出。`curl --write-out` 补充 `%{num_redirects}`，重定向后的有效 URL、状态码和次数可以同时输出。
 - Agent 的 goal loop 使用自然语言 pacing；compaction、budget、失败回合、命令结果和 evaluator 记录只在时间线中出现一次，失败回合不会被错误地自动继续。
 
 ### Artifact、CSTX 与数据边界
@@ -58,6 +60,7 @@ rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力
 - rc3 与 rc4 标签不是线性父子关系；完整审查使用两标签的实际 commit（`100278e0..f2f510d2`），覆盖合并分支中的 Web、runtime、extension、traffic、curl、native build 和 CI 改动，而不是只查看 rc4 最近几条提交。
 - 原始 rc4 产物已下载并校验 Windows amd64 的 `aiscan` 与 `aiscan-full`。重新发布前又用当前候选二进制验证普通版 CLI、full Web、认证、ConnectRPC、PTY、外部节点扫描和浏览器端 CSTX WASM；access key 不出现在 URL、local/session storage、页面文本、模型 prompt 或 AOP JSONL。
 - `scan --json` 会抑制 spray 的进度表/banner 并只向 stdout 输出 JSONL；真实目标扫描产生的 43 行输出均可逐行严格解析。`agent --skill <local-path>` 会按规范化文件路径选中已加载 skill；真实 one-shot 进程覆盖 text/json/stream-json、AOP JSONL、resume 和本地 skill。
+- 本机授权实验目标进一步覆盖了发布 CLI 的 `curl` 重定向/文件输出、gogo 指纹与双输出、spray 爬取、neutron 自定义 POC、zombie Redis 认证、严格 `scan --json` 和 full Katana 爬取；原生 JSONL、canonical AOP JSONL 与自定义 POC 结果均逐行解析验证。
 - Windows 上的完整 `go test ./...`、`go test -race ./...`、`go vet ./...`、Katana headless、前端构建和 14 项 Playwright E2E（13 通过、1 个显式 goal evaluator 场景跳过）均完成；standard/full 在 `CGO_ENABLED=0/1` 下都能编译。WSL Ubuntu 另行执行了 Unix shell/tmux、Agent 多轮交互、Proton 文件与管道扫描以及 Arsenal 离线管理测试；需要访问 GitHub Release 的 Arsenal 在线安装因当前 WSL 网络超时未计为通过。
 
 ## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证

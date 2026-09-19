@@ -103,16 +103,54 @@ func isDirectScannerJSONOutput(rest []string) bool {
 	if len(rest) == 0 || !scannerext.Available(rest[0]) {
 		return false
 	}
-	for _, arg := range rest[1:] {
-		if arg == "-j" || arg == "--json" {
-			return true
-		}
-		if strings.HasPrefix(arg, "--json=") {
-			value := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(arg, "--json=")))
+	args := rest[1:]
+	switch rest[0] {
+	case "gogo", "zombie":
+		value, ok := scannerFlagValue(args, "-o", "--output")
+		value = strings.ToLower(strings.TrimSpace(value))
+		return ok && (value == "jl" || value == "json" || value == "jsonl")
+	case "katana":
+		return scannerBoolFlagEnabled(args, "-j", "-jsonl", "--jsonl")
+	case "scan", "spray", "neutron", "proton":
+		return scannerBoolFlagEnabled(args, "-j", "--json", "--jsonl")
+	}
+	return false
+}
+
+func scannerBoolFlagEnabled(args []string, names ...string) bool {
+	for _, arg := range args {
+		key, value, hasValue := strings.Cut(arg, "=")
+		for _, name := range names {
+			if key != name {
+				continue
+			}
+			if !hasValue {
+				return true
+			}
+			value = strings.ToLower(strings.TrimSpace(value))
 			return value != "false" && value != "0" && value != "no"
 		}
 	}
 	return false
+}
+
+func scannerFlagValue(args []string, names ...string) (string, bool) {
+	for i := 0; i < len(args); i++ {
+		key, value, hasValue := strings.Cut(args[i], "=")
+		for _, name := range names {
+			if key != name {
+				continue
+			}
+			if hasValue {
+				return value, true
+			}
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
+		}
+	}
+	return "", false
 }
 
 func scannerVerifyMode(args []string, defaultVerify string) (string, bool) {

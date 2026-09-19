@@ -224,11 +224,11 @@ func TestFollowRedirect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out, _, err := run(t, []string{"-L", srv.URL + "/a"}, "", "")
+	out, _, err := run(t, []string{"-L", "-w", " %{http_code} %{num_redirects} %{url_effective}", srv.URL + "/a"}, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "final" {
+	if out != "final 200 1 "+srv.URL+"/b" {
 		t.Fatalf("expected followed body, got %q", out)
 	}
 }

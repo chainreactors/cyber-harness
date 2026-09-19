@@ -152,14 +152,13 @@ func TestParseCLIAgentMachineOutput(t *testing.T) {
 	}
 }
 
-func TestParseCLIExtractsOutputForAgentAndScanners(t *testing.T) {
+func TestParseCLIExtractsOutputForAgentAndScan(t *testing.T) {
 	tests := []struct {
 		args     []string
 		wantArgs []string
 	}{
 		{args: []string{"agent", "-p", "hello", "-o", "agent.jsonl"}},
 		{args: []string{"scan", "-i", "127.0.0.1", "-o", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
-		{args: []string{"gogo", "-i", "127.0.0.1", "-p", "80", "-o", "gogo.jsonl"}, wantArgs: []string{"gogo", "-i", "127.0.0.1", "-p", "80"}},
 	}
 	for _, test := range tests {
 		t.Run(test.args[0], func(t *testing.T) {
@@ -175,6 +174,44 @@ func TestParseCLIExtractsOutputForAgentAndScanners(t *testing.T) {
 				t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, test.wantArgs)
 			}
 		})
+	}
+}
+
+func TestParseCLIDirectScannerOwnsPostCommandOutputFlag(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "curl", args: []string{"curl", "-o", "body.txt", "http://127.0.0.1"}},
+		{name: "gogo", args: []string{"gogo", "-i", "127.0.0.1", "-o", "jl"}},
+		{name: "neutron", args: []string{"neutron", "-i", "http://127.0.0.1", "-o", "result.jsonl"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parsed, err := parseCLI(test.args)
+			if err != nil {
+				t.Fatalf("parseCLI: %v", err)
+			}
+			if parsed.Option.OutputFile != "" {
+				t.Fatalf("global output file captured scanner flag: %q", parsed.Option.OutputFile)
+			}
+			if !reflect.DeepEqual(parsed.ScannerArgs, test.args) {
+				t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, test.args)
+			}
+		})
+	}
+}
+
+func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
+	parsed, err := parseCLI([]string{"-o", "events.jsonl", "gogo", "-i", "127.0.0.1", "-o", "jl"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if parsed.Option.OutputFile != "events.jsonl" {
+		t.Fatalf("global output file = %q", parsed.Option.OutputFile)
+	}
+	wantArgs := []string{"gogo", "-i", "127.0.0.1", "-o", "jl"}
+	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
+		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
 }
 

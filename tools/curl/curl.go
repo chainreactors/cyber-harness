@@ -75,7 +75,7 @@ Supported options:
   -s, --silent                 Silent mode
   -S, --show-error             Show errors even with -s
   -f, --fail                   Fail on HTTP 4xx/5xx responses
-  -w, --write-out <format>     After completion, print %{http_code}, %{url_effective}, ...
+  -w, --write-out <format>     Print status/URL/type/size/redirect variables after completion
   -v, --verbose                Log request/response headers
   -N, --no-buffer              Stream response output without buffering
   -k, --insecure               Do not verify TLS
