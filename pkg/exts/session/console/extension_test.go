@@ -12,6 +12,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	contributor "github.com/chainreactors/cyber/pkg/exts/session/console"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
@@ -33,7 +34,7 @@ func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
 		registry, err = extension.Use[*api.Registry](scope)
 		return err
 	}}
-	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), loopext.New(agent.StandardLoop{}),
+	set, err := extension.New(append(apptest.Entries(t, newTestApplication(t)), promptext.New(), loopext.New(agent.StandardLoop{}),
 		tui,
 		session,
 		presentation,

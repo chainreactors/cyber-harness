@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -38,20 +39,20 @@ type EvalLoopConfig struct {
 // NewLoopConfig builds an EvalLoopConfig around a fresh Evaluator. The rounds
 // spec is a number, natural language, or empty for the default ceiling; see
 // ParseBudget.
-func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal, criteria, rounds string) EvalLoopConfig {
-	return newLoopConfig(p, model, logger, goal, agent.TextInput(goal), criteria, rounds)
+func NewLoopConfig(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, goal, criteria, rounds string) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, prompts, goal, agent.TextInput(goal), criteria, rounds)
 }
 
 // NewLoopConfigWithInput preserves transport controls and multimodal parts on
 // the first evaluation round. Boundaries that already published the user input
 // use this constructor so the original multimodal input is preserved in Goal mode.
-func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, input *aop.Message, criteria, rounds string) EvalLoopConfig {
-	return newLoopConfig(p, model, logger, strings.TrimSpace(provider.MessageText(input)), input, criteria, rounds)
+func NewLoopConfigWithInput(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, input *aop.Message, criteria, rounds string) EvalLoopConfig {
+	return newLoopConfig(p, model, logger, prompts, strings.TrimSpace(provider.MessageText(input)), input, criteria, rounds)
 }
 
-func newLoopConfig(p provider.Provider, model string, logger telemetry.Logger, goal string, input *aop.Message, criteria, rounds string) EvalLoopConfig {
+func newLoopConfig(p provider.Provider, model string, logger telemetry.Logger, prompts prompt.Resolver, goal string, input *aop.Message, criteria, rounds string) EvalLoopConfig {
 	return EvalLoopConfig{
-		Evaluator:    New(Config{Provider: p, Model: model, Logger: logger}),
+		Evaluator:    New(Config{Provider: p, Model: model, Logger: logger, Prompts: prompts}),
 		Budget:       ParseBudget(rounds),
 		Goal:         goal,
 		Criteria:     criteria,
@@ -172,8 +173,10 @@ func RunWithEval(ctx context.Context, a *agent.Agent, cfg EvalLoopConfig, opts .
 		if !verdict.InheritContext {
 			cfg.Evaluator.cfg.Logger.Importantf("evaluate: compacting context (round %d)", round)
 			if _, err := a.Compact(ctx, agent.CompactConfig{
-				Provider: cfg.Evaluator.cfg.Provider,
-				Model:    cfg.Evaluator.cfg.Model,
+				Provider:       cfg.Evaluator.cfg.Provider,
+				Model:          cfg.Evaluator.cfg.Model,
+				PromptResolver: cfg.Evaluator.cfg.Prompts,
+				Logger:         cfg.Evaluator.cfg.Logger,
 			}); err != nil {
 				cfg.Evaluator.cfg.Logger.Warnf("compact failed, falling back to reset: %s", err)
 				a.Reset()

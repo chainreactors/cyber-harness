@@ -15,7 +15,8 @@ Load/Close 的窄接口或借用对象，例如 Files、ProxyHub、Importer、IO
 空生命周期包装。
 
 Tool Registry 与 Command Registry 直接定义各自 Point，Skill Library 定义 Bundle Point，
-TUI 定义 Console Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CLI 和连接测试
+Prompt Extension 定义 `prompt.Contribution` Point 并提供 `prompt.Resolver`，TUI 定义 Console
+Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CLI 和连接测试
 是解析前 Resource；需要参与这段组合的扩展在自己的包中提供 `Declare`，直接向
 `cli.Contribution`、`config.Section` 和 `config.Connection` Point 注册。Declare 不定义 Point，
 也不引入 declaration 子包、生命周期 Extension、聚合 Provider DTO 或独立 Probe Registry。

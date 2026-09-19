@@ -43,6 +43,7 @@ import (
 	sdkgogo "github.com/chainreactors/sdk/gogo"
 	"github.com/chainreactors/sdk/pkg/association"
 	sdkspray "github.com/chainreactors/sdk/spray"
+	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -111,6 +112,28 @@ func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
 	}
 	if reg.Has("neutron") {
 		t.Fatal("neutron should not be registered without templates")
+	}
+}
+
+// TestCommandsCarryAPromptDescription guards the system prompt's pseudo-command
+// list. A command with no QuickReference whose Usage opens with the generated
+// "Usage:" header is listed as a bare name, which tells the model nothing about
+// when to reach for it — zombie and scan both shipped that way.
+func TestCommandsCarryAPromptDescription(t *testing.T) {
+	gogoEng, _ := sdkgogo.NewEngine(nil)
+	sprayEng, _ := sdkspray.NewEngine(nil)
+	zombieEng, _ := sdkzombie.NewEngine(nil)
+	reg := buildRegistry(t, &engine.Set{Gogo: gogoEng, Spray: sprayEng, Zombie: zombieEng})
+
+	specs := reg.All()
+	if len(specs) == 0 {
+		t.Fatal("no commands registered")
+	}
+	docs := reg.UsageDocs()
+	for _, spec := range specs {
+		if strings.Contains(docs, "- "+spec.Name+"\n") {
+			t.Errorf("%s is listed as a bare name; declare a QuickReference or open Usage with a summary line", spec.Name)
+		}
 	}
 }
 

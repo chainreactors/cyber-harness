@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
@@ -89,11 +90,11 @@ func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	if request.ProviderMode != profilepkg.ProviderRequired {
 		t.Fatalf("provider mode = %v, want required", request.ProviderMode)
 	}
-	if request.Session == nil || request.Session.Loop == nil || request.Session.PromptConfig == nil {
+	if request.Session == nil || request.Session.Loop == nil {
 		t.Fatalf("runtime request = %#v, want scanner Agent configuration", request.Session)
 	}
-	if !request.Session.PromptConfig.ScannerAgentMode || request.Session.PromptConfig.ScannerName != "gogo" {
-		t.Fatalf("scanner prompt config = %#v", request.Session.PromptConfig)
+	if request.Session.PromptTarget != prompt.ScannerSystem || request.Session.ScannerName != "gogo" {
+		t.Fatalf("scanner prompt selection = target %q scanner %q", request.Session.PromptTarget, request.Session.ScannerName)
 	}
 	if !p.loaded || !p.closed || p.runtimeCalls != 1 {
 		t.Fatalf("profile lifecycle: loaded=%v closed=%v runtime calls=%d", p.loaded, p.closed, p.runtimeCalls)

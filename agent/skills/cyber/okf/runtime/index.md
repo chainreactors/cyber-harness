@@ -1,6 +1,6 @@
 # Runtime Tool Knowledge Bundle
 
-This bundle organizes cyber's runtime mechanism tool documentation as concept files, borrowing mechanisms from [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (concept files + YAML frontmatter + index listing + provenance fields). cyber references OKF's mechanisms to structure externally produced markdown; it does not claim full OKF spec compliance.
+This bundle organizes Cyber's runtime tool documentation as OKF 0.2 concept files with YAML frontmatter, progressive-disclosure indexes, and provenance fields.
 
 ## Concepts
 

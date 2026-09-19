@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
@@ -66,11 +67,16 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	promptResolver, err := extension.Use[prompt.Resolver](scope)
+	if err != nil {
+		return err
+	}
 	config := e.config
 	config.Loop = loop
 	config.Application = application
 	config.Hooks, config.Tools, config.CommandRegistry = hookRegistry, tools, commandRegistry
 	config.Skills, config.Bash = store, bash
+	config.PromptResolver = promptResolver
 	resource, err := session.NewResource(config)
 	if err != nil {
 		return err

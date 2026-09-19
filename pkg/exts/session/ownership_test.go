@@ -13,6 +13,7 @@ import (
 	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/apptest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
@@ -31,7 +32,7 @@ func TestSessionCloseDoesNotCloseBorrowedLoop(t *testing.T) {
 	application := &apppkg.App{}
 	l := loopext.New(loopFunc(func(context.Context, agent.Config) (*agent.Result, error) { return &agent.Result{Output: "alive"}, nil }))
 	s := sessionext.New(agentsession.Config{})
-	set, err := extension.New(append(apptest.Entries(t, application), l, s)...)
+	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), l, s)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestLoopPrecedesSessionInCompositionOrder(t *testing.T) {
 	application.SetProvider(inertProvider{}, agent.ProviderConfig{})
 	loop := loopext.New(selected)
 	sessions := sessionext.New(agentsession.Config{Application: application})
-	set, err := extension.New(append(apptest.Entries(t, application), loop, sessions)...)
+	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), loop, sessions)...)
 	if err != nil {
 		t.Fatal(err)
 	}

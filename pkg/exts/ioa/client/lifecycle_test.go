@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/types"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"github.com/chainreactors/cyber/pkg/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
@@ -72,7 +73,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Dependencies{
 				Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil },
 			})
-			set, err := extension.New(hosttest.Capabilities(), adapter)
+			set, err := extension.New(hosttest.Capabilities(), promptext.New(), adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +141,7 @@ func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
 		stream.Publish(&aop.Event{SessionId: "child", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
 		return nil
 	}}
-	set, err := extension.New(extension.Provided[*events.Stream](stream), adapter, agent)
+	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +175,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	defer server.Close()
 	stream := events.New()
 	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{})
-	set, err := extension.New(extension.Provided[*events.Stream](stream), adapter)
+	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter)
 	if err != nil {
 		t.Fatal(err)
 	}

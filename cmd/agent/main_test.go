@@ -40,7 +40,8 @@ func TestAgentDependencyClosureExcludesFullApplicationFeatures(t *testing.T) {
 	}
 	forbidden := []string{
 		"/pkg/exts/scanner", "/pkg/exts/search", "/pkg/exts/proxy", "/pkg/exts/ioa",
-		"/pkg/exts/browser", "/pkg/exts/record", "/pkg/exts/web", "/pkg/web", "/tools/proxy", "/tools/record",
+		"/pkg/exts/browser", "/pkg/exts/record", "/pkg/exts/web", "/pkg/exts/okf", "/pkg/web",
+		"/tools/proxy", "/tools/record", "/tools/okf",
 	}
 	for _, dependency := range strings.Fields(string(output)) {
 		for _, fragment := range forbidden {

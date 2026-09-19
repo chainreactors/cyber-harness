@@ -8,7 +8,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/inbox"
-	agentprompt "github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
@@ -213,10 +212,6 @@ func newCyberProfile(config cyberProfileConfig) (*cyberProfile, error) {
 	if config.Session != nil {
 		agentConfig := *config.Session
 		agentConfig.NodeName = nodeName
-		if config.IOA != nil && config.IOA.Space != "" {
-			agentConfig.Preamble = strings.TrimSpace(agentConfig.Preamble + "\n" + ioaext.Preamble(*config.IOA))
-		}
-
 		agentConfig.Option, agentConfig.Logger = config.Option, logger
 		values = append(values, sessionext.New(agentConfig))
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
@@ -309,11 +304,6 @@ func cloneConfig(config *agentsession.Config) *agentsession.Config {
 	}
 	cloned := *config
 	cloned.BaseSkills = append([]string(nil), config.BaseSkills...)
-	if config.PromptConfig != nil {
-		prompt := *config.PromptConfig
-		prompt.LoadedSkills = append([]agentprompt.LoadedSkill(nil), config.PromptConfig.LoadedSkills...)
-		cloned.PromptConfig = &prompt
-	}
 	return &cloned
 }
 

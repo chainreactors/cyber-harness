@@ -74,36 +74,6 @@ func TestLoadEmbeddedSkills(t *testing.T) {
 	}
 }
 
-func TestFormatForPrompt(t *testing.T) {
-	loaded, _ := LoadEmbedded()
-	prompt := FormatForPrompt(loaded)
-	for _, want := range []string{
-		"<available_skills>",
-		"<name>cyber</name>",
-		"cyber://skills/cyber/SKILL.md",
-		"Use the read tool to load a skill file",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, prompt)
-		}
-	}
-	for _, internal := range []string{"scan", "gogo", "spray", "katana", "zombie", "neutron", "proton", "playwright"} {
-		if strings.Contains(prompt, "<name>"+internal+"</name>") {
-			t.Fatalf("prompt includes removed scanner skill %q:\n%s", internal, prompt)
-		}
-	}
-
-	hidden := []Skill{{
-		Name:        "hidden",
-		Description: "hidden skill",
-		Location:    "cyber://skills/hidden/SKILL.md",
-		Internal:    true,
-	}}
-	if got := FormatForPrompt(hidden); got != "" {
-		t.Fatalf("hidden prompt = %q, want empty", got)
-	}
-}
-
 func TestExpandCommand(t *testing.T) {
 	store, diagnostics := LoadEmbeddedStore()
 	if len(diagnostics) != 0 {

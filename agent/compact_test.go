@@ -6,9 +6,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 )
+
+type compactionTestPrompts struct{}
+
+func (compactionTestPrompts) Build(_ context.Context, input prompt.Context) prompt.Result {
+	switch input.Target {
+	case prompt.CompactSystem:
+		return prompt.Result{Prompt: "summarize the conversation"}
+	case prompt.CompactPrefix:
+		return prompt.Result{Prompt: "summarize the retained turn prefix"}
+	case prompt.CompactRequest:
+		return prompt.Result{Prompt: "create a context checkpoint " + input.Compaction.CustomInstructions}
+	default:
+		return prompt.Result{}
+	}
+}
 
 func msg(role, content string) *aop.Message {
 	return textMessage(role, content)
@@ -150,7 +166,7 @@ func TestCompactHistorySummarizesOversizedTurnPrefix(t *testing.T) {
 
 	compacted, result, err := compactHistory(context.Background(), CompactConfig{
 		Provider: llm, Model: "custom", KeepRecentTokens: 20000,
-		ReserveTokens: 16384, MaxTokens: 16384,
+		ReserveTokens: 16384, MaxTokens: 16384, PromptResolver: compactionTestPrompts{},
 	}, messages)
 	if err != nil {
 		t.Fatal(err)
@@ -225,11 +241,12 @@ func TestRunAutomaticallyCompactsBeforeThresholdRequest(t *testing.T) {
 		chatResponse(NewTextMessage("assistant", "final answer")),
 	}}
 	agent := NewAgent(Config{Loop: StandardLoop{},
-		Provider:      llm,
-		Tools:         newTestTools(t),
-		Model:         "custom",
-		MaxTokens:     64,
-		ContextWindow: 8192,
+		Provider:       llm,
+		PromptResolver: compactionTestPrompts{},
+		Tools:          newTestTools(t),
+		Model:          "custom",
+		MaxTokens:      64,
+		ContextWindow:  8192,
 		Compaction: CompactionSettings{
 			ReserveTokens:    40,
 			KeepRecentTokens: 20,
@@ -283,12 +300,13 @@ func TestRunRecoversFromContextOverflowOnce(t *testing.T) {
 		}
 	}}
 	agent := NewAgent(Config{Loop: StandardLoop{},
-		Provider:      llm,
-		Tools:         newTestTools(t),
-		Model:         "custom",
-		MaxTokens:     64,
-		ContextWindow: 1000000,
-		MaxRetries:    -1,
+		Provider:       llm,
+		PromptResolver: compactionTestPrompts{},
+		Tools:          newTestTools(t),
+		Model:          "custom",
+		MaxTokens:      64,
+		ContextWindow:  1000000,
+		MaxRetries:     -1,
 		Compaction: CompactionSettings{
 			ReserveTokens:    40,
 			KeepRecentTokens: 20,
@@ -323,7 +341,7 @@ func TestCompactHistoryRejectsTruncatedSummary(t *testing.T) {
 
 	compacted, _, err := compactHistory(context.Background(), CompactConfig{
 		Provider: llm, Model: "test", KeepRecentTokens: 20,
-		ReserveTokens: 40, MaxTokens: 64,
+		ReserveTokens: 40, MaxTokens: 64, PromptResolver: compactionTestPrompts{},
 	}, messages)
 	if err == nil || !strings.Contains(err.Error(), "summary output truncated") {
 		t.Fatalf("compactHistory() error = %v, want truncated summary error", err)

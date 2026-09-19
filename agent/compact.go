@@ -5,56 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/truncate"
 	types "github.com/chainreactors/cyber/core/types"
 )
-
-const compactSystemPrompt = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
-
-Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`
-
-const compactUserPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
-
-Use this EXACT format:
-
-## Goal
-[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
-
-## Progress
-### Done
-- [x] [Completed tasks/changes]
-
-### In Progress
-- [ ] [Current work]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale]
-
-## Next Steps
-1. [Ordered list of what should happen next]
-
-## Critical Context
-- [File paths, function names, error messages, or other data needed to continue]
-- [Or "(none)" if not applicable]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.`
-
-const compactTurnPrefixPrompt = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained. Summarize the prefix to provide context for the retained suffix.
-
-Use this EXACT format:
-
-## Original Request
-[What did the user ask for in this turn?]
-
-## Early Progress
-- [Key decisions and work done in the prefix]
-
-## Context for Suffix
-- [Information needed to understand the retained recent work]
-
-Be concise. Focus on what is needed to understand the kept suffix.`
 
 type CompactConfig struct {
 	Provider           Provider
@@ -63,6 +20,8 @@ type CompactConfig struct {
 	ReserveTokens      int
 	MaxTokens          int
 	CustomInstructions string
+	PromptResolver     prompt.Resolver
+	Logger             telemetry.Logger
 }
 
 type CompactResult struct {
@@ -89,6 +48,12 @@ func (a *Agent) Compact(ctx context.Context, cfg CompactConfig) (*CompactResult,
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = a.Cfg.MaxTokens
+	}
+	if cfg.PromptResolver == nil {
+		cfg.PromptResolver = a.Cfg.PromptResolver
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = a.Cfg.Logger
 	}
 	a.mu.Unlock()
 
@@ -142,7 +107,7 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message)
 		summary = "No prior history."
 		if cut.TurnStart > 0 {
 			var err error
-			summary, err = summarize(ctx, cfg.Provider, cfg.Model, msgs[:cut.TurnStart], cfg.CustomInstructions, summaryLimit)
+			summary, err = summarize(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, msgs[:cut.TurnStart], cfg.CustomInstructions, summaryLimit)
 			if err != nil {
 				return nil, nil, fmt.Errorf("compact history summarize: %w", err)
 			}
@@ -155,7 +120,7 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message)
 			prefixLimit = cfg.MaxTokens
 		}
 		prefixSummary, err := summarizeConversation(
-			ctx, cfg.Provider, cfg.Model, msgs[cut.TurnStart:cut.FirstKept], compactTurnPrefixPrompt, prefixLimit,
+			ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, prompt.CompactPrefix, msgs[cut.TurnStart:cut.FirstKept], "", prefixLimit,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compact turn prefix summarize: %w", err)
@@ -163,7 +128,7 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message)
 		summary += "\n\n---\n\n**Turn Context (split turn):**\n\n" + prefixSummary
 	} else {
 		var err error
-		summary, err = summarize(ctx, cfg.Provider, cfg.Model, msgs[:cut.FirstKept], cfg.CustomInstructions, summaryLimit)
+		summary, err = summarize(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, msgs[:cut.FirstKept], cfg.CustomInstructions, summaryLimit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compact summarize: %w", err)
 		}
@@ -311,22 +276,32 @@ func serializeMessages(msgs []*aop.Message) string {
 	return sb.String()
 }
 
-func summarize(ctx context.Context, p Provider, model string, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {
-	prompt := compactUserPrompt
-	if customInstructions != "" {
-		prompt += "\n\nAdditional focus: " + customInstructions
-	}
-	return summarizeConversation(ctx, p, model, msgs, prompt, maxTokens)
+func summarize(ctx context.Context, p Provider, model string, resolver prompt.Resolver, logger telemetry.Logger, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {
+	return summarizeConversation(ctx, p, model, resolver, logger, prompt.CompactRequest, msgs, customInstructions, maxTokens)
 }
 
-func summarizeConversation(ctx context.Context, p Provider, model string, msgs []*aop.Message, prompt string, maxTokens int) (string, error) {
-	userContent := "<conversation>\n" + serializeMessages(msgs) + "</conversation>\n\n" + prompt
+func summarizeConversation(ctx context.Context, p Provider, model string, resolver prompt.Resolver, logger telemetry.Logger, target prompt.Target, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {
+	if resolver == nil {
+		return "", fmt.Errorf("compact prompt resolver is nil")
+	}
+	input := prompt.Context{Target: prompt.CompactSystem}
+	systemResult := resolver.Build(ctx, input)
+	input.Target = target
+	input.Compaction.CustomInstructions = customInstructions
+	requestResult := resolver.Build(ctx, input)
+	if logger != nil {
+		for _, diagnostic := range append(systemResult.Diagnostics, requestResult.Diagnostics...) {
+			logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
+		}
+	}
+	systemPrompt, requestPrompt := systemResult.Prompt, requestResult.Prompt
+	userContent := "<conversation>\n" + serializeMessages(msgs) + "</conversation>\n\n" + requestPrompt
 
 	temp := float64(0)
 	resp, err := p.ChatCompletion(ctx, &ChatCompletionRequest{
 		Model: model,
 		Messages: []*aop.Message{
-			provider.TextMessage("system", compactSystemPrompt),
+			provider.TextMessage("system", systemPrompt),
 			provider.TextMessage("user", userContent),
 		},
 		MaxTokens:   maxTokens,

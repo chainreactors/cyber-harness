@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/commands"
 	appext "github.com/chainreactors/cyber/pkg/exts/app"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	providerext "github.com/chainreactors/cyber/pkg/exts/provider"
 	skillsext "github.com/chainreactors/cyber/pkg/exts/skills"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
@@ -66,6 +67,7 @@ func New(c Config) ([]extension.Extension, error) {
 		commands.NewRegistry(),
 		toolset.NewRegistry(),
 		library,
+		promptext.New(),
 		egressProvider,
 		fileext.New(files.Config{Directory: c.Directory}),
 		terminalext.New(terminal),

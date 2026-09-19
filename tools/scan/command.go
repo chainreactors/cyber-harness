@@ -80,6 +80,19 @@ func (c *Command) Usage() string {
 	return Usage()
 }
 
+func (c *Command) QuickReference() string {
+	return `### scan — the full pipeline: gogo -> spray -> zombie -> neutron
+  -i <target>          URL, IP, IP:port, or CIDR  (-l <file> for a list)
+  --mode quick|full    Scan profile (default quick)
+  --ports <preset>     gogo port preset; defaults to all in quick, - in full
+  --verify <level>     AI verification of loots: auto, off, low, medium, high, critical
+  --sniper / --deep    AI vulnerability search / deep AI testing on findings
+  -j                   Emit raw gogo and spray results as JSON Lines
+  Examples:
+    scan -i 10.0.0.0/24 --mode quick
+    scan -i https://target --mode full --verify high`
+}
+
 func Usage() string {
 	var options flags
 	return toolargs.GoFlagsHelp("scan", &options)

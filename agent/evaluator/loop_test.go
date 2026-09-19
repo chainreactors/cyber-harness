@@ -7,10 +7,29 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 )
+
+type evaluatorTestPrompts struct{}
+
+func (evaluatorTestPrompts) Build(_ context.Context, input prompt.Context) prompt.Result {
+	switch input.Target {
+	case prompt.EvaluatorSystem:
+		return prompt.Result{Prompt: "evaluate the run"}
+	case prompt.EvaluatorRequest:
+		return prompt.Result{Prompt: strings.Join([]string{
+			input.Evaluation.Goal,
+			input.Evaluation.Criteria,
+			input.Evaluation.Progress,
+			input.Evaluation.Trace,
+		}, "\n")}
+	default:
+		return prompt.Result{}
+	}
+}
 
 type fixedProvider struct {
 	response *provider.ChatCompletionResponse
@@ -77,7 +96,7 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 	}
 
 	result, verdict, err := RunWithEval(context.Background(), ag,
-		NewLoopConfigWithInput(verdictProvider, "test", nil, input, "finish the task", "1"))
+		NewLoopConfigWithInput(verdictProvider, "test", nil, evaluatorTestPrompts{}, input, "finish the task", "1"))
 	if err != nil {
 		t.Fatalf("RunWithEval() error = %v", err)
 	}
@@ -173,7 +192,7 @@ func TestRunWithEvalRunsWhileEvaluatorAsksToContinue(t *testing.T) {
 	}}
 
 	_, verdict, err := RunWithEval(context.Background(), evalAgent(agentProvider),
-		NewLoopConfigWithInput(verdictProvider, "test", nil, agent.TextInput("scan it"), "finish the task", ""))
+		NewLoopConfigWithInput(verdictProvider, "test", nil, evaluatorTestPrompts{}, agent.TextInput("scan it"), "finish the task", ""))
 	if err != nil {
 		t.Fatalf("RunWithEval() error = %v", err)
 	}
@@ -201,7 +220,7 @@ func TestRunWithEvalStopsWhenEvaluatorDeclinesToContinue(t *testing.T) {
 	}}
 
 	_, verdict, err := RunWithEval(context.Background(), evalAgent(agentProvider),
-		NewLoopConfigWithInput(verdictProvider, "test", nil, agent.TextInput("scan it"), "finish the task", ""))
+		NewLoopConfigWithInput(verdictProvider, "test", nil, evaluatorTestPrompts{}, agent.TextInput("scan it"), "finish the task", ""))
 	if err != nil {
 		t.Fatalf("RunWithEval() error = %v", err)
 	}
@@ -223,7 +242,7 @@ func TestRunWithEvalStopsAtRoundCeiling(t *testing.T) {
 	}}
 
 	_, verdict, err := RunWithEval(context.Background(), evalAgent(agentProvider),
-		NewLoopConfigWithInput(verdictProvider, "test", nil, agent.TextInput("scan it"), "finish the task", "2"))
+		NewLoopConfigWithInput(verdictProvider, "test", nil, evaluatorTestPrompts{}, agent.TextInput("scan it"), "finish the task", "2"))
 	if err != nil {
 		t.Fatalf("RunWithEval() error = %v", err)
 	}
@@ -246,7 +265,7 @@ func TestRunWithEvalPassesRoundGuidanceToEvaluator(t *testing.T) {
 	}}
 
 	_, _, err := RunWithEval(context.Background(), evalAgent(agentProvider),
-		NewLoopConfigWithInput(verdictProvider, "test", nil, agent.TextInput("scan it"), "finish the task", "尽量深入，最多三十轮"))
+		NewLoopConfigWithInput(verdictProvider, "test", nil, evaluatorTestPrompts{}, agent.TextInput("scan it"), "finish the task", "尽量深入，最多三十轮"))
 	if err != nil {
 		t.Fatalf("RunWithEval() error = %v", err)
 	}

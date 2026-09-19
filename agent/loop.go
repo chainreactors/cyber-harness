@@ -65,8 +65,17 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 		return result, err
 	}
 
-	initialPrompt, prepend := runStartHook(ctx, cfg, cfg.SystemPrompt)
+	systemPrompt := cfg.SystemPrompt
+	if cfg.SystemPromptFn != nil {
+		var err error
+		systemPrompt, err = cfg.SystemPromptFn(ctx, &cfg)
+		if err != nil {
+			return end(nil, fmt.Errorf("resolve system prompt: %w", err), StopReasonError)
+		}
+	}
+	initialPrompt, prepend := runStartHook(ctx, cfg, systemPrompt)
 	cfg.SystemPrompt = initialPrompt
+	cfg.SystemPromptFn = nil
 	transcript.append(prepend...)
 
 	for turn = 1; ; turn++ {
@@ -99,11 +108,7 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 				ib = nil
 			}
 		}
-		systemPrompt := cfg.SystemPrompt
-		if cfg.SystemPromptFn != nil {
-			systemPrompt = cfg.SystemPromptFn(&cfg)
-		}
-		reqMessages := requestMessages(ctx, cfg, systemPrompt, transcript.messages, turn)
+		reqMessages := requestMessages(ctx, cfg, cfg.SystemPrompt, transcript.messages, turn)
 		toolDefinitions := cfg.Tools.ToolDefinitions()
 		contextTokens := transcript.estimatedContextTokens(estimateRequestTokens(reqMessages, toolDefinitions))
 		if shouldCompactContext(contextTokens, cfg.ContextWindow, cfg.Compaction) {
@@ -111,7 +116,7 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 			if compactErr != nil {
 				cfg.Logger.Warnf("auto-compaction failed: %s", compactErr)
 			} else if compacted {
-				reqMessages = requestMessages(ctx, cfg, systemPrompt, transcript.messages, turn)
+				reqMessages = requestMessages(ctx, cfg, cfg.SystemPrompt, transcript.messages, turn)
 			}
 		}
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
@@ -368,6 +373,8 @@ func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcri
 		KeepRecentTokens: keepRecent,
 		ReserveTokens:    reserve,
 		MaxTokens:        cfg.MaxTokens,
+		PromptResolver:   cfg.PromptResolver,
+		Logger:           cfg.Logger,
 	}, transcript.messages)
 	if err != nil {
 		em.status(types.CompactStateError, &types.CompactDetail{Error: err.Error()})

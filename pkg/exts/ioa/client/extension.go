@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/eventbus"
@@ -55,6 +56,17 @@ func (e *Extension) Service() *service.Service {
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
+	if e.config.Space != "" {
+		space := e.config.Space
+		if err := extension.Add(scope, prompt.Contribution{
+			Name: "ioa.collaboration.prompt", Targets: []prompt.Target{prompt.MainSystem},
+			Apply: func(_ context.Context, document *prompt.Document, _ prompt.Context) error {
+				return document.After(prompt.SectionIdentity, "ioa.collaboration", prompt.Static("IOA collaboration space: "+space))
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	if len(e.deps.Skills) > 0 {
 		if err := extension.Add(scope, e.deps.Skills...); err != nil {
 			return err

@@ -1,6 +1,6 @@
 # EASM Tool Knowledge Bundle
 
-This bundle organizes cyber's external attack surface scanning tool documentation as concept files, borrowing mechanisms from [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (concept files + YAML frontmatter + index listing + provenance fields). cyber references OKF's mechanisms to structure externally produced markdown; it does not claim full OKF spec compliance.
+This bundle organizes Cyber's external attack surface scanning documentation as OKF 0.2 concept files with YAML frontmatter, progressive-disclosure indexes, and provenance fields.
 
 ## Concepts
 
@@ -13,3 +13,4 @@ This bundle organizes cyber's external attack surface scanning tool documentatio
 - [passive](passive.md) — cyberspace asset discovery via uncover
 - [playwright](playwright.md) — headless browser automation
 - [scan](scan.md) — multi-stage orchestration pipeline
+- [curl](curl.md) — browser-naturalized HTTP requests and evidence capture

@@ -51,6 +51,19 @@ func (c *Command) Usage() string {
 	return toolargs.GoFlagsHelp(c.Name(), &options)
 }
 
+func (c *Command) QuickReference() string {
+	return `### zombie — weak credential checks on discovered services (authorized checks only)
+  -i <ip> -s <service>          Check one service on an IP
+  -I <file> / -c <cidr>         Target file, or a CIDR range
+  -u <user> / -U <file>         Usernames, or a username list file
+  -p <pwd> / -P <file>          Passwords, or a password list file
+  -a user::pass / -A <file>     Explicit credentials, or a credential list file
+  -j <file> / -g <file>         Reuse gogo or JSON results as input (not output)
+  --weakpass                    Apply the built-in common weak-password rule
+  --force-continue              Keep testing after a first success
+  NOTE: -f/-O write results to a file (-O json for JSON Lines); -o sets the stdout format.`
+}
+
 func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("zombie", &err)
 	args := execution.Args

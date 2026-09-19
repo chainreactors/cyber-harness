@@ -377,12 +377,10 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 		},
 	}
 
-	systemPrompt := buildTestSystemPrompt(tools, commandRegistry, nil)
-
 	result, err := (NewAgent(Config{Loop: StandardLoop{},
 		Provider:     llm,
 		Tools:        tools,
-		SystemPrompt: systemPrompt,
+		SystemPrompt: "You are a test agent.",
 		Model:        "test-model",
 	})).Run(context.Background(), TextInput("scan 127.0.0.1"))
 	if err != nil {
@@ -401,7 +399,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	}
 }
 
-func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
+func TestAgentUsesConfiguredPromptAndExpandsSkillCommand(t *testing.T) {
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)
@@ -413,7 +411,7 @@ func TestAgentPromptIncludesEmbeddedSkillIndexAndExpansion(t *testing.T) {
 			chatResponse(NewTextMessage("assistant", "done")),
 		},
 	}
-	systemPrompt := buildTestSystemPrompt(registry, nil, store.All())
+	const systemPrompt = "test system prompt with <available_skills>"
 	task := skills.ExpandCommand("/skill:cyber scan 127.0.0.1", store)
 
 	result, err := (NewAgent(Config{Loop: StandardLoop{},
@@ -1677,26 +1675,6 @@ func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, cont
 		}
 		t.Fatalf("tool result for %s missing %q, got: %q", toolCallID, contains, actual)
 	}
-}
-
-func buildTestSystemPrompt(tools tool.Executor, commandRegistry *commands.Registry, ss []skills.Skill) string {
-	var sb strings.Builder
-	sb.WriteString("You are a test agent.\n\n## Available Tools\n\n")
-	if tools != nil {
-		for _, definition := range tools.ToolDefinitions() {
-			sb.WriteString("### " + definition.Name + "\n" + definition.Description + "\n\n")
-		}
-	}
-	if commandRegistry != nil {
-		if docs := commandRegistry.UsageDocs(); docs != "" {
-			sb.WriteString("## Pseudo-Commands\n\n" + docs + "\n\n")
-		}
-	}
-	if skillPrompt := skills.FormatForPrompt(ss); skillPrompt != "" {
-		sb.WriteString(skillPrompt)
-		sb.WriteString("\n\n")
-	}
-	return sb.String()
 }
 
 func buildTmuxTestPrompt(tools tool.Executor, commandRegistry *commands.Registry) string {

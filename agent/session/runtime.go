@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -43,7 +44,9 @@ type Runtime struct {
 	skills           *skills.Store
 	bash             *terminaltool.BashTool
 	nodeName         string
-	systemPrompt     string
+	promptTarget     prompt.Target
+	scannerName      string
+	loadedSkills     []prompt.LoadedSkill
 	heartbeat        time.Duration
 	agentConfig      agent.Config
 	resumeMessages   []*aop.Message
@@ -81,11 +84,12 @@ type Config struct {
 	Skills           *skills.Store
 	Bash             *terminaltool.BashTool
 	NodeName         string
-	Preamble         string
 	Option           *cfg.Option
 	Logger           telemetry.Logger
 	PrimarySessionID string
-	PromptConfig     *prompt.PromptConfig
+	PromptResolver   prompt.Resolver
+	PromptTarget     prompt.Target
+	ScannerName      string
 	MaxPending       int
 	// Loop supplies the algorithm; this extension owns admission and drain.
 	Loop agent.Loop
@@ -204,41 +208,17 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	if store == nil {
 		store = skills.NewStore(nil)
 	}
-	var scannerDocs string
-	if rt.commandRegistry != nil {
-		scannerDocs = rt.commandRegistry.UsageDocs()
+	rt.promptTarget = rc.PromptTarget
+	if rt.promptTarget == "" {
+		rt.promptTarget = prompt.MainSystem
 	}
-	pc := &prompt.PromptConfig{
-		Tools:       executor,
-		ScannerDocs: scannerDocs,
-		Skills:      store.All(),
-		NodeName:    nodeName,
-	}
-	if rc.PromptConfig != nil {
-		promptConfig := *rc.PromptConfig
-		if promptConfig.Tools == nil {
-			promptConfig.Tools = pc.Tools
-		}
-		if promptConfig.ScannerDocs == "" {
-			promptConfig.ScannerDocs = pc.ScannerDocs
-		}
-		if promptConfig.Skills == nil {
-			promptConfig.Skills = pc.Skills
-		}
-		if promptConfig.NodeName == "" {
-			promptConfig.NodeName = pc.NodeName
-		}
-		promptConfig.Skills = append([]skills.Skill(nil), promptConfig.Skills...)
-		promptConfig.LoadedSkills = append([]prompt.LoadedSkill(nil), rc.PromptConfig.LoadedSkills...)
-		pc = &promptConfig
-	}
-	pc.CustomPreamble = strings.TrimSpace(pc.CustomPreamble + "\n" + rc.Preamble)
+	rt.scannerName = rc.ScannerName
 	skillNames := option.Skills
-	if !pc.ScannerAgentMode {
+	if rt.promptTarget != prompt.ScannerSystem {
 		skillNames = append(append([]string(nil), rc.BaseSkills...), skillNames...)
 	}
 	for _, name := range skillNames {
-		if promptHasLoadedSkill(pc, name) {
+		if promptHasLoadedSkill(rt.loadedSkills, name) {
 			continue
 		}
 		body := store.ReadBody(name)
@@ -249,11 +229,9 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 			body = skills.ReadFile(name)
 		}
 		if body != "" {
-			pc.LoadedSkills = append(pc.LoadedSkills, prompt.LoadedSkill{Name: name, Body: body})
+			rt.loadedSkills = append(rt.loadedSkills, prompt.LoadedSkill{Name: name, Body: body})
 		}
 	}
-	rt.systemPrompt = prompt.BuildSystemPrompt(pc, nil)
-	logger.Debugf("system prompt length: %d chars", len(rt.systemPrompt))
 
 	rt.agentConfig = agent.Config{
 		Loop:                  rc.Loop,
@@ -268,6 +246,8 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		Hooks:                 rt.hooks,
 		CaptureProviderFrames: option.CaptureProviderFrames,
 		MessageCounter:        resumeCounter,
+		SystemPromptFn:        rt.resolveSystemPrompt,
+		PromptResolver:        rc.PromptResolver,
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -293,13 +273,53 @@ func (rt *Runtime) ready() error {
 	return nil
 }
 
-func promptHasLoadedSkill(pc *prompt.PromptConfig, name string) bool {
-	for _, loaded := range pc.LoadedSkills {
+func promptHasLoadedSkill(values []prompt.LoadedSkill, name string) bool {
+	for _, loaded := range values {
 		if loaded.Name == name {
 			return true
 		}
 	}
 	return false
+}
+
+func (rt *Runtime) resolveSystemPrompt(ctx context.Context, config *agent.Config) (string, error) {
+	resolver := rt.agentConfig.PromptResolver
+	if config != nil && config.PromptResolver != nil {
+		resolver = config.PromptResolver
+	}
+	if resolver == nil {
+		return "", nil
+	}
+	hostname, _ := os.Hostname()
+	input := prompt.Context{Target: rt.promptTarget, Agent: prompt.AgentContext{
+		NodeName: rt.nodeName, ScannerName: rt.scannerName,
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Hostname: hostname,
+		Now: time.Now(), Windows: runtime.GOOS == "windows",
+		LoadedSkills: append([]prompt.LoadedSkill(nil), rt.loadedSkills...),
+	}}
+	if config != nil {
+		input.Agent.Name, input.Agent.Model = config.AgentName, config.Model
+		if config.Tools != nil {
+			for _, definition := range config.Tools.ToolDefinitions() {
+				input.Agent.Tools = append(input.Agent.Tools, prompt.Tool{Name: definition.Name, Description: definition.Description})
+			}
+		}
+	}
+	if rt.commandRegistry != nil {
+		input.Agent.ScannerDocs = rt.commandRegistry.UsageDocs()
+	}
+	if rt.skills != nil {
+		for _, value := range rt.skills.All() {
+			if !value.Internal {
+				input.Agent.Skills = append(input.Agent.Skills, prompt.Skill{Name: value.Name, Description: value.Description, Location: value.Location})
+			}
+		}
+	}
+	result := resolver.Build(ctx, input)
+	for _, diagnostic := range result.Diagnostics {
+		rt.logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
+	}
+	return result.Prompt, nil
 }
 
 func (r *Resource) Close(ctx context.Context) error {

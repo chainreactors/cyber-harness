@@ -895,7 +895,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	if interactive {
 		primary = "main-repl"
 	}
-	runtimeResource, err := New(Config{Application: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}})
+	runtimeResource, err := New(Config{Application: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
 	if err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)

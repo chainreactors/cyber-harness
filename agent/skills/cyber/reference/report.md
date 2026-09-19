@@ -3,9 +3,9 @@
 
 Generate a concise security scan report from the provided scan results.
 
-## Report Structure (OKF-style bundle)
+## Report Structure (OKF bundle)
 
-Write the report as a directory of markdown files, borrowing mechanisms from OKF (concept files with YAML frontmatter, an index listing, provenance fields). This references OKF's mechanisms to organize output markdown; full OKF spec compliance is not required.
+Write the report as an OKF 0.2 directory of markdown files with concept frontmatter, an index listing, bundle-relative links, and provenance fields. Run `okf validate <report-dir>` before completion and `okf test <report-dir>` for maintained or published reports.
 
 ```
 <report-dir>/
@@ -22,8 +22,10 @@ Each `findings/<result_id>.md` carries frontmatter:
 ---
 type: Vulnerability Finding
 title: Shiro rememberMe deserialization RCE
+description: Confirmed remote code execution through an exposed Shiro rememberMe flow.
 severity: critical
-status: confirmed            # confirmed | unverified | dismissed
+status: stable               # OKF lifecycle: draft | stable | deprecated
+finding_status: confirmed    # domain state: confirmed | unverified | dismissed
 verified:
   - { by: cyber/<version>, at: 2026-08-02T00:00:00Z }   # or human:<id> for human review
 sources:

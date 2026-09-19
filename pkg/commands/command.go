@@ -18,8 +18,11 @@ var (
 // Command is an immutable native command declaration. Its dependencies are
 // captured by Run when the owning extension is constructed.
 type Command struct {
-	Name            string
-	Usage           string
+	Name  string
+	Usage string
+	// QuickReference is the command's inline reference in the system prompt. A
+	// command that declares none is listed by its Usage summary line, so a Usage
+	// that opens with the generated "Usage:" header has to declare one.
 	QuickReference  string
 	DescriptionPath string
 	Run             func(context.Context, *Execution) (any, error)

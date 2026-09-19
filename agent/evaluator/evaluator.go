@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentpkg "github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -27,6 +28,7 @@ type Config struct {
 	MaxRetries    int
 	ContextWindow int
 	Logger        telemetry.Logger
+	Prompts       prompt.Resolver
 }
 
 // Verdict is the evaluator's answer for one round. Pass ends the loop as a
@@ -86,11 +88,24 @@ func New(cfg Config) *Evaluator {
 
 func (e *Evaluator) Evaluate(ctx context.Context, req Request) (*Verdict, error) {
 	trace := buildTrace(req.Messages, req.Output, req.Turns, req.ContextTokens, e.cfg.ContextWindow)
-	prompt := buildPrompt(req, trace)
+	if e.cfg.Prompts == nil {
+		return nil, fmt.Errorf("evaluator prompt resolver is nil")
+	}
+	input := prompt.Context{Evaluation: prompt.EvaluationContext{
+		Goal: req.Goal, Criteria: req.Criteria, Progress: buildProgress(req), Trace: trace,
+	}}
+	input.Target = prompt.EvaluatorSystem
+	systemResult := e.cfg.Prompts.Build(ctx, input)
+	input.Target = prompt.EvaluatorRequest
+	requestResult := e.cfg.Prompts.Build(ctx, input)
+	for _, diagnostic := range append(systemResult.Diagnostics, requestResult.Diagnostics...) {
+		e.cfg.Logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
+	}
+	requestPrompt := requestResult.Prompt
 
 	var lastErr error
 	for attempt := 0; attempt < e.cfg.MaxRetries; attempt++ {
-		v, err := e.call(ctx, prompt)
+		v, err := e.call(ctx, systemResult.Prompt, requestPrompt)
 		if err == nil {
 			return v, nil
 		}
@@ -106,32 +121,6 @@ func (e *Evaluator) Evaluate(ctx context.Context, req Request) (*Verdict, error)
 	}
 	return nil, fmt.Errorf("evaluate failed after %d attempts: %w", e.cfg.MaxRetries, lastErr)
 }
-
-const systemPrompt = `You are an evaluator. Call the "verdict" tool with your result. No text replies.
-
-You own the stop decision: there is no small round budget to ration. The loop
-runs another round whenever you ask for one, so keep it alive while rounds are
-still buying progress, and end it yourself once they are not.
-
-Rules:
-- pass=true only if the task was fully achieved per criteria
-- continue (only read when pass=false): true when another round has a concrete
-  chance — the trace shows progress, or an untried step is available
-- continue=false when the agent is stuck: repeating the same failing actions,
-  blocked by something it cannot resolve (missing credentials, unreachable
-  target, out-of-scope work), or the criteria cannot be met at all. Say which in
-  reason — it is the last thing the user sees about this goal
-- continue=false is a normal outcome, not a failure to avoid. Spending rounds on
-  a loop that stopped progressing is worse than stopping
-- when the user gave round guidance it appears under Progress: treat it as their
-  own words on how long to keep going and follow it, unless the goal is already
-  achieved or the loop is plainly stuck
-- feedback: actionable next step when pass=false and continue=true
-- inherit_context decision based on context_usage% shown in trace:
-  - >80%: MUST set inherit_context=false (context nearly full, fresh start required)
-  - >50%: SHOULD set inherit_context=false unless critical intermediate state exists
-  - <=50%: default inherit_context=true
-- When inherit_context=false, feedback must be fully self-contained (include file paths, findings, variable names, prior progress)`
 
 var verdictTool = func() *aop.ToolDefinition {
 	schema, _ := aop.JSONValue(map[string]interface{}{
@@ -153,7 +142,7 @@ var verdictTool = func() *aop.ToolDefinition {
 	}
 }()
 
-func (e *Evaluator) call(ctx context.Context, userPrompt string) (*Verdict, error) {
+func (e *Evaluator) call(ctx context.Context, systemPrompt, userPrompt string) (*Verdict, error) {
 	temp := float64(0)
 	resp, err := e.cfg.Provider.ChatCompletion(ctx, &provider.ChatCompletionRequest{
 		Model: e.cfg.Model,
@@ -182,19 +171,6 @@ func (e *Evaluator) call(ctx context.Context, userPrompt string) (*Verdict, erro
 		}
 	}
 	return nil, fmt.Errorf("model did not call verdict tool")
-}
-
-func buildPrompt(req Request, trace string) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Goal\n%s\n\n", req.Goal)
-	if req.Criteria != "" {
-		fmt.Fprintf(&sb, "## Acceptance Criteria\n%s\n\n", req.Criteria)
-	}
-	if progress := buildProgress(req); progress != "" {
-		fmt.Fprintf(&sb, "## Progress\n%s\n", progress)
-	}
-	fmt.Fprintf(&sb, "## Execution Trace\n%s", trace)
-	return sb.String()
 }
 
 // buildProgress shows the evaluator what its earlier rounds asked for and what

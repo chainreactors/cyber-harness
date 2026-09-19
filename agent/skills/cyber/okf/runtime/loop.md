@@ -25,5 +25,5 @@ loop stop-all
 
 - A loop can schedule recurring [scan](/easm/scan.md) or
   [fetch](fetch.md) workflows.
-- Use [ioa send](ioa-send.md) to publish recurring checkpoints and
+- Use [ioa send](cyber://skills/cyber/okf/runtime/ioa-send.md) to publish recurring checkpoints and
   [tmux](tmux.md) to inspect long-running command sessions launched by a task.

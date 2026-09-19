@@ -8,6 +8,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -96,9 +97,8 @@ const (
 	ToolFlowTerminate
 )
 
-// SystemPromptFunc is called at the start of each turn to produce the system prompt.
-// Receives the current config context so it can adapt to active tools, model, etc.
-type SystemPromptFunc func(cfg *Config) string
+// SystemPromptFunc resolves the system prompt once at the start of a run.
+type SystemPromptFunc func(context.Context, *Config) (string, error)
 
 type ProviderEntry struct {
 	Provider Provider
@@ -117,6 +117,7 @@ type Config struct {
 	Model            string
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
+	PromptResolver   prompt.Resolver
 	Messages         []*aop.Message
 	MaxTokens        int
 	ContextWindow    int
@@ -157,11 +158,18 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config          { c.Provider = p; return c }
-func (c Config) WithLoop(loop Loop) Config               { c.Loop = loop; return c }
-func (c Config) WithTools(t tool.Executor) Config        { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config               { c.Model = m; return c }
-func (c Config) WithSystemPrompt(s string) Config        { c.SystemPrompt = s; return c }
+func (c Config) WithProvider(p Provider) Config   { c.Provider = p; return c }
+func (c Config) WithLoop(loop Loop) Config        { c.Loop = loop; return c }
+func (c Config) WithTools(t tool.Executor) Config { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config        { c.Model = m; return c }
+func (c Config) WithSystemPrompt(s string) Config {
+	c.SystemPrompt, c.SystemPromptFn = s, nil
+	return c
+}
+func (c Config) WithSystemPromptFunc(fn SystemPromptFunc) Config {
+	c.SystemPrompt, c.SystemPromptFn = "", fn
+	return c
+}
 func (c Config) WithMessages(msgs []*aop.Message) Config { c.Messages = msgs; return c }
 func (c Config) WithStream(s bool) Config                { c.Stream = s; return c }
 func (c Config) WithInbox(ib inbox.Inbox) Config         { c.Inbox = ib; return c }
@@ -246,8 +254,7 @@ func NewAgent(cfg Config) *Agent {
 	return &Agent{
 		Cfg: cfg,
 		state: State{
-			SystemPrompt: cfg.SystemPrompt,
-			Tools:        cfg.Tools,
+			Tools: cfg.Tools,
 		},
 	}
 }
@@ -267,7 +274,6 @@ type Result struct {
 }
 
 type State struct {
-	SystemPrompt string
 	Messages     []*aop.Message
 	Tools        tool.Executor
 	ErrorMessage string

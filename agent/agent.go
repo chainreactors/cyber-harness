@@ -243,10 +243,11 @@ func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ty
 		Provider: cfg.Provider,
 		Tools:    cfg.Tools,
 		Model:    cfg.Model,
-		// Children share the parent's system prompt: it carries the environment,
-		// tool and skill guidance every agent needs, and only fork used to get it
-		// (through the copied conversation).
+		// Children inherit either the explicit prompt or its run-scoped resolver,
+		// along with the environment, tool, and skill context it renders.
 		SystemPrompt:          cfg.SystemPrompt,
+		SystemPromptFn:        cfg.SystemPromptFn,
+		PromptResolver:        cfg.PromptResolver,
 		MaxTokens:             cfg.MaxTokens,
 		ContextWindow:         cfg.ContextWindow,
 		Logger:                cfg.Logger,

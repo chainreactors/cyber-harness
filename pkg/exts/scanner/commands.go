@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -37,6 +38,7 @@ type borrowed struct {
 	commands    commands.Executor
 	bash        *terminaltool.BashTool
 	skills      *skills.Store
+	prompts     prompt.Resolver
 }
 
 func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
@@ -53,14 +55,15 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 			return nil, fmt.Errorf("scanner agent loop must be supplied by the profile")
 		}
 		parent := agent.NewAgent(agent.Config{
-			Loop:          loop,
-			Provider:      model,
-			Tools:         borrow.tools,
-			Model:         providerConfig.Model,
-			MaxTokens:     providerConfig.MaxTokens,
-			ContextWindow: providerConfig.ContextWindow,
-			Logger:        logger,
-			Bus:           application,
+			Loop:           loop,
+			Provider:       model,
+			Tools:          borrow.tools,
+			Model:          providerConfig.Model,
+			MaxTokens:      providerConfig.MaxTokens,
+			ContextWindow:  providerConfig.ContextWindow,
+			Logger:         logger,
+			Bus:            application,
+			PromptResolver: borrow.prompts,
 		})
 		options = append(options,
 			scan.WithParent(parent),
@@ -269,7 +272,7 @@ func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, ev
 	}
 	impl := scan.New(engines, scanOptions...)
 	return commands.Command{
-		Name: impl.Name(), Usage: impl.Usage(),
+		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
 		DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
 		Run:             impl.Run,
 	}, nil

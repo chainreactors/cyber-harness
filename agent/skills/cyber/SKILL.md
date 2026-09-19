@@ -44,9 +44,7 @@ All pseudo-commands run through `bash`. They are **not** system binaries.
 - `neutron`: template-based POC execution.
 - `proton`: sensitive information scanning — API keys, tokens, credentials, secrets in files or piped data.
 
-Each scanner's detailed flags live in an OKF-style tool concept under `cyber://skills/cyber/okf/easm/<command>.md`, loaded automatically on invocation.
-
-cyber organizes externally produced markdown (tool docs, reports, findings) by referencing mechanisms from [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md): concept files with YAML frontmatter (`type`, `title`, `tags`, `status`, `verified`, `sources`), per-bundle `index.md` listings, and bundle-relative links. It borrows the mechanism only — full OKF spec compliance is not required.
+Each scanner's detailed flags live in an OKF 0.2 tool concept under `cyber://skills/cyber/okf/easm/<command>.md`, loaded automatically on invocation.
 
 ### Scanners (full-build only)
 

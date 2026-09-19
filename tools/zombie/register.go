@@ -15,7 +15,7 @@ func NewCommand(engines *engine.Set, logger telemetry.Logger, proxy string, even
 	}
 	impl := New(engines.Zombie).WithLogger(logger).WithProxy(proxy).WithEvents(events)
 	return commands.Command{
-		Name: impl.Name(), Usage: impl.Usage(),
+		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
 		DescriptionPath: "cyber://skills/cyber/okf/easm/zombie.md",
 		Run:             impl.Run,
 	}, nil

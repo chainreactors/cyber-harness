@@ -681,7 +681,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
 		commandRegistry: reg, tools: tools, bash: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger()},
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
 		closeDone:   make(chan struct{}), loaded: true,
 	}
 	commandValues, commandIndex, err := commandDeclarations(nil)

@@ -527,7 +527,6 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	mailbox := &sessionMailbox{base: baseInbox}
 	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.agentConfig.Logger)
 	agentCfg := rt.agentConfig.
-		WithSystemPrompt(rt.systemPrompt).
 		WithStream(true).
 		WithInbox(mailbox).
 		WithSessionID(id).
@@ -1177,7 +1176,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 	}
 	if input.EvalCriteria != "" {
 		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, message, input.EvalCriteria, input.EvalRounds)
+		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, s.runtime.agentConfig.PromptResolver, message, input.EvalCriteria, input.EvalRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))

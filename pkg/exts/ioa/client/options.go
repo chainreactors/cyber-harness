@@ -105,11 +105,4 @@ func accessKeyURL(endpoint, token string) string {
 	parsed.User = url.User(token)
 	return parsed.String()
 }
-func Preamble(config service.Config) string {
-	if config.Space == "" {
-		return ""
-	}
-	return "IOA collaboration space: " + config.Space
-}
-
 func FlagGroup() cfg.FlagGroup { return cfg.FlagGroup{Name: "IOA client", Options: &Options{}} }

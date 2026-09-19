@@ -3,7 +3,6 @@ package skills
 import (
 	"context"
 	"embed"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -556,44 +555,6 @@ func (s *Store) ReadVirtualBody(location string) (string, bool, error) {
 	}
 	_, body := splitRaw(raw)
 	return strings.TrimSpace(body), true, nil
-}
-
-func FormatForPrompt(skills []Skill) string {
-	visible := make([]Skill, 0, len(skills))
-	for _, skill := range skills {
-		if !skill.Internal {
-			visible = append(visible, skill)
-		}
-	}
-	if len(visible) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString("\n\n## Available Skills\n\n")
-	sb.WriteString("The following skills provide specialized instructions for specific security scanning tasks.\n")
-	sb.WriteString("Use the read tool to load a skill file when the task matches its description.\n")
-	sb.WriteString("When a skill references relative paths, resolve them relative to the skill base directory.\n\n")
-	sb.WriteString("<available_skills>\n")
-	for _, skill := range visible {
-		sb.WriteString("  <skill>\n")
-		sb.WriteString("    <name>")
-		appendEscapedXML(&sb, skill.Name)
-		sb.WriteString("</name>\n")
-		sb.WriteString("    <description>")
-		appendEscapedXML(&sb, skill.Description)
-		sb.WriteString("</description>\n")
-		sb.WriteString("    <location>")
-		appendEscapedXML(&sb, skill.Location)
-		sb.WriteString("</location>\n")
-		sb.WriteString("  </skill>\n")
-	}
-	sb.WriteString("</available_skills>\n")
-	return sb.String()
-}
-
-func appendEscapedXML(sb *strings.Builder, value string) {
-	_ = xml.EscapeText(sb, []byte(value))
 }
 
 // FormatInvocation formats a skill invocation with its body.

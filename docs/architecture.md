@@ -86,11 +86,39 @@ scope.release(borrows)    释放它借来的东西（Use）
 | `*terminaltool.BashTool` | terminal ext | tmux、scanner、session |
 | `agent/proc.Sessions` | terminal ext | pty |
 | `agent.Loop` | loop ext，profile 不选推理时是 `agent.NoLoop()` | scanner、session |
+| `prompt.Resolver` | prompt ext | scanner、session；经 Agent 传给 evaluator、compact |
 | `*app.App` | app ext | provider、scanner、search、session |
 | `*console/api.Registry` | tui ext | 装配根（加载后封存并读取贡献） |
 | `*agentsession.Runtime` | session ext | 装配根 |
 
 借用者一列不是给运行时查的，它是加载顺序的说明书：提供者必须排在每一个借用者之前。
+
+## Prompt 贡献点
+
+`pkg/exts/prompt` 拥有 `prompt.Contribution` Point，并提供只读的 `prompt.Resolver` 能力。
+默认 agent、evaluator 与 compact prompt 都是普通 contribution；scanner 等功能扩展拥有自己的
+typed target、payload 和默认 prompt contribution。所有功能扩展通过
+`extension.Add` 追加、替换、删除或重置具名 section，不再向 session 传 `PromptConfig` 或拼接
+preamble。内置 section ID 是稳定 API，target 区分每一种模型请求。
+
+Contribution 严格按扩展注册顺序执行，不另设 priority 或依赖图。每次修改在 `Document` 副本上
+完成，失败或 panic 只产生 diagnostic，不泄漏部分修改；renderer 同样隔离诊断。一次 Agent Run
+在 `BeforeRun` hook 之前解析一次 system prompt，随后整个 Run 保持不变。贡献句柄撤销会取消并
+排空正在执行的 apply/render。
+
+OKF 是这种功能扩展的实例：完整 `aiscan` 安装 `pkg/exts/okf`，由它贡献 Markdown 策略、`okf`
+校验命令和虚拟参考文档；最小 `cmd/agent` 只安装通用 prompt ext，不自动启用 OKF。
+
+## `tools/` 与 `pkg/exts/`
+
+Extension 是**生命周期**的边界，`tools/` 不是。`tools/<name>` 是普通业务类型——引擎、客户端、
+渲染器——由某个 Extension 构造并持有：没有 `Load`/`Close`，没有 Scope，不进 Profile 的 Set。
+`pkg/exts/<feature>` 是适配层，把需要启动时装、关闭时停的东西包成 Extension，再登记它贡献的
+Point 与它提供、借用的能力。
+
+判据因此是生命周期而不是代码量。守卫测试把这条钉在目录上：每个 `pkg/exts/<feature>` 子树至少
+要声明一个 `Load(*extension.Scope)`；没有 Extension 的子树要么是胶水、属于拥有该资源的
+`tools/` 包，要么是绕过了适配层、让宿主直接学会了一个领域概念。
 
 ## 装配根
 

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	agentprompt "github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/prompt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
@@ -134,11 +134,7 @@ func RunDirectScannerMode(ctx context.Context, factory profile.Factory, option *
 	var sessionConfig *agentsession.Config
 	if option.AI && scannerArgs[0] != "scan" {
 		sessionConfig = &agentsession.Config{
-			Loop: agent.StandardLoop{},
-			PromptConfig: &agentprompt.PromptConfig{
-				ScannerAgentMode: true,
-				ScannerName:      scannerArgs[0],
-			},
+			Loop: agent.StandardLoop{}, PromptTarget: prompt.ScannerSystem, ScannerName: scannerArgs[0],
 		}
 	}
 	p, err := factory.Build(profile.Request{

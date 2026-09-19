@@ -3,12 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
 	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/agent/provider"
@@ -23,6 +25,62 @@ import (
 	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/encoding/protojson"
 )
+
+func TestSystemPromptResolvesOnceBeforeRunHooks(t *testing.T) {
+	registry := hooks.New()
+	var hookSaw string
+	agenthooks.BeforeRun.On(registry, "test", func(_ context.Context, event agenthooks.RunStartEvent) (agenthooks.RunStartResult, error) {
+		hookSaw = event.SystemPrompt
+		updated := event.SystemPrompt + "\nhook"
+		return agenthooks.RunStartResult{SystemPrompt: &updated}, nil
+	})
+	llm := &scriptedProvider{responses: []*ChatCompletionResponse{
+		chatResponse(ChatMessage{Role: "assistant", ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function", Function: FunctionCall{Name: "echo", Arguments: "{}"},
+		}}}),
+		chatResponse(NewTextMessage("assistant", "done")),
+	}}
+	resolved := 0
+	agent := NewAgent(Config{
+		Loop: StandardLoop{}, Provider: llm, Model: "test", Hooks: registry,
+		Tools: newTestTools(t, &recordingTool{name: "echo", output: "ok"}),
+		SystemPromptFn: func(context.Context, *Config) (string, error) {
+			resolved++
+			return fmt.Sprintf("resolved-%d", resolved), nil
+		},
+	})
+	if _, err := agent.Run(t.Context(), TextInput("run")); err != nil {
+		t.Fatal(err)
+	}
+	if resolved != 1 || hookSaw != "resolved-1" {
+		t.Fatalf("resolved=%d hook saw=%q", resolved, hookSaw)
+	}
+	for index, request := range llm.requestsSnapshot() {
+		if len(request.Messages) == 0 || provider.MessageText(request.Messages[0]) != "resolved-1\nhook" {
+			t.Fatalf("request %d system prompt = %#v", index, request.Messages)
+		}
+	}
+}
+
+func TestSystemPromptResolutionFailureEndsRun(t *testing.T) {
+	llm := &callbackProvider{fn: func(context.Context, *ChatCompletionRequest) (*ChatCompletionResponse, error) {
+		t.Fatal("provider should not be called")
+		return nil, nil
+	}}
+	agent := NewAgent(Config{
+		Loop: StandardLoop{}, Provider: llm,
+		SystemPromptFn: func(context.Context, *Config) (string, error) {
+			return "", errors.New("prompt failed")
+		},
+	})
+	result, err := agent.Run(t.Context(), TextInput("run"))
+	if err == nil || !strings.Contains(err.Error(), "resolve system prompt: prompt failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if result == nil || result.Stop != StopReasonError || result.Err == nil {
+		t.Fatalf("result = %#v", result)
+	}
+}
 
 func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 	registry := hooks.New()

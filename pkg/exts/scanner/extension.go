@@ -3,7 +3,9 @@ package scanner
 import (
 	"context"
 	"fmt"
+
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
@@ -69,6 +71,13 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	promptResolver, err := extension.Use[prompt.Resolver](scope)
+	if err != nil {
+		return err
+	}
+	if err := extension.Add(scope, scannerPromptContribution()); err != nil {
+		return err
+	}
 	e.application = application
 	proxyURL := endpoint.ProxyURL()
 	if proxyURL == "" {
@@ -76,7 +85,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	e.engines = initEngines(scope.Init(), e.config, e.logger)
 	values, err := buildScannerCommands(borrowed{
-		application: application, tools: tools, commands: commandRegistry, bash: bash, skills: store,
+		application: application, tools: tools, commands: commandRegistry, bash: bash, skills: store, prompts: promptResolver,
 	}, e.engines, e.config, loop, e.workDir, proxyURL, e.logger)
 	if err != nil || len(values) == 0 {
 		return err
