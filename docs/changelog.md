@@ -1,29 +1,54 @@
 # Changelog
 
-## v1.0.0-rc3 — 流量、curl 和 Web 工作台更新
+## v1.0.0-rc4 — 组合架构、浏览器 CSTX 与纯 Go full 构建
 
-### 具体修改
+rc4 收敛运行时组合与 Artifact 数据路径：Go 服务只负责归档原始事件，CSTX 的解析、合并和关联由浏览器中的 TypeScript/WASM SDK 完成；full 版本不再依赖 libcstx 或原生 RE2。
 
-- 按 [组合架构 RFC](rfc-composition.md) 将参考发行版组合提取到公开的 `pkg/aiscan.New`；
-  `pkg/base.New` + `extension.New` 成为自定义发行版的最小入口，新增可编译示例和依赖方向守卫。
-- 删除 browser、record、Web 的 `init()` 注册和全局 factory slice，build tag 改为选择显式调用的
-  同名函数；`app.App` 收敛为非生命周期的 `app.State`，`profile.Application/Factory.Build`
-  收敛为 `profile.Profile` 和直接构造函数调用。
-- 流量模型新增 `Exchange`，一条 Flow 同时保存 request 和 response；代理层支持按订阅选择 Flow，并把超过内存预算的 response body 写入文件。
-- 修复代理捕获中的 Host 丢失问题；切换代理出口只影响新连接，已有连接继续完成；MITM body 文件在 Flow 删除后回收。
-- curl 工具新增 `-x/--proxy`、`-F/--form`、`--data-urlencode`、ASCII trace；补充 `--http1.0/--http1.1/--http2`、HEAD 请求校验、超时返回码 28、TLS/resolve 处理和失败输出保留。
-- 工具结果新增 64 KiB 内联上限；JSONL 文件和每个会话的 SQLite 事件数量有上限；取消任务后迟到的 Artifact 不再写入会话。
-- 失败的 Agent turn 不再自动重复执行；AOP 文本在协议边界统一清洗为合法 UTF-8。
-- Web 资产列表改为分页；聊天时间线和回复完成时间使用新的时间字段；curl、gogo、scan 统一使用 Web 资产摘要。
-- 取消远程扫描通过运行时控制通道立即处理；前台 shell 命令继承调用方工作目录。
-- Agent 重连后，已打开的终端会重新发送 `pty.list`；Agent 断线向浏览器发送 `pty.detached`；连接关闭时丢弃排队发送。
-- 更新 cyber-ui 子模块、聊天时间线和 IOA 控制台的协议生成代码，修复前后端版本漂移。
+### 架构与数据路径
 
-### 发布产物
+- 按 [组合架构 RFC](rfc-composition.md) 将参考发行版组合提取到公开的 `pkg/aiscan.New`；`pkg/base.New` 与扩展 capability 成为自定义发行版的明确边界。
+- 删除运行时 sink、pending、wire 和重复 DTO 转发层，扩展直接贡献或借用 capability；Profile 成为应用组合和生命周期入口。
+- Go 侧移除 CSTX 处理结果、SCO 查询服务及对应数据库表，只保留原始 Artifact 的归档与同步 RPC；保留的 native CSTX 扩展不再被任何产品 edition 选择。
+- `cyber-ui` 通过 `@cyber/cstx` 的 v0.5 TypeScript/WASM ABI 在浏览器中解析归档 Artifact，并直接生成资产视图。
+- PTY、进程、prompt、scanner、IOA client 和 Web application dispatch 收敛到各自扩展所有权，减少跨包手工装配和隐式全局状态。
+
+### Agent 与 Web
+
+- evaluator 以自然语言 pacing 驱动 goal loop，修复 compaction、budget、失败消息和命令结果在时间线中的重复或缺失。
+- Web 资产导入、扫描卡片、快速连接、命令面板和 ConnectRPC 二进制 framing 完成端到端修复，并补齐中英文标签。
+- 文档重组为用户、开发者、架构和概念入口，新增可编译的自定义组合与 session 示例。
+
+### 构建与发布
+
+- full 默认使用纯 Go/WASM RE2，`CGO_ENABLED=0` 与 `CGO_ENABLED=1` 均可构建；仅 record edition 需要 CGO 和 recorder SDK。
+- standard 与 full 都从 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64，不再下载静态 RE2 SDK 或 macOS CGO 工具链。
+- `aiscan` 与 `aiscan-full` 各发布 6 个 ZIP；`aiscan_checksums.txt` 覆盖全部 12 个 ZIP，`runner` 仅参与构建验证。
+
+## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
+
+本次候选版本汇总 rc2 之后的改动，重点改善流量数据的存储边界、Web 会话的稳定性以及发布产物验证。
+
+### Improvements
+
+- HTTP 流量使用统一 Exchange 结构，支持选择性订阅、有界捕获、body 文件存储与回收。
+- 限制工具内联结果、JSONL 文件和会话 SQLite 事件的大小或数量，减少长期会话的资源占用。
+- 避免 AOP 事件重复持久化，规范协议边界的 UTF-8 文本，修复失败回合重复自动继续的问题。
+- Web 取消请求由运行时处理；前台命令继承调用工作目录。资产面板支持分页，并更新聊天时间线与回复完成时间展示。
+- 内置 curl 补充常用参数兼容行为，并统一响应快照和 Web 资产摘要。
+
+### CI and Release
+
+- 修复连接结束后仍可能发送排队消息的竞态，增加连接关闭重复回归。
+- 后端 E2E 覆盖整个 Web 包树，修正周常 Web 并发测试迁移后的包路径和测试名。
+- 发布前检查目标提交已经通过完整 CI；已公开的同名 Release 不再删除重建。
+- 修复 Linux/macOS ZIP 内二进制执行权限，增加 Linux amd64/arm64 解包启动与 checksum 验证。
+
+### Release Matrix
 
 - `aiscan`：Linux、macOS、Windows 的 amd64/arm64，共 6 个 ZIP。
 - `aiscan-full`：Linux、macOS 的 amd64/arm64 和 Windows amd64，共 5 个 ZIP。
-- `aiscan_checksums.txt` 包含 11 个 ZIP 的 SHA-256；`runner` 仅用于构建验证，不作为 Release 附件。
+- 校验文件：`aiscan_checksums.txt`。`runner` 参与构建验证，不作为 Release 附件发布。
+
 ## v1.0.0-rc2 — MITM 流量审计 + 动态代理路由 + 可验证发布
 
 v1.0.0-rc2 重点重构了 Cyber 的流量出口：所有工具共用常驻代理 Hub，可动态切换代理和 MITM 捕获状态，并把 HTTP/HTTPS 流量准确关联到具体任务。文件访问、扫描结果和发布流程也补齐了明确的审计与稳定性边界。
