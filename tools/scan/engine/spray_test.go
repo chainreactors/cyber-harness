@@ -49,7 +49,7 @@ func TestBuildSprayOptionAvoidsPerRunGlobalLoggerMutation(t *testing.T) {
 }
 
 func TestBuildSprayOptionHonorsQuiet(t *testing.T) {
-	if !buildSprayOption(SprayCheckOptions{Quiet: true}).Option.Quiet {
+	if !buildSprayOption(SprayCheckOptions{Quiet: true}).Quiet {
 		t.Fatal("quiet option was not propagated")
 	}
 }

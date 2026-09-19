@@ -17,7 +17,7 @@ func TestCLIParserDeclaresAvailableScanners(t *testing.T) {
 	var cli cliOptions
 	parser := newCLIParser(&cli, 0)
 	for _, name := range scannerNames() {
-		if parser.Command.Find(name) == nil {
+		if parser.Find(name) == nil {
 			t.Errorf("available scanner %q is missing from CLI commands", name)
 		}
 	}
