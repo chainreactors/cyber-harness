@@ -188,7 +188,6 @@ func newProfile(config config) (*Profile, error) {
 		}
 		values = append(values, observer)
 	}
-	values = append(values, ptyext.New())
 	var ioa *ioaext.Extension
 	if config.IOA != nil {
 		bundle, diagnostics := ioaext.Skills()
@@ -220,6 +219,7 @@ func newProfile(config config) (*Profile, error) {
 		values = append(values, presentation)
 	}
 	if config.Session != nil {
+		values = append(values, ptyext.New())
 		agentConfig := *config.Session
 		agentConfig.NodeName = nodeName
 		agentConfig.Option, agentConfig.Logger = config.Option, logger

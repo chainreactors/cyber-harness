@@ -12,11 +12,13 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
 	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 type profileLoop func(context.Context, agent.Config) (*agent.Result, error)
@@ -209,8 +211,13 @@ func TestApplicationOnlyProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := aop.NewNamespaceMux(t.Context())
+	if err := mux.Register(&ptypb.ProtocolMessage{}, func(context.Context, *aop.Envelope, protobuf.Message, aop.SendFunc) error {
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.RegisterNamespaces(mux); err != nil {
-		t.Fatal("resource namespaces unavailable after Load")
+		t.Fatalf("application profile conflicts with Web-owned namespaces: %v", err)
 	}
 	if _, err := p.Runtime(); err == nil {
 		t.Fatal("application-only profile returned Runtime")
