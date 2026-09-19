@@ -8,9 +8,11 @@ rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力
 
 - `aiscan --version`、`aiscan -h`、`aiscan scan -h` 在发布二进制中直接可用；普通版保留 `agent`、`scan`、`gogo`、`spray`、`zombie`、`neutron`、`proton` 等 CLI 能力。
 - `aiscan-full web` 启动内嵌 Web 工作台，默认监听 `127.0.0.1:8080`，启动日志打印访问地址、access key 和 Agent 连接命令；`--addr`、`--token`、`--db`、`--no-agent` 可分别控制监听地址、认证、SQLite 文件和是否启动内嵌 Agent。
+- `--no-agent` 只把 Web 作为 Hub：没有执行节点时提交扫描会返回 `FAILED_PRECONDITION` 且不创建记录，节点在排队后离线则将任务标记为失败；Hub 不再悄悄回退到本地扫描。
 - Web 首屏、`/health`、认证登录、会话列表、扫描列表和 Artifact 归档查询使用同一套发布构建中的静态资源与 ConnectRPC；无效 bearer token 会被拒绝，访问 key 不会写入可缓存的响应。
 - 扫描完成后，Web 会显示扫描摘要卡片并把原始 Artifact 归档到对应会话；资产面板支持导入、分页、类型筛选、搜索、关系图、详情和导出，不再要求 Go 服务先生成一套重复的 SCO 报告 DTO。
 - 快速连接从当前 Web space 获取 Agent token 并加入当前 space；命令面板从客户端命令目录生成 `/help`，代码块可复制，扫描卡片、资产表格、连接提示和错误通知均提供中英文文本。
+- 移动端在 320px 宽度仍保留资产、IOA、Agent、工具、快速连接、设置和退出入口；紧凑顶栏不再互相覆盖，打开后的会话侧栏也不会把关闭按钮压在顶栏下面。
 - Web 的聊天、会话恢复、Agent 状态、PTY、IOA 控制台、工具目录、配置面板和 Artifact 详情都改为同一条二进制 Connect/AOP 数据路径；前端不再维护旧的 scan/report/SCO 客户端分支。SPA 路由回退到当前 `index.html`，指纹化静态资源可长期缓存，入口文档始终禁止缓存。
 - 流量工具使用 canonical protobuf `traffic.Flow`/`traffic.Exchange`；MITM Hub 支持按调用选择订阅、限制捕获大小，并把响应 body 流式写入持久文件。代理切换、Host 重建、取消请求和尾随 Artifact 的处理都绑定到实际 operation，而不是时间窗口或临时 sink。
 - 纯 Go `curl` 支持常用请求、重定向、表单、cookie jar、代理、`--resolve`、超时、HTTP 版本、trace、输出文件和 `--write-out`；默认注入浏览器请求头并继续经过 Runner egress/HTTP 观察链。
@@ -54,9 +56,9 @@ rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力
 ### 审查记录
 
 - rc3 与 rc4 标签不是线性父子关系；完整审查使用两标签的实际 commit（`100278e0..f2f510d2`），覆盖合并分支中的 Web、runtime、extension、traffic、curl、native build 和 CI 改动，而不是只查看 rc4 最近几条提交。
-- 已下载并校验 Windows amd64 的 `aiscan` 与 `aiscan-full` 发布包。普通版 CLI、初始化和能力缺失提示正常；full 版实际启动 Web，验证了 `/health`、嵌入式页面、登录、无认证拒绝、Bearer 认证和 HttpOnly session。浏览器检查确认 access key 不出现在 URL、local/session storage 或页面文本中。
-- rc4 的 `scan --json` 仍会把 spray 的进度表/banner 写入 stdout，破坏 JSONL 消费者的严格解析；该问题在 rc4 之后由 `e2b2960e` 修复（quiet spray + JSON 行过滤），不应视为 rc4 已解决项。`--skill <local-path>` 同样在 rc4 后才修复路径匹配，rc4 用户应使用已加载 skill 名称作为临时规避。
-- 本机完整 `go test ./...` 的唯一失败是 Katana headless 测试被 Windows Defender 以“virus or potentially unwanted software”拒绝执行临时 `leakless.exe`；其余 Go、vet、前端构建、CGO=0/1 full/standard 构建和 Web smoke 均通过，不能将该环境阻断归因于 rc4 代码。
+- 原始 rc4 产物已下载并校验 Windows amd64 的 `aiscan` 与 `aiscan-full`。重新发布前又用当前候选二进制验证普通版 CLI、full Web、认证、ConnectRPC、PTY、外部节点扫描和浏览器端 CSTX WASM；access key 不出现在 URL、local/session storage、页面文本、模型 prompt 或 AOP JSONL。
+- `scan --json` 会抑制 spray 的进度表/banner 并只向 stdout 输出 JSONL；真实目标扫描产生的 43 行输出均可逐行严格解析。`agent --skill <local-path>` 会按规范化文件路径选中已加载 skill；真实 one-shot 进程覆盖 text/json/stream-json、AOP JSONL、resume 和本地 skill。
+- Windows 上的完整 `go test ./...`、`go test -race ./...`、`go vet ./...`、Katana headless、前端构建和 14 项 Playwright E2E（13 通过、1 个显式 goal evaluator 场景跳过）均完成；standard/full 在 `CGO_ENABLED=0/1` 下都能编译。WSL Ubuntu 另行执行了 Unix shell/tmux、Agent 多轮交互、Proton 文件与管道扫描以及 Arsenal 离线管理测试；需要访问 GitHub Release 的 Arsenal 在线安装因当前 WSL 网络超时未计为通过。
 
 ## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
 
