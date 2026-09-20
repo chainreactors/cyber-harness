@@ -17,6 +17,8 @@ import (
 )
 
 type Config struct {
+	// Tool optionally selects the host protocol facade over the owned Bash runtime.
+	Tool           func(*terminaltool.BashTool) coretool.Tool
 	Environment    map[string]string
 	Directory      string
 	Timeout        int
@@ -24,7 +26,8 @@ type Config struct {
 	MaximumTimeout time.Duration
 	// HiddenCommands are control-only registry commands omitted from the Bash
 	// description and shell aliases.
-	HiddenCommands []string
+	HiddenCommands     []string
+	StandaloneCommands []string
 }
 type Extension struct {
 	mu     sync.Mutex
@@ -74,10 +77,15 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	bash.SetEgressResolver(endpoint.Egress)
 	bash.EnableShellCommands(executor)
 	bash.HideCommands(m.config.HiddenCommands...)
+	bash.StandaloneCommands(m.config.StandaloneCommands...)
 
 	m.bash = bash
 
-	if err := extension.Add[coretool.Tool](scope, bash); err != nil {
+	var tool coretool.Tool = bash
+	if m.config.Tool != nil {
+		tool = m.config.Tool(bash)
+	}
+	if err := extension.Add[coretool.Tool](scope, tool); err != nil {
 		return err
 	}
 	if err := extension.Provide[*terminaltool.BashTool](scope, bash); err != nil {

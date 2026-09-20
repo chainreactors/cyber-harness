@@ -2,41 +2,44 @@ package scan
 
 import (
 	"context"
+	"errors"
+	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/utils/parsers"
 	"testing"
-
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/prompt"
 )
 
-type recordingPromptResolver struct {
-	input prompt.Context
-}
-
-func (r *recordingPromptResolver) Build(_ context.Context, input prompt.Context) prompt.Result {
-	r.input = input
-	return prompt.Result{Prompt: "resolved worker prompt"}
-}
-
-func TestWorkerPromptUsesAgentConfigResolver(t *testing.T) {
-	resolver := &recordingPromptResolver{}
-	resolve := workerPrompt(VerifySystemTarget, "verify instructions", nil)
-	result, err := resolve(t.Context(), &agent.Config{
-		AgentName: "verifier", Model: "test-model", PromptResolver: resolver,
-	})
-	if err != nil || result != "resolved worker prompt" {
-		t.Fatalf("worker prompt result = %q, %v", result, err)
+func TestScannerPassesDelegateSelectedLoots(t *testing.T) {
+	for _, name := range []string{"verify", "sniper"} {
+		t.Run(name, func(t *testing.T) {
+			coll := &collector{loots: []parsers.Loot{
+				{Target: "http://chosen.test", Kind: parsers.LootFingerprint, Priority: "high", Data: map[string]any{"focus": true}},
+				{Target: "http://other.test", Priority: "low"},
+			}}
+			calls := 0
+			worker := func(_ context.Context, got string, loot parsers.Loot) (string, error) {
+				calls++
+				if got != name || loot.Target != "http://chosen.test" {
+					t.Fatalf("%s: %v", got, loot)
+				}
+				return "status:confirmed", nil
+			}
+			if name == "verify" {
+				runVerifyPass(t.Context(), worker, coll, priority("high"), telemetry.NopLogger())
+			} else {
+				runSniperPass(t.Context(), worker, coll, telemetry.NopLogger())
+			}
+			if calls != 1 || coll.loots[0].Data["verification_status"] != "confirmed" || coll.loots[1].Data["verification_status"] != nil {
+				t.Fatalf("calls=%d loots=%v", calls, coll.loots)
+			}
+		})
 	}
-	if resolver.input.Target != VerifySystemTarget || resolver.input.Agent.Instructions != "verify instructions" {
-		t.Fatalf("worker prompt input = %#v", resolver.input)
-	}
-	if resolver.input.Agent.Name != "verifier" || resolver.input.Agent.Model != "test-model" {
-		t.Fatalf("worker agent context = %#v", resolver.input.Agent)
-	}
 }
-
-func TestWorkerPromptRequiresPluginResolver(t *testing.T) {
-	resolve := workerPrompt(SniperSystemTarget, "sniper instructions", nil)
-	if result, err := resolve(t.Context(), &agent.Config{}); err == nil || result != "" {
-		t.Fatalf("worker prompt without plugin = %q, %v", result, err)
+func TestWorkerFailureDoesNotAnnotateLoot(t *testing.T) {
+	coll := &collector{loots: []parsers.Loot{{Priority: "high"}}}
+	runVerifyPass(t.Context(), func(context.Context, string, parsers.Loot) (string, error) {
+		return "status:confirmed", errors.New("failed")
+	}, coll, priority("high"), telemetry.NopLogger())
+	if coll.loots[0].Data["verification_status"] != nil {
+		t.Fatal("failed task annotated loot")
 	}
 }

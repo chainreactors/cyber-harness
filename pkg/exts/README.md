@@ -39,6 +39,10 @@ Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CL
 用于 Extension 实现及底层单元测试；不得在宿主中再建立初始化、注册或清理路径。`Declare` 与
 `NewConsole` 可以提供独立的声明和展示入口，但不重复创建功能实例。
 
+Subagent Extension 定义唯一的 `subagent.Subagent` Point；Scanner 贡献 verify/sniper，具名与匿名共用执行流程。
+`subagentext.NewTools()` 借用同一 Point 和 Session Runtime 安装工具，Session 本身不安装 subagent。
+Registry 的动态注册 Handle 持有到任务收尾；撤销取消并排空关联任务。详见 [Subagent](subagent/README.md)。
+
 Session Extension 获取依赖并安装默认 JSONLHistory；Session 命令在构造时校验并冻结，运行中不再注册。
 Logger 由基础组合创建，Session、IOA、Scanner 与 Observe 借用同一个实例，直接通过 SetOutput 切换输出，不替换 Logger 或逐层传播。
 Provider Extension 创建和发布 Provider 状态；

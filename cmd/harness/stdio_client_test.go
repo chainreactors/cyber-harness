@@ -1,5 +1,3 @@
-//go:build live_llm
-
 package harness_test
 
 import (
@@ -21,16 +19,25 @@ import (
 // stdioClient speaks the public JSONL protocol to a separately built executable.
 // No application implementation or transport helper is imported by the harness.
 type stdioClient struct {
-	input   io.WriteCloser
-	replies chan map[string]any
-	done    chan struct{}
-	err     error // read only after done
-	seq     int
-	eventMu sync.Mutex
-	events  []map[string]any
+	sessionID string
+	input     io.WriteCloser
+	replies   chan map[string]any
+	done      chan struct{}
+	err       error // read only after done
+	seq       int
+	eventMu   sync.Mutex
+	events    []map[string]any
 }
 
-type stdioAgentMode struct{ providerURL, model string }
+type stdioAgentMode struct {
+	sessionID          string
+	executable         string
+	providerURL, model string
+	commandOnly        bool
+	longTask           bool
+	workDir            string
+	environment        []string
+}
 
 func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, modes ...stdioAgentMode) *stdioClient {
 	t.Helper()
@@ -38,10 +45,14 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	lifetime, taskTimeout, maxTokens := 4*time.Minute, "220", "1024"
+	if len(modes) == 1 && modes[0].longTask {
+		lifetime, taskTimeout, maxTokens = 65*time.Minute, "3600", "16384"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
 	args := []string{"--config", w.config, "--data-dir", filepath.Join(dir, "data"), "--no-color",
-		"agent", "--transport", "stdio", "--timeout", "220", "--ioa-url", ioaURL, "--node-name", name, "--space", space + "-inbox-" + name}
-	internalAgent := len(modes) == 1
+		"agent", "--transport", "stdio", "--timeout", taskTimeout, "--ioa-url", ioaURL, "--node-name", name, "--space", space + "-inbox-" + name}
+	internalAgent := len(modes) == 1 && !modes[0].commandOnly
 	if len(modes) > 1 {
 		cancel()
 		t.Fatal("one stdio agent mode expected")
@@ -51,11 +62,45 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 			cancel()
 			t.Fatal("internal Agent requires the local bounded model gateway")
 		}
-		args = append(args, "--provider", "openai", "--base-url", modes[0].providerURL, "--model", modes[0].model, "--api-key", "harness-gateway-token", "--max-tokens", "1024")
+		if modes[0].longTask {
+			// The gateway validates a buffered response before releasing tools.
+			// Match its five-minute bound through the existing provider profile;
+			// flat provider flags would silently restore the 120s default.
+			profile := map[string]any{"llm": map[string]any{"active_profile": "harness", "providers": []any{
+				map[string]any{"id": "harness", "provider": "openai", "base_url": modes[0].providerURL, "model": modes[0].model, "api_key": "harness-gateway-token", "max_tokens": 16384, "timeout": 330},
+			}}}
+			data, err := json.Marshal(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configPath := filepath.Join(dir, "provider.yaml")
+			writeFile(t, configPath, data)
+			args[1] = configPath
+		} else {
+			args = append(args, "--provider", "openai", "--base-url", modes[0].providerURL, "--model", modes[0].model, "--api-key", "harness-gateway-token", "--max-tokens", maxTokens)
+		}
 	}
-	cmd := exec.CommandContext(ctx, executablePath, args...)
-	cmd.Dir, cmd.Env = dir, testEnvironment(!internalAgent)
-	p := &stdioClient{replies: make(chan map[string]any, 16), done: make(chan struct{})}
+	// The command-only case has no model server and produces no completions.
+	// Provider startup records the failed probe, while real IOA commands remain usable.
+	if len(modes) == 1 && modes[0].commandOnly {
+		args = append(args, "--provider", "openai", "--base-url", "http://127.0.0.1:1", "--model", "ioa-command-only", "--api-key", "unused-command-only")
+	}
+	binary := executablePath
+	if len(modes) == 1 && modes[0].executable != "" {
+		binary = modes[0].executable
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir, cmd.Env = dir, testEnvironment(len(modes) == 0)
+	if len(modes) == 1 {
+		if modes[0].workDir != "" {
+			cmd.Dir = modes[0].workDir
+		}
+		cmd.Env = append(cmd.Env, modes[0].environment...)
+	}
+	p := &stdioClient{sessionID: "operator", replies: make(chan map[string]any, 16), done: make(chan struct{})}
+	if len(modes) == 1 && modes[0].sessionID != "" {
+		p.sessionID = modes[0].sessionID
+	}
 	errLog := newLog(t, filepath.Join(dir, "stderr.log"))
 	trace := newLog(t, filepath.Join(dir, "protocol.jsonl"))
 	cmd.Stderr = errLog
@@ -91,9 +136,8 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 				cancel()
 				break
 			}
-			// Manual IOA membership and the runtime's startup inbox are separate.
-			// These operators explicitly poll the work space, while each application
-			// subscribes to its own empty inbox. Unexpected internal turns fail.
+			// Command-only scenarios deliberately avoid delivering to an active
+			// Session. An unexpected automatic model turn is a test failure.
 			if !internalAgent && field(envelope, "payload", "event", "turnStarted") != nil {
 				p.err = fmt.Errorf("unexpected application Agent turn in external-operator scenario")
 				cancel()
@@ -135,7 +179,7 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 			t.Errorf("stdio application %s: %v; see %s", name, p.err, dir)
 		}
 	})
-	response := p.request(t, "aop.ProtocolMessage", "openSessionRequest", map[string]any{"sessionId": "operator"})
+	response := p.request(t, "aop.ProtocolMessage", "openSessionRequest", map[string]any{"sessionId": p.sessionID})
 	if field(response, "openSessionResponse", "accepted") == nil {
 		t.Fatalf("session rejected: %v", response)
 	}
@@ -176,7 +220,11 @@ func (p *stdioClient) request(t *testing.T, namespace, operation string, value a
 
 func (p *stdioClient) command(t *testing.T, line string) (string, error) {
 	t.Helper()
-	response := p.request(t, "cyber.command.CommandProtocolMessage", "request", map[string]any{"sessionId": "operator", "line": "!" + line})
+	sessionID := p.sessionID
+	if sessionID == "" {
+		sessionID = "operator"
+	}
+	response := p.request(t, "cyber.command.CommandProtocolMessage", "request", map[string]any{"sessionId": sessionID, "line": "!" + line})
 	if failure := field(response, "protocolError"); failure != nil {
 		return "", fmt.Errorf("%v", failure)
 	}

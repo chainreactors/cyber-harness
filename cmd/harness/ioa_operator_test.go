@@ -76,64 +76,6 @@ func TestLiveLLMMultiAgentIOAThreadAndIsolation(t *testing.T) {
 	writeEvidence(t, filepath.Join(w.dir, "ioa-evidence.json"), map[string]any{"work": work, "thread": thread, "isolated": isolated, "model_requests": []int{first.requests, second.requests}})
 }
 
-type ioaMessage struct {
-	ID      string `json:"id"`
-	SpaceID string `json:"space_id"`
-	Sender  string `json:"sender"`
-	Content struct {
-		Text string `json:"text"`
-	} `json:"content"`
-	Refs struct {
-		Messages []string `json:"messages"`
-		Nodes    []string `json:"nodes"`
-	} `json:"refs"`
-}
-
-func readIOAMessages(t *testing.T, client *stdioClient, line string) []ioaMessage {
-	t.Helper()
-	out, err := client.command(t, line)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var messages []ioaMessage
-	if err = json.Unmarshal([]byte(out), &messages); err != nil {
-		t.Fatalf("invalid IOA messages: %v: %s", err, out)
-	}
-	return messages
-}
-func uniqueIOAMessage(t *testing.T, messages []ioaMessage, text string) ioaMessage {
-	t.Helper()
-	var found []ioaMessage
-	for _, m := range messages {
-		if m.Content.Text == text {
-			found = append(found, m)
-		}
-	}
-	if len(found) != 1 {
-		t.Fatalf("expected one %q message, got %d in %+v", text, len(found), messages)
-	}
-	if found[0].ID == "" || found[0].Sender == "" || found[0].SpaceID == "" {
-		t.Fatalf("missing IOA identity: %+v", found[0])
-	}
-	return found[0]
-}
-func assertIOAReply(t *testing.T, reply, parent ioaMessage) {
-	t.Helper()
-	if reply.SpaceID != parent.SpaceID || len(reply.Refs.Messages) != 1 || reply.Refs.Messages[0] != parent.ID || len(reply.Refs.Nodes) != 1 || reply.Refs.Nodes[0] != parent.Sender {
-		t.Fatalf("incorrect reply references: %+v -> %+v", reply, parent)
-	}
-}
-
-// writeEvidence records one scenario's acceptance evidence, redacted.
-func writeEvidence(t *testing.T, path string, value any) {
-	t.Helper()
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, path, redactSecrets(data))
-}
-
 type ioaOperation struct {
 	Action  string `json:"action"`
 	Text    string `json:"text"`
@@ -307,7 +249,9 @@ func (o *ioaOperator) operate(t *testing.T, op ioaOperation) (string, error) {
 			if !ioaIdentifier.MatchString(op.Node) {
 				return "", fmt.Errorf("invalid node ID")
 			}
-			command += " --ref-nodes " + op.Node
+			// This operator reads IOA explicitly outside the application Agent.
+			// Address that external recipient without waking an internal Session.
+			command += " --ref-nodes " + op.Node + " --target-session external-operator"
 		}
 	default:
 		return "", fmt.Errorf("unknown IOA operation")

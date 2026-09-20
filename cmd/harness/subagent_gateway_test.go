@@ -22,7 +22,7 @@ import (
 
 // Forward real completions, buffering each SSE response until every tool call
 // has been validated. No assistant text/tool argument is generated or corrected
-// here. Only bash/subagent and this run's finite IOA commands are exposed.
+// here. Long tasks also expose the application's workspace file tools.
 type subagentGateway struct {
 	server            *httptest.Server
 	config            map[string]any
@@ -32,11 +32,21 @@ type subagentGateway struct {
 	spawned           map[string]bool
 	roles             map[string]int
 	parentCompletions map[string]bool
+	peerInputs        map[string]bool
 	log               *os.File
 	failure           chan error
+	longTask          bool
+	gameTask          bool
+	projectRoot       string
+	outputTokens      int
+	usageMissing      int
 }
 
 func newSubagentGateway(t *testing.T, dir, space, nonce string) *subagentGateway {
+	return startSubagentGateway(t, dir, space, nonce, false)
+}
+
+func startSubagentGateway(t *testing.T, dir, space, nonce string, longTask bool) *subagentGateway {
 	t.Helper()
 	cfg := liveLLMRequest(t)
 	if cfg["provider"] != "openai" && cfg["provider"] != "deepseek" {
@@ -46,8 +56,14 @@ func newSubagentGateway(t *testing.T, dir, space, nonce string) *subagentGateway
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := &subagentGateway{config: cfg, space: space, nonce: nonce, spawned: make(map[string]bool), roles: make(map[string]int), parentCompletions: make(map[string]bool), log: f, failure: make(chan error, 1)}
-	ctx, cancel := context.WithTimeout(context.Background(), 160*time.Second)
+	g := &subagentGateway{config: cfg, space: space, nonce: nonce, spawned: make(map[string]bool), roles: make(map[string]int), peerInputs: make(map[string]bool), parentCompletions: make(map[string]bool), log: f, failure: make(chan error, 1)}
+	g.longTask = longTask
+	g.projectRoot = filepath.Join(dir, "project")
+	lifetime := 160 * time.Second
+	if longTask {
+		lifetime = 60 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
 	g.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { g.serve(ctx, w, r) }))
 	t.Cleanup(func() {
 		cancel()
@@ -92,13 +108,27 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 	g.requests++
 	requestID := g.requests
 	g.mu.Unlock()
-	if requestID > 40 {
-		g.reject(w, fmt.Errorf("global limit of 40 model requests exceeded"))
+	limit, tokenLimit, callTimeout := 40, 1024, 35*time.Second
+	if g.longTask {
+		limit, tokenLimit, callTimeout = 200, 16384, 5*time.Minute
+	}
+	if requestID > limit {
+		g.reject(w, fmt.Errorf("global limit of %d model requests exceeded", limit))
 		return
 	}
 	role := "probe"
 	if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
 		role = requestAgentRole(body)
+		if g.longTask {
+			role = longTaskRole(body)
+		}
+		if g.gameTask {
+			role = longRequestSession(body)
+			if role != "black" && role != "white" {
+				g.reject(w, fmt.Errorf("game only has black and white players, got %q", role))
+				return
+			}
+		}
 		if role == "" {
 			g.reject(w, fmt.Errorf("unidentified Agent request"))
 			return
@@ -110,16 +140,22 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 				continue
 			}
 			name, _ := field(item, "function", "name").(string)
-			if name == "bash" || (name == "subagent" && role == "parent") {
+			if name == "bash" || (g.gameTask && name == "inbox_wait") || (name == "subagent" && role == "parent") ||
+				(g.longTask && (name == "read" || name == "ls" || name == "glob" || name == "write")) {
 				restricted = append(restricted, item)
 			}
 		}
 		body["tools"] = restricted
 		g.mu.Lock()
 		g.roles[role]++
+		for _, text := range []string{"offer:" + g.nonce, "reply:" + g.nonce, "ack:" + g.nonce} {
+			if requestPeerContains(body, text) {
+				g.peerInputs[role+":"+strings.Split(text, ":")[0]] = true
+			}
+		}
 		if role == "parent" {
 			for _, name := range []string{"worker-a", "worker-b"} {
-				if requestCompletionContains(body, `<subagent_completion name="`+name+`" type="" status="completed">`) {
+				if requestCompletionContains(body, `<subagent_completion name="" label="`+name+`"`) {
 					g.parentCompletions[name] = true
 				}
 			}
@@ -131,8 +167,8 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 			return
 		}
 	}
-	if n, ok := body["max_tokens"].(float64); !ok || n > 1024 {
-		body["max_tokens"] = 1024
+	if n, ok := body["max_tokens"].(float64); !ok || n > float64(tokenLimit) {
+		body["max_tokens"] = tokenLimit
 	}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -143,7 +179,7 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 		g.reject(w, err)
 		return
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	stop := context.AfterFunc(r.Context(), cancel)
 	defer stop()
@@ -157,12 +193,32 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
+		if r.Context().Err() != nil {
+			g.recordCanceledRequest(w, requestID, role, nil, tokenLimit, false)
+			return
+		}
 		g.reject(w, fmt.Errorf("upstream: %s", redactSecrets([]byte(err.Error()))))
 		return
 	}
-	response, readErr := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
+	responseLimit := int64(4 << 20)
+	if g.longTask {
+		responseLimit = 16 << 20
+	}
+	response, readErr := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
 	resp.Body.Close()
-	if readErr != nil || len(response) > 4<<20 {
+	if readErr != nil || int64(len(response)) > responseLimit {
+		if readErr != nil && r.Context().Err() != nil {
+			stream, _ := body["stream"].(bool)
+			g.recordCanceledRequest(w, requestID, role, response, tokenLimit, stream)
+			return
+		}
+		_ = g.record(map[string]any{"partial_response": requestID, "role": role, "body": string(response), "read_error": fmt.Sprint(readErr)})
+		if g.longTask {
+			g.mu.Lock()
+			g.outputTokens += tokenLimit
+			g.usageMissing++
+			g.mu.Unlock()
+		}
 		g.reject(w, fmt.Errorf("invalid or oversized upstream response: %v", readErr))
 		return
 	}
@@ -171,20 +227,82 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 		return
 	}
 	stream, _ := body["stream"].(bool)
-	calls, err := completionToolCalls(response, stream)
+	// Preserve and charge responses even when their tool calls are rejected.
+	if err = g.record(map[string]any{"response": requestID, "role": role, "stream": stream, "body": string(response)}); err != nil {
+		g.reject(w, err)
+		return
+	}
+	maxCalls := 2
+	if g.longTask {
+		maxCalls = 8
+	}
+	if g.gameTask {
+		maxCalls = 64
+	}
+	var calls []gatewayCall
+	// Startup ping intentionally uses a tiny token cap and performs no Agent work.
+	// A truncated ping must not be classified as a truncated task response.
+	if role != "probe" {
+		calls, err = completionToolCalls(response, stream, maxCalls)
+	}
 	if err == nil {
-		err = g.validateCalls(role, calls)
+		if g.gameTask {
+			// Game rules live in the task, not in a scripted tool sequence.
+			// The ordinary application executes the model's actual calls.
+		} else if g.longTask {
+			err = validateLongTaskCalls(role, calls, g.projectRoot)
+		} else {
+			err = g.validateCalls(role, calls)
+		}
+	}
+	if g.longTask {
+		tokens, found := responseOutputTokens(response, stream)
+		g.mu.Lock()
+		if !found {
+			tokens = tokenLimit
+			g.usageMissing++
+		}
+		g.outputTokens += tokens
+		exceeded := g.outputTokens > 120000
+		g.mu.Unlock()
+		if exceeded {
+			g.reject(w, fmt.Errorf("120000 output token budget exceeded (missing usage charged at maximum)"))
+			return
+		}
 	}
 	if err != nil {
 		g.reject(w, fmt.Errorf("%s response: %w", role, err))
 		return
 	}
-	if err = g.record(map[string]any{"response": requestID, "role": role, "stream": stream, "body": string(response)}); err != nil {
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	_, _ = w.Write(response)
+}
+
+// Canceling a model request is expected when an Agent is interrupted or killed.
+// Preserve evidence and conservatively charge missing usage, without treating
+// the caller's cancellation itself as a provider or harness failure.
+func (g *subagentGateway) recordCanceledRequest(w http.ResponseWriter, id int, role string, response []byte, maximum int, stream bool) {
+	tokens, found := responseOutputTokens(response, stream)
+	if !found {
+		tokens = maximum
+	}
+	if err := g.record(map[string]any{"canceled_request": id, "role": role, "partial_response_body": string(response), "output_tokens_charged": tokens, "usage_missing": !found}); err != nil {
 		g.reject(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	_, _ = w.Write(response)
+	if !g.longTask {
+		return
+	}
+	g.mu.Lock()
+	g.outputTokens += tokens
+	if !found {
+		g.usageMissing++
+	}
+	exceeded := g.outputTokens > 120000
+	g.mu.Unlock()
+	if exceeded {
+		g.reject(w, fmt.Errorf("120000 output token budget exceeded while accounting for canceled requests"))
+	}
 }
 
 func requestAgentRole(body map[string]any) string {
@@ -245,6 +363,20 @@ func requestCompletionContains(body map[string]any, needle string) bool {
 	return false
 }
 
+// Only user messages supplied by the IOA Inbox count as delivery evidence.
+func requestPeerContains(body map[string]any, needle string) bool {
+	messages, _ := body["messages"].([]any)
+	for _, value := range messages {
+		if m, ok := value.(map[string]any); ok && m["role"] == "user" {
+			text := chatText(m["content"])
+			if strings.HasPrefix(text, `<message origin="peer"`) && strings.Contains(text, needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type gatewayCall struct {
 	Index    int `json:"index"`
 	Function struct {
@@ -253,11 +385,12 @@ type gatewayCall struct {
 	} `json:"function"`
 }
 
-func completionToolCalls(data []byte, stream bool) ([]gatewayCall, error) {
+func completionToolCalls(data []byte, stream bool, maxCalls int) ([]gatewayCall, error) {
 	if !stream {
 		var response struct {
 			Choices []struct {
-				Message struct {
+				FinishReason string `json:"finish_reason"`
+				Message      struct {
 					Calls []gatewayCall `json:"tool_calls"`
 				} `json:"message"`
 			} `json:"choices"`
@@ -268,6 +401,12 @@ func completionToolCalls(data []byte, stream bool) ([]gatewayCall, error) {
 		}
 		if len(response.Choices) != 1 {
 			return nil, fmt.Errorf("one completion required")
+		}
+		if response.Choices[0].FinishReason == "length" || response.Choices[0].FinishReason == "max_tokens" {
+			return nil, fmt.Errorf("model response truncated by output token limit")
+		}
+		if len(response.Choices[0].Message.Calls) > maxCalls {
+			return nil, fmt.Errorf("too many tool calls")
 		}
 		return response.Choices[0].Message.Calls, nil
 	}
@@ -287,8 +426,9 @@ func completionToolCalls(data []byte, stream bool) ([]gatewayCall, error) {
 		}
 		var chunk struct {
 			Choices []struct {
-				Index int `json:"index"`
-				Delta struct {
+				Index        int    `json:"index"`
+				FinishReason string `json:"finish_reason"`
+				Delta        struct {
 					Calls []gatewayCall `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
@@ -297,11 +437,14 @@ func completionToolCalls(data []byte, stream bool) ([]gatewayCall, error) {
 			return nil, err
 		}
 		for _, choice := range chunk.Choices {
+			if choice.FinishReason == "length" || choice.FinishReason == "max_tokens" {
+				return nil, fmt.Errorf("model response truncated by output token limit")
+			}
 			if choice.Index != 0 {
 				return nil, fmt.Errorf("multiple choices")
 			}
 			for _, delta := range choice.Delta.Calls {
-				if delta.Index < 0 || delta.Index > 1 {
+				if delta.Index < 0 || delta.Index >= maxCalls {
 					return nil, fmt.Errorf("too many tool calls")
 				}
 				call := calls[delta.Index]
@@ -351,13 +494,13 @@ func (g *subagentGateway) validateCalls(role string, calls []gatewayCall) error 
 			if action != "" && action != "create" {
 				return fmt.Errorf("only create/list allowed")
 			}
-			name, _ := args["name"].(string)
+			name, _ := args["label"].(string)
 			prompt, _ := args["prompt"].(string)
 			if (name != "worker-a" && name != "worker-b") || g.spawned[name] || args["mode"] != "async" {
 				return fmt.Errorf("expected one async delegation per worker")
 			}
-			if typ, _ := args["type"].(string); typ != "" {
-				return fmt.Errorf("only default child type allowed")
+			if typ, _ := args["name"].(string); typ != "" {
+				return fmt.Errorf("only anonymous subagents allowed")
 			}
 			prefix := "HARNESS_A"
 			if name == "worker-b" {
@@ -404,7 +547,7 @@ func (g *subagentGateway) validateCommand(role, command string) error {
 	if role != "parent" && role != "a" && role != "b" {
 		return fmt.Errorf("unidentified IOA caller")
 	}
-	if command == "ioa read --all --limit 20" || regexp.MustCompile(`^ioa read --all --message [a-f0-9]{20,40} --direction downstream$`).MatchString(command) {
+	if command == "ioa space nodes" || (role != "b" && command == "ioa read --all --limit 20") || regexp.MustCompile(`^ioa read --all --message [a-f0-9]{20,40} --direction downstream$`).MatchString(command) {
 		return nil
 	}
 	texts := []string{}
@@ -416,7 +559,7 @@ func (g *subagentGateway) validateCommand(role, command string) error {
 	}
 	for _, text := range texts {
 		prefix := `ioa send --content '{"text":"` + text + `"}'`
-		if command == prefix || regexp.MustCompile("^"+regexp.QuoteMeta(prefix)+` --ref-messages [a-f0-9]{20,40}$`).MatchString(command) {
+		if regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + ` --target-session [a-f0-9]{16,40}( --ref-messages [a-f0-9]{20,40})?$`).MatchString(command) {
 			return nil
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ const (
 // BashTool defaults. Runner/WebAgent transports use this entry point while the
 // agent-facing Execute method applies the explicit wait/background contract.
 type BashExecOptions struct {
+	foreground bool
 	Name       string
 	WorkDir    string
 	Env        map[string]string
@@ -57,26 +59,27 @@ type ProcessContainment interface {
 }
 
 type BashTool struct {
-	baseEnv        map[string]string
-	hooks          *hooks.Registry
-	processMu      sync.Mutex
-	processClosed  bool
-	processWG      sync.WaitGroup
-	workDir        string
-	timeout        int
-	scannerProxy   string
-	scannerProxyCA string
-	egressResolver func(context.Context) (proxyURL, caPath string, release func())
-	tasks          *procbus.Manager
-	registry       coretool.CommandExecutor
-	shellCommands  bool
-	hiddenCommands map[string]struct{}
-	adapterMu      sync.Mutex
-	shellAdapter   *shellCommandAdapter
-	containment    ProcessContainment
-	maxTimeout     time.Duration
-	closeOnce      sync.Once
-	monitored      sync.Map // tmux session ID -> notification already installed
+	baseEnv            map[string]string
+	hooks              *hooks.Registry
+	processMu          sync.Mutex
+	processClosed      bool
+	processWG          sync.WaitGroup
+	workDir            string
+	timeout            int
+	scannerProxy       string
+	scannerProxyCA     string
+	egressResolver     func(context.Context) (proxyURL, caPath string, release func())
+	tasks              *procbus.Manager
+	registry           coretool.CommandExecutor
+	shellCommands      bool
+	hiddenCommands     map[string]struct{}
+	standaloneCommands map[string]struct{}
+	adapterMu          sync.Mutex
+	shellAdapter       *shellCommandAdapter
+	containment        ProcessContainment
+	maxTimeout         time.Duration
+	closeOnce          sync.Once
+	monitored          sync.Map // tmux session ID -> notification already installed
 }
 
 func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashTool {
@@ -139,6 +142,15 @@ func (t *BashTool) EnableShellCommands(registry coretool.CommandExecutor) {
 	t.attachShellCommands(registry)
 }
 
+// StandaloneCommands keeps commands discoverable but prevents their invocation
+// from shell adapters. Only direct registry dispatch may start these commands.
+func (t *BashTool) StandaloneCommands(names ...string) {
+	t.standaloneCommands = make(map[string]struct{}, len(names))
+	for _, name := range names {
+		t.standaloneCommands[name] = struct{}{}
+	}
+}
+
 // HideCommands removes control-only commands from Bash discovery and shell
 // aliases while leaving direct, policy-checked registry execution available.
 // Profiles configure this before publishing the Bash tool.
@@ -183,7 +195,14 @@ func (t *BashTool) ensureShellCommands() (*shellCommandAdapter, error) {
 		}
 		t.shellAdapter = adapter
 	}
-	if err := t.shellAdapter.syncAliases(t.commandNames()); err != nil {
+	names := t.commandNames()
+	allowed := names[:0]
+	for _, name := range names {
+		if _, standalone := t.standaloneCommands[name]; !standalone {
+			allowed = append(allowed, name)
+		}
+	}
+	if err := t.shellAdapter.syncAliases(allowed); err != nil {
 		t.shellAdapter.close()
 		t.shellAdapter = nil
 		return nil, err
@@ -305,6 +324,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 // final session state. Non-zero exits are represented by Info.ExitStatus() rather
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
+	options.foreground = true
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil, fmt.Errorf("empty command")
@@ -423,6 +443,9 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 			}
 		}
 	}
+	if _, standalone := t.standaloneCommands[leftToken]; standalone {
+		return nil, fmt.Errorf("%s must be a standalone command without shell composition", leftToken)
+	}
 	adapter, err := t.ensureShellCommands()
 	if err != nil {
 		return nil, err
@@ -437,7 +460,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 		env := t.runEnv(ctx, options.Env, adapter, contextID)
 		execution := coretool.NewExecution(t.tasks, command, nil, workDir, env)
 		info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
-			proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env}))
+			shellAttachment(command, workDir, env, options))
 		if err != nil {
 			adapter.releaseContext(contextID)
 			cleanup()
@@ -509,7 +532,7 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	env = t.runEnv(ctx, options.Env, nil, "")
 	execution := coretool.NewExecution(t.tasks, command, nil, workDir, env)
 	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
-		proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env}))
+		shellAttachment(command, workDir, env, options))
 	if err != nil {
 		cleanup()
 		return nil, err
@@ -517,6 +540,26 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	execution.BindID(info.ID)
 	t.releaseProcess(cleanup, execution)
 	return execution, nil
+}
+
+func shellAttachment(command, workDir string, env []string, options BashExecOptions) proc.Attachment {
+	attachment := proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env})
+	if !options.foreground || runtime.GOOS != "windows" {
+		return attachment
+	}
+	return proc.AttachFunc(func(ctx context.Context) (*proc.Attached, error) {
+		attached, err := attachment.Start(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// Ctrl+C on a Windows terminal can interrupt only the current child,
+		// allowing cmd.exe to execute the remainder of a canceled command line.
+		// Foreground RPC cancellation must terminate the whole invocation. Keep
+		// the registry's one stop/drain lifecycle, but skip interactive signals.
+		signal := attached.Signal
+		attached.Signal = func(proc.Signal) error { return signal(proc.SigKill) }
+		return attached, nil
+	})
 }
 
 // procSpec is the registry-level half of a bash invocation: identity and

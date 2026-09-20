@@ -27,6 +27,7 @@ import (
 	proxyext "github.com/chainreactors/cyber/pkg/exts/proxy"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	nodepkg "github.com/chainreactors/cyber/pkg/node"
@@ -174,7 +175,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		agentConfig := *config.Session
 		agentConfig.NodeName = nodeName
 		agentConfig = sessionext.ConfigFromOption(config.Option, agentConfig)
-		values = append(values, sessionext.New(agentConfig))
+		values = append(values, sessionext.New(agentConfig), subagentext.NewTools())
 		values = append(values, sessionext.NewProtocol())
 		values = append(values, sessionext.NewConsole())
 	}

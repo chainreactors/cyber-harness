@@ -5,8 +5,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/core/types"
 )
+
+func TestDirectCommandInheritsCurrentAgentConfig(t *testing.T) {
+	rt := newBareRuntime(t, nil, nil)
+	var observed agent.Config
+	var found bool
+	var err error
+	rt.commands, rt.commandIndex, err = commandDeclarations([]Command{{
+		Spec: &types.CommandSpec{Name: "/inspect-config"},
+		Handler: func(ctx context.Context, _ *Session, _ []string) (*types.CommandResult, error) {
+			observed, found = agent.ToolAgentConfig(ctx)
+			return nil, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := rt.OpenSession(t.Context(), SessionOptions{ID: "selected-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{}
+	s.state.agent.SetProvider(p, "selected-model")
+	if _, err := s.Command(t.Context(), "/inspect-config"); err != nil {
+		t.Fatal(err)
+	}
+	if !found || observed.Model != "selected-model" || observed.Provider != p || observed.SessionID != s.ID() {
+		t.Fatalf("command received stale config: model=%s session=%s present=%v", observed.Model, observed.SessionID, found)
+	}
+}
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)

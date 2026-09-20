@@ -1,14 +1,13 @@
-package session
+package sessionexec
 
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/cyber/agent"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/aop"
-
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
@@ -49,7 +48,7 @@ func TestSubagentWithMemoryIOA(t *testing.T) {
 			})})
 
 			tool := newSubagentTestTool(t, parent.Cfg)
-			defer tool.runtime.close(context.Background())
+			defer tool.closeRuntime(context.Background())
 			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "dispatch"})
 			if _, err = tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode)); err != nil {
 				t.Fatal(err)

@@ -154,10 +154,6 @@ func (e *aopEmitter) messageDelta(messageID string, contentIndex int, partType, 
 
 func (e *aopEmitter) toolCall(call *aop.ToolCall) {
 	event := &aop.Event{Payload: &aop.Event_ToolCall{ToolCall: call}}
-	if detail, ok := delegationFromToolCall(call.Name, decodeToolArguments(call)); ok {
-		e.emitWithExt(event, detail)
-		return
-	}
 	e.emit(event)
 }
 

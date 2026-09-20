@@ -1,15 +1,15 @@
-package session
+package sessionexec
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/chainreactors/cyber/agent"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/core/hooks"
@@ -65,7 +65,7 @@ func TestTaskLifecycleOrdering(t *testing.T) {
 			})})
 
 			tool := newSubagentTestTool(t, parent.Cfg)
-			defer tool.runtime.close(context.Background())
+			defer tool.closeRuntime(context.Background())
 			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
 			result, err := tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode))
 			if err != nil {
@@ -95,7 +95,12 @@ func TestDispatchFailurePreventsEveryMode(t *testing.T) {
 			reg := hooks.New()
 			failure := errors.New("record unavailable")
 			var ends atomic.Int32
-			agenthooks.SessionStart.On(reg, "deny", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { return struct{}{}, failure })
+			agenthooks.SessionStart.On(reg, "deny", func(_ context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
+				if ev.ParentToolCallID == "" {
+					return struct{}{}, nil
+				}
+				return struct{}{}, failure
+			})
 			agenthooks.SessionEnd.On(reg, "cleanup", func(_ context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
 				if ev.ParentToolCallID == "" {
 					return struct{}{}, nil
@@ -110,7 +115,7 @@ func TestDispatchFailurePreventsEveryMode(t *testing.T) {
 			})})
 
 			tool := newSubagentTestTool(t, parent.Cfg)
-			defer tool.runtime.close(context.Background())
+			defer tool.closeRuntime(context.Background())
 			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
 			if _, err := tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode)); !errors.Is(err, failure) {
 				t.Fatalf("error: %v", err)
@@ -159,14 +164,14 @@ func TestTaskLifetimeAndFinalRecordDrain(t *testing.T) {
 	}
 	deadline, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	if err := tool.runtime.close(deadline); !errors.Is(err, context.DeadlineExceeded) {
+	if err := tool.closeRuntime(deadline); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close: %v", err)
 	}
 	if parent.Cfg.Inbox.Len() != 0 {
 		t.Fatal("notified before final record")
 	}
 	close(release)
-	if err := tool.runtime.close(t.Context()); err != nil {
+	if err := tool.closeRuntime(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if parent.Cfg.Inbox.Len() != 1 {
@@ -177,7 +182,7 @@ func TestTaskLifetimeAndFinalRecordDrain(t *testing.T) {
 func TestSubagentMessageRemoved(t *testing.T) {
 
 	tool := newSubagentTestTool(t, agent.Config{})
-	if _, err := tool.Execute(t.Context(), `{"action":"message","name":"worker","message":"hi"}`); err == nil {
+	if _, err := tool.Execute(t.Context(), `{"action":"message","label":"worker","message":"hi"}`); err == nil {
 		t.Fatal("direct communication still enabled")
 	}
 }

@@ -4,15 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/agent/provider"
-	"github.com/chainreactors/cyber/core/extension"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
-	searchext "github.com/chainreactors/cyber/pkg/exts/search"
-	"github.com/chainreactors/cyber/pkg/harness"
-
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,12 +19,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
+	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/utils/parsers"
 )
@@ -50,7 +49,7 @@ func installScanner(t *testing.T, directory string, config Config, extra ...exte
 	if err != nil {
 		t.Fatal(err)
 	}
-	values = append(values, loopext.New(agent.StandardLoop{}), New(config, directory), searchext.New(searchext.Config{}))
+	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), searchext.New(searchext.Config{}))
 	values = append(values, extra...)
 	var installed scannerInstallation
 	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {

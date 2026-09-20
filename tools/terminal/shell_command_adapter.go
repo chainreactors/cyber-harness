@@ -175,8 +175,11 @@ func (b *shellCommandAdapter) handle(parent context.Context, conn net.Conn) {
 		_ = writer.write(shellCommandAdapterFrame{Type: "final", ExitCode: 125})
 		return
 	}
+	b.mu.Lock()
+	_, allowed := b.aliases[header.Command]
+	b.mu.Unlock()
 	command, ok := b.registry.Get(header.Command)
-	if !ok {
+	if !ok || !allowed {
 		message := "unknown in-memory command: " + header.Command
 		_, _ = io.WriteString(&shellCommandAdapterStreamWriter{writer: writer, frameType: "stderr"}, message+"\n")
 		_ = writer.write(shellCommandAdapterFrame{Type: "final", ExitCode: 127})

@@ -6,7 +6,6 @@ import (
 	"io"
 	"slices"
 
-	"github.com/chainreactors/cyber/agent"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -18,11 +17,11 @@ import (
 )
 
 type Command struct {
+	executionOnly bool
 	toolargs.Base
 	engines     *engine.Set
-	parent      *agent.Agent
+	worker      Worker
 	deepBrowser func(context.Context, string) (string, error)
-	readSkill   func(string) string
 }
 
 type flags struct {
@@ -63,13 +62,6 @@ func New(engineSet *engine.Set, opts ...Option) *Command {
 		}
 	}
 	return cmd
-}
-
-func (c *Command) InitLogger(logger telemetry.Logger) {
-	c.Base.InitLogger(logger)
-	if c.parent != nil {
-		c.parent.Cfg.Logger = c.Logger
-	}
 }
 
 func (c *Command) Name() string { return "scan" }
@@ -126,6 +118,9 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 			return c.Usage() + "\n", nil, nil
 		}
 		return "", nil, fmt.Errorf("scan: %w", err)
+	}
+	if c.executionOnly && (flags.Sniper || flags.Deep || (flags.Verify != "" && flags.Verify != "off")) {
+		return "", nil, fmt.Errorf("scan: AI modes are unavailable in execution-only mode")
 	}
 	if flags.Debug {
 		flags.Trace = true
@@ -184,13 +179,16 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	p.Run(seeds)
 
-	if c.parent != nil && verifyLevel != "" {
-		runVerifyPass(ctx, c.parent, c.readSkill, coll, verifyLevel, c.Logger)
+	if verifyLevel != "" {
+		runVerifyPass(ctx, c.worker, coll, verifyLevel, c.Logger)
 	}
-	if c.parent != nil && flags.Sniper {
-		runSniperPass(ctx, c.parent, c.readSkill, coll, c.Logger)
+	if flags.Sniper {
+		runSniperPass(ctx, c.worker, coll, c.Logger)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
 	coll.Finish()
 
 	var out string

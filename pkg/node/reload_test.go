@@ -15,11 +15,13 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/gorilla/websocket"
@@ -28,32 +30,41 @@ import (
 
 type reloadTestProfile struct {
 	*harness.Harness
-	fail   bool
-	closed atomic.Bool
+	fail       bool
+	closed     atomic.Bool
+	protocols  *extension.Set
+	namespaces *namespaces.Registry
 }
 
 func (p *reloadTestProfile) Load(ctx context.Context) error {
 	if p.fail {
 		return errors.New("candidate load failed")
 	}
-	return p.Harness.Load(ctx)
-}
-func (p *reloadTestProfile) Close(ctx context.Context) error {
-	err := p.Harness.Close(ctx)
-	p.closed.Store(true)
-	return err
-}
-func (p *reloadTestProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
+	if err := p.Harness.Load(ctx); err != nil {
+		return err
+	}
 	rt, err := p.Runtime()
 	if err != nil {
 		return err
 	}
-	for _, binding := range rt.NamespaceBindings() {
-		if err := binding.Register(mux); err != nil {
-			return err
-		}
+	p.namespaces = namespaces.New()
+	p.protocols, err = extension.New(p.namespaces, extension.Provided(rt), sessionext.NewProtocol())
+	if err != nil {
+		return err
 	}
-	return nil
+	return p.protocols.Load(ctx)
+}
+func (p *reloadTestProfile) Close(ctx context.Context) error {
+	var err error
+	if p.protocols != nil {
+		err = p.protocols.Close(ctx)
+	}
+	err = errors.Join(err, p.Harness.Close(ctx))
+	p.closed.Store(true)
+	return err
+}
+func (p *reloadTestProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
+	return p.namespaces.Bind(mux)
 }
 func (*reloadTestProfile) AgentStatus() *aop.AgentStatus         { return &aop.AgentStatus{} }
 func (*reloadTestProfile) ConsoleBindings() *consoleapi.Bindings { return nil }

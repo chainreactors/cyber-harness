@@ -90,7 +90,7 @@ func TestLoggerRetargetReachesExistingSessionsAndDerivedAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := first.state.agent.Derive()
+	child := agent.NewAgent(first.state.agent.ConfigSnapshot().ForTask("child", "", nil))
 	var logs bytes.Buffer
 	runtime.Logger.SetOutput(&logs)
 	first.state.agent.Cfg.Logger.Infof("existing session")

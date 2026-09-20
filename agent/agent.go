@@ -8,7 +8,6 @@ import (
 	"github.com/chainreactors/cyber/agent/inbox"
 	providerpkg "github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -194,53 +193,6 @@ func (a *Agent) ConfigSnapshot() Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg
-}
-
-// Derive creates a new Agent with the same infrastructure (provider, tools,
-// model, logger) but clean state. Use for spawning independent agent tasks.
-func (a *Agent) Derive() *Agent {
-	cfg := a.ConfigSnapshot()
-	return deriveNamedFromConfig(cfg, cfg.AgentName, "", nil)
-}
-
-// DeriveNamed creates an isolated child agent and gives its AOP stream a
-// distinct actor name while preserving the current session as its parent.
-func (a *Agent) DeriveNamed(name string) *Agent {
-	return a.deriveNamed(name, "", nil)
-}
-
-func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
-	return deriveNamedFromConfig(a.ConfigSnapshot(), name, parentToolCallID, detail)
-}
-
-func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
-	return NewAgent(Config{
-		Loop:     cfg.Loop,
-		Provider: cfg.Provider,
-		Tools:    cfg.Tools,
-		Lifetime: cfg.Lifetime,
-		Model:    cfg.Model,
-		// Children inherit either the explicit prompt or its run-scoped resolver,
-		// along with the environment, tool, and skill context it renders.
-		SystemPrompt:          cfg.SystemPrompt,
-		SystemPromptFn:        cfg.SystemPromptFn,
-		PromptResolver:        cfg.PromptResolver,
-		MaxTokens:             cfg.MaxTokens,
-		ContextWindow:         cfg.ContextWindow,
-		Logger:                cfg.Logger,
-		MaxRetries:            cfg.MaxRetries,
-		MaxParallelTools:      cfg.MaxParallelTools,
-		Stream:                cfg.Stream,
-		Temperature:           cfg.Temperature,
-		CacheRetention:        cfg.CacheRetention,
-		CaptureProviderFrames: cfg.CaptureProviderFrames,
-		Bus:                   cfg.Bus,
-		Hooks:                 cfg.Hooks,
-		AgentName:             name,
-		ParentSessionID:       cfg.SessionID,
-		ParentToolCallID:      parentToolCallID,
-		Delegation:            detail,
-	})
 }
 
 // EmitStatus emits an AOP status event on the agent's session. Used by

@@ -14,6 +14,20 @@ Session 保留对话和运行状态，使下一次输入可以继续使用历史
 
 取消受理不代表执行已经退出。正常取消的 `TurnEnded` 由 Runtime 在执行结束后发布，携带最终 usage 和错误；Web 只在派发失败、断连或自身停止等待时提供兜底终态。
 
+Scanner 将 verify/sniper 注册到 subagent 扩展唯一的 `Subagent` Point，通过注入的 Worker 按名称同步执行，独立 CLI 不需要创建 Runtime Session。调用来自 Agent 或 Session 命令时继承当前模型快照，否则使用 Profile 配置。它与普通 subagent 共用 `Config.ForTask`，隔离历史、Inbox、调度器和事件计数；scan 返回前等待子任务退出，调用取消或所属 Profile 关闭会取消子任务。AOP 中的子任务 Session/Turn 事件仅用于委派追踪，不注册对话队列、IOA 接收器或后台续跑。
+
+## Subagent 委派
+
+subagent 是可选扩展，不属于 Agent 配置或 Session 内建工具。`subagentext.New()` 拥有唯一的
+`resource.Point[subagent.Subagent]`；`NewTools()` 借用该 Point 和 Session Runtime 安装统一工具。
+注册名 `name` 可选：省略执行匿名任务，具名执行注册的 Prepare。`label` 标识本次运行的可读名称，
+`session_id` 用于唯一定位与取消。`catalog` 列出当前定义，`list` 列出运行实例。
+
+具名定义可以在运行时增加与撤销。租约覆盖准备、执行和收尾，撤销取消关联任务并等待排空，
+之后才允许同名注册。Session 仅提供通用附属会话、单任务模式与关闭完成回调；
+subagent 在最终记录之后发送完成通知、释放父 inbox producer。完整职责与调用约定见
+[Subagent 扩展](../../pkg/exts/subagent/README.md)。
+
 ## 标准循环
 
 1. 检查 Provider 和执行上下文，解析本次 Run 的 system prompt，再执行 `BeforeRun` hook。

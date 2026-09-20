@@ -1,15 +1,17 @@
-package session
+package sessionexec
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/agent"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/subagent"
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
@@ -28,12 +30,38 @@ func TestSubAgentSyncReturnsResult(t *testing.T) {
 	ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(context.Background(), parent.Cfg), operation.Invocation{CallID: "spawn-sync"})
 
 	tool := newSubagentTestTool(t, parent.Cfg)
-	result, err := tool.Execute(ctx, `{"action":"create","mode":"sync","name":"worker","prompt":"do the work"}`)
+	result, err := tool.Execute(ctx, `{"action":"create","mode":"sync","label":"worker","prompt":"do the work"}`)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got := coretool.ResultText(result); !strings.Contains(got, `name="worker" session_id="`) || !strings.Contains(got, "child result") {
+	if got := coretool.ResultText(result); !strings.Contains(got, `label="worker" session_id="`) || !strings.Contains(got, "child result") {
 		t.Fatalf("result = %q", got)
+	}
+}
+
+func TestSubagentMessagesBelongToChild(t *testing.T) {
+	bus := coreevents.New()
+	var messages []*aop.Event
+	bus.Observe(coreevents.ObserverFunc(func(ev *aop.Event) {
+		if ev.GetMessage() != nil {
+			messages = append(messages, ev)
+		}
+	}))
+	parent := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{}, Bus: bus, SessionID: "parent", AgentName: "parent",
+		Provider: &scriptedProvider{responses: []*agent.ChatCompletionResponse{chatResponse(newTextMessage("assistant", "child result"))}},
+	})
+	tool := newSubagentTestTool(t, parent.Cfg)
+	ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
+	if _, err := tool.Execute(ctx, `{"mode":"sync","label":"child","prompt":"work"}`); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("missing child messages")
+	}
+	for _, ev := range messages {
+		if ev.SessionId == "parent" || ev.Emitter != "child" {
+			t.Fatalf("child message uses parent emitter: %v", ev)
+		}
 	}
 }
 
@@ -41,7 +69,7 @@ func TestSubAgentCreateRequiresExecutingAgentContext(t *testing.T) {
 
 	tool := newSubagentTestTool(t, agent.Config{})
 
-	_, err := tool.Execute(context.Background(), `{"action":"create","mode":"sync","name":"worker","prompt":"work"}`)
+	_, err := tool.Execute(context.Background(), `{"action":"create","mode":"sync","label":"worker","prompt":"work"}`)
 	if err == nil || err.Error() != "subagent create requires the executing agent context" {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -56,7 +84,7 @@ func TestSubAgentCreateRequiresSpawningToolCallID(t *testing.T) {
 
 	tool := newSubagentTestTool(t, parent.Cfg)
 
-	_, err := tool.Execute(agent.ContextWithToolAgentConfig(context.Background(), parent.Cfg), `{"action":"create","mode":"sync","name":"worker","prompt":"work"}`)
+	_, err := tool.Execute(agent.ContextWithToolAgentConfig(context.Background(), parent.Cfg), `{"action":"create","mode":"sync","label":"worker","prompt":"work"}`)
 	if err == nil || err.Error() != "subagent create requires the spawning tool call id" {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -88,7 +116,7 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 	ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(context.Background(), active.Cfg), operation.Invocation{CallID: "spawn-context"})
 
 	tool := newSubagentTestTool(t, active.Cfg)
-	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","name":"context-worker","prompt":"work"}`); err != nil {
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","label":"context-worker","prompt":"work"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -151,7 +179,7 @@ func TestSubAgentAsyncOutlivesInvocationContext(t *testing.T) {
 
 	tool := newSubagentTestTool(t, active.Cfg)
 
-	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","name":"bg-worker","prompt":"work"}`); err != nil {
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"async","label":"bg-worker","prompt":"work"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
@@ -191,7 +219,7 @@ func TestSubAgentForkInheritsParentConversation(t *testing.T) {
 	ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(context.Background(), cfg), operation.Invocation{CallID: "spawn-fork"})
 
 	tool := newSubagentTestTool(t, cfg)
-	if _, err := tool.Execute(ctx, `{"action":"create","mode":"fork","name":"forker","prompt":"continue"}`); err != nil {
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"fork","label":"forker","prompt":"continue"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
@@ -236,7 +264,7 @@ func TestSubAgentInheritsParentSystemPrompt(t *testing.T) {
 	ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(context.Background(), parent.Cfg), operation.Invocation{CallID: "spawn-prompt"})
 
 	tool := newSubagentTestTool(t, parent.Cfg)
-	if _, err := tool.Execute(ctx, `{"action":"create","mode":"sync","name":"worker","prompt":"do the work"}`); err != nil {
+	if _, err := tool.Execute(ctx, `{"action":"create","mode":"sync","label":"worker","prompt":"do the work"}`); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
@@ -282,9 +310,15 @@ func TestSubagentModelOverrideAndPanicUseSessionCleanup(t *testing.T) {
 			return &agent.Result{Output: "done", Stop: agent.StopReasonCompleted}, nil
 		})})
 		tool := newSubagentTestTool(t, parent.Cfg)
-		tool.resolve = func(string) (AgentType, error) { return AgentType{Model: "child-model"}, nil }
+		_, registerErr := tool.registry.Add(subagent.Subagent{Name: "worker", Prepare: func(_ context.Context, cfg agent.Config, _ subagent.Input) (agent.Config, string, error) {
+			cfg.Model = "child-model"
+			return cfg, "task", nil
+		}})
+		if registerErr != nil {
+			t.Fatal(registerErr)
+		}
 		ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
-		_, err := tool.Execute(ctx, `{"mode":"sync","type":"worker","prompt":"task"}`)
+		_, err := tool.Execute(ctx, `{"mode":"sync","name":"worker","prompt":"task"}`)
 		if (err != nil) != panicLoop {
 			t.Fatalf("panic=%v error=%v", panicLoop, err)
 		}
@@ -307,7 +341,7 @@ func TestSubagentKillAndParentCloseUseSessionState(t *testing.T) {
 		})})
 		tool := newSubagentTestTool(t, parent.Cfg)
 		ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
-		if _, err := tool.Execute(ctx, `{"mode":"async","name":"child","prompt":"task"}`); err != nil {
+		if _, err := tool.Execute(ctx, `{"mode":"async","label":"child","prompt":"task"}`); err != nil {
 			t.Fatal(err)
 		}
 		<-started
@@ -315,7 +349,13 @@ func TestSubagentKillAndParentCloseUseSessionState(t *testing.T) {
 			t.Fatal("active session missing")
 		}
 		if kill {
-			if _, err := tool.kill("child"); err != nil {
+			tool.mu.Lock()
+			var id string
+			for sessionID := range tool.runs {
+				id = sessionID
+			}
+			tool.mu.Unlock()
+			if _, err := tool.kill(id); err != nil {
 				t.Fatal(err)
 			}
 			wait, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -323,7 +363,7 @@ func TestSubagentKillAndParentCloseUseSessionState(t *testing.T) {
 			if !parent.Cfg.Inbox.Wait(wait) {
 				t.Fatal("no kill completion")
 			}
-		} else if err := tool.runtime.CloseSession(t.Context(), parent.SessionID(), SessionCloseCanceled); err != nil {
+		} else if err := tool.runtime.CloseSession(t.Context(), parent.SessionID(), session.SessionCloseCanceled); err != nil {
 			t.Fatal(err)
 		}
 		if tool.list() != "No subagents running." {

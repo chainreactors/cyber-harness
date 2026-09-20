@@ -1001,7 +1001,7 @@ func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	childConfig := rt.agentConfig.WithModel("child-model")
-	child, err := rt.OpenSession(t.Context(), SessionOptions{ID: "child", ParentSessionID: session.ID(), agentConfig: &childConfig})
+	child, err := rt.OpenSession(t.Context(), SessionOptions{ID: "child", ParentSessionID: session.ID(), Config: &childConfig})
 	if err != nil {
 		t.Fatal(err)
 	}

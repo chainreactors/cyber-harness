@@ -942,7 +942,7 @@ func TestCacheConfigInheritance(t *testing.T) {
 		SessionID:      "parent-session-123",
 	}
 
-	child := NewAgent(parentCfg).Derive()
+	child := NewAgent(parentCfg.ForTask("child", "", nil))
 
 	if child.Cfg.CacheRetention != CacheShort {
 		t.Errorf("child CacheRetention = %q, want %q", child.Cfg.CacheRetention, CacheShort)

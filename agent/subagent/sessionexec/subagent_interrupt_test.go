@@ -1,13 +1,13 @@
-package session
+package sessionexec
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/agent"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
@@ -57,7 +57,7 @@ func TestInboxInterruptSubagentReturnsOnlyAfterContinuation(t *testing.T) {
 	parent := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{}, Provider: llm, Model: "test", Hooks: reg, SessionID: "parent"})
 
 	tool := newSubagentTestTool(t, parent.Cfg)
-	defer tool.runtime.close(context.Background())
+	defer tool.closeRuntime(context.Background())
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	ctx = operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(ctx, parent.Cfg), operation.Invocation{CallID: "spawn"})

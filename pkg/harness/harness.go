@@ -22,6 +22,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -58,6 +59,9 @@ func New(config Config) (*Harness, error) {
 	if err != nil {
 		return nil, err
 	}
+	if config.Session != nil {
+		entries = append(entries, subagentext.New())
+	}
 	entries = append(entries, config.Extensions...)
 
 	h := &Harness{}
@@ -66,7 +70,7 @@ func New(config Config) (*Harness, error) {
 		if session.Loop == nil {
 			session.Loop = agent.StandardLoop{}
 		}
-		entries = append(entries, loopext.New(session.Loop), sessionext.New(session))
+		entries = append(entries, loopext.New(session.Loop), sessionext.New(session), subagentext.NewTools())
 	}
 	// The final consumer reads the capabilities assembled by the graph. This
 	// keeps ownership in the extensions while giving an embedded host a small,

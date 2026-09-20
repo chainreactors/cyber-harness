@@ -18,9 +18,11 @@ import (
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
+	"github.com/chainreactors/cyber/agent/subagent"
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 
@@ -36,13 +38,21 @@ type Config struct {
 }
 
 type Extension struct {
-	config  Config
-	workDir string
-	engines *engine.Set
+	config        Config
+	workDir       string
+	engines       *engine.Set
+	executionOnly bool
 }
 
 func New(config Config, workDir string) *Extension {
 	return &Extension{config: config, workDir: workDir}
+}
+
+// NewExecution installs scanner commands without borrowing model, prompt, skills,
+// or agent-loop resources. Engine ownership and command construction are shared
+// with the AI-enhanced distribution.
+func NewExecution(config Config, workDir string) *Extension {
+	return &Extension{config: config, workDir: workDir, executionOnly: true}
 }
 
 func (e *Extension) Load(scope *extension.Scope) error {
@@ -53,39 +63,8 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	providers, err := extension.Use[*provider.State](scope)
-	if err != nil {
-		return err
-	}
 	endpoint, err := extension.Use[egress.Endpoint](scope)
 	if err != nil {
-		return err
-	}
-	tools, err := extension.Use[coretool.Executor](scope)
-	if err != nil {
-		return err
-	}
-	commandRegistry, err := extension.Use[coretool.CommandExecutor](scope)
-	if err != nil {
-		return err
-	}
-	bash, err := extension.Use[*terminaltool.BashTool](scope)
-	if err != nil {
-		return err
-	}
-	store, err := extension.Use[*skills.Store](scope)
-	if err != nil {
-		return err
-	}
-	loop, err := extension.Use[agent.Loop](scope)
-	if err != nil {
-		return err
-	}
-	promptResolver, err := extension.Use[prompt.Resolver](scope)
-	if err != nil {
-		return err
-	}
-	if err := extension.Add(scope, scannerPromptContribution()); err != nil {
 		return err
 	}
 	stream, err := extension.Use[*events.Stream](scope)
@@ -109,9 +88,60 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 
 	var options []scan.Option
-	model, providerConfig := providers.Current()
-	if model != nil {
-		parent := agent.NewAgent(agent.Config{
+	if !e.executionOnly {
+		providers, err := extension.Use[*provider.State](scope)
+		if err != nil {
+			return err
+		}
+		tools, err := extension.Use[coretool.Executor](scope)
+		if err != nil {
+			return err
+		}
+		commandRegistry, err := extension.Use[coretool.CommandExecutor](scope)
+		if err != nil {
+			return err
+		}
+		bash, err := extension.Use[*terminaltool.BashTool](scope)
+		if err != nil {
+			return err
+		}
+		store, err := extension.Use[*skills.Store](scope)
+		if err != nil {
+			return err
+		}
+		hookRegistry, err := extension.Use[*hooks.Registry](scope)
+		if err != nil {
+			return err
+		}
+		loop, err := extension.Use[agent.Loop](scope)
+		if err != nil {
+			return err
+		}
+		promptResolver, err := extension.Use[prompt.Resolver](scope)
+		if err != nil {
+			return err
+		}
+		if err := extension.Add(scope, scannerPromptContribution()); err != nil {
+			return err
+		}
+		executor, err := extension.Use[subagent.Executor](scope)
+		if err != nil {
+			return err
+		}
+		readSkill := func(name string) string {
+			content, ok, err := store.ReadVirtual("cyber://skills/scan/" + name + ".md")
+			if !ok || err != nil {
+				return ""
+			}
+			return content
+		}
+		if err := extension.Add(scope, scannerSubagents(readSkill)...); err != nil {
+			return err
+		}
+		model, providerConfig := providers.Current()
+		config := agent.Config{
+			Lifetime:       scope.Lifetime(),
+			Hooks:          hookRegistry,
 			Loop:           loop,
 			Provider:       model,
 			Tools:          tools,
@@ -121,20 +151,17 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			Logger:         logger,
 			Bus:            stream,
 			PromptResolver: promptResolver,
-		})
-		options = append(options,
-			scan.WithParent(parent),
-			scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-				return collectDeepBrowserArtifacts(ctx, commandRegistry, bash, targetURL, logger)
-			}),
-		)
-		options = append(options, scan.WithSkillReader(func(name string) string {
-			content, ok, err := store.ReadVirtual("cyber://skills/scan/" + name + ".md")
-			if !ok || err != nil {
-				return ""
-			}
-			return content
-		}))
+		}
+		options = append(options, scan.WithWorker(scannerWorker(executor, config)))
+		if model != nil {
+			options = append(options,
+				scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
+					return collectDeepBrowserArtifacts(ctx, commandRegistry, bash, targetURL, logger)
+				}),
+			)
+		}
+	} else {
+		options = append(options, scan.WithExecutionOnly())
 	}
 	options = append(options, scan.WithLogger(logger))
 
@@ -180,7 +207,10 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		values = append(values, command)
 	}
 	values = append(values, manifestScannerCommands(stream, e.engines, logger, proxyURL)...)
-	return extension.Add(scope, values...)
+	if err := extension.Add(scope, values...); err != nil {
+		return err
+	}
+	return extension.Provide[*Availability](scope, availability(values, e.engines))
 }
 
 func (e *Extension) Close(context.Context) error {

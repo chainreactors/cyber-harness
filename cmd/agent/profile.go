@@ -14,10 +14,10 @@ import (
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	harness "github.com/chainreactors/cyber/pkg/harness"
-
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
+	harness "github.com/chainreactors/cyber/pkg/harness"
 )
 
 type agentProfile struct {
@@ -53,7 +53,7 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	p := &agentProfile{}
 	values = append(values,
 		loop,
-		sessionext.New(sessionConfig),
+		subagentext.New(), sessionext.New(sessionConfig), subagentext.NewTools(),
 		tuiext.New(),
 		sessionext.NewConsole(),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {

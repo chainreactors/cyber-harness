@@ -1,42 +1,74 @@
-package session
+package sessionexec
 
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/inbox"
-	aop "github.com/chainreactors/cyber/aop"
-	coreevents "github.com/chainreactors/cyber/core/events"
-	coretool "github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"sync"
 	"testing"
+
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/subagent"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 )
 
-func newSubagentTestTool(t *testing.T, cfg agent.Config) *SubAgentTool {
+type testTool struct {
+	*Tool
+	registry     *subagent.Registry
+	closeRuntime func(context.Context) error
+}
+
+func newSubagentTestTool(t *testing.T, cfg agent.Config) *testTool {
 	t.Helper()
 	base := cfg.Lifetime
 	if base == nil {
 		base = t.Context()
 	}
-	ctx, cancel := context.WithCancel(base)
-	events, _ := cfg.Bus.(*coreevents.Stream)
-	if events == nil {
-		events = coreevents.New()
+	stream, _ := cfg.Bus.(*coreevents.Stream)
+	application := apptest.NewFixture(t, cfg.Logger, stream)
+	application.Providers.Set(cfg.Provider, agent.ProviderConfig{Model: cfg.Model})
+	values := apptest.Entries(t, application)
+	registry := cfg.Hooks
+	if registry == nil {
+		registry = hooks.New()
 	}
-	rt := &Runtime{ctx: ctx, cancel: cancel, loaded: true, agentConfig: cfg, events: events, sessions: make(map[string]*sessionState), runs: make(map[string]*Run)}
-	if cfg.Inbox == nil {
-		cfg.Inbox = inbox.NewBuffered(64)
+	values[0] = extension.Provided[*hooks.Registry](registry)
+	loop := cfg.Loop
+	if loop == nil {
+		loop = agent.NoLoop()
 	}
-	parent, err := rt.OpenSession(ctx, SessionOptions{ID: cfg.SessionID})
-	if err != nil {
+	se := sessionext.New(session.Config{})
+	values = append(values, promptext.New(), loopext.New(loop), se)
+	hosttest.Load(t, t.Context(), values...)
+	rt := se.Runtime()
+	if _, err := rt.OpenSession(base, session.SessionOptions{ID: cfg.SessionID, SingleTask: true}); err != nil {
 		t.Fatal(err)
 	}
-	parent.state.inbox.base = cfg.Inbox
-	parent.state.inbox.active = true
-	rt.hooks = cfg.Hooks
-	t.Cleanup(func() { _ = rt.close(context.Background()) })
-	return NewSubAgentTool(rt, nil)
+	definitions := subagent.NewRegistry()
+	if err := definitions.Activate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := definitions.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	tool := New(rt, definitions, base)
+	t.Cleanup(func() {
+		if err := tool.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return &testTool{Tool: tool, registry: definitions, closeRuntime: se.Close}
 }
 
 type scriptedProvider struct {

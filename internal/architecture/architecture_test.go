@@ -65,6 +65,15 @@ func TestRuntimeDependencies(t *testing.T) {
 			if imported == module+"pkg/app" || imported == module+"pkg/exts/app" {
 				t.Errorf("%s imports removed App package", relative)
 			}
+			if !strings.HasSuffix(path, "_test.go") {
+				directory := filepath.ToSlash(filepath.Dir(relative))
+				if (directory == "agent" || directory == "agent/session") && strings.HasPrefix(imported, module+"agent/subagent") {
+					t.Errorf("%s depends on optional subagent capability", relative)
+				}
+				if strings.HasPrefix(relative, "tools/scan/") && (strings.HasPrefix(imported, module+"agent/subagent") || imported == module+"agent/session") {
+					t.Errorf("%s bypasses the injected scanner Worker", relative)
+				}
+			}
 			if !runtime {
 				continue
 			}
@@ -102,13 +111,14 @@ type installationRule struct {
 }
 
 var installationRules = map[string][]installationRule{
-	"agent":            {{"pkg/exts/native", []string{"NewSubAgentTool"}}},
-	"agent/session":    {{"pkg/exts/session", []string{"NewResource", "Resource"}}},
-	"agent/provider":   {{"pkg/exts/provider", []string{"Initialize"}}},
-	"agent/prompt":     {{"pkg/exts/prompt", []string{"NewRegistry"}}},
-	"agent/skills":     {{"pkg/exts/skills", []string{"NewStore", "LoadAll", "LoadFrom"}}},
-	"tools/ioa":        {{"pkg/exts/ioa/client/extension.go", []string{"New", "Resource"}}},
-	"tools/ioa/server": {{"pkg/exts/ioa/server/extension.go", []string{"New", "Resource"}}},
+	"agent/subagent":             {{"pkg/exts/subagent", []string{"NewRegistry"}}},
+	"agent/subagent/sessionexec": {{"pkg/exts/subagent", []string{"New"}}},
+	"agent/session":              {{"pkg/exts/session", []string{"NewResource", "Resource"}}},
+	"agent/provider":             {{"pkg/exts/provider", []string{"Initialize"}}},
+	"agent/prompt":               {{"pkg/exts/prompt", []string{"NewRegistry"}}},
+	"agent/skills":               {{"pkg/exts/skills", []string{"NewStore", "LoadAll", "LoadFrom"}}},
+	"tools/ioa":                  {{"pkg/exts/ioa/client/extension.go", []string{"New", "Resource"}}},
+	"tools/ioa/server":           {{"pkg/exts/ioa/server/extension.go", []string{"New", "Resource"}}},
 	"tools/terminal": {
 		{"pkg/exts/terminal", []string{"NewBashTool"}},
 		{"pkg/exts/tmux", []string{"NewTmuxCommand"}},
