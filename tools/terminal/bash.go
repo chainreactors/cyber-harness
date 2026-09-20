@@ -76,6 +76,7 @@ type BashTool struct {
 	containment    ProcessContainment
 	maxTimeout     time.Duration
 	closeOnce      sync.Once
+	monitored      sync.Map // tmux session ID -> notification already installed
 }
 
 func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashTool {
@@ -217,7 +218,7 @@ func (t *BashTool) Description() string {
 
 type BashArgs struct {
 	Command string `json:"command" jsonschema:"description=The command to execute. For shell commands: any valid sh command. For pseudo-commands (scan, gogo, tmux, etc.): pass them directly here."`
-	Wait    int    `json:"wait,omitempty" jsonschema:"minimum=0,description=Foreground wait in seconds. 0 waits until completion. A positive value moves a still-running command to background after that many seconds without canceling it."`
+	Wait    int    `json:"wait,omitempty" jsonschema:"minimum=0,description=Foreground wait in seconds. 0 waits until completion unless interrupted by Inbox. A positive value moves a still-running command to background after that many seconds without canceling it. Interruption also releases the wait; the same tmux session continues."`
 	Timeout int    `json:"timeout,omitempty" jsonschema:"minimum=0,description=Maximum total command runtime in seconds. 0 means unlimited when explicitly provided. Omit to use the default (600s). The timeout continues to apply after a command moves to background."`
 
 	timeoutSet bool
@@ -702,6 +703,15 @@ func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 
 func (t *BashTool) waitOrBackground(execution *coretool.Execution, ctx context.Context, targetInbox inbox.Inbox, wait time.Duration) *coretool.Result {
 	done := t.tasks.Done(execution.ID)
+	var interrupt <-chan struct{}
+	if targetInbox != nil {
+		interrupt = targetInbox.InterruptSignal()
+	}
+	// Explicit tmux waits handle their target themselves. Do not background the
+	// short-lived command wrapper as well as the session it is waiting for.
+	if execution.Command == "tmux" {
+		interrupt = nil
+	}
 	var waitTimer *time.Timer
 	var waitDone <-chan time.Time
 	if wait > 0 {
@@ -713,19 +723,35 @@ func (t *BashTool) waitOrBackground(execution *coretool.Execution, ctx context.C
 	case <-done:
 		return t.collectResult(execution)
 	case <-waitDone:
-		info, ok := t.tasks.Get(execution.ID)
-		if !ok {
+		return t.background(execution, targetInbox, fmt.Sprintf("after waiting %s", wait))
+	case <-interrupt:
+		if ctx.Err() != nil {
+			_ = execution.Kill()
+			<-done
 			return t.collectResult(execution)
 		}
-		t.startMonitor(info, targetInbox)
-		return coretool.TextResult(fmt.Sprintf(
-			"Command moved to background after waiting %s. It is still running.\nsession id=%s name=%s\nCompletion will be delivered automatically. Use `tmux kill -t %s` to stop.",
-			wait, info.ID, info.Name, info.ID))
+		return t.background(execution, targetInbox, "because an interrupting Inbox message arrived")
 	case <-ctx.Done():
 		_ = execution.Kill()
 		<-done
 		return t.collectResult(execution)
 	}
+}
+
+func (t *BashTool) background(execution *coretool.Execution, targetInbox inbox.Inbox, reason string) *coretool.Result {
+	info, ok := t.tasks.Get(execution.ID)
+	if !ok || info.State != proc.StateRunning {
+		return t.collectResult(execution)
+	}
+	if !execution.DetachParent() {
+		// The owner already canceled; do not claim a canceled process survives.
+		<-t.tasks.Done(execution.ID)
+		return t.collectResult(execution)
+	}
+	t.startMonitor(info, targetInbox)
+	return coretool.TextResult(fmt.Sprintf(
+		"Command moved to background %s. It is still managed by tmux.\nsession id=%s name=%s\nUse `tmux capture-pane -t %s` to inspect output or `tmux kill-session -t %s` to stop. Completion is delivered to the calling Inbox when present.",
+		reason, info.ID, info.Name, info.ID, info.ID))
 }
 
 func (t *BashTool) collectResult(execution *coretool.Execution) *coretool.Result {
@@ -815,6 +841,9 @@ func (t *BashTool) proxyEnv(ctx context.Context) []string {
 
 func (t *BashTool) startMonitor(info proc.Info, targetInbox inbox.Inbox) {
 	if targetInbox == nil {
+		return
+	}
+	if _, loaded := t.monitored.LoadOrStore(info.ID, struct{}{}); loaded {
 		return
 	}
 	producer := targetInbox.RegisterProducer("bash:" + info.ID)

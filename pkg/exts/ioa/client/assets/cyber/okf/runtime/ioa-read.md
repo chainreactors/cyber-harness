@@ -1,22 +1,17 @@
 ---
 type: Tool Playbook
 title: ioa read
-description: Read addressed, recent, or threaded messages from the current IOA collaboration space with cursor and limit controls.
+description: Recover earlier messages or a reply thread from the shared IOA history.
 tags: [runtime, collaboration, ioa]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---
 
-# ioa read — Collaboration Inbox
+# ioa read — Shared History
 
-`ioa read` retrieves messages from the current IOA space — addressed by
-default, `--all` for everything, `--message` for thread context, `--after` for
-cursor updates, `--listen` for a live stream.
+`ioa read --all --after ID` recovers messages after a known message. Omit `--after`
+for initial history, or use `--message ID` for a thread. New messages already arrive
+automatically: call `inbox_wait` to wait, without polling or extra listeners.
 
-See the ioa skill (`cyber://skills/ioa/SKILL.md`) for message formats and coordination rules.
-
-## Related concepts
-
-- Read messages from the context selected by [ioa space](ioa-space.md) and
-  reply or publish checkpoints with [ioa send](ioa-send.md).
-- Agent messages may carry results from the [scan pipeline](/easm/scan.md).
+Add `--limit N` to bound the result. Without `--all`, only messages addressed to
+your node are returned. `ioa read --help` lists the remaining options.

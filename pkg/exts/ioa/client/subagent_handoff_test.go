@@ -66,7 +66,7 @@ func TestHandoffAndSessionRouting(t *testing.T) {
 			}
 			select {
 			case m := <-got:
-				if m.Meta["message_id"] != msg.ID || m.Origin != inbox.OriginPeer {
+				if m.Meta["message_id"] != msg.ID || m.Origin != inbox.OriginPeer || m.Interrupt {
 					t.Fatalf("input: %#v", m)
 				}
 			case <-ctx.Done():
@@ -81,6 +81,18 @@ func TestHandoffAndSessionRouting(t *testing.T) {
 			default:
 			}
 			ev.Output = "result"
+			urgent, err := client.Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": "correct course"}, Refs: &protocols.Ref{Nodes: []string{client.NodeID()}}, Meta: map[string]any{"source_session_id": "sibling", "target_session_id": "worker", "interrupt": true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case m := <-got:
+				if !m.Interrupt || m.Meta["message_id"] != urgent.ID {
+					t.Fatalf("interrupt mapping: %#v", m)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
 			ev.Stop = agenthooks.StopReasonCompleted
 			if _, err = agenthooks.SessionEnd.Emit(ctx, reg, ev); err != nil {
 				t.Fatal(err)
@@ -89,15 +101,19 @@ func TestHandoffAndSessionRouting(t *testing.T) {
 				t.Fatal(err)
 			}
 			history, err = client.Read(ctx, space, protocols.ReadOptions{All: true})
-			if err != nil || len(history) != 3 {
+			if err != nil || len(history) != 4 {
 				t.Fatalf("history: %v %v", history, err)
 			}
-			if history[2].Refs.Messages[0] != history[0].ID || history[2].Content["message"] != "result" {
-				t.Fatalf("return: %#v", history[2])
+			if history[3].Refs.Messages[0] != history[0].ID || history[3].Content["message"] != "result" {
+				t.Fatalf("return: %#v", history[3])
 			}
 			msg.ID = "late"
 			if err = e.deliver(ctx, msg); err == nil {
 				t.Fatal("closed task still receives")
+			}
+			urgent.ID = "late-name"
+			if err = e.deliver(ctx, urgent); err == nil {
+				t.Fatal("closed name still receives")
 			}
 		})
 	}
@@ -117,7 +133,7 @@ func TestRoutingRejectsOtherNodesAndAmbiguousDefaults(t *testing.T) {
 	defer set.Close(context.Background())
 	got := make(chan inbox.Message, 2)
 	for _, id := range []string{"one", "two"} {
-		_, err = agenthooks.SessionStart.Emit(t.Context(), reg, agenthooks.SessionEvent{SessionID: id, Deliver: func(_ context.Context, m inbox.Message) error { got <- m; return nil }})
+		_, err = agenthooks.SessionStart.Emit(t.Context(), reg, agenthooks.SessionEvent{SessionID: id, AgentName: "worker", Deliver: func(_ context.Context, m inbox.Message) error { got <- m; return nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,6 +152,26 @@ func TestRoutingRejectsOtherNodesAndAmbiguousDefaults(t *testing.T) {
 	if err = e.deliver(t.Context(), msg); err == nil {
 		t.Fatal("ambiguous broadcast accepted")
 	}
+	msg.Meta = map[string]any{"target_session_id": "worker"}
+	if err = e.deliver(t.Context(), msg); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous name accepted: %v", err)
+	}
+	msg.Meta["target_session_id"] = "one"
+	e.mu.Lock()
+	e.routes["two"].start.AgentName = "one"
+	e.mu.Unlock()
+	if err = e.deliver(t.Context(), msg); err != nil {
+		t.Fatalf("ID must take precedence over another session's name: %v", err)
+	}
+	<-got
+	if _, err = agenthooks.SessionEnd.Emit(t.Context(), reg, agenthooks.SessionEvent{SessionID: "one"}); err != nil {
+		t.Fatal(err)
+	}
+	msg.ID = "remaining-name"
+	if err = e.deliver(t.Context(), msg); err != nil {
+		t.Fatalf("remaining unique name: %v", err)
+	}
+	<-got
 }
 
 func TestSpaceSwitchMovesSubscriptionButKeepsDispatchReference(t *testing.T) {

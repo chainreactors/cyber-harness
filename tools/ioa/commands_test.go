@@ -227,7 +227,7 @@ func TestSendReply(t *testing.T) {
 	}
 }
 
-func TestSendUnknownProtocol(t *testing.T) {
+func TestSendPositionalRecipientWithJSON(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
@@ -236,8 +236,8 @@ func TestSendUnknownProtocol(t *testing.T) {
 	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"nosuchproto", "--content", `{"content":"x"}`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown subcommand or argument") {
-		t.Fatalf("expected unknown protocol error, got: %v", err)
+	if err != nil || client.lastSentBody.Meta["target_session_id"] != "nosuchproto" {
+		t.Fatalf("expected positional recipient, got: %v", err)
 	}
 }
 
@@ -264,17 +264,17 @@ func TestSendWithoutContent(t *testing.T) {
 	}
 }
 
-func TestSendUnknownSubcommand(t *testing.T) {
+func TestSendRejectsUnknownOption(t *testing.T) {
 	client := newFakeIOAClient(protocols.SpaceInfo{ID: knownSpaceID, Name: "my-space"})
 	cmds := NewCommands(client, "tester", nil)
 	joinSpace(t, cmds)
 
 	testOutput.Reset(nil)
 	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
-		"bogus", "--content", `{"content":"x"}`,
+		"white", "--bogus", "x", "--content", `{"content":"x"}`,
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown subcommand or argument") {
-		t.Fatalf("expected unknown subcommand error, got: %v", err)
+	if err == nil {
+		t.Fatal("unknown option accepted")
 	}
 }
 
@@ -755,11 +755,83 @@ func TestSendAddsSessionProvenance(t *testing.T) {
 	if m.Meta["source_session_id"] != "source" || m.Meta["target_session_id"] != "child" || len(m.Refs.Nodes) != 1 || m.Refs.Nodes[0] != nodeID {
 		t.Fatalf("provenance: %#v", m)
 	}
-	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"handoff", "--target-session=child", "--title", "task", "--message", "work"}); err != nil {
+	if m.Meta["interrupt"] != nil {
+		t.Fatal("ordinary send requests interruption")
+	}
+	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"handoff", "--target-session=child", "--interrupt", "--title", "task", "--message", "work"}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
-	if err != nil || len(messages) != 2 || messages[1].Meta["source_session_id"] != "source" {
+	if err != nil || len(messages) != 2 || messages[1].Meta["source_session_id"] != "source" || messages[1].Meta["interrupt"] != true {
 		t.Fatalf("typed send: %v %v", messages, err)
+	}
+}
+
+func TestSendShortForm(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		args      []string
+		text      string
+		interrupt bool
+		invalid   bool
+	}{
+		{name: "plain", args: []string{"white", "第 2 手 F4"}, text: "第 2 手 F4"},
+		{name: "quoted JSON text", args: []string{"white", `a "quote" and {JSON}`}, text: `a "quote" and {JSON}`},
+		{name: "interrupt", args: []string{"white", "change course", "--interrupt"}, text: "change course", interrupt: true},
+		{name: "JSON", args: []string{"white", "--content", `{"text":"hello"}`}, text: "hello"},
+		{name: "protocol name as recipient", args: []string{"handoff", "hello"}, text: "hello"},
+		{name: "flag text in JSON", args: []string{"white", "--content", `{"text":"--interrupt"}`}, text: "--interrupt"},
+		{name: "missing text", args: []string{"white"}, invalid: true},
+		{name: "empty recipient", args: []string{"", "hello"}, invalid: true},
+		{name: "two targets", args: []string{"white", "hello", "--target-session", "black"}, invalid: true},
+		{name: "extra text", args: []string{"white", "hello", "extra"}, invalid: true},
+		{name: "empty legacy target", args: []string{"--target-session=", "--content", `{"text":"hello"}`}, invalid: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := New(Config{}, nil)
+			if err := resource.Start(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer resource.Close(context.Background())
+			ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{SessionID: "black"})
+			err := findSubCmd(t, resource.Service.Commands(), "send").Execute(ctx, tt.args)
+			if tt.invalid {
+				if err == nil {
+					t.Fatal("invalid send accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages, err := resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
+			if err != nil || len(messages) != 1 {
+				t.Fatalf("messages: %v %v", messages, err)
+			}
+			m := messages[0]
+			urgent, _ := m.Meta["interrupt"].(bool)
+			if m.Content["text"] != tt.text || m.Meta["target_session_id"] != tt.args[0] || m.Meta["source_session_id"] != "black" || urgent != tt.interrupt {
+				t.Fatalf("wrong message: %#v", m)
+			}
+		})
+	}
+}
+
+func TestSendProtocolBooleanAndHelp(t *testing.T) {
+	resource := New(Config{}, nil)
+	if err := resource.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer resource.Close(context.Background())
+	command := findSubCmd(t, resource.Service.Commands(), "send")
+	if err := command.Execute(t.Context(), []string{"swarm", "--task", "--interrupt", "--target-session", "worker", "--content=--interrupt"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := resource.Service.Client().Read(t.Context(), resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
+	if err != nil || len(rows) != 1 || rows[0].Meta["interrupt"] != true || rows[0].Content["content"] != "--interrupt" {
+		t.Fatalf("protocol flags: %v %v", rows, err)
+	}
+	if err := command.Execute(t.Context(), []string{"handoff", "--help"}); err != nil {
+		t.Fatal(err)
 	}
 }

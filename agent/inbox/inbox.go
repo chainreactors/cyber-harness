@@ -10,11 +10,13 @@ import (
 var (
 	ErrInboxClosed = errors.New("inbox closed")
 	ErrInboxFull   = errors.New("inbox full")
+	ErrInterrupted = errors.New("inbox interrupted")
 )
 
 type Inbox interface {
 	Push(msg Message) error
 	Drain() []Message
+	InterruptSignal() <-chan struct{}
 	Close()
 	Closed() bool
 	Len() int
@@ -35,12 +37,14 @@ func (h *ProducerHandle) Done() {
 }
 
 type Buffered struct {
-	mu        sync.Mutex
-	buf       []Message
-	capacity  int
-	closed    bool
-	notify    chan struct{}
-	producers map[string]struct{}
+	mu          sync.Mutex
+	buf         []Message
+	capacity    int
+	closed      bool
+	notify      chan struct{}
+	interrupt   chan struct{}
+	interrupted bool
+	producers   map[string]struct{}
 }
 
 func NewBuffered(capacity int) *Buffered {
@@ -51,6 +55,7 @@ func NewBuffered(capacity int) *Buffered {
 		buf:       make([]Message, 0, capacity),
 		capacity:  capacity,
 		notify:    make(chan struct{}),
+		interrupt: make(chan struct{}),
 		producers: make(map[string]struct{}),
 	}
 }
@@ -79,6 +84,10 @@ func (b *Buffered) Push(msg Message) error {
 	}
 	wasEmpty := len(b.buf) == 0
 	b.buf = append(b.buf, msg)
+	if msg.Interrupt && !b.interrupted {
+		b.interrupted = true
+		close(b.interrupt)
+	}
 	if wasEmpty {
 		b.wakeLocked()
 	}
@@ -109,6 +118,10 @@ func (b *Buffered) ActiveProducers() int {
 func (b *Buffered) Drain() []Message {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.interrupted {
+		b.interrupt = make(chan struct{})
+		b.interrupted = false
+	}
 	if len(b.buf) == 0 {
 		return nil
 	}
@@ -120,6 +133,15 @@ func (b *Buffered) Drain() []Message {
 		})
 	}
 	return out
+}
+
+// InterruptSignal remains closed until Drain consumes the admitted messages.
+// Obtain it after Drain, so delivery between draining and observing cannot be lost.
+// Closing the Inbox does not interrupt work; its owner controls task cancellation.
+func (b *Buffered) InterruptSignal() <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.interrupt
 }
 
 func needsSort(msgs []Message) bool {

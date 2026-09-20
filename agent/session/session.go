@@ -442,11 +442,12 @@ func (m *sessionMailbox) kickAutomatic() {
 	}
 }
 
-func (m *sessionMailbox) Drain() []inboxpkg.Message     { return m.base.Drain() }
-func (m *sessionMailbox) Close()                        { m.base.Close() }
-func (m *sessionMailbox) Closed() bool                  { return m.base.Closed() }
-func (m *sessionMailbox) Len() int                      { return m.base.Len() }
-func (m *sessionMailbox) Wait(ctx context.Context) bool { return m.base.Wait(ctx) }
+func (m *sessionMailbox) Drain() []inboxpkg.Message        { return m.base.Drain() }
+func (m *sessionMailbox) InterruptSignal() <-chan struct{} { return m.base.InterruptSignal() }
+func (m *sessionMailbox) Close()                           { m.base.Close() }
+func (m *sessionMailbox) Closed() bool                     { return m.base.Closed() }
+func (m *sessionMailbox) Len() int                         { return m.base.Len() }
+func (m *sessionMailbox) Wait(ctx context.Context) bool    { return m.base.Wait(ctx) }
 func (m *sessionMailbox) WaitWhileActive(ctx context.Context) bool {
 	return m.base.WaitWhileActive(ctx)
 }

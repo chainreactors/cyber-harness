@@ -56,7 +56,11 @@ func (e *CollaborationExtension) Load(scope *extension.Scope) error {
 	if err := extension.Add(scope, prompt.Contribution{
 		Name: "ioa.collaboration.prompt", Targets: []prompt.Target{prompt.MainSystem},
 		Apply: func(_ context.Context, document *prompt.Document, _ prompt.Context) error {
-			return document.After(prompt.SectionIdentity, "ioa.collaboration", prompt.Static("Use ioa send --target-session for ongoing agent communication; ioa read for prior context."))
+			return document.After(prompt.SectionIdentity, "ioa.collaboration", prompt.Static(`IOA is ready in the configured space.
+Send: ioa send <session-id-or-name> "message". Reply: add --ref-messages <message-id>.
+New messages arrive automatically; call inbox_wait to wait without ending the task.
+Recover history when needed: ioa read --all [--after <message-id>].
+Redirect current work: add --interrupt; running commands continue.`))
 		},
 	}); err != nil {
 		return err

@@ -35,6 +35,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		}, nil
 	})
 	e.subagent = subagent
+	if err := extension.Add[coretool.Tool](scope, &agent.InboxWaitTool{}); err != nil {
+		return err
+	}
 	if err := extension.Add[coretool.Tool](scope, subagent); err != nil {
 		return err
 	}

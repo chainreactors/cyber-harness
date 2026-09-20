@@ -77,6 +77,7 @@ When producing a scan report, follow the format and verification semantics in `c
 
 - `wait: 0` (default): stay in the foreground until completion.
 - `wait: N`: move a still-running command to background after N seconds and return its session id. This is not a failure or cancellation.
+- An interrupting Inbox message also releases a foreground wait. The same tmux session continues and sends completion through Inbox. Use `inbox_wait` to await messages; do not use shell sleep or poll history to wait for peers.
 - omitted `timeout`: use the 600s safety timeout. `timeout: N` cancels the command after N total seconds, including background time. `timeout: 0` disables the command timeout.
 
 Background completion is delivered through the inbox automatically. Incremental output is best-effort; completion delivery is retained with higher priority.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sort"
@@ -121,11 +122,24 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 		}
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistant, usage, err := requestWithRetry(ctx, cfg, em, reqMessages, toolDefinitions, turn)
+		assistant, usage, err := requestWithInboxInterrupt(ctx, cfg, em, reqMessages, toolDefinitions, turn)
 		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
 			if ctx.Err() != nil {
 				return end(nil, ctx.Err(), StopReasonCanceled)
+			}
+			if errors.Is(err, inbox.ErrInterrupted) {
+				transcript.completedTurns = turn
+				transcript.usageMessageCount = len(transcript.messages)
+				em.usage(usage, cfg.Model)
+				em.status("interrupted", nil)
+				if cfg.TokenBudget > 0 && transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget) {
+					return end(nil, fmt.Errorf("token budget exhausted after interruption"), StopReasonBudget)
+				}
+				if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
+					return end(nil, nil, StopReasonStopped)
+				}
+				continue
 			}
 			if isContextOverflowError(err) && !overflowRecoveryAttempted {
 				compacted, compactErr := runAutoCompaction(ctx, cfg, em, transcript, "overflow", transcript.contextTokens)
@@ -464,6 +478,10 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
 	var wg sync.WaitGroup
+	var interrupt <-chan struct{}
+	if cfg.Inbox != nil {
+		interrupt = cfg.Inbox.InterruptSignal()
+	}
 	for i := range slots {
 		if slots[i].rejectedReason != "" {
 			slots[i].startedAt = time.Now()
@@ -480,6 +498,15 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 			defer wg.Done()
 			defer func() { <-sem }()
 			slots[i].startedAt = time.Now()
+			select {
+			case <-interrupt:
+				slots[i].result = toolExecution{result: "Tool was not executed because an interrupting Inbox message arrived.", isError: true}
+				return
+			case <-ctx.Done():
+				slots[i].result = toolExecution{result: "Tool was not executed because the task was canceled.", isError: true}
+				return
+			default:
+			}
 			slots[i].result = runToolCallSafely(ctx, cfg, assistant.message, slots[i].tc, turn)
 		}()
 	}

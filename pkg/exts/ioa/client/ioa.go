@@ -110,6 +110,17 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 	var route *sessionRoute
 	if target != "" {
 		route = e.routes[target]
+		if route == nil {
+			for _, candidate := range e.routes {
+				if candidate.start.AgentName == target && candidate.deliver != nil {
+					if route != nil {
+						e.mu.Unlock()
+						return fmt.Errorf("IOA session name %q is ambiguous; use its Session ID", target)
+					}
+					route = candidate
+				}
+			}
+		}
 	} else {
 		for _, candidate := range e.routes {
 			if candidate.primary {
@@ -143,6 +154,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 	}
 	e.mu.Unlock()
 	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
+	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
 	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target}
 	return deliver(ctx, input)
 }

@@ -2,7 +2,19 @@
 
 [文档首页](README.md) · 前置：[Web 与协作](user/web.md) · 开发前置：[扩展装配](architecture/composition.md)
 
-先在两个终端分别运行 `aiscan ioa serve` 和配置好模型的 `aiscan agent --ioa-url http://127.0.0.1:8765 --space lab`。后者在没有任务输入时保持交互会话；带 `-p` 时仍是一次性任务。本章继续解释身份、投递、配置与资源所有权。
+Agent 已加入配置的空间，常用操作只有五项：
+
+| 需要做什么 | 用法 |
+| --- | --- |
+| 发送 | `ioa send <session-id-or-name> "消息"` |
+| 回复并关联记录 | 在发送命令后加 `--ref-messages <message-id>` |
+| 等待新消息 | 调用 `inbox_wait` 工具；消息自动到达 |
+| 补齐历史 | `ioa read --all --after <message-id>`；首次读取可省略 `--after` |
+| 纠正当前工作 | 在发送命令后加 `--interrupt`；已运行的命令继续执行 |
+
+运行 `ioa` 查看帮助。发送返回已保存的消息 ID；对方是否处理，需要其回复确认。
+
+跨进程协作时，在两个终端分别运行 `aiscan ioa serve` 和配置好模型的 `aiscan agent --ioa-url http://127.0.0.1:8765 --space lab`。后者在没有任务输入时保持交互会话；带 `-p` 时是一次性任务。
 
 IOA 是可插拔的 Agent 协作扩展。产品默认安装客户端扩展：未配置 URL 时使用 SDK Service、SQLite `:memory:` 和 Hub，在进程内调用，不监听 HTTP 端口；配置 URL 时连接外部 IOA。外部故障不会降级成隔离的内存空间。Web Agent 的默认地址仍为 `<server-url>/ioa`。
 
@@ -32,16 +44,22 @@ sync、async、fork 派发都先同步写入 handoff，再启动子任务。记�
 父子、兄弟任务共享 Node ID，以已有 Session ID 区分：
 
 ```text
-ioa send --target-session <session_id> --content '{"text":"follow-up"}'
-ioa send --ref-nodes <node_id> --target-session <session_id> --content '{"text":"remote follow-up"}'
+ioa send <session-id-or-name> "follow-up"
+ioa send <session-id-or-name> "remote follow-up" --ref-nodes <node_id>
 ioa read --message <dispatch_message_id>
 ```
 
-Session ID 可从派发返回值和 `subagent list` 获取。源 Session 从执行上下文注入，目标 Session 放入 IOA metadata；继续复用 Sender、Refs.Nodes 和 Refs.Messages。同 Node 定向消息不会被自身发送者过滤。没有目标 Session 的外部消息只进入主会话或唯一普通会话，歧义时拒绝投递。
+名称在目标 Node 的活跃 Session 中唯一时可用；Session ID 精确匹配优先，重名拒绝投递。Session ID 可从派发返回值和 `subagent list` 获取。跨 Node 发送时增加 `--ref-nodes <node_id>`。旧 `--target-session` 保留兼容。
+
+短命令将文本封装为 JSON，继续使用 SDK 发送。名称解析复用扩展现有 Session 路由。源 Session 从执行上下文注入，目标 Session 写入 IOA metadata；消息关联沿用 Refs.Messages，仅在正文提及 ID 不会建立回复链。同 Node 定向消息不会被自身发送者过滤。没有目标 Session 的外部消息只进入主会话或唯一普通会话，歧义时拒绝投递。
 
 `subagent.message` 已移除。未安装 IOA ext 时仍可派发并返回一次结果，但不存在持续通讯通道。子任务结束后不再接收消息；需要继续工作时重新派发，并引用既有记录。
 
 `ioa space` 切换命令空间及自动订阅，派发结果仍写入对应派发发生的空间。成功发送只表示 IOA 已保存消息，不表示目标已消费。后来者显式 `ioa read`，不自动回放历史。当前不提供可靠 outbox、消费回执或离线补投。
+
+运行中的 Agent 使用 `inbox_wait` 等待新消息，无需轮询历史或执行 shell sleep。该工具复用 `Inbox.Wait`，不会取走消息；下一轮统一消费。可选 `timeout` 指定等待秒数，省略或为零时等待到消息到达或任务取消。普通消息即可唤醒等待。
+
+`ioa send <session-id-or-name> "更新后的要求" --interrupt` 请求显式中断。IOA 仅保存并映射标记，通知由 Inbox 管理：当前模型请求取消后在同一任务内重新推理；tmux 前台等待让出，原命令以相同 Session ID 继续在后台执行并通知完成。已在后台的命令不受影响，已开始的非 tmux 原生工具完成后返回，尚未开始的旧工具调用跳过。中断不取消任务，也不复活已结束的子任务。
 
 Console 只借用 Reader，复用扩展身份；Reader 不拥有注册、订阅和关闭能力。独立查询 CLI 与连接测试直接拥有 IOA Resource，无需创建 Agent 或安装生命周期 Hooks。连接测试通过注册交换访问密钥，再执行查询。
 
