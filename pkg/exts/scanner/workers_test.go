@@ -6,6 +6,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/subagent"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/tools/scan"
 )
@@ -36,14 +37,17 @@ func (r *recordingPromptResolver) Build(_ context.Context, input prompt.Context)
 	return prompt.Result{Prompt: "resolved worker prompt"}
 }
 
-func TestWorkerPromptUsesAgentConfigResolver(t *testing.T) {
+func TestScannerPreparationUsesAgentConfigResolver(t *testing.T) {
 	resolver := &recordingPromptResolver{}
-	resolve := workerPrompt(scan.VerifySystemTarget, "verify instructions", nil)
-	result, err := resolve(t.Context(), &agent.Config{
+	worker := scannerSubagents(func(string) string { return "verify instructions" })[0]
+	cfg, task, err := worker.Prepare(t.Context(), agent.Config{
 		AgentName: "verifier", Model: "test-model", PromptResolver: resolver,
-	})
-	if err != nil || result != "resolved worker prompt" {
-		t.Fatalf("worker prompt result = %q, %v", result, err)
+	}, subagent.Input{Prompt: "verify task"})
+	if err != nil || task != "verify task" {
+		t.Fatalf("prepared task = %q, %v", task, err)
+	}
+	if cfg.SystemPrompt != "resolved worker prompt" || cfg.SystemPromptFn != nil {
+		t.Fatalf("system prompt was not frozen: %+v", cfg)
 	}
 	if resolver.input.Target != scan.VerifySystemTarget || resolver.input.Agent.Instructions != "verify instructions" {
 		t.Fatalf("worker prompt input = %#v", resolver.input)
@@ -53,9 +57,9 @@ func TestWorkerPromptUsesAgentConfigResolver(t *testing.T) {
 	}
 }
 
-func TestWorkerPromptRequiresPluginResolver(t *testing.T) {
-	resolve := workerPrompt(scan.SniperSystemTarget, "sniper instructions", nil)
-	if result, err := resolve(t.Context(), &agent.Config{}); err == nil || result != "" {
+func TestScannerPreparationRequiresPluginResolver(t *testing.T) {
+	worker := scannerSubagents(func(string) string { return "sniper instructions" })[1]
+	if _, result, err := worker.Prepare(t.Context(), agent.Config{}, subagent.Input{Prompt: "research task"}); err == nil || result != "" {
 		t.Fatalf("worker prompt without plugin = %q, %v", result, err)
 	}
 }

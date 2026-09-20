@@ -3,6 +3,7 @@ package sessionexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -132,5 +133,82 @@ func TestRepeatedLabelsHaveIndependentSessionIDs(t *testing.T) {
 	}
 	if err := tool.Close(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Preparation has no Session yet, but must still be canceled by either owner
+// and counted by Close until it actually returns.
+func TestPreparationCancellationDrainsBeforeToolClose(t *testing.T) {
+	for _, owner := range []string{"tool", "parent"} {
+		for _, mode := range []subagent.Mode{subagent.Sync, subagent.Async, subagent.Fork} {
+			t.Run(owner+"/"+string(mode), func(t *testing.T) {
+				parent := agent.NewAgent(agent.Config{SessionID: "parent"})
+				tool := newSubagentTestTool(t, parent.Cfg)
+				entered, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(release) })
+				defer unblock()
+				h, err := tool.registry.Add(subagent.Subagent{Name: "worker", Prepare: func(ctx context.Context, cfg agent.Config, _ subagent.Input) (agent.Config, string, error) {
+					close(entered)
+					<-ctx.Done()
+					close(canceled)
+					<-release
+					return cfg, "", ctx.Err()
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg := parent.Cfg
+				lifetime, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cfg.Lifetime = lifetime
+				ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), cfg), operation.Invocation{CallID: "spawn"})
+				done := make(chan error, 1)
+				go func() {
+					_, err := tool.Execute(ctx, fmt.Sprintf(`{"name":"worker","mode":%q,"prompt":"task"}`, mode))
+					done <- err
+				}()
+				select {
+				case <-entered:
+				case <-time.After(time.Second):
+					t.Fatal("preparation did not start")
+				}
+				if owner == "parent" {
+					cancel()
+					select {
+					case <-canceled:
+					case <-time.After(time.Second):
+						t.Fatal("parent did not cancel preparation")
+					}
+				}
+				deadline, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+				defer stop()
+				if err := tool.Close(deadline); !errors.Is(err, resource.ErrCloseIncomplete) {
+					t.Fatalf("closed before preparation drained: %v", err)
+				}
+				select {
+				case <-canceled:
+				case <-time.After(time.Second):
+					t.Fatal("tool did not cancel preparation")
+				}
+				unblock()
+				select {
+				case err := <-done:
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("preparation error: %v", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("preparation did not return")
+				}
+				if err := tool.Close(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := h.Close(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if len(tool.runs) != 0 || cfg.Inbox.ActiveProducers() != 0 {
+					t.Fatal("preparation leaked a session or producer")
+				}
+			})
+		}
 	}
 }

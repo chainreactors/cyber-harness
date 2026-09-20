@@ -27,7 +27,10 @@ func scannerSubagent(name, description string, systemTarget, requestTarget promp
 			if strings.TrimSpace(instructions) == "" {
 				return cfg, "", fmt.Errorf("scanner subagent %q skill is unavailable", name)
 			}
-			system, err := workerPrompt(systemTarget, instructions, cfg.Logger)(ctx, &cfg)
+			agentContext := prompt.AgentContext{Name: cfg.AgentName, Model: cfg.Model, Instructions: instructions}
+			system, err := resolveWorkerPrompt(ctx, cfg.PromptResolver, prompt.Context{
+				Target: systemTarget, Agent: agentContext,
+			}, cfg.Logger)
 			if err != nil {
 				return cfg, "", err
 			}
@@ -46,7 +49,7 @@ func scannerSubagent(name, description string, systemTarget, requestTarget promp
 				return cfg, "", fmt.Errorf("scanner subagent %q requires a loot target", name)
 			}
 			request, err := resolveWorkerPrompt(ctx, cfg.PromptResolver, prompt.Context{
-				Target: requestTarget, Agent: prompt.AgentContext{Name: cfg.AgentName, Model: cfg.Model, Instructions: instructions}, Payload: payload,
+				Target: requestTarget, Agent: agentContext, Payload: payload,
 			}, cfg.Logger)
 			if err == nil && strings.TrimSpace(input.Prompt) != "" {
 				request += "\n\n" + input.Prompt
@@ -73,17 +76,6 @@ func scannerWorker(executor subagent.Executor, defaults agent.Config) scan.Worke
 			return "", nil
 		}
 		return result.Output, nil
-	}
-}
-
-func workerPrompt(target prompt.Target, instructions string, logger telemetry.Logger) agent.SystemPromptFunc {
-	return func(ctx context.Context, config *agent.Config) (string, error) {
-		if config == nil || config.PromptResolver == nil {
-			return "", fmt.Errorf("scanner prompt resolver is unavailable")
-		}
-		input := prompt.Context{Target: target, Agent: prompt.AgentContext{Instructions: instructions}}
-		input.Agent.Name, input.Agent.Model = config.AgentName, config.Model
-		return resolveWorkerPrompt(ctx, config.PromptResolver, input, logger)
 	}
 }
 

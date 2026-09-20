@@ -130,33 +130,23 @@ func (r *Registry) Add(values ...Subagent) (resource.Handle, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		r.reserved[entry.Name] = true
-		names = append(names, entry.Name)
 	}
-	return &registration{registry: r, handle: handle, names: names}, nil
-}
-
-type registration struct {
-	registry *Registry
-	handle   resource.Handle
-	names    []string
-	once     sync.Once
-}
-
-func (h *registration) Close(ctx context.Context) error {
-	if err := h.handle.Close(ctx); err != nil {
-		return err
-	}
-	h.once.Do(func() {
-		h.registry.mu.Lock()
-		defer h.registry.mu.Unlock()
-		for _, name := range h.names {
-			delete(h.registry.reserved, name)
+	releaseNames := sync.OnceFunc(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for _, entry := range entries {
+			delete(r.reserved, entry.Name)
 		}
 	})
-	return nil
+	return resource.HandleFunc(func(ctx context.Context) error {
+		if err := handle.Close(ctx); err != nil {
+			return err
+		}
+		releaseNames()
+		return nil
+	}), nil
 }
 
 func (r *Registry) Catalog() []Subagent {
@@ -182,15 +172,28 @@ func (r *Registry) Start(ctx context.Context, cfg agent.Config, request Request)
 	}
 	r.active++
 	call, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	stopOwner := context.AfterFunc(r.lifetime, cancel)
+	owner := r.lifetime
 	r.mu.Unlock()
-	stops := []func(){func() { stopOwner() }, cancel}
-	release := func() {}
+	stops := []func(){cancel}
+	bind := func(owner context.Context) {
+		if owner == nil {
+			return
+		}
+		stop := context.AfterFunc(owner, cancel)
+		stops = append(stops, func() { stop() })
+		if owner.Err() != nil {
+			cancel()
+		}
+	}
+	bind(owner)
+	var release func()
 	finish := func() {
 		for _, stop := range stops {
 			stop()
 		}
-		release()
+		if release != nil {
+			release()
+		}
 		r.mu.Lock()
 		r.active--
 		if r.stopping && r.active == 0 {
@@ -214,7 +217,6 @@ func (r *Registry) Start(ctx context.Context, cfg agent.Config, request Request)
 		var leased context.Context
 		entry, leased, release, err = r.store.Acquire(call, request.Name)
 		if err != nil {
-			release = func() {}
 			return nil, err
 		}
 		call = leased
@@ -233,19 +235,9 @@ func (r *Registry) Start(ctx context.Context, cfg agent.Config, request Request)
 		return nil, fmt.Errorf("timeout requires sync mode and a positive duration")
 	}
 	if mode == Sync {
-		stop := context.AfterFunc(ctx, cancel)
-		stops = append(stops, func() { stop() })
-		if ctx.Err() != nil {
-			cancel()
-		}
+		bind(ctx)
 	}
-	if cfg.Lifetime != nil {
-		stop := context.AfterFunc(cfg.Lifetime, cancel)
-		stops = append(stops, func() { stop() })
-		if cfg.Lifetime.Err() != nil {
-			cancel()
-		}
-	}
+	bind(cfg.Lifetime)
 	if request.Timeout > 0 {
 		var timeoutCancel context.CancelFunc
 		call, timeoutCancel = context.WithTimeout(call, request.Timeout)

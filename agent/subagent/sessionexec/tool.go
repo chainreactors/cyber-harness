@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/subagent"
 	aop "github.com/chainreactors/cyber/aop"
@@ -26,7 +25,6 @@ type Tool struct {
 	lifetime  context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
-	stopping  bool
 	runs      map[string]*subagent.Run
 	wg        sync.WaitGroup
 	closeOnce sync.Once
@@ -105,68 +103,19 @@ func (t *Tool) create(ctx context.Context, args Args) (string, error) {
 			return "", fmt.Errorf("timeout requires sync mode and a positive duration")
 		}
 	}
-	t.mu.Lock()
-	if t.stopping || t.lifetime.Err() != nil || !t.runtime.Active() {
-		t.mu.Unlock()
-		return "", fmt.Errorf("subagent executor is not active")
-	}
-	t.wg.Add(1)
-	t.mu.Unlock()
-	// Protect preparation too. Start separately binds the caller lifetime and
-	// decides whether invocation cancellation applies based on the resolved mode.
-	parentLifetime := cfg.Lifetime
-	lifetime, cancel := context.WithCancel(t.lifetime)
-	stopParent := func() bool { return false }
-	if parentLifetime != nil {
-		stopParent = context.AfterFunc(parentLifetime, cancel)
-		if parentLifetime.Err() != nil {
-			cancel()
-		}
-	}
-	cfg.Lifetime = lifetime
-	cleanup := func() { stopParent(); cancel(); t.wg.Done() }
-	task, err := t.executor.Start(ctx, cfg, subagent.Request{Name: args.Name, Label: args.Label, Input: subagent.Input{Prompt: args.Prompt}, Mode: args.Mode, Timeout: timeout})
+	task, finish, err := t.prepare(ctx, cfg, subagent.Request{
+		Name: args.Name, Label: args.Label, Input: subagent.Input{Prompt: args.Prompt}, Mode: args.Mode, Timeout: timeout,
+	})
 	if err != nil {
-		cleanup()
 		return "", err
 	}
-	finishLease := func() { task.Finish(); cleanup() }
 	detail := task.Detail
 	var messages []*aop.Message
 	if task.Mode == subagent.Fork {
 		messages = truncateToLastCompleteBoundary(cfg.Messages)
 	}
-	var producer *inbox.ProducerHandle
-	completion := cfg.Inbox
 	id := aop.EnvelopeID()
-	if task.Mode != subagent.Sync && completion != nil {
-		producer = completion.RegisterProducer("subagent:" + id)
-	}
-	// Publish before OpenSession: its start hooks can fail and close immediately.
-	t.mu.Lock()
-	t.runs[id] = task
-	t.mu.Unlock()
-	var closed sync.Once
-	onClosed := func(outcome session.Outcome) {
-		closed.Do(func() {
-			t.mu.Lock()
-			delete(t.runs, id)
-			t.mu.Unlock()
-			if producer == nil {
-				return
-			}
-			defer producer.Done()
-			if !outcome.Started || outcome.Result == nil {
-				return
-			}
-			status, content := subagentCompletion(outcome.Result, outcome.Err)
-			msg := inbox.NewMessage(inbox.OriginSystem, "user", fmt.Sprintf("<subagent_completion name=%q label=%q session_id=%q status=%q>\n%s\n</subagent_completion>", detail.AgentType, detail.AgentName, id, status, content))
-			msg.Meta = map[string]any{"subagent": detail.AgentName, "name": detail.AgentType, "session_id": id, "status": status}
-			if err := completion.Push(msg); err != nil && cfg.Logger != nil {
-				cfg.Logger.Warnf("inbox push subagent completion %s: %s", detail.AgentName, err)
-			}
-		})
-	}
+	onClosed := t.track(id, task, cfg)
 	childCfg := task.Config.ForTask(detail.AgentName, callID, detail)
 	_, err = t.runtime.OpenSession(task.Context, session.SessionOptions{
 		ID: id, ParentSessionID: cfg.SessionID, ParentToolCallID: callID,
@@ -175,35 +124,27 @@ func (t *Tool) create(ctx context.Context, args Args) (string, error) {
 	})
 	if err != nil {
 		onClosed(session.Outcome{})
-		finishLease()
+		finish()
 		return "", err
 	}
 	run, err := t.runtime.RunSession(task.Context, id, session.RunInput{Continue: true})
 	if err != nil {
 		_ = t.runtime.CloseSession(context.Background(), id, session.SessionCloseError)
-		finishLease()
+		finish()
 		return "", err
 	}
-	finish := func() (*agent.Result, error) {
-		defer finishLease()
-		result, err := run.Wait()
-		reason := session.SessionCloseCompleted
-		if err != nil {
-			reason = session.SessionCloseError
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				reason = session.SessionCloseCanceled
-			}
-		}
-		return result, errors.Join(err, t.runtime.CloseSession(context.Background(), id, reason))
+	wait := func() (*agent.Result, error) {
+		defer finish()
+		return t.wait(id, run)
 	}
 	if task.Mode == subagent.Sync {
-		result, err := finish()
+		result, err := wait()
 		if err != nil {
 			return fmt.Sprintf("subagent %q (session=%s) failed: %s\n%s", detail.AgentName, id, err, resultOutput(result)), err
 		}
 		return fmt.Sprintf("<subagent_result name=%q label=%q session_id=%q status=\"completed\">\n%s\n</subagent_result>", detail.AgentType, detail.AgentName, id, resultOutput(result)), nil
 	}
-	go func() { _, _ = finish() }()
+	go func() { _, _ = wait() }()
 	return fmt.Sprintf("Started subagent %q (session=%s, mode=%s, name=%s). Will notify on completion.", detail.AgentName, id, task.Mode, detail.AgentType), nil
 }
 
@@ -235,7 +176,6 @@ func (t *Tool) kill(id string) (string, error) {
 func (t *Tool) Close(ctx context.Context) error {
 	t.closeOnce.Do(func() {
 		t.mu.Lock()
-		t.stopping = true
 		t.cancel()
 		t.mu.Unlock()
 		go func() { t.wg.Wait(); close(t.done) }()
