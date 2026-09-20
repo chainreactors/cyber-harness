@@ -1,67 +1,104 @@
 # Changelog
 
-## v1.0.0-rc4 — Web 资产链路、组合式扩展与纯 Go full
+## v1.0.0-rc4 — 编译链路简化 + Extension 架构重构 + 浏览器端 CSTX
 
-rc4 把“扫描结果如何进入 Web”和“一个发行版包含哪些能力”变成了可以直接验证的行为：CLI 继续产生原始 Artifact，Web 归档并通过浏览器端 CSTX WASM 解析成资产；`aiscan-full` 不再要求 Go 侧安装 libcstx 或 native RE2。普通版适合 CLI 和自动化，full 版在此基础上提供 Web、浏览器和深度扫描能力。
+rc4 首先收敛了编译方式和能力组合：`Makefile` 与 `editions.env` 成为构建入口和 edition 规则的事实来源，官方 standard 与 full 发行版均不依赖 libcstx 或 native RE2，并可在启用或关闭 CGO 时编译；运行时则统一为一套显式的 Extension 生命周期和静态 Profile。基于这两个边界，Go 只归档 scanner-native Artifact，Web 通过 CSTX TypeScript/WASM 构建资产关系，不再让后端承担重复的数据模型与处理链路。
 
-### 用户可见的变化
+### New Features
 
-- `aiscan --version`、`aiscan -h`、`aiscan scan -h` 在发布二进制中直接可用；普通版保留 `agent`、`scan`、`gogo`、`spray`、`zombie`、`neutron`、`proton` 等 CLI 能力。
-- `aiscan-full web` 启动内嵌 Web 工作台，默认监听 `127.0.0.1:8080`，启动日志打印访问地址、access key 和 Agent 连接命令；`--addr`、`--token`、`--db`、`--no-agent` 可分别控制监听地址、认证、SQLite 文件和是否启动内嵌 Agent。
-- `--no-agent` 只把 Web 作为 Hub：没有执行节点时提交扫描会返回 `FAILED_PRECONDITION` 且不创建记录，节点在排队后离线则将任务标记为失败；Hub 不再悄悄回退到本地扫描。
-- Web 首屏、`/health`、认证登录、会话列表、扫描列表和 Artifact 归档查询使用同一套发布构建中的静态资源与 ConnectRPC；无效 bearer token 会被拒绝，访问 key 不会写入可缓存的响应。
-- 扫描完成后，Web 会显示扫描摘要卡片并把原始 Artifact 归档到对应会话；资产面板支持导入、分页、类型筛选、搜索、关系图、详情和导出，不再要求 Go 服务先生成一套重复的 SCO 报告 DTO。
-- 快速连接从当前 Web space 获取 Agent token 并加入当前 space；命令面板从客户端命令目录生成 `/help`，代码块可复制，扫描卡片、资产表格、连接提示和错误通知均提供中英文文本。
-- 移动端在 320px 宽度仍保留资产、IOA、Agent、工具、快速连接、设置和退出入口；紧凑顶栏不再互相覆盖，打开后的会话侧栏也不会把关闭按钮压在顶栏下面。
-- Web 的聊天、会话恢复、Agent 状态、PTY、IOA 控制台、工具目录、配置面板和 Artifact 详情都改为同一条二进制 Connect/AOP 数据路径；前端不再维护旧的 scan/report/SCO 客户端分支。SPA 路由回退到当前 `index.html`，指纹化静态资源可长期缓存，入口文档始终禁止缓存。
-- 流量工具使用 canonical protobuf `traffic.Flow`/`traffic.Exchange`；MITM Hub 支持按调用选择订阅、限制捕获大小，并把响应 body 流式写入持久文件。代理切换、Host 重建、取消请求和尾随 Artifact 的处理都绑定到实际 operation，而不是时间窗口或临时 sink。
-- 纯 Go `curl` 支持常用请求、重定向、表单、cookie jar、代理、`--resolve`、超时、HTTP 版本、trace、输出文件和 `--write-out`；默认注入浏览器请求头并继续经过 Runner egress/HTTP 观察链。
-- 直接扫描器拥有命令后的原生参数：`curl -o`、`gogo -o jl`、`neutron -o` 和 `zombie -o json` 不再被根 CLI 误当成 AOP 事件文件；全局事件输出放在命令前，例如 `aiscan -o events.jsonl gogo ... -o jl`。gogo 的 JSONL stdout 会过滤进度行，`-j <file>` 仍只表示历史结果输入。
-- standard/full 的帮助目录直接从 edition manifest 生成：standard 不再展示不可执行的 `katana`/`passive`，此前遗漏的 `curl` 会正常列出。`curl --write-out` 补充 `%{num_redirects}`，重定向后的有效 URL、状态码和次数可以同时输出。
-- Agent 的 goal loop 使用自然语言 pacing；compaction、budget、失败回合、命令结果和 evaluator 记录只在时间线中出现一次，失败回合不会被错误地自动继续。
+**编译链路与发行版简化**
 
-### Artifact、CSTX 与数据边界
+standard 与 full 现在共享一条纯 Go 编译链路。full 虽然包含 Web、浏览器和深度扫描能力，但其默认 RE2 后端仍是纯 Go，且两个 edition 都不再链接 Go 侧 libcstx；`CGO_ENABLED=0` 和 `CGO_ENABLED=1` 下均可构建和运行。只有显式选择 `record` edition 时才需要 CGO 和 recorder SDK。
 
-- Go 端只接收、归档和同步原始 Artifact，并通过 Artifact RPC 提供给 Web；旧的 CSTX 解析结果、SCO 查询服务、报告转发层以及相关数据库表已移除。
-- `cyber-ui` 的 `@cyber/cstx` 升级到 `0.5.0`，使用 TypeScript/WASM ABI 在浏览器完成 artifact 的 parse、merge、link 和节点规范化；资产视图、关系图、列推断和导出都读取这条浏览器数据路径。
-- 当前 Artifact protobuf/ABI 是唯一事实来源，发行版不再携带 v1/v2/v3 兼容 DTO、sink、pending 或 wire 转发层。保留的 native CSTX 扩展只用于 SDK/自定义组合，不被 `aiscan` 或 `aiscan-full` 产品 profile 选中。
-- Web、PTY、进程、prompt、scanner、IOA client 和 application dispatch 各自声明 capability；自定义宿主使用 `pkg/aiscan.New`，更底层的最小宿主使用 `pkg/base.New`，无需手工拼装内部生命周期对象。
-- IOA 已拆成独立 client/server extension：Agent 的 `--ioa-url` 使用 URL userinfo 传递 access key，Web 通过同源 `/ioa/` bridge 注入保留的 IOA identity；space、node、message/context 查询和快速连接都使用当前 space/node 关系，不再读取旧的全局字段。
-- 资源和生命周期由 profile/manifest 组合：工具资源从 `core` 移到 `tools`，每个 extension 通过 capability 声明依赖，统一的 process registry 管理命令、PTY、tmux 和后台任务；旧 root workspace、重复 runner/harness 和 product architecture 名称被移除。
+- `aiscan` 包含 Agent、核心扫描器、代理、Skills 和 IOA，适合服务器、脚本和无浏览器环境
+- `aiscan-full` 在 standard 基础上增加 Web、Chromium 复用、Katana 和被动测绘能力
+- standard/full ZIP 不包含录屏 SDK，也不会在启动时加载 native CSTX Extension
+- record SDK 由 `chainreactors/native` Release 提供，并校验固定版本、SHA-256、manifest 和 ABI header
+- Linux、macOS、Windows 的 amd64/arm64 由同一份 edition 定义和 GoReleaser 配置生成
+- `go.mod`、AOP 子模块和公开包路径统一从 `aiscan` 重命名为 `cyber`
 
-### 构建、CGO 与发行版选择
+`Makefile` 是本地构建入口，`editions.env` 是 build tags 与 CGO 策略的唯一事实来源。CI 直接校验 edition 组合和 CGO 开关；GoReleaser 负责跨平台编译，release workflow 负责打包、UPX、checksum 和产物启动验证。
 
-- `aiscan-full` 的默认 RE2 路径是纯 Go；`CGO_ENABLED=0` 和 `CGO_ENABLED=1` 都能构建和运行。普通版与 full 版都不依赖 Go 侧 libcstx。
-- 只有显式启用 `record` edition 才需要 CGO 和 recorder SDK；官方 `aiscan`/`aiscan-full` ZIP 不包含录屏 SDK，也不会在启动时加载 native CSTX 扩展。
-- 普通版 (`aiscan`) 包含 Agent、核心扫描器、代理、Skills 和 IOA，适合服务器、脚本和无浏览器环境；full 版 (`aiscan-full`) 额外包含 Web、Chromium 复用、Katana 和被动测绘能力。
-- 两个发行版都由 Linux runner 交叉编译 Linux、macOS、Windows 的 amd64/arm64；这不代表目标机自带模型、Chromium 或扫描规则服务，具体外部依赖仍按使用的工具和配置决定。
-- `go.mod`、AOP 子模块和公开包路径已从 `aiscan` 重命名为 `cyber`；`Makefile` 与 `editions.env` 是本地构建的唯一入口和 tag/CGO 真相，GoReleaser 只负责编译，打包、UPX、checksum 和启动验证由 release workflow 完成。
-- record SDK 改由 `chainreactors/native` Release 提供，`.github/native/sdk.sh` 负责固定版本、SHA-256、manifest 和 ABI header 校验；仓库不再携带 native 库，也不在 standard/full 构建中隐式下载或链接 recorder。
+**单一 Extension 与静态 Profile 组合**
 
-### 迁移影响
+运行时能力统一由一套 Extension 生命周期和显式 Profile 组合，不再依赖包级 `init`、全局注册表或多套 runner/workspace 包装。自定义发行版可以从 `pkg/base.New` 取得最小能力集；希望复用官方产品组合的嵌入方可以直接调用 `pkg/aiscan.New`。
 
-- 依赖旧 Go SCO/report RPC、旧数据库表或旧的临时 loot/file-range 编码的客户端需要重新生成 protobuf，并改用 Artifact RPC 与当前 latest schema。
-- 自定义发行版不应再注册全局 sink、pending 或 wire 适配器；将功能声明为 extension capability，并从组合根传入 `pkg/aiscan.New` 所需的配置。
-- 要使用 Web，下载 `aiscan-full`；下载普通 `aiscan` 后执行 `web` 会得到明确的能力缺失，而不是静默启动一个不完整的 Web 服务。
-- 依赖 `pkg/runner`、`pkg/tui`、`pkg/types`、`pkg/web/api/report`、`proto/*/sco.proto` 或旧的 `cmd/runner` 的嵌入方需要按新目录和 protobuf 生成包迁移；这些旧路径在 rc4 中没有兼容别名。
+- Web、PTY、进程、prompt、scanner、IOA client 和 application dispatch 分别声明 capability 与依赖
+- standard、full、record 的可选能力由构建 edition 显式选择，加载顺序和关闭顺序由同一 Extension Set 管理
+- IOA 拆为独立 client/server Extension；Web 通过同源 `/ioa/` bridge 保留身份，Agent 使用 `--ioa-url` 接入
+- process registry 统一拥有命令、PTY、tmux 和后台任务，工具资源从 `core` 移到其实际所属的 `tools` 领域
+- 删除旧 root workspace、重复 harness/runner 组合和 product architecture 包装，不保留兼容别名
 
-### Release Matrix 与验证
+**浏览器端 CSTX 资产链路**
+
+Go 服务不再解析 CSTX、生成 SCO 报告 DTO，或维护一套与原始扫描结果重复的数据表。它只负责接收、归档和同步 scanner-native Artifact，并通过 Artifact RPC 交给 Web。`cyber-ui` 使用 `@cyber/cstx 0.5.0` 的 TypeScript/WASM ABI，在浏览器中完成 parse、merge、link 和节点规范化。
+
+- 资产面板直接从归档 Artifact 构建主机、端口、服务、应用、URL 和漏洞关系
+- 支持 Artifact 导入、分页、类型筛选、字段搜索、关系图、详情和导出
+- 扫描完成后，会话时间线显示扫描摘要卡片，并可在刷新或重启后恢复对应资产
+- 删除旧 CSTX 解析结果、SCO 查询服务、报告转发层及相关数据库表
+- 当前 Artifact protobuf/ABI 是唯一事实来源，不再携带 v1/v2/v3 兼容 DTO、sink、pending 或 wire 转发层
+
+保留的 native CSTX Extension 只供 SDK 或自定义组合使用，`aiscan` 和 `aiscan-full` 的产品 Profile 都不会加载它。
+
+**Web Hub 与可脚本化 CLI**
+
+`aiscan-full web` 提供带认证的内嵌工作台，也可以通过 `--no-agent` 只作为远程执行 Hub。Web、Agent 和直接 scanner 现在使用同一条 ConnectRPC/AOP/Artifact 数据路径；CLI 的帮助、参数归属和机器可读输出也与实际 edition 能力保持一致。
+
+- Web 默认监听 `127.0.0.1:8080`，启动时打印访问地址、access key 和 Agent 接入命令
+- 没有执行节点时，`--no-agent` Hub 以 `FAILED_PRECONDITION` 拒绝扫描且不创建虚假记录；排队后离线的任务会明确失败
+- 快速接入命令读取当前 Web space 与短期所需 Agent token，不把 access key 写入 URL、浏览器存储或可缓存响应
+- standard 的命令目录只显示实际可用 scanner，并补充此前遗漏的纯 Go `curl`
+- scanner 命令后的 `-o` 归 scanner 自己；全局 AOP JSONL 使用命令前的 `-o`，例如 `aiscan -o events.jsonl gogo ... -o jl`
+- `gogo -o jl` 和 `scan --json` 只向 stdout 输出严格 JSONL；`gogo -j <file>` 继续表示历史结果输入
+- `curl --write-out` 支持 `%{http_code}`、`%{url_effective}` 和 `%{num_redirects}` 等常用变量
+
+### Improvements
+
+**Web 与 Agent 体验**
+
+- 聊天、会话恢复、Agent 状态、PTY、IOA Console、工具目录、配置和 Artifact 详情统一使用当前 Connect/AOP 路径
+- 命令面板和 `/help` 从客户端命令目录生成；扫描卡片、资产表格、连接提示和错误通知提供中英文文本
+- 320px 宽度下仍保留资产、IOA、Agent、工具、快速连接、设置和退出入口，侧栏与关闭按钮不再和顶栏重叠
+- SPA 路由回退到当前 `index.html`；入口禁止缓存，指纹化静态资源使用长期缓存
+- goal loop 使用自然语言 pacing；compaction、budget、evaluator、命令结果和失败回合在时间线中只出现一次
+
+**流量与进程边界**
+
+- 流量工具统一使用 canonical protobuf `traffic.Flow` / `traffic.Exchange`
+- MITM Hub 按实际 operation 订阅流量、限制单体与总体捕获大小，并将响应 body 流式写入有界持久文件
+- Flow 淘汰同步删除归属 body，启动时清理遗留 `.part`；代理切换、取消和尾随 Artifact 不再依赖时间窗口
+- 纯 Go `curl` 支持重定向、表单、cookie jar、代理、`--resolve`、超时、HTTP 版本、trace 和输出文件，并经过统一 egress/HTTP 观察链
+
+### Bug Fixes
+
+- 修复 scan 完成卡片无法可靠关联会话、刷新后丢失，以及 Connect JSON 无法解码未知 `Any` Extension 的问题
+- 修复无 Agent Hub 静默回退本地扫描、节点离线后任务状态悬空，以及快速连接加入错误 space 的问题
+- 修复 direct scanner 的 `-o` 被根 CLI 截获、gogo JSONL 混入进度行和 spray banner 的问题
+- 修复本地 `--skill <path>` 无法按规范化路径选中已加载 Skill 的问题
+- 修复失败回合和命令结果重复显示、`/compact` 无消息分支不可见、重连后消息 ID 冲突等时间线问题
+- 修复 IOA access key 被错误当作 bearer token、配置探活成功但实际 Agent 无法注册的问题
+- 修复移动端顶栏操作被挤出视口、会话侧栏关闭按钮遮挡和命令弹层 Enter 失效的问题
+
+### Breaking Changes
+
+- 旧 Go SCO/report RPC、SCO 数据库表和 `proto/*/sco.proto` 已移除；客户端需重新生成 protobuf 并改用 Artifact RPC
+- 自定义发行版不再注册全局 sink、pending 或 wire 适配器；能力应作为 Extension 显式加入 Profile
+- 依赖 `pkg/runner`、`pkg/tui`、`pkg/types`、`pkg/web/api/report`、旧 `cmd/runner` 或旧临时 loot/file-range 编码的嵌入方需要迁移到当前公开入口
+- 普通 `aiscan` 不包含 Web；执行 `web` 会返回明确的 capability 缺失。需要 Web 时请下载 `aiscan-full`
+- 本次 pre-v1 重构不保留 v1/v2/v3 schema 或旧 Go 包路径的兼容层，latest schema 即当前事实来源
+
+### Release Matrix
 
 | 产物 | Linux | macOS | Windows | 数量 |
 | --- | --- | --- | --- | ---: |
 | `aiscan` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
 | `aiscan-full` | amd64、arm64 | amd64、arm64 | amd64、arm64 | 6 |
-| `aiscan_checksums.txt` | — | — | — | 1 |
+| `aiscan_checksums.txt` | - | - | - | 1 |
 
-`v1.0.0-rc4` 的发布门禁覆盖 Go 单元/竞态、架构与依赖检查、Web 前端构建、Playwright E2E、扫描器功能、headless record/replay、Windows cgo/非 cgo 编译、两套 GoReleaser 矩阵、ZIP 解包启动和 Linux amd64/arm64/Windows 产物验证。Release 包含 12 个 ZIP 和 1 个 checksum 文件；`runner` 只参与验证，不作为附件发布。
+发布门禁覆盖 Go 单元测试与竞态测试、架构和依赖检查、`go vet`、lint、Web 前端构建、Playwright E2E、scanner 功能测试、headless record/replay、Windows CGO/非 CGO 编译、两套 GoReleaser 矩阵，以及 Windows、Linux amd64、Linux arm64 发布包的 checksum 与启动验证。
 
-### 审查记录
-
-- rc3 与 rc4 标签不是线性父子关系；完整审查使用两标签的实际 commit（`100278e0..f2f510d2`），覆盖合并分支中的 Web、runtime、extension、traffic、curl、native build 和 CI 改动，而不是只查看 rc4 最近几条提交。
-- 原始 rc4 产物已下载并校验 Windows amd64 的 `aiscan` 与 `aiscan-full`。重新发布前又用当前候选二进制验证普通版 CLI、full Web、认证、ConnectRPC、PTY、外部节点扫描和浏览器端 CSTX WASM；access key 不出现在 URL、local/session storage、页面文本、模型 prompt 或 AOP JSONL。
-- `scan --json` 会抑制 spray 的进度表/banner 并只向 stdout 输出 JSONL；真实目标扫描产生的 43 行输出均可逐行严格解析。`agent --skill <local-path>` 会按规范化文件路径选中已加载 skill；真实 one-shot 进程覆盖 text/json/stream-json、AOP JSONL、resume 和本地 skill。
-- 本机授权实验目标进一步覆盖了发布 CLI 的 `curl` 重定向/文件输出、gogo 指纹与双输出、spray 爬取、neutron 自定义 POC、zombie Redis 认证、严格 `scan --json` 和 full Katana 爬取；原生 JSONL、canonical AOP JSONL 与自定义 POC 结果均逐行解析验证。
-- Windows 上的完整 `go test ./...`、`go test -race ./...`、`go vet ./...`、Katana headless、前端构建和 14 项 Playwright E2E（13 通过、1 个显式 goal evaluator 场景跳过）均完成；standard/full 在 `CGO_ENABLED=0/1` 下都能编译。WSL Ubuntu 另行执行了 Unix shell/tmux、Agent 多轮交互、Proton 文件与管道扫描以及 Arsenal 离线管理测试；需要访问 GitHub Release 的 Arsenal 在线安装因当前 WSL 网络超时未计为通过。
+最终 Release 包含 12 个 ZIP 和 1 个 checksum 文件。发布后重新下载并验证了 Windows amd64 的 `aiscan` 与 `aiscan-full`：普通版 CLI、严格 JSONL、curl 重定向变量和真实本地扫描均通过；full 版的 `/health`、登录认证、HttpOnly 会话、ConnectRPC、快速接入和浏览器存储边界均通过真实浏览器测试。
 
 ## v1.0.0-rc3 — 有界流量存储、会话稳定性与发布验证
 
