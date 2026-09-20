@@ -20,7 +20,7 @@ flowchart TD
 
 `agent/` 提供模型循环和会话机制，`core/` 提供资源、hooks、操作关联和事件等基础设施。业务实现多位于 `tools/`，对应扩展在 `pkg/exts/` 中将实现接入资源与生命周期。
 
-`pkg/base` 返回有序的基础扩展；`pkg/harness` 在此之上提供工具宿主和会话 Agent 的通用组合；`pkg/aiscan` 再加入扫描器、代理和其他产品能力；`cmd/aiscan` 解析配置并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
+`pkg/harness.BaseExtensions` 返回有序的默认扩展，`harness.New` 在此之上提供工具宿主和会话 Agent 的通用组合；`cmd/aiscan` 负责解析配置、加入扫描器和代理等产品能力，并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
 
 ## 装配与生命周期
 
@@ -58,4 +58,16 @@ Go 宿主直接持有组合和 Session Runtime。跨进程宿主通过 AOP 发�
 
 ## 源码阅读
 
-从 [base.New](../pkg/base/base.go)、[aiscan 的能力选择](../pkg/aiscan/extensions.go)和 [Profile](../pkg/aiscan/profile.go)可以读到完整装配顺序。随后沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进所调用的工具。各专题末尾提供对应实现与测试入口。
+从 [harness.BaseExtensions](../pkg/harness/base.go)、[aiscan 的能力选择](../cmd/aiscan/extensions.go)和 [Profile](../cmd/aiscan/profile.go)可以读到完整装配顺序。随后沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进所调用的工具。各专题末尾提供对应实现与测试入口。
+
+## 代码组织与依赖边界
+
+`core` 承担资源生命周期、执行与事件机制，不依赖 `agent`、`pkg` 或 `tools`。命令和模型工具在 `core/tool` 中分别由 `CommandRegistry`、`ToolRegistry` 管理，保留不同的执行接口与资源所有权；`core/proc` 提供进程会话管理和事件桥接。`core/tool/hooks` 使用 AOP 载荷表达执行边界，避免反向依赖工具注册表。
+
+`pkg/config` 和 `pkg/output` 分别负责应用配置和输出。`pkg/harness` 提供默认组装；具体产品的配置转换、能力选择和运行模式位于 `cmd/aiscan`。需要控制扩展顺序的宿主使用 `harness.BaseExtensions` 和 `extension.New`；`harness.New` 提供固定顺序的默认组合。
+
+扫描命令自行保证命令输出不含颜色控制符，`core/tool` 不按业务命令名改写参数。扫描收集器的结果类型归 `tools/scan` 私有，Loot 直接使用 `parsers.Loot`；`pkg/output` 仅承载共享的事件读取、渲染和格式化。`pkg/app` 的 Provider 状态与配置转换直接依赖 `agent/provider`，无需经过 Agent 根包的类型别名。
+
+IOA client/server 的 CLI 声明与 Session、IOA client 的 Console 贡献和各自扩展放在同一包，以文件划分职责。`NewConsole` 仍是独立安装入口，合包不改变可选性或加载顺序。IOA client 和 server 保持独立，避免客户端引入服务端依赖。
+
+共享状态 `pkg/app`、宿主契约 `pkg/profile`、启动声明 `pkg/cli` 和展示契约 `pkg/console/api` 有多个非扩展消费者，继续独立。测试辅助位于 `internal/testutil/hosttest` 与 `internal/testutil/apptest`，后者可以依赖前者，避免低层测试引入完整应用图。

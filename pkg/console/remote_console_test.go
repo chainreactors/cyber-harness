@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"testing"
 )
 

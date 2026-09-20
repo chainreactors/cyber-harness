@@ -7,13 +7,13 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	agentprompt "github.com/chainreactors/cyber/agent/prompt"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/apptest"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func defaultPromptResolver(t *testing.T) agentprompt.Resolver {

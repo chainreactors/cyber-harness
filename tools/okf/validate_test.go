@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func writeMarkdown(t *testing.T, root, name, content string) {
@@ -149,7 +148,7 @@ func TestCommandSupportsJSONAndStrictFailure(t *testing.T) {
 	writeMarkdown(t, root, "minimal.md", "---\ntype: Reference\n---\n\n# Minimal\n")
 	command := NewCommand()
 	var output bytes.Buffer
-	result, err := command.Run(context.Background(), &commands.Execution{
+	result, err := command.Run(context.Background(), &coretool.Execution{
 		Args: []string{"validate", ".", "--format", "json"}, Dir: root, Stdout: &output,
 	})
 	if err != nil {
@@ -167,7 +166,7 @@ func TestCommandSupportsJSONAndStrictFailure(t *testing.T) {
 	}
 
 	output.Reset()
-	_, err = command.Run(context.Background(), &commands.Execution{
+	_, err = command.Run(context.Background(), &coretool.Execution{
 		Args: []string{"test", "."}, Dir: root, Stdout: &output,
 	})
 	if err == nil || !strings.Contains(err.Error(), "OKF test failed") || !strings.Contains(output.String(), "ERROR") {

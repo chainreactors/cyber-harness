@@ -14,12 +14,12 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -38,8 +38,8 @@ type Runtime struct {
 	primarySessionID string
 	app              *apppkg.State
 	hooks            *hooks.Registry
-	tools            tool.Executor
-	commandRegistry  commands.Executor
+	tools            coretool.Executor
+	commandRegistry  coretool.CommandExecutor
 	skills           *skills.Store
 	bash             *terminaltool.BashTool
 	nodeName         string
@@ -78,8 +78,8 @@ type Config struct {
 	// State for them: they belong to the extensions that own them, and State is
 	// not a place to park other people's things.
 	Hooks            *hooks.Registry
-	Tools            tool.Executor
-	CommandRegistry  commands.Executor
+	Tools            coretool.Executor
+	CommandRegistry  coretool.CommandExecutor
 	Skills           *skills.Store
 	Bash             *terminaltool.BashTool
 	NodeName         string
@@ -105,7 +105,7 @@ func (rt *Runtime) Skills() *skills.Store {
 	return rt.skills
 }
 
-func (rt *Runtime) CommandRegistry() commands.Executor {
+func (rt *Runtime) CommandRegistry() coretool.CommandExecutor {
 	if rt == nil {
 		return nil
 	}
@@ -119,7 +119,7 @@ func (rt *Runtime) Hooks() *hooks.Registry {
 	return rt.hooks
 }
 
-func (rt *Runtime) Tools() tool.Executor {
+func (rt *Runtime) Tools() coretool.Executor {
 	if rt == nil {
 		return nil
 	}
@@ -198,7 +198,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		nodeName = "cyber"
 	}
 	rt.nodeName = nodeName
-	executor := tool.EmptyExecutor()
+	executor := coretool.EmptyExecutor()
 	if rt.tools != nil {
 		executor = rt.tools
 	}

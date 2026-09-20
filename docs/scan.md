@@ -77,7 +77,7 @@ aiscan scan -i http://127.0.0.1:3000 --verify=off --sniper
 
 当前源码有几个与旧文档不同的边界。默认配置中的 `auto` 允许 Provider 不可用，但 CLI 会移除这个参数，扫描命令没有进一步将其转换为 high 阈值；因此目前不能承诺“默认自动验证 high”。显式传 `--verify=auto` 还会进入要求模型的启动路径。需要确定性地启用或关闭验证，请明确指定级别或 off。
 
-`--deep` 仍在帮助和启动选项中，但当前 scan 执行路径没有调用 AI deep 阶段；不应将传入该参数当作已经完成动态测试。它也不控制完整发行版的 Katana 深度爬取。实现依据是[模式选择](../pkg/runner/scanner.go)、[启动入口](../pkg/runner/modes.go)和[扫描执行](../tools/scan/command.go)。
+`--deep` 仍在帮助和启动选项中，但当前 scan 执行路径没有调用 AI deep 阶段；不应将传入该参数当作已经完成动态测试。它也不控制完整发行版的 Katana 深度爬取。实现依据是[模式选择](../cmd/aiscan/scanner_mode.go)、[启动入口](../cmd/aiscan/modes.go)和[扫描执行](../tools/scan/command.go)。
 
 ## 输出格式
 

@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func scannerPromptResolver(t *testing.T, contributions ...prompt.Contribution) prompt.Resolver {
@@ -49,8 +49,8 @@ func TestScannerOwnsWorkerPrompts(t *testing.T) {
 		}
 	}
 
-	loot := output.Loot{
-		Kind: output.LootVuln, Target: "https://target.example", Priority: "critical",
+	loot := parsers.Loot{
+		Kind: parsers.LootVuln, Target: "https://target.example", Priority: "critical",
 		Description: "remote code execution", Data: map[string]any{
 			"severity": "critical", "template_id": "rce-1", "service": "https",
 			"fingers": []string{"nginx", "php"},

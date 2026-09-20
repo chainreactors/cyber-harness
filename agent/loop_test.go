@@ -12,15 +12,15 @@ import (
 
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
-	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/hooks"
+	procbus "github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -115,10 +115,10 @@ func TestParallelToolCallRecoversExtensionPanic(t *testing.T) {
 	}
 	first := provider.MessageToolResult(batch.messages[0])
 	second := provider.MessageToolResult(batch.messages[1])
-	if first == nil || !first.IsError || !strings.Contains(tool.ResultText(first), "operation denied") {
+	if first == nil || !first.IsError || !strings.Contains(coretool.ResultText(first), "operation denied") {
 		t.Fatalf("first result = %+v", first)
 	}
-	if second == nil || second.IsError || tool.ResultText(second) != "second ok" {
+	if second == nil || second.IsError || coretool.ResultText(second) != "second ok" {
 		t.Fatalf("second result = %+v", second)
 	}
 	if got := logs.String(); strings.Contains(got, "before boom") || !strings.Contains(got, "handler panicked") {
@@ -162,7 +162,7 @@ func TestToolResultEventNormalizesInvalidUTF8(t *testing.T) {
 	if _, err := aop.Wrap("event", "call-invalid-utf8", message); err != nil {
 		t.Fatalf("wrap tool.result: %v", err)
 	}
-	if got := tool.ResultText(provider.MessageToolResult(batch.messages[0])); got != "ok:\uFFFD" {
+	if got := coretool.ResultText(provider.MessageToolResult(batch.messages[0])); got != "ok:\uFFFD" {
 		t.Fatalf("transcript output = %q, want valid UTF-8 replacement", got)
 	}
 }
@@ -172,10 +172,10 @@ type invalidUTF8Tool struct{}
 func (invalidUTF8Tool) Name() string        { return "echo" }
 func (invalidUTF8Tool) Description() string { return "returns raw text" }
 func (invalidUTF8Tool) Definition() *aop.ToolDefinition {
-	return tool.Def("echo", "returns raw text", struct{}{})
+	return coretool.Def("echo", "returns raw text", struct{}{})
 }
-func (invalidUTF8Tool) Execute(context.Context, string) (*tool.Result, error) {
-	return &tool.Result{Output: []*aop.Content{{
+func (invalidUTF8Tool) Execute(context.Context, string) (*coretool.Result, error) {
+	return &coretool.Result{Output: []*aop.Content{{
 		Value: &aop.Content_Text{Text: &aop.TextContent{Text: string([]byte{'o', 'k', ':', 0xe7})}},
 	}}}, nil
 }
@@ -520,7 +520,7 @@ func TestOutputLimitToolCallIsRejectedAndRetried(t *testing.T) {
 	if got := string(truncatedCalls[0].GetArguments().GetData()); got != "{}" {
 		t.Fatalf("sanitized arguments = %q, want {}", got)
 	}
-	if errorResult == nil || !errorResult.IsError || !strings.Contains(tool.ResultText(errorResult), "Retry") {
+	if errorResult == nil || !errorResult.IsError || !strings.Contains(coretool.ResultText(errorResult), "Retry") {
 		t.Fatalf("error tool result = %#v", errorResult)
 	}
 }
@@ -629,7 +629,7 @@ func TestStreamingMalformedToolCallIsRejectedAfterNormalTerminalMarker(t *testin
 	if len(rejectedCalls) != 1 || string(rejectedCalls[0].GetArguments().GetData()) != "{}" {
 		t.Fatalf("rejected tool call = %#v", rejectedCalls)
 	}
-	if errorResult == nil || !errorResult.IsError || !strings.Contains(tool.ResultText(errorResult), "invalid") {
+	if errorResult == nil || !errorResult.IsError || !strings.Contains(coretool.ResultText(errorResult), "invalid") {
 		t.Fatalf("error tool result = %#v", errorResult)
 	}
 }

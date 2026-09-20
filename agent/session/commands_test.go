@@ -2,11 +2,10 @@ package session
 
 import (
 	"context"
+	"github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"strings"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/types"
 )
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {

@@ -28,7 +28,7 @@ result, err := turn.Wait()
 
 ## 接入实际模型
 
-演示程序将启动 Provider 设为 Disabled，再通过 Runtime.SetProvider 注入本地实现。实际应用通常在 `base.Config.Provider` 中选择 `StartupRequired`，提供 `ProviderConfig` 的协议、端点、密钥和模型；删除演示 Provider 的注入，让基础扩展完成初始化。
+演示程序将启动 Provider 设为 Disabled，再通过 Runtime.SetProvider 注入本地实现。实际应用通常在 `harness.BaseConfig.Provider` 中选择 `StartupRequired`，提供 `ProviderConfig` 的协议、端点、密钥和模型；删除演示 Provider 的注入，让基础扩展完成初始化。
 
 也可以实现 `provider.Provider` 接入自己的后端；支持流式返回时再实现 `StreamingProvider`。框架上层使用统一的 AOP 消息，供应商的 wire format 留在适配器中。模型配置与重试语义见[上下文与知识](../architecture/context.md#provider-选择与容错)。
 

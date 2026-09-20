@@ -26,7 +26,7 @@ import (
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 // A single stable, modern Chrome identity. Keeping one fingerprint per process
@@ -58,7 +58,7 @@ var browserDefaults = []Header{
 // browser naturalization defaults, performs the exchange, and writes
 // curl-shaped output. Egress and workDir are per-invocation; nothing here
 // mutates the shared Command.
-func (c *Command) do(ctx context.Context, req *Request, egress commands.Egress, workDir string, stdout, stderr io.Writer) error {
+func (c *Command) do(ctx context.Context, req *Request, egress coretool.Egress, workDir string, stdout, stderr io.Writer) error {
 	if req.Version {
 		_, err := fmt.Fprintln(stdout, compatibilityVersion)
 		return err

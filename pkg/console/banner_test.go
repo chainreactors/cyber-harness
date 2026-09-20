@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	outputpkg "github.com/chainreactors/cyber/core/output"
+	outputpkg "github.com/chainreactors/cyber/pkg/output"
 )
 
 // assertUniformWidth checks every line of a rendered box has the same visible

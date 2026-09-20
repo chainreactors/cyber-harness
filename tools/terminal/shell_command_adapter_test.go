@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/utils/proc"
 )
 
@@ -29,15 +29,15 @@ type adapterTestCommands struct {
 	once     sync.Once
 }
 
-func newAdapterTestBash(t *testing.T) (*BashTool, *commands.Registry, *adapterTestCommands) {
+func newAdapterTestBash(t *testing.T) (*BashTool, *coretool.CommandRegistry, *adapterTestCommands) {
 	t.Helper()
 	state := &adapterTestCommands{started: make(chan struct{}), canceled: make(chan struct{})}
 	registry, _ := loadTestRegistry(t, commandBatch(
-		commands.Command{Name: "memory_echo", Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		coretool.Command{Name: "memory_echo", Run: func(_ context.Context, execution *coretool.Execution) (any, error) {
 			fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
 			return nil, nil
 		}},
-		commands.Command{Name: "memory_upper", Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		coretool.Command{Name: "memory_upper", Run: func(_ context.Context, execution *coretool.Execution) (any, error) {
 			data, err := io.ReadAll(execution.Stdin)
 			if err != nil {
 				return nil, err
@@ -45,22 +45,22 @@ func newAdapterTestBash(t *testing.T) (*BashTool, *commands.Registry, *adapterTe
 			_, err = execution.Stdout.Write(bytes.ToUpper(data))
 			return nil, err
 		}},
-		commands.Command{Name: "memory_fail", Run: func(context.Context, *commands.Execution) (any, error) {
+		coretool.Command{Name: "memory_fail", Run: func(context.Context, *coretool.Execution) (any, error) {
 			return nil, adapterTestExitError{code: 7}
 		}},
-		commands.Command{Name: "memory_context", Run: func(ctx context.Context, execution *commands.Execution) (any, error) {
+		coretool.Command{Name: "memory_context", Run: func(ctx context.Context, execution *coretool.Execution) (any, error) {
 			invocation := operation.InvocationFromContext(ctx)
 			fmt.Fprintf(execution.Stdout, "dir=%s call=%s session=%s turn=%s emitter=%s\n",
 				execution.Dir, invocation.CallID, invocation.SessionID, invocation.TurnID, invocation.Emitter)
 			return nil, nil
 		}},
-		commands.Command{Name: "memory_wait", Run: func(ctx context.Context, _ *commands.Execution) (any, error) {
+		coretool.Command{Name: "memory_wait", Run: func(ctx context.Context, _ *coretool.Execution) (any, error) {
 			state.once.Do(func() { close(state.started) })
 			<-ctx.Done()
 			close(state.canceled)
 			return nil, ctx.Err()
 		}},
-		commands.Command{Name: "scan", Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		coretool.Command{Name: "scan", Run: func(_ context.Context, execution *coretool.Execution) (any, error) {
 			fmt.Fprintln(execution.Stdout, strings.Join(execution.Args, " "))
 			return nil, nil
 		}},

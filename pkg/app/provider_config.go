@@ -3,14 +3,14 @@ package app
 import (
 	"strings"
 
-	"github.com/chainreactors/cyber/agent"
-	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/agent/provider"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
-func defaultProviderConfig() agent.ProviderConfig {
-	return agent.ProviderConfig{
-		Provider: agent.NormalizeProvider(cfg.DefaultProvider),
+func defaultProviderConfig() provider.ProviderConfig {
+	return provider.ProviderConfig{
+		Provider: provider.NormalizeProvider(cfg.DefaultProvider),
 		BaseURL:  cfg.DefaultBaseURL,
 		APIKey:   cfg.DefaultAPIKey,
 		Model:    cfg.DefaultModel,
@@ -23,14 +23,14 @@ func HasSingleProviderFields(option *cfg.Option) bool {
 	return option.Provider != "" || option.BaseURL != "" || option.APIKey != "" || option.Model != ""
 }
 
-func entryToProviderConfig(entry cfg.LLMProviderEntry) agent.ProviderConfig {
+func entryToProviderConfig(entry cfg.LLMProviderEntry) provider.ProviderConfig {
 	providerName := strings.TrimSpace(entry.Provider)
 	if providerName == "" {
-		providerName = agent.InferProviderFromBaseURL(entry.BaseURL)
+		providerName = provider.InferFromBaseURL(entry.BaseURL)
 	} else {
-		providerName = agent.NormalizeProvider(providerName)
+		providerName = provider.NormalizeProvider(providerName)
 	}
-	cfg := agent.ProviderConfig{
+	cfg := provider.ProviderConfig{
 		Provider:      providerName,
 		BaseURL:       entry.BaseURL,
 		APIKey:        entry.APIKey,
@@ -60,7 +60,7 @@ func activeProviderIndex(option *cfg.Option) int {
 	return 0
 }
 
-func applyProviderLimits(providerConfig *agent.ProviderConfig, option *cfg.Option) {
+func applyProviderLimits(providerConfig *provider.ProviderConfig, option *cfg.Option) {
 	if option.MaxTokens != 0 {
 		providerConfig.MaxTokens = option.MaxTokens
 	}
@@ -69,7 +69,7 @@ func applyProviderLimits(providerConfig *agent.ProviderConfig, option *cfg.Optio
 	}
 }
 
-func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
+func ProviderConfig(option *cfg.Option) provider.ProviderConfig {
 	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
 		applyProviderLimits(&cfg, option)
@@ -77,12 +77,12 @@ func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
 	}
 	cfg := defaultProviderConfig()
 	if option.Provider != "" {
-		cfg.Provider = agent.NormalizeProvider(option.Provider)
+		cfg.Provider = provider.NormalizeProvider(option.Provider)
 	}
 	if option.BaseURL != "" {
 		cfg.BaseURL = option.BaseURL
 		if option.Provider == "" {
-			cfg.Provider = agent.InferProviderFromBaseURL(option.BaseURL)
+			cfg.Provider = provider.InferFromBaseURL(option.BaseURL)
 		}
 	}
 	if option.APIKey != "" {
@@ -99,10 +99,10 @@ func ProviderConfig(option *cfg.Option) agent.ProviderConfig {
 	return cfg
 }
 
-func FallbackProviderConfigs(option *cfg.Option) []agent.ProviderConfig {
+func FallbackProviderConfigs(option *cfg.Option) []provider.ProviderConfig {
 	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		active := activeProviderIndex(option)
-		var configs []agent.ProviderConfig
+		var configs []provider.ProviderConfig
 		for i, entry := range option.Providers {
 			if i == active {
 				continue
@@ -111,14 +111,14 @@ func FallbackProviderConfigs(option *cfg.Option) []agent.ProviderConfig {
 		}
 		return configs
 	}
-	var configs []agent.ProviderConfig
+	var configs []provider.ProviderConfig
 	for _, entry := range option.Providers {
 		configs = append(configs, entryToProviderConfig(entry))
 	}
 	return configs
 }
 
-func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig agent.ProviderConfig) {
+func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig provider.ProviderConfig) {
 	option.Provider = providerConfig.Provider
 	option.BaseURL = providerConfig.BaseURL
 	option.APIKey = providerConfig.APIKey
@@ -130,7 +130,7 @@ func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig agent.Provi
 // ProviderConfigFromProto resolves the active LLM profile directly from the
 // canonical config proto. This is the only provider-config path used when a
 // DistributeConfig is already in hand (remote agents, hub reload).
-func ProviderConfigFromProto(llm *types.LLMConfig) agent.ProviderConfig {
+func ProviderConfigFromProto(llm *types.LLMConfig) provider.ProviderConfig {
 	active := cfg.ActiveLLMProvider(llm)
 	if active == nil {
 		return defaultProviderConfig()
@@ -139,12 +139,12 @@ func ProviderConfigFromProto(llm *types.LLMConfig) agent.ProviderConfig {
 }
 
 // FallbackProviderConfigsFromProto returns every non-active profile in order.
-func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []agent.ProviderConfig {
+func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []provider.ProviderConfig {
 	if llm == nil {
 		return nil
 	}
 	active := cfg.ActiveLLMProvider(llm)
-	var configs []agent.ProviderConfig
+	var configs []provider.ProviderConfig
 	for _, profile := range llm.Providers {
 		if active != nil && profile.Id == active.Id {
 			continue
@@ -154,18 +154,18 @@ func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []agent.ProviderConf
 	return configs
 }
 
-func providerConfigFromProto(profile *types.LLMProviderConfig) agent.ProviderConfig {
+func providerConfigFromProto(profile *types.LLMProviderConfig) provider.ProviderConfig {
 	profile = cfg.NormalizeLLMProvider(profile)
 	if profile == nil {
 		return defaultProviderConfig()
 	}
 	providerName := strings.TrimSpace(profile.Provider)
 	if providerName == "" {
-		providerName = agent.InferProviderFromBaseURL(profile.BaseUrl)
+		providerName = provider.InferFromBaseURL(profile.BaseUrl)
 	} else {
-		providerName = agent.NormalizeProvider(providerName)
+		providerName = provider.NormalizeProvider(providerName)
 	}
-	result := agent.ProviderConfig{
+	result := provider.ProviderConfig{
 		Provider:      providerName,
 		BaseURL:       profile.BaseUrl,
 		APIKey:        profile.ApiKey,

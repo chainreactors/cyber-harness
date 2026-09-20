@@ -12,15 +12,14 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
-	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-	presentation "github.com/chainreactors/cyber/pkg/exts/ioa/client/console"
-	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 	service "github.com/chainreactors/cyber/tools/ioa/server"
 )
 
 // The query CLI owns a client-only graph with no Agent, inbox, or event output.
-func runIOAClientCommand(ctx context.Context, mode string, option clientext.Options, output presentation.Options, args presentation.Args, env hostcli.Environment) (resultErr error) {
+func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Options, output ioaclient.ConsoleOptions, args ioaclient.ConsoleArgs, env hostcli.Environment) (resultErr error) {
 	ioaURL := option.URL
 	if ioaURL == "" {
 		ioaURL = "http://127.0.0.1:8765"
@@ -30,7 +29,7 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 		return err
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
-	client := clientext.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, clientext.Dependencies{Logger: env.Logger})
+	client := ioaclient.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, ioaclient.Dependencies{Logger: env.Logger})
 	set, err := extension.New(client)
 	if err != nil {
 		return err
@@ -43,24 +42,24 @@ func runIOAClientCommand(ctx context.Context, mode string, option clientext.Opti
 	}
 	switch mode {
 	case "spaces":
-		return presentation.RunIOASpaces(ctx, client.Service(), &output, env.Out, env.Err)
+		return ioaclient.RunIOASpaces(ctx, client.Service(), &output, env.Out, env.Err)
 	case "nodes":
-		return presentation.RunIOANodes(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOANodes(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "messages":
 		if args.Space == "" {
 			return fmt.Errorf("space is required")
 		}
-		return presentation.RunIOAMessages(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOAMessages(ctx, client.Service(), &output, args, env.Out, env.Err)
 	case "context":
 		if args.Space == "" || args.MessageID == "" {
 			return fmt.Errorf("space and message ID are required")
 		}
-		return presentation.RunIOAContext(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOAContext(ctx, client.Service(), &output, args, env.Out, env.Err)
 	}
 	return fmt.Errorf("unknown query %s", mode)
 }
 
-func runIOAServe(ctx context.Context, option serverext.Options, logger telemetry.Logger) (resultErr error) {
+func runIOAServe(ctx context.Context, option ioaserver.Options, logger telemetry.Logger) (resultErr error) {
 	listenURL := option.URL
 	if listenURL == "" {
 		listenURL = "http://127.0.0.1:8765"
@@ -69,7 +68,7 @@ func runIOAServe(ctx context.Context, option serverext.Options, logger telemetry
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("invalid IOA listen URL")
 	}
-	server := serverext.New(service.Config{AccessKey: option.Token, MCP: true})
+	server := ioaserver.New(service.Config{AccessKey: option.Token, MCP: true})
 	set, err := extension.New(server)
 	if err != nil {
 		return err

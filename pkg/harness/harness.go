@@ -14,10 +14,9 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/base"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -30,7 +29,7 @@ import (
 // optional session consumes them. Session enables the Agent runtime; its Loop
 // defaults to StandardLoop when Session.Loop is nil.
 type Config struct {
-	Base       base.Config
+	Base       BaseConfig
 	Extensions []extension.Extension
 	Session    *agentsession.Config
 	Loop       agent.Loop
@@ -43,14 +42,14 @@ type Harness struct {
 	set      *extension.Set
 	app      *apppkg.State
 	runtime  *agentsession.Runtime
-	tools    tool.Executor
-	commands commands.Executor
+	tools    coretool.Executor
+	commands coretool.CommandExecutor
 	bash     *terminaltool.BashTool
 }
 
 // New builds a harness without loading it.
 func New(config Config) (*Harness, error) {
-	entries, err := base.New(config.Base)
+	entries, err := BaseExtensions(config.Base)
 	if err != nil {
 		return nil, err
 	}
@@ -74,10 +73,10 @@ func New(config Config) (*Harness, error) {
 		if h.app, err = extension.Use[*apppkg.State](scope); err != nil {
 			return err
 		}
-		if h.tools, err = extension.Use[tool.Executor](scope); err != nil {
+		if h.tools, err = extension.Use[coretool.Executor](scope); err != nil {
 			return err
 		}
-		if h.commands, err = extension.Use[commands.Executor](scope); err != nil {
+		if h.commands, err = extension.Use[coretool.CommandExecutor](scope); err != nil {
 			return err
 		}
 		if h.bash, err = extension.Use[*terminaltool.BashTool](scope); err != nil {
@@ -134,7 +133,7 @@ func (h *Harness) Runtime() (*agentsession.Runtime, error) {
 }
 
 // Tools returns the shared tool executor after Load.
-func (h *Harness) Tools() (tool.Executor, error) {
+func (h *Harness) Tools() (coretool.Executor, error) {
 	if !h.Active() || h.tools == nil {
 		return nil, fmt.Errorf("harness is not active")
 	}
@@ -142,7 +141,7 @@ func (h *Harness) Tools() (tool.Executor, error) {
 }
 
 // Commands returns the shared command executor after Load.
-func (h *Harness) Commands() (commands.Executor, error) {
+func (h *Harness) Commands() (coretool.CommandExecutor, error) {
 	if !h.Active() || h.commands == nil {
 		return nil, fmt.Errorf("harness is not active")
 	}

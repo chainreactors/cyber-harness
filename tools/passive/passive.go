@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/projectdiscovery/uncover/sources"
 )
@@ -84,7 +84,7 @@ Options:
   -h            Show this help`, availStr)
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("passive", &err)
 	args := execution.Args
 	src, rest, help, err := splitSource(args)

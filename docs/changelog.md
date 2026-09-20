@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- 合并 `pkg/base` 到 `pkg/harness`，以 `BaseConfig` 和 `BaseExtensions` 提供默认能力。
+- 将 `pkg/commands` 与 `pkg/toolset` 归入 `core/tool`，保留独立的命令和工具注册表；进程会话桥接从 `agent/proc` 移至 `core/proc`。
+- 应用配置与输出分别从 `core/config`、`core/output` 移至 `pkg/config`、`pkg/output`；发布版本注入路径同步更新。
+- aiscan 运行模式从 `pkg/runner` 收回 `cmd/aiscan`；测试辅助归入 `internal/testutil`，保留 host/app 两层。
+- IOA client/server 的 CLI、IOA client 和 Session 的 Console 适配并入所属扩展包，保留独立安装入口。
+
+- 将参考发行版组装从 `pkg/aiscan` 内联至 `cmd/aiscan`，移除公开的 `pkg/aiscan.New` 入口。嵌入方可使用 `pkg/harness` 构造通用宿主，或显式组合扩展；它们不自动提供完整 aiscan 发行版。CLI、配置字段和协议保持不变。
+
 ## v1.0.0-rc4 — 编译链路简化 + Extension 架构重构 + 浏览器端 CSTX
 
 rc4 首先收敛了编译方式和能力组合：`Makefile` 与 `editions.env` 成为构建入口和 edition 规则的事实来源，官方 standard 与 full 发行版均不依赖 libcstx 或 native RE2，并可在启用或关闭 CGO 时编译；运行时则统一为一套显式的 Extension 生命周期和静态 Profile。基于这两个边界，Go 只归档 scanner-native Artifact，Web 通过 CSTX TypeScript/WASM 构建资产关系，不再让后端承担重复的数据模型与处理链路。

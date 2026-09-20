@@ -2,9 +2,8 @@ package agent
 
 import (
 	"context"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"strings"
-
-	"github.com/chainreactors/cyber/core/tool"
 )
 
 type FinishTool struct{}
@@ -22,14 +21,14 @@ type finishArgs struct {
 }
 
 func (t *FinishTool) Definition() *ToolDefinition {
-	return tool.Def("finish", t.Description(), finishArgs{})
+	return coretool.Def("finish", t.Description(), finishArgs{})
 }
 
-func (t *FinishTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
-	args, _ := tool.ParseArgs[finishArgs](arguments)
+func (t *FinishTool) Execute(_ context.Context, arguments string) (*coretool.Result, error) {
+	args, _ := coretool.ParseArgs[finishArgs](arguments)
 	summary := strings.TrimSpace(args.Summary)
 	if summary == "" {
 		summary = "Task completed."
 	}
-	return tool.TerminateResult(summary), nil
+	return coretool.TerminateResult(summary), nil
 }

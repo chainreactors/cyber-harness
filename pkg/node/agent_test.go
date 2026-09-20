@@ -1,11 +1,10 @@
 package node
 
 import (
-	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	"testing"
 )
 
 func TestRunRemoteAgentRejectsNilConstructorAndResult(t *testing.T) {

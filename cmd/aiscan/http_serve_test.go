@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/extension"
-	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	ioaservice "github.com/chainreactors/cyber/tools/ioa/server"
 	ioaclient "github.com/chainreactors/ioa/client"
 )
 
 func TestManagedHTTPShutdownCancelsSSEBeforeDraining(t *testing.T) {
-	owner := serverext.New(ioaservice.Config{AccessKey: "test-key"})
+	owner := ioaserver.New(ioaservice.Config{AccessKey: "test-key"})
 	set, err := extension.New(owner)
 	if err != nil {
 		t.Fatal(err)

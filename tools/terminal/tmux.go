@@ -3,19 +3,18 @@ package terminal
 import (
 	"context"
 	"fmt"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/core/truncate"
+	"github.com/chainreactors/utils/proc"
 	"sort"
 	"strings"
 	"time"
-
-	procbus "github.com/chainreactors/cyber/agent/proc"
-	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/proc"
 )
 
 type tmuxCommand struct {
 	manager *procbus.Manager
-	start   func(context.Context, string, BashExecOptions) (*commands.Execution, error)
+	start   func(context.Context, string, BashExecOptions) (*coretool.Execution, error)
 }
 
 const tmuxUsage = `tmux - PTY session manager
@@ -39,16 +38,16 @@ const tmuxUsage = `tmux - PTY session manager
   wait-for -t <id> [--timeout duration]
       Block until session completes.`
 
-func NewTmuxCommand(bash *BashTool) commands.Command {
+func NewTmuxCommand(bash *BashTool) coretool.Command {
 	runner := &tmuxCommand{manager: bash.Manager(), start: bash.Start}
-	return commands.Command{
+	return coretool.Command{
 		Name: "tmux", Usage: tmuxUsage,
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
 		Run:             runner.run,
 	}
 }
 
-func (t *tmuxCommand) run(ctx context.Context, execution *commands.Execution) (any, error) {
+func (t *tmuxCommand) run(ctx context.Context, execution *coretool.Execution) (any, error) {
 	args := execution.Args
 	var result string
 	var err error

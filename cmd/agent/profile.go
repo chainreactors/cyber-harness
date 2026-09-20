@@ -8,15 +8,15 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	base "github.com/chainreactors/cyber/pkg/base"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
+	harness "github.com/chainreactors/cyber/pkg/harness"
+
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 )
@@ -36,7 +36,7 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 
 	// This build routes nothing, so it publishes the disabled endpoint and
 	// links no proxy at all.
-	values, err := base.New(base.Config{
+	values, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory:    workDir,
 		SkillPaths:   agentSkillPaths(option.Skills),
 		SkillExclude: []string{"cyber"},
@@ -56,7 +56,7 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 		loop,
 		sessionext.New(sessionConfig),
 		tuiext.New(),
-		sessionconsole.New(),
+		sessionext.NewConsole(),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			var err error
 			if p.runtime, err = extension.Use[*agentsession.Runtime](scope); err != nil {

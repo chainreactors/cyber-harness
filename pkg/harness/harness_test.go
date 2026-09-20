@@ -9,29 +9,30 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/base"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/harness"
 )
 
 type helloTool struct{}
 
-func (helloTool) Name() string                 { return "hello" }
-func (helloTool) Description() string          { return "say hello" }
-func (helloTool) Definition() *tool.Definition { return tool.Def("hello", "say hello", struct{}{}) }
-func (helloTool) Execute(context.Context, string) (*tool.Result, error) {
-	return tool.TextResult("hello"), nil
+func (helloTool) Name() string        { return "hello" }
+func (helloTool) Description() string { return "say hello" }
+func (helloTool) Definition() *coretool.Definition {
+	return coretool.Def("hello", "say hello", struct{}{})
+}
+func (helloTool) Execute(context.Context, string) (*coretool.Result, error) {
+	return coretool.TextResult("hello"), nil
 }
 
 func toolExtension() extension.Extension {
 	return extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Add[tool.Tool](scope, helloTool{})
+		return extension.Add[coretool.Tool](scope, helloTool{})
 	}}
 }
 
 func TestToolHarnessLoadsCustomCapabilities(t *testing.T) {
 	h, err := harness.New(harness.Config{
-		Base:       base.Config{Directory: t.TempDir()},
+		Base:       harness.BaseConfig{Directory: t.TempDir()},
 		Extensions: []extension.Extension{toolExtension()},
 	})
 	if err != nil {
@@ -46,8 +47,8 @@ func TestToolHarnessLoadsCustomCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := executor.ExecuteTool(t.Context(), "hello", "{}")
-	if err != nil || tool.ResultText(result) != "hello" {
-		t.Fatalf("tool result = %q, err = %v", tool.ResultText(result), err)
+	if err != nil || coretool.ResultText(result) != "hello" {
+		t.Fatalf("tool result = %q, err = %v", coretool.ResultText(result), err)
 	}
 	if _, err := h.Runtime(); err == nil {
 		t.Fatal("tool-only harness unexpectedly created a session runtime")
@@ -66,7 +67,7 @@ func (providerStub) ChatCompletion(ctx context.Context, _ *provider.ChatCompleti
 
 func TestAgentHarnessDefaultsToStandardLoop(t *testing.T) {
 	h, err := harness.New(harness.Config{
-		Base:    base.Config{Directory: t.TempDir(), Provider: provider.StartupConfig{Mode: provider.StartupDisabled}},
+		Base:    harness.BaseConfig{Directory: t.TempDir(), Provider: provider.StartupConfig{Mode: provider.StartupDisabled}},
 		Session: &agentsession.Config{},
 	})
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
@@ -178,7 +177,7 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 		record := result.TemplateResult(target.Target)
 		resultID := toolargs.ArtifactResultID("neutron", toolpb.ArtifactKindVuln, target.Target, record)
 		loot := bindLoot(vulnLoot(record), resultID, "neutron")
-		emit(artifactLootEvent(capNeutronPOC, loot, output.ArtifactResult{
+		emit(artifactLootEvent(capNeutronPOC, loot, artifactResult{
 			ResultID: resultID,
 			Tool:     "neutron",
 			Kind:     toolpb.ArtifactKindVuln,
@@ -332,7 +331,7 @@ func deriveWeakpassResult(source string, result *parsers.ZombieResult, emit func
 	target := result.Address()
 	resultID := toolargs.ArtifactResultID("zombie", toolpb.ArtifactKindWeakpass, target, result)
 	loot := bindLoot(weakpassLoot(result), resultID, "zombie")
-	emit(artifactLootEvent(source, loot, output.ArtifactResult{
+	emit(artifactLootEvent(source, loot, artifactResult{
 		ResultID: resultID,
 		Tool:     "zombie",
 		Kind:     toolpb.ArtifactKindWeakpass,

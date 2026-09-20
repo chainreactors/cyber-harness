@@ -502,7 +502,7 @@ scan:
 | `CYBER_REPL` | REPL 输入模式：readline 或 fast |
 | `PLAYWRIGHT_CLI_SESSION` | Playwright 默认 session |
 
-运行时业务环境变量只在 `core/config` 解析一次，再通过运行时配置下传。`PATH`、子进程环境继承以及 Go 标准库的 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 属于操作系统级行为，不纳入业务配置优先级。前端开发服务器的 `CYBER_BACKEND_URL` 是 Vite 构建期配置，也不进入 Go 运行时配置。
+运行时业务环境变量只在 `pkg/config` 解析一次，再通过运行时配置下传。`PATH`、子进程环境继承以及 Go 标准库的 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 属于操作系统级行为，不纳入业务配置优先级。前端开发服务器的 `CYBER_BACKEND_URL` 是 Vite 构建期配置，也不进入 Go 运行时配置。
 
 ---
 

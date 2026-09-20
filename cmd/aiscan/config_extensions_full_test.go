@@ -3,8 +3,8 @@
 package main
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"os"
 	"path/filepath"
 	"strings"

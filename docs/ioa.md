@@ -29,7 +29,7 @@ Profile 构造客户端并传入配置、Skills 和可选投递函数；客户�
 没有投递函数时仍可使用命令和 skills，不启动自动收信。
 
 基础能力与 Command/Tool Registry 先加载，随后安装 IOA Client，再安装会话与展示扩展；
-关闭顺序相反。具体组合见 [Profile](../pkg/aiscan/profile.go)。只有整个 Set 加载成功并发布后，投递函数才允许调用 Agent 的 `Deliver`。
+关闭顺序相反。具体组合见 [Profile](../cmd/aiscan/profile.go)。只有整个 Set 加载成功并发布后，投递函数才允许调用 Agent 的 `Deliver`。
 该入口选择主会话，否则选择唯一会话；无会话、多会话歧义、关闭或队列满时返回错误。
 不会自动创建会话。忙碌会话接收追加输入，空闲会话通过既有 Inbox 机制自动执行。
 
@@ -61,9 +61,9 @@ Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭�
 Profile 决定。
 
 - `pkg/cli.Registry` 直接实现 `Point[cli.Contribution]`。
-- `core/config.Sections` 直接实现 `Point[config.Section]`，并提供 `config.Connection` Point。
+- `pkg/config.Sections` 直接实现 `Point[config.Section]`，并提供 `config.Connection` Point。
 - client/server 的 `Declare` 函数直接贡献资源，不返回 Provider DTO，也不经过 Catalog。
-- `core/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
+- `pkg/config.Sections` 保存类型工厂、别名、校验和密钥路径；`Option.Extensions` 只保存数据。
 - `pkg/cli.Registry` 收集子命令与 flag groups，解析不执行 Action。每个命令作用域内拒绝重名参数。
 - IOA client 声明拥有 `ioa` section 的连接测试；Web Config API 通过 Config Sections 分发。
 - `pkg/profile.Profile` 只发布通用 ConsoleBindings、共享 State 和完整 AgentStatus。
@@ -133,7 +133,7 @@ Web 的 IOA Server 保持宿主寿命，应用配置重载只替换应用 Profil
 根目录 `go.work` 联调 workspace 随之移除，构建不再依赖相邻仓库的本地路径。
 
 ```text
-go test ./core/config ./pkg/cli ./agent/skills ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./cmd/aiscan ./pkg/web/service
+go test ./pkg/config ./pkg/cli ./agent/skills ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./cmd/aiscan ./pkg/web/service
 go test -race ./core/extension ./core/events ./core/eventbus ./pkg/exts/... ./tools/ioa/... ./pkg/profile ./pkg/node ./pkg/console ./agent/skills
 go test -tags full ./cmd/aiscan ./pkg/web/service
 go test github.com/chainreactors/ioa/server

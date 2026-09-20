@@ -3,15 +3,14 @@ package console
 import (
 	"context"
 	"fmt"
-	"io"
-
-	procbus "github.com/chainreactors/cyber/agent/proc"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/proc"
+	"io"
 )
 
 const MainREPLName = "main-repl"

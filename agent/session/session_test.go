@@ -20,12 +20,12 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/apptest"
-	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/pkg/toolset"
+
 	looptool "github.com/chainreactors/cyber/tools/loop"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
@@ -654,11 +654,11 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 	return starts, ends
 }
 
-func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Runtime {
+func newBareRuntime(t *testing.T, values []coretool.Command, provider agent.Provider) *Runtime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	reg := commands.NewRegistry()
-	tools := toolset.NewRegistry()
+	reg := coretool.NewCommandRegistry()
+	tools := coretool.NewToolRegistry()
 	terminal := terminaltools.New(terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
 	var bash *terminaltool.BashTool
 	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
@@ -698,7 +698,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 }
 
 func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
-	rt := newBareRuntime(t, []commands.Command{looptool.NewCommand()}, nil)
+	rt := newBareRuntime(t, []coretool.Command{looptool.NewCommand()}, nil)
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "chat-1"})
 	if err != nil {

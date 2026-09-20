@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 func TestAgentCLIExposesOnlyLocalAgentOptions(t *testing.T) {

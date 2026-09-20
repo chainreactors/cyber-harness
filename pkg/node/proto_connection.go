@@ -29,11 +29,11 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/aopws"
+
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
-	toolset "github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -517,7 +517,7 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 			fail("tool executor is unavailable")
 			return
 		}
-		event, err := toolset.ExecuteToolRequest(taskCtx, operationID, request, executor, cc.Progress)
+		event, err := coretool.ExecuteToolRequest(taskCtx, operationID, request, executor, cc.Progress)
 		if err != nil {
 			seal()
 			fail(err.Error())
@@ -530,11 +530,11 @@ func handleAgentToolMessage(ctx context.Context, cc connectionConfig, envelope *
 	}()
 }
 
-func connectionExecutor(cc connectionConfig) tool.Executor {
+func connectionExecutor(cc connectionConfig) coretool.Executor {
 	if cc.Executor != nil {
 		return cc.Executor
 	}
-	return tool.EmptyExecutor()
+	return coretool.EmptyExecutor()
 }
 
 func handleAgentFileMessage(ctx context.Context, cc connectionConfig, envelope *aop.Envelope, value *filepb.ProtocolMessage, send func(string, protobuf.Message)) {

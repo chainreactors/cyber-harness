@@ -4,20 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
-	"testing"
-
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/fingers/common"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/pkg/association"
+	"strings"
+	"testing"
 )
 
 func runCyberhub(t *testing.T, cmd *CyberhubSearch, args ...string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 	return output.String()

@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/cyber/tools/headless"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -243,7 +243,7 @@ Examples:
 }
 
 // Execute dispatches to the appropriate sub-command.
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("playwright", &err)
 	args := execution.Args
 	if len(args) == 0 {
@@ -251,7 +251,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	}
 
 	// Extract global -s flag. The environment-derived default is resolved once
-	// by core/config and injected when the command is constructed.
+	// by pkg/config and injected when the command is constructed.
 	globalSession := c.defaultSession
 	var cleanArgs []string
 	for i := 0; i < len(args); i++ {

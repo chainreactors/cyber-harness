@@ -4,16 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/chainreactors/cyber/core/resource"
+	types "github.com/chainreactors/cyber/core/types"
+	configpkg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	configpkg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
-	types "github.com/chainreactors/cyber/core/types"
-	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 )
 
 // fakeConfigStore is a minimal in-memory ConfigStore.

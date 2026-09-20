@@ -9,19 +9,18 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/resource"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
 // terminal returns the registry that owns the command point and the terminal
 // extension that contributes to it and provides the session registry.
 func terminal(t *testing.T) ([]extension.Extension, *terminalext.Extension) {
 	t.Helper()
-	commandPoint := commands.NewRegistry()
-	toolPoint := toolset.NewRegistry()
+	commandPoint := coretool.NewCommandRegistry()
+	toolPoint := coretool.NewToolRegistry()
 	value := terminalext.New(terminalext.Config{Directory: t.TempDir(), Timeout: 1})
 	return []extension.Extension{
 		namespaces.New(), hosttest.Capabilities(), commandPoint, toolPoint,

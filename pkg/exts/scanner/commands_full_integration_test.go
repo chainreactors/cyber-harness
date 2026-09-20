@@ -16,7 +16,7 @@ import (
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/katana"
 	passivecmd "github.com/chainreactors/cyber/tools/passive"
 	"github.com/chainreactors/cyber/tools/scan/engine"
@@ -25,7 +25,7 @@ import (
 func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
 	return output.String()

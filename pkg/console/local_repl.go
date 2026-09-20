@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )

@@ -10,8 +10,8 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/output"
 	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
+	"github.com/chainreactors/cyber/pkg/output"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {

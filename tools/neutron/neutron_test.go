@@ -4,6 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/neutron/operators"
+	neutronhttp "github.com/chainreactors/neutron/protocols/http"
+	"github.com/chainreactors/neutron/templates"
+	sdkneutron "github.com/chainreactors/sdk/neutron"
+	"github.com/chainreactors/sdk/pkg/association"
+	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"net"
 	nethttp "net/http"
 	"os"
@@ -11,14 +18,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/neutron/operators"
-	neutronhttp "github.com/chainreactors/neutron/protocols/http"
-	"github.com/chainreactors/neutron/templates"
-	sdkneutron "github.com/chainreactors/sdk/neutron"
-	"github.com/chainreactors/sdk/pkg/association"
-	sdktypes "github.com/chainreactors/sdk/pkg/types"
 )
 
 func TestNormalizeNucleiStyleArgs(t *testing.T) {
@@ -83,7 +82,7 @@ func TestCommandTemplateListSupportsNucleiStyleFlagsAndJSON(t *testing.T) {
 	), nil)
 
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"}, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"-tl", "-severity", "critical", "-tags", "cve", "-j"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -120,7 +119,7 @@ http:
 
 	cmd := New(newTestNeutronEngine(t, testTemplate("embedded", "low", "embedded", "")), nil)
 	var output bytes.Buffer
-	_, err = cmd.Run(context.Background(), &commands.Execution{Args: []string{"--template-list", "-t", templatePath}, Stdout: &output, Stderr: &output})
+	_, err = cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--template-list", "-t", templatePath}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

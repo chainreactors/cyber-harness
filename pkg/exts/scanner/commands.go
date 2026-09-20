@@ -11,10 +11,10 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	curltools "github.com/chainreactors/cyber/tools/curl"
 	gotools "github.com/chainreactors/cyber/tools/gogo"
 	neutrontools "github.com/chainreactors/cyber/tools/neutron"
@@ -34,14 +34,14 @@ import (
 // positional arguments.
 type borrowed struct {
 	application *app.State
-	tools       tool.Executor
-	commands    commands.Executor
+	tools       coretool.Executor
+	commands    coretool.CommandExecutor
 	bash        *terminaltool.BashTool
 	skills      *skills.Store
 	prompts     prompt.Resolver
 }
 
-func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]commands.Command, error) {
+func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]coretool.Command, error) {
 	application := borrow.application
 	var scannerResources *resources.Set
 	if engineSet != nil {
@@ -83,7 +83,7 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 	}
 	options = append(options, scan.WithLogger(logger))
 
-	var values []commands.Command
+	var values []coretool.Command
 	values = append(values, curltools.NewCommand(logger, proxyURL, application))
 	if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
 		logger.Warnf("gogo unavailable: %v", err)
@@ -114,7 +114,7 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 		index = engineSet.Index
 	}
 	cyberhub := searchtools.NewCyberhubSearch(index)
-	values = append(values, commands.Command{
+	values = append(values, coretool.Command{
 		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
 		Run:             cyberhub.Run,
@@ -131,7 +131,7 @@ func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config,
 	return append(values, manifestCommands...), nil
 }
 
-func executeRegistryCommand(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {
+func executeRegistryCommand(ctx context.Context, registry coretool.CommandExecutor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {
 		return "", fmt.Errorf("bash tool is not registered")
 	}
@@ -190,7 +190,7 @@ func quoteCommandArg(value string) string {
 	return `"` + value + `"`
 }
 
-func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor, bash *terminaltool.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
+func collectDeepBrowserArtifacts(ctx context.Context, registry coretool.CommandExecutor, bash *terminaltool.BashTool, targetURL string, logger telemetry.Logger) (string, error) {
 	if registry == nil || !registry.Has("playwright") {
 		return "", fmt.Errorf("playwright command unavailable")
 	}
@@ -259,9 +259,9 @@ func collectDeepBrowserArtifacts(ctx context.Context, registry commands.Executor
 	), nil
 }
 
-func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (commands.Command, error) {
+func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, events aop.EventPublisher) (coretool.Command, error) {
 	if engines == nil || engines.Gogo == nil || engines.Spray == nil {
-		return commands.Command{}, fmt.Errorf("scan engines are unavailable")
+		return coretool.Command{}, fmt.Errorf("scan engines are unavailable")
 	}
 	scanOptions := append([]scan.Option(nil), options...)
 	if proxy != "" {
@@ -271,7 +271,7 @@ func newScanCommand(engines *engine.Set, options []scan.Option, proxy string, ev
 		scanOptions = append(scanOptions, scan.WithEvents(events))
 	}
 	impl := scan.New(engines, scanOptions...)
-	return commands.Command{
+	return coretool.Command{
 		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
 		DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
 		Run:             impl.Run,

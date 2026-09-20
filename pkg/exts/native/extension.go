@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	looptool "github.com/chainreactors/cyber/tools/loop"
 )
 
@@ -33,7 +33,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			Model:           skill.AgentModel, Background: skill.AgentBackground,
 		}, nil
 	})
-	if err := extension.Add[tool.Tool](scope, subagent); err != nil {
+	if err := extension.Add[coretool.Tool](scope, subagent); err != nil {
 		return err
 	}
 	return extension.Add(scope, looptool.NewCommand())

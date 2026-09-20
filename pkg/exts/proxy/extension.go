@@ -3,12 +3,11 @@ package proxy
 
 import (
 	"context"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	proxytool "github.com/chainreactors/cyber/tools/proxy"
 )
 
@@ -38,7 +37,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	executor, err := extension.Use[commands.Executor](scope)
+	executor, err := extension.Use[coretool.CommandExecutor](scope)
 	if err != nil {
 		return err
 	}

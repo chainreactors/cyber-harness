@@ -16,8 +16,8 @@ import (
 	"unicode"
 
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 const (
@@ -204,7 +204,7 @@ func fetchClientForProxy(proxy, caPath string) (*http.Client, error) {
 
 func (c *FetchCommand) ClearCache() { c.cache.Clear() }
 
-func (c *FetchCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *FetchCommand) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("fetch", &err)
 	args := execution.Args
 	rawURL, extract, err := parseFetchArgs(args)
@@ -229,7 +229,7 @@ func (c *FetchCommand) Run(ctx context.Context, execution *commands.Execution) (
 		return nil, nil
 	}
 
-	egress := commands.ResolveExecutionEgress(execution, c.proxy)
+	egress := coretool.ResolveExecutionEgress(execution, c.proxy)
 	client, err := fetchClientForProxy(egress.ProxyURL, egress.CAPath)
 	if err != nil {
 		return nil, err

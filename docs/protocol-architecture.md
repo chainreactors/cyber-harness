@@ -165,7 +165,7 @@ namespace 贡献只有一个类型 `aop.Binding`（`Prototype` + `Open`）：`Op
 - **rpc（定义投影层，`proto/rpc`、`pkg/rpc`）**：protobuf service contract、生成的 Go message/client/handler 接口，不实现业务语义。
 - **api（业务层，`pkg/web/api`）**：实现控制面（Sessions/Scans/Config/Artifacts/Agents/Status）与 Application envelope 业务路由（OpenSession/RunTurn/Watch/Command/File/PTY）。本层不得 import net/http、WebSocket、Connect 或 SQLite；机制通过 Store/Runtime/CommandExecutor/FileUploader/PTYRouter 和最小 ApplicationConnection 接口注入。
 - **web（机制与传输层，`pkg/web`）**：拥有 WS upgrade、EnvelopeStream adapter、Connection、认证、持久化、AgentPool、Hub 与装配。两个 endpoint 只做各自首帧初始化；Application 移交 api，Node 移交 AgentPool，之后复用 Connection。
-- **core（领域层，`core/`、`agent/`、`pkg/runner`、`aop/`）**：web 之前已存在的领域能力，不感知管理端。
+- **core（领域层，`core/`、`agent/`、`aop/`）**：web 之前已存在的领域能力，不感知管理端。
 - **client 世界**：SPA、CLI、node 平级，都是 api 的消费者。node（`pkg/node`，原 `pkg/web/agent`）是 cyber 的节点端 client：只依赖 aop 协议与 runner，不得依赖 `pkg/web`。
 
 session 只有一个概念、三种视图：协议视图 `aop.Session`（core）、定义视图 `api.Sessions`、机制视图 Service runtime + store。其他同名概念（如 auth cookie session）必须改名，不得共享 "session" 命名。
@@ -186,7 +186,7 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - Application 业务语义（envelope 路由）：`pkg/web/service/application.go`
 - Agent 节点连接（AgentPool 拥有）：`pkg/web/service/agents_stream.go`
 - Agent Runtime session protocol：`agent/session/protocol.go`
-- stdio framing：`pkg/host/stdio.go`；入口组合：`pkg/runner/stdio.go`
+- stdio framing：`pkg/host/stdio.go`；入口组合：`cmd/aiscan/stdio.go`
 - Browser client：`web/frontend/cyber-ui/packages/aop/src/client.ts`
 - Connect boundary：`pkg/web/connect.go`
 

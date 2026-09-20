@@ -4,15 +4,14 @@ package pty
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/aop"
+	ptypb "github.com/chainreactors/cyber/aop/pty"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	runtimeproc "github.com/chainreactors/utils/proc"
+	"google.golang.org/protobuf/proto"
 	"strings"
 	"sync"
 	"time"
-
-	procbus "github.com/chainreactors/cyber/agent/proc"
-	"github.com/chainreactors/cyber/aop"
-	ptypb "github.com/chainreactors/cyber/aop/pty"
-	runtimeproc "github.com/chainreactors/utils/proc"
-	"google.golang.org/protobuf/proto"
 )
 
 const (

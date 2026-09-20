@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	types "github.com/chainreactors/cyber/core/types"
 )
 
 func testDistributeConfig(t *testing.T, values cfg.Values) *types.DistributeConfig {

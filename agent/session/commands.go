@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -101,15 +101,15 @@ func builtinCommands() []Command {
 			return text("/status", CommandPresentationPreformatted, s.baseState().commands.statusText())
 		}},
 		{Spec: &types.CommandSpec{Name: "/clear", Description: "清空当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
-			return s.rotateCommand(ctx, commands.JoinCommandLine("/clear", args))
+			return s.rotateCommand(ctx, coretool.JoinCommandLine("/clear", args))
 		}},
 		{Spec: &types.CommandSpec{Name: "/compact", Usage: "/compact [focus]", Description: "压缩当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
-			return s.rotateCommand(ctx, commands.JoinCommandLine("/compact", args))
+			return s.rotateCommand(ctx, coretool.JoinCommandLine("/compact", args))
 		}},
 		{Spec: &types.CommandSpec{Name: "/eval", Aliases: []string{"/goal"}, Usage: "/eval [criteria|rounds <spec>|off]", Description: "运行时目标评估"}, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 			state := s.baseState().commands
 			criteria := strings.TrimSpace(strings.Join(args, " "))
-			line := commands.JoinCommandLine("/eval", args)
+			line := coretool.JoinCommandLine("/eval", args)
 			// "rounds" sets how long the loop may keep going: a number is a hard
 			// ceiling, anything else is plain language the evaluator follows.
 			if len(args) > 0 && strings.EqualFold(args[0], "rounds") {
@@ -147,7 +147,7 @@ func builtinCommands() []Command {
 			}
 		}},
 		{Spec: &types.CommandSpec{Name: "/loop", Usage: "/loop [interval prompt|list|stop name]", Description: "运行时定时循环"}, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {
-			line := commands.JoinCommandLine("/loop", args)
+			line := coretool.JoinCommandLine("/loop", args)
 			if len(args) == 0 {
 				args = []string{"list"}
 			}

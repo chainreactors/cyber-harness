@@ -4,17 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"path/filepath"
 	"strings"
-
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // ReferenceURI is the command's virtual usage document.
 const ReferenceURI = "cyber://skills/cyber/okf/runtime/okf.md"
 
-func NewCommand() commands.Command {
-	return commands.Command{
+func NewCommand() coretool.Command {
+	return coretool.Command{
 		Name:            "okf",
 		Usage:           "okf <validate|test> <path> [--format text|json]",
 		QuickReference:  "### okf - validate OKF knowledge bundles\n  okf validate <path>   Check official OKF 0.2 conformance\n  okf test <path>       Run strict production checks",
@@ -23,7 +22,7 @@ func NewCommand() commands.Command {
 	}
 }
 
-func runCommand(ctx context.Context, execution *commands.Execution) (any, error) {
+func runCommand(ctx context.Context, execution *coretool.Execution) (any, error) {
 	if execution == nil || len(execution.Args) < 2 {
 		return nil, fmt.Errorf("usage: okf <validate|test> <path> [--format text|json]")
 	}

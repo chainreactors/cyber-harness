@@ -15,7 +15,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	types "github.com/chainreactors/cyber/core/types"
 )
@@ -36,7 +36,7 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, err
 	}
 	if cfg.Tools == nil {
-		cfg.Tools = tool.EmptyExecutor()
+		cfg.Tools = coretool.EmptyExecutor()
 	}
 
 	transcript := newTranscript(cfg.Messages, 8)
@@ -526,7 +526,7 @@ type toolCallSlot struct {
 type toolExecution struct {
 	result     string
 	rawResult  string
-	fullResult *tool.Result
+	fullResult *coretool.Result
 	isError    bool
 	err        error
 	flow       ToolFlowDecision
@@ -563,9 +563,9 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 		}
 		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Name, arguments)
 		if toolResult == nil {
-			toolResult = &tool.Result{}
+			toolResult = &coretool.Result{}
 		}
-		execution.result = tool.ResultText(toolResult)
+		execution.result = coretool.ResultText(toolResult)
 		execution.err = execErr
 		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
@@ -575,7 +575,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
-		if tool.ResultHasMedia(toolResult) || toolResult.Terminate {
+		if coretool.ResultHasMedia(toolResult) || toolResult.Terminate {
 			execution.fullResult = toolResult
 		}
 	}
@@ -621,7 +621,7 @@ func (e toolExecution) toMessage(toolCallID string) *aop.Message {
 		IsError:   e.isError,
 		Terminate: e.flow == ToolFlowTerminate,
 	}
-	if e.fullResult != nil && tool.ResultHasImages(e.fullResult) {
+	if e.fullResult != nil && coretool.ResultHasImages(e.fullResult) {
 		for _, block := range e.fullResult.Output {
 			if text := block.GetText(); text != nil {
 				result.Output = append(result.Output, aop.Text(text.Text))

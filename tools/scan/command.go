@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/chainreactors/cyber/agent"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	"github.com/chainreactors/cyber/tools/toolargs"
@@ -96,11 +96,16 @@ func Usage() string {
 	return toolargs.GoFlagsHelp("scan", &options)
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("scan", &err)
-	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	ctx = withInvocationProxy(ctx, egress.ProxyURL)
-	out, _, err := c.execute(ctx, c.resolveRelativePaths(execution.Args), execution.Stdout)
+	// Command output is consumed by agents and remote hosts as plain text.
+	args := c.resolveRelativePaths(execution.Args)
+	if !slices.Contains(args, "--no-color") {
+		args = append(slices.Clone(args), "--no-color")
+	}
+	out, _, err := c.execute(ctx, args, execution.Stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +118,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	return nil, nil
 }
 
-func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *output.ScanResult, error) {
+func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *scanResult, error) {
 	var flags flags
 	parser := toolargs.NewGoFlagsParser("scan", &flags)
 	if _, err := parser.ParseArgs(args); err != nil {
@@ -215,7 +220,7 @@ func subscribePipeline(bus *eventbus.Bus[pipeline.Observation[event]], coll *col
 	}
 }
 
-func (c *Command) emitStructuredData(ctx context.Context, result *output.ScanResult) {
+func (c *Command) emitStructuredData(ctx context.Context, result *scanResult) {
 	if result == nil || c.Events == nil {
 		return
 	}

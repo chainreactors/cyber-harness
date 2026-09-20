@@ -10,7 +10,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/sdk/spray"
 	spraycore "github.com/chainreactors/spray/core"
@@ -65,7 +65,7 @@ func (c *Command) QuickReference() string {
     spray -l urls.txt --finger --crawl`
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("spray", &err)
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
@@ -80,7 +80,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if c.engine != nil {
 		c.engine.InstallResourceProvider()
 	}
-	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	args = c.injectProxyURL(args, egress.ProxyURL)
 	runOpts := spraycore.RunOptions{
 		Output:        &buf,

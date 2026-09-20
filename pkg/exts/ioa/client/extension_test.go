@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
@@ -26,7 +26,7 @@ func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
 func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
-	registry := commands.NewRegistry()
+	registry := coretool.NewCommandRegistry()
 	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
 	set, err := extension.New(
 		hosttest.Capabilities(),

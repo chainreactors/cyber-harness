@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,12 +11,12 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/skills"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/runner"
+
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -285,7 +285,7 @@ func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
-	err := runner.RunDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
+	err := runDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {
@@ -302,7 +302,7 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
-	err := runner.RunDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
+	err := runDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{Debug: true, NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {
@@ -746,7 +746,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 func TestResolveScannerModeForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
 		cfg.DefaultVerify = "off"
-		mode, args, err := runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, cfg.DefaultVerify)
+		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -757,7 +757,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -768,7 +768,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -779,7 +779,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, cfg.DefaultVerify)
+		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -787,7 +787,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("mode = %#v", mode)
 		}
 
-		mode, _, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, cfg.DefaultVerify)
+		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -795,7 +795,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("sniper mode = %#v", mode)
 		}
 
-		mode, args, err = runner.ResolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, cfg.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -852,9 +852,9 @@ func withDefaults(t *testing.T, fn func()) {
 	fn()
 }
 
-func readClientOptions(t *testing.T, option *cfg.Option) clientext.Options {
+func readClientOptions(t *testing.T, option *cfg.Option) ioaclient.Options {
 	t.Helper()
-	value, err := clientext.ReadOptions(option)
+	value, err := ioaclient.ReadOptions(option)
 	if err != nil {
 		t.Fatal(err)
 	}

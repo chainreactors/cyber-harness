@@ -10,18 +10,17 @@ import (
 
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/pkg/toolset"
 )
 
-func newRegistry(workDir string) (tool.Executor, *terminaltool.BashTool, *extension.Set) {
+func newRegistry(workDir string) (coretool.Executor, *terminaltool.BashTool, *extension.Set) {
 	bash := terminaltool.NewBashTool(workDir, 300, nil)
-	registry := toolset.NewRegistry()
-	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[tool.Tool](scope, bash) }}
+	registry := coretool.NewToolRegistry()
+	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[coretool.Tool](scope, bash) }}
 	set, err := extension.New(extension.Provided[*hooks.Registry](hooks.New()), registry, contribution)
 	if err != nil {
 		panic(err)

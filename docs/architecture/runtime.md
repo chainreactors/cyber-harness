@@ -79,4 +79,4 @@ flowchart LR
 
 用 `-o` 记录事件，再检查消息、工具调用、结果、状态与结束原因。长时间不结束时先检查后台命令、subagent、周期任务；反复同一错误时区分模型请求重试与模型主动重试工具。上下文与重试策略见 [下一层机制](context.md)。
 
-实现：[循环](../../agent/loop.go)、[Inbox](../../agent/inbox/inbox.go)、[调度器](../../agent/loop_scheduler.go)、[评估器](../../agent/evaluator/loop.go)。对应测试：[循环](../../agent/loop_test.go)、[工具调用](../../pkg/toolset/tool_call_test.go)、[Inbox](../../agent/inbox/inbox_test.go)、[评估反馈](../../agent/evaluator/loop_test.go)。
+实现：[循环](../../agent/loop.go)、[Inbox](../../agent/inbox/inbox.go)、[调度器](../../agent/loop_scheduler.go)、[评估器](../../agent/evaluator/loop.go)。对应测试：[循环](../../agent/loop_test.go)、[工具调用](../../core/tool/tool_call_test.go)、[Inbox](../../agent/inbox/inbox_test.go)、[评估反馈](../../agent/evaluator/loop_test.go)。

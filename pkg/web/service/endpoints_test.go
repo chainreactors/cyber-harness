@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	configpkg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
+	configpkg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"

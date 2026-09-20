@@ -12,10 +12,10 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/truncate"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	"github.com/chainreactors/cyber/pkg/output"
 	"golang.org/x/term"
 )
 

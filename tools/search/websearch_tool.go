@@ -3,9 +3,8 @@ package search
 import (
 	"context"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"strings"
-
-	"github.com/chainreactors/cyber/core/tool"
 )
 
 type WebSearchTool struct {
@@ -28,12 +27,12 @@ func (t *WebSearchTool) Description() string {
 	return "Search the web for CVEs, exploits, vulnerability details, and product documentation."
 }
 
-func (t *WebSearchTool) Definition() *tool.Definition {
-	return tool.Def("web_search", t.Description(), webSearchArgs{})
+func (t *WebSearchTool) Definition() *coretool.Definition {
+	return coretool.Def("web_search", t.Description(), webSearchArgs{})
 }
 
-func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
-	args, err := tool.ParseArgs[webSearchArgs](arguments)
+func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
+	args, err := coretool.ParseArgs[webSearchArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -53,14 +52,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*tool.Re
 	if t.search != nil {
 		result, err := t.search(ctx, args.Query, num)
 		if err == nil && strings.TrimSpace(result) != "" {
-			return tool.TextResult(result), nil
+			return coretool.TextResult(result), nil
 		}
 	}
 
 	if t.tavily != nil {
 		result, err := t.tavily.Execute(ctx, []string{args.Query, "--num", fmt.Sprint(num)})
 		if err == nil {
-			return tool.TextResult(result), nil
+			return coretool.TextResult(result), nil
 		}
 	}
 

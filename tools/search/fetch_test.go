@@ -3,19 +3,18 @@ package search
 import (
 	"bytes"
 	"context"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func execFetch(t *testing.T, cmd *FetchCommand, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	return output.String()
@@ -52,7 +51,7 @@ func TestFetchUsesCallScopedRunnerProxy(t *testing.T) {
 
 	cmd := NewFetchCommand()
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{
+	_, err := cmd.Run(context.Background(), &coretool.Execution{
 		Args:   []string{proxy.URL + "/through-proxy"},
 		Env:    []string{"ALL_PROXY=" + proxy.URL},
 		Stdout: &output,

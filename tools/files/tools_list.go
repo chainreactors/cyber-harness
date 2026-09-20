@@ -2,9 +2,8 @@ package files
 
 import (
 	"context"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"strings"
-
-	"github.com/chainreactors/cyber/core/tool"
 )
 
 type listingTool struct {
@@ -29,11 +28,11 @@ func (t *listingTool) Description() string {
 	}
 	return "List entries in a directory inside the workspace."
 }
-func (t *listingTool) Definition() *tool.Definition {
-	return tool.Def(t.Name(), t.Description(), listArgs{})
+func (t *listingTool) Definition() *coretool.Definition {
+	return coretool.Def(t.Name(), t.Description(), listArgs{})
 }
-func (t *listingTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
-	a, err := tool.ParseArgs[listArgs](arguments)
+func (t *listingTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
+	a, err := coretool.ParseArgs[listArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -61,5 +60,5 @@ func (t *listingTool) Execute(ctx context.Context, arguments string) (*tool.Resu
 	if err != nil {
 		return nil, err
 	}
-	return tool.TextResult(strings.Join(names, "\n")), nil
+	return coretool.TextResult(strings.Join(names, "\n")), nil
 }

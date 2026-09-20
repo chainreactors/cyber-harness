@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"errors"
-	configpkg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	types "github.com/chainreactors/cyber/core/types"
+	configpkg "github.com/chainreactors/cyber/pkg/config"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	"sync"
 	"testing"

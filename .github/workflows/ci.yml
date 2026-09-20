@@ -264,7 +264,7 @@ jobs:
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Run Windows package tests
-        run: go test -count=1 ./agent/... ./pkg/runner/... ./pkg/web/...
+        run: go test -count=1 ./agent/... ./cmd/aiscan/... ./pkg/web/...
 
       - name: Compile and test the full CLI without cgo on Windows
         run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan

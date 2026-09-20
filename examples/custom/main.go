@@ -9,8 +9,8 @@ import (
 
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/base"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/harness"
 )
 
 func main() {
@@ -29,15 +29,15 @@ type helloArgs struct {
 
 func (helloTool) Name() string        { return "hello" }
 func (helloTool) Description() string { return "Return a greeting without external effects." }
-func (t helloTool) Definition() *tool.Definition {
-	return tool.Def(t.Name(), t.Description(), helloArgs{})
+func (t helloTool) Definition() *coretool.Definition {
+	return coretool.Def(t.Name(), t.Description(), helloArgs{})
 }
-func (helloTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
-	args, err := tool.ParseArgs[helloArgs](arguments)
+func (helloTool) Execute(_ context.Context, arguments string) (*coretool.Result, error) {
+	args, err := coretool.ParseArgs[helloArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
-	return tool.TextResult("Hello, " + args.Name + "!"), nil
+	return coretool.TextResult("Hello, " + args.Name + "!"), nil
 }
 
 func run() (resultErr error) {
@@ -45,7 +45,7 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
-	entries, err := base.New(base.Config{
+	entries, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory: directory,
 		Provider:  provider.StartupConfig{Mode: provider.StartupDisabled},
 	})
@@ -53,12 +53,12 @@ func run() (resultErr error) {
 		return err
 	}
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Add[tool.Tool](scope, helloTool{})
+		return extension.Add[coretool.Tool](scope, helloTool{})
 	}})
-	var executor tool.Executor
+	var executor coretool.Executor
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		var err error
-		executor, err = extension.Use[tool.Executor](scope)
+		executor, err = extension.Use[coretool.Executor](scope)
 		return err
 	}})
 	set, err := extension.New(entries...)
@@ -74,6 +74,6 @@ func run() (resultErr error) {
 	if err != nil {
 		return err
 	}
-	fmt.Println(tool.ResultText(result))
+	fmt.Println(coretool.ResultText(result))
 	return nil
 }

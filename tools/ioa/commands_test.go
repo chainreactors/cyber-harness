@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -595,12 +595,12 @@ func envOr(key, fallback string) string {
 // helpers
 // ---------------------------------------------------------------------------
 
-func joinSpace(t *testing.T, cmds []commands.Command) {
+func joinSpace(t *testing.T, cmds []coretool.Command) {
 	t.Helper()
 	joinSpaceByName(t, cmds, "my-space")
 }
 
-func joinSpaceByName(t *testing.T, cmds []commands.Command, name string) {
+func joinSpaceByName(t *testing.T, cmds []coretool.Command, name string) {
 	t.Helper()
 	testOutput.Reset(nil)
 	if err := findSubCmd(t, cmds, "space").Execute(context.Background(), []string{name, "test"}); err != nil {
@@ -608,14 +608,14 @@ func joinSpaceByName(t *testing.T, cmds []commands.Command, name string) {
 	}
 }
 
-type testCommand struct{ commands.Command }
+type testCommand struct{ coretool.Command }
 
 func (c testCommand) Execute(ctx context.Context, args []string) error {
-	_, err := c.Run(ctx, &commands.Execution{Args: args, Stdout: testOutput, Stderr: testOutput})
+	_, err := c.Run(ctx, &coretool.Execution{Args: args, Stdout: testOutput, Stderr: testOutput})
 	return err
 }
 
-func findCmd(t *testing.T, cmds []commands.Command, name string) testCommand {
+func findCmd(t *testing.T, cmds []coretool.Command, name string) testCommand {
 	t.Helper()
 	for _, cmd := range cmds {
 		if cmd.Name == name {
@@ -628,11 +628,11 @@ func findCmd(t *testing.T, cmds []commands.Command, name string) testCommand {
 
 // findSubCmd returns the ioa root command wrapped to dispatch the given
 // subcommand (space/send/read), so tests read like the old ioa_* commands.
-func findSubCmd(t *testing.T, cmds []commands.Command, sub string) testCommand {
+func findSubCmd(t *testing.T, cmds []coretool.Command, sub string) testCommand {
 	t.Helper()
 	root := findCmd(t, cmds, "ioa")
 	inner := root.Run
-	root.Run = func(ctx context.Context, execution *commands.Execution) (any, error) {
+	root.Run = func(ctx context.Context, execution *coretool.Execution) (any, error) {
 		execution.Args = append([]string{sub}, execution.Args...)
 		return inner(ctx, execution)
 	}

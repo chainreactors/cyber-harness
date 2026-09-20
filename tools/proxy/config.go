@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	operationpb "github.com/chainreactors/cyber/aop/operation"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/proxyclient"
 	"google.golang.org/protobuf/proto"
 )

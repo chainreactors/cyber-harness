@@ -12,7 +12,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 type recordingSession struct {
@@ -155,7 +155,7 @@ func callBackendScreenshot(backend Backend, ctx context.Context, target Resolved
 	return backend.Screenshot(ctx, target)
 }
 
-func (t *Tool) stop(ctx context.Context, id string) (*tool.Result, error) {
+func (t *Tool) stop(ctx context.Context, id string) (*coretool.Result, error) {
 	if id == "" {
 		return nil, fmt.Errorf("recording_id is required for action=stop")
 	}
@@ -170,15 +170,15 @@ func (t *Tool) stop(ctx context.Context, id string) (*tool.Result, error) {
 	return t.waitResult(ctx, session)
 }
 
-func (t *Tool) waitResult(ctx context.Context, session *recordingSession) (*tool.Result, error) {
+func (t *Tool) waitResult(ctx context.Context, session *recordingSession) (*coretool.Result, error) {
 	select {
 	case <-session.done:
 		info := session.snapshot()
 		if info.State == sessionFailed {
-			return tool.ErrorResult(marshalJSON(info)), nil
+			return coretool.ErrorResult(marshalJSON(info)), nil
 		}
 		text := marshalJSON(info)
-		return &tool.Result{Output: []*aop.Content{
+		return &coretool.Result{Output: []*aop.Content{
 			aop.Text(text),
 			aop.MediaURI("video", "video/mp4", filepath.Base(info.Output), t.mediaURI(ctx, info.Output)),
 		}}, nil
@@ -195,7 +195,7 @@ func (t *Tool) waitResult(ctx context.Context, session *recordingSession) (*tool
 	}
 }
 
-func (t *Tool) status(id string) (*tool.Result, error) {
+func (t *Tool) status(id string) (*coretool.Result, error) {
 	if id != "" {
 		session, ok := t.session(id)
 		if !ok {

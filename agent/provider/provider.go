@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/pkg/config"
 )
 
 type Provider interface {

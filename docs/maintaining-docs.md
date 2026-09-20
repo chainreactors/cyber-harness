@@ -41,7 +41,7 @@
 node docs/check-links.mjs
 go run ./examples/custom
 go run ./examples/session
-go test ./core/resource ./core/extension ./core/registry ./pkg/toolset ./examples/custom ./examples/session
+go test ./core/resource ./core/extension ./core/registry ./core/tool ./examples/custom ./examples/session
 ```
 
 链接检查覆盖根 README 和 docs 下的手写 Markdown，检查普通行内本地链接、标题锚点及代码围栏。生成式 API 目录不作为扫描源，代码块里的示意链接不检查；它不是完整的 Markdown/HTML 解析器，也不验证外部 URL 可达性。

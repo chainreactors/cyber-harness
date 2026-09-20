@@ -15,7 +15,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 )
 
@@ -66,36 +66,36 @@ type SubAgentArgs struct {
 }
 
 func (t *SubAgentTool) Definition() *aop.ToolDefinition {
-	return tool.Def(t.Name(), t.Description(), SubAgentArgs{})
+	return coretool.Def(t.Name(), t.Description(), SubAgentArgs{})
 }
 
-func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
-	args, err := tool.ParseArgs[SubAgentArgs](arguments)
+func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
+	args, err := coretool.ParseArgs[SubAgentArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
 
 	switch args.Action {
 	case "list":
-		return tool.TextResult(t.list()), nil
+		return coretool.TextResult(t.list()), nil
 	case "kill":
 		output, err := t.kill(args.Name)
 		if err != nil {
 			return nil, err
 		}
-		return tool.TextResult(output), nil
+		return coretool.TextResult(output), nil
 	case "message":
 		output, err := t.sendMessage(args.Name, args.Message)
 		if err != nil {
 			return nil, err
 		}
-		return tool.TextResult(output), nil
+		return coretool.TextResult(output), nil
 	case "", "create":
 		output, err := t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout)
 		if err != nil {
 			return nil, err
 		}
-		return tool.TextResult(output), nil
+		return coretool.TextResult(output), nil
 	default:
 		return nil, fmt.Errorf("unknown action: %s", args.Action)
 	}

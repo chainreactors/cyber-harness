@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 const (
@@ -51,12 +51,12 @@ func (t *Tool) Description() string {
 	return "Capture desktop or application-window screenshots and H.264 MP4 recordings. Supports synchronous duration recording and asynchronous start/stop/status sessions."
 }
 
-func (t *Tool) Definition() *tool.Definition {
-	return tool.Def(t.Name(), t.Description(), Args{})
+func (t *Tool) Definition() *coretool.Definition {
+	return coretool.Def(t.Name(), t.Description(), Args{})
 }
 
-func (t *Tool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
-	args, err := tool.ParseArgs[Args](arguments)
+func (t *Tool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
+	args, err := coretool.ParseArgs[Args](arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (t *Tool) Execute(ctx context.Context, arguments string) (*tool.Result, err
 	}
 }
 
-func (t *Tool) screenshot(ctx context.Context, args Args) (*tool.Result, error) {
+func (t *Tool) screenshot(ctx context.Context, args Args) (*coretool.Result, error) {
 	if t.backend == nil {
 		return nil, fmt.Errorf("capture backend is unavailable")
 	}
@@ -148,7 +148,7 @@ func (t *Tool) screenshot(ctx context.Context, args Args) (*tool.Result, error) 
 		MimeType string     `json:"mime_type"`
 	}{"screenshot", target.Info, path, len(data), "image/png"}
 	text, _ := json.MarshalIndent(meta, "", "  ")
-	return &tool.Result{Output: []*aop.Content{
+	return &coretool.Result{Output: []*aop.Content{
 		aop.Text(string(text)),
 		aop.MediaData("image", preview.MimeType, filepath.Base(path), preview.Data),
 	}}, nil

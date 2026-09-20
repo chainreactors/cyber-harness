@@ -2,10 +2,10 @@ package console
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,11 +14,11 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 )

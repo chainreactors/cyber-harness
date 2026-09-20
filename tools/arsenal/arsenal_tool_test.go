@@ -11,14 +11,14 @@ import (
 	"testing"
 
 	crtm "github.com/chainreactors/crtm/pkg"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 // run executes arsenal as a Command and returns stdout.
 func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("arsenal %s: %v", strings.Join(args, " "), err)
 	}
@@ -29,7 +29,7 @@ func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 func runErr(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	t.Helper()
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
 	if err == nil {
 		t.Fatalf("arsenal %s: expected error, got output: %s", strings.Join(args, " "), output.String())
 	}

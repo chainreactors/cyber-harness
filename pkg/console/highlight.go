@@ -12,7 +12,7 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/muesli/termenv"
 
-	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/pkg/output"
 )
 
 // ---------------------------------------------------------------------------

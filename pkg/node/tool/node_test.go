@@ -17,8 +17,8 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"github.com/chainreactors/cyber/pkg/node/tool"
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -36,12 +36,12 @@ type testTool struct {
 
 func (t *testTool) Name() string        { return "echo" }
 func (t *testTool) Description() string { return "echo or wait" }
-func (t *testTool) Definition() *tool.Definition {
-	return tool.Def(t.Name(), t.Description(), struct {
+func (t *testTool) Definition() *coretool.Definition {
+	return coretool.Def(t.Name(), t.Description(), struct {
 		Value string `json:"value"`
 	}{})
 }
-func (t *testTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
+func (t *testTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	if arguments == `{"value":"wait"}` {
 		invocation := operation.InvocationFromContext(ctx)
 		if invocation.Progress != nil {
@@ -63,7 +63,7 @@ func (t *testTool) Execute(ctx context.Context, arguments string) (*tool.Result,
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	return tool.TextResult(arguments), nil
+	return coretool.TextResult(arguments), nil
 }
 
 func send(conn *websocket.Conn, json bool, envelope *aop.Envelope) error {
@@ -217,7 +217,7 @@ func TestWireCallCancellationAndStableReconnectIdentity(t *testing.T) {
 			}
 			select {
 			case terminal := <-result:
-				if !terminal.IsError || terminal.CallId != "call-1" || terminal.Name != "echo" || !strings.Contains(tool.ResultText(terminal), "canceled") {
+				if !terminal.IsError || terminal.CallId != "call-1" || terminal.Name != "echo" || !strings.Contains(coretool.ResultText(terminal), "canceled") {
 					t.Fatalf("canceled result: %+v", terminal)
 				}
 			case err := <-serverErr:

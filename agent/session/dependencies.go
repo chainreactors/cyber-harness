@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	"github.com/chainreactors/cyber/pkg/output"
 )
 
 // HistoryStore supplies recovery without coupling the runtime to a filesystem.
@@ -62,7 +62,7 @@ func NewResource(config Config) (*Resource, error) {
 	}
 	tools := config.Tools
 	if tools == nil {
-		tools = tool.EmptyExecutor()
+		tools = coretool.EmptyExecutor()
 	}
 	return &Resource{runtime: &Runtime{
 		commands: declared, commandIndex: index, history: config.History,

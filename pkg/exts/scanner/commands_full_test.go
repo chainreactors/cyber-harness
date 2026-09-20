@@ -12,7 +12,7 @@ import (
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/katana"
 	passivecmd "github.com/chainreactors/cyber/tools/passive"
 	"github.com/chainreactors/cyber/tools/scan/engine"
@@ -56,7 +56,7 @@ func TestFullScannerFunctionalRegression(t *testing.T) {
 	passive := passivecmd.New(passiveEngine).WithLogger(telemetry.NopLogger())
 	registry := registerTestScanners(t, engineSet, t.TempDir(), bus, telemetry.NopLogger(),
 		katana.NewCommand(telemetry.NopLogger(), "", bus),
-		commands.Command{Name: passive.Name(), Usage: passive.Usage(), Run: passive.Run},
+		coretool.Command{Name: passive.Name(), Usage: passive.Usage(), Run: passive.Run},
 	)
 
 	for _, name := range []string{"katana", "passive"} {

@@ -15,8 +15,8 @@ import (
 	"time"
 
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/hooks"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
 

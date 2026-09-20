@@ -10,9 +10,9 @@ import (
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -51,11 +51,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	tools, err := extension.Use[tool.Executor](scope)
+	tools, err := extension.Use[coretool.Executor](scope)
 	if err != nil {
 		return err
 	}
-	commandRegistry, err := extension.Use[commands.Executor](scope)
+	commandRegistry, err := extension.Use[coretool.CommandExecutor](scope)
 	if err != nil {
 		return err
 	}

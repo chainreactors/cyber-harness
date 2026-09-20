@@ -10,7 +10,7 @@ import (
 
 	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/crtm/pkg/registry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 // ArsenalCommand is a pseudo-command invoked via bash:
@@ -59,7 +59,7 @@ Usage:
 Installed tools become immediately available via bash.`
 }
 
-func (c *ArsenalCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *ArsenalCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	args := execution.Args
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(execution.Stdout, c.Usage()+"\n")

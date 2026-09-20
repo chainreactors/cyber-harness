@@ -11,9 +11,9 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -47,11 +47,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	tools, err := extension.Use[tool.Executor](scope)
+	tools, err := extension.Use[coretool.Executor](scope)
 	if err != nil {
 		return err
 	}
-	commandRegistry, err := extension.Use[commands.Executor](scope)
+	commandRegistry, err := extension.Use[coretool.CommandExecutor](scope)
 	if err != nil {
 		return err
 	}

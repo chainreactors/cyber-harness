@@ -8,7 +8,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/namespaces"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 func TestHubOwnsProxyLifecycle(t *testing.T) {
@@ -21,7 +21,7 @@ func TestHubOwnsProxyLifecycle(t *testing.T) {
 		endpoint, err = extension.Use[egress.Endpoint](scope)
 		return err
 	}}
-	set, err := extension.New(namespaces.New(), extension.Provided[*hooks.Registry](hooks.New()), commands.NewRegistry(), ext, borrow)
+	set, err := extension.New(namespaces.New(), extension.Provided[*hooks.Registry](hooks.New()), coretool.NewCommandRegistry(), ext, borrow)
 	if err != nil {
 		t.Fatal(err)
 	}

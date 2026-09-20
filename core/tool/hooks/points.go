@@ -10,7 +10,6 @@ import (
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/utils/proc"
 )
 
@@ -37,13 +36,13 @@ type CallEvent struct {
 type ResultEvent struct {
 	Call      *aop.ToolCall
 	Operation *operationpb.Ref
-	Result    *tool.Result
+	Result    *aop.ToolResult
 }
 
 type Completion struct {
 	Lifecycle
 	Call   *aop.ToolCall
-	Result *tool.Result
+	Result *aop.ToolResult
 }
 
 var Before = corehooks.NewPoint[CallEvent, Admission]("tool.before").

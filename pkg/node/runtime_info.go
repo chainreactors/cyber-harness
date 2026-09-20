@@ -12,11 +12,11 @@ import (
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -70,7 +70,7 @@ func commandSpecs(runtime *session.Runtime, specs []*types.CommandSpec) []*types
 
 // RegistryCommandSpecs projects the Bash-internal command registry without
 // adding chat runtime or skill commands. Tool-only nodes use these specs too.
-func RegistryCommandSpecs(registry commands.Executor, store *skills.Store) []*types.CommandSpec {
+func RegistryCommandSpecs(registry coretool.CommandExecutor, store *skills.Store) []*types.CommandSpec {
 	if registry == nil {
 		return nil
 	}

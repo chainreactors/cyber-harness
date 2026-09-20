@@ -8,7 +8,6 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/core/tool"
 )
 
 func TestExecutionCompletion(t *testing.T) {
@@ -38,7 +37,7 @@ func TestExecutionCompletion(t *testing.T) {
 				}
 				return struct{}{}, nil
 			})
-			result, err := Execute(t.Context(), r, "test", "{}", func(ctx context.Context, _ string) (*tool.Result, error) {
+			result, err := Execute(t.Context(), r, "test", "{}", func(ctx context.Context, _ string) (*aop.ToolResult, error) {
 				calls++
 				switch mode {
 				case "panic":
@@ -48,7 +47,7 @@ func TestExecutionCompletion(t *testing.T) {
 				case "cancel":
 					operation.RequestCancel(ctx, errors.New("policy canceled"))
 				}
-				return tool.TextResult("ok"), nil
+				return &aop.ToolResult{Output: []*aop.Content{aop.Text("ok")}}, nil
 			})
 			if completions != 1 {
 				t.Fatalf("completions = %d", completions)
@@ -73,9 +72,9 @@ func TestAfterPreservesContentAndCannotEraseCancellation(t *testing.T) {
 		return struct{}{}, nil
 	})
 	want := errors.New("canceled by policy")
-	result, err := Execute(t.Context(), r, "test", "{}", func(ctx context.Context, _ string) (*tool.Result, error) {
+	result, err := Execute(t.Context(), r, "test", "{}", func(ctx context.Context, _ string) (*aop.ToolResult, error) {
 		operation.RequestCancel(ctx, want)
-		return &tool.Result{Output: []*aop.Content{aop.Text("committed before cancellation"), aop.Text("second block")}}, nil
+		return &aop.ToolResult{Output: []*aop.Content{aop.Text("committed before cancellation"), aop.Text("second block")}}, nil
 	})
 	if !errors.Is(err, want) || !result.IsError || !result.Terminate || len(result.Output) != 2 {
 		t.Fatalf("result=%v err=%v", result, err)
@@ -89,11 +88,11 @@ func TestBeforeCannotModifyInvocationArguments(t *testing.T) {
 		e.Call.Name = "other"
 		return Admission{}, nil
 	})
-	_, err := Execute(t.Context(), r, "test", "{}", func(_ context.Context, args string) (*tool.Result, error) {
+	_, err := Execute(t.Context(), r, "test", "{}", func(_ context.Context, args string) (*aop.ToolResult, error) {
 		if args != "{}" {
 			t.Fatal("arguments were mutated")
 		}
-		return tool.TextResult("ok"), nil
+		return &aop.ToolResult{Output: []*aop.Content{aop.Text("ok")}}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

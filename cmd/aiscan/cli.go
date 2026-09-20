@@ -3,6 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/core/telemetry"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	"github.com/chainreactors/cyber/pkg/output"
 	"io"
 	"os"
 	"os/signal"
@@ -13,12 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/output"
-	"github.com/chainreactors/cyber/core/telemetry"
-	hostcli "github.com/chainreactors/cyber/pkg/cli"
-	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	"github.com/chainreactors/cyber/pkg/runner"
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -109,7 +108,7 @@ func cyber() {
 		os.Exit(1)
 	}
 
-	cfgPath, err := runner.ResolveRuntimeConfig(&option)
+	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
@@ -160,7 +159,7 @@ func cyber() {
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, newCyberProfileFromRequest, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runDirectScannerMode(ctx, newCyberProfileFromRequest, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}

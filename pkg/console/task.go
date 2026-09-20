@@ -9,7 +9,7 @@ import (
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // RunTask owns static presentation and its event subscription. Runtime only

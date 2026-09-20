@@ -14,7 +14,7 @@
 
 ## 复用命令能力
 
-当功能本来就是一个带参数的命令，贡献 `commands.Command` 可以复用现有 CLI 知识。Agent 通过 bash 工具调用它，终端路由把已注册命令交给进程内实现，其余命令交给宿主 shell。
+当功能本来就是一个带参数的命令，贡献 `tool.Command` 可以复用现有 CLI 知识。Agent 通过 bash 工具调用它，终端路由把已注册命令交给进程内实现，其余命令交给宿主 shell。
 
 这种接入适合扫描器、查询和格式校验。它不需要额外生成同名可执行文件，也不必为每个 flag 再定义一个模型工具。若应用需要专门的结构化交互，再增加 Tool 表面，并让两种入口调用同一业务实现。
 
@@ -50,7 +50,7 @@ Load 中的初始化使用 `scope.Init()`，持续后台工作使用 `scope.Life
 
 ```sh
 go run ./examples/custom
-go test ./core/resource ./core/extension ./core/registry ./pkg/toolset
+go test ./core/resource ./core/extension ./core/registry ./core/tool
 ```
 
 支持 CGO 与 race detector 的平台可进一步执行 `go test -race ./core/resource ./core/extension ./core/registry`。当扩展已能独立工作，下一步是在[宿主中打开会话](hosting.md)，让模型使用它。

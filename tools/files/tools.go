@@ -3,18 +3,17 @@ package files
 import (
 	"context"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/chainreactors/cyber/core/tool"
 )
 
 // toolsFor constructs the four basic tools owned by the files extension.
-func (filesystem *Files) Tools() ([]tool.Tool, error) {
+func (filesystem *Files) Tools() ([]coretool.Tool, error) {
 	if filesystem == nil {
 		return nil, fmt.Errorf("file tools require a filesystem")
 	}
-	tools := []tool.Tool{
+	tools := []coretool.Tool{
 		&fileTool{files: filesystem},
 		&listingTool{files: filesystem},
 		&listingTool{files: filesystem, glob: true},
@@ -56,19 +55,19 @@ func (t *fileTool) Description() string {
 	return "Read a bounded UTF-8 text file inside the configured directory or an explicitly selected read-only mount."
 }
 
-func (t *fileTool) Definition() *tool.Definition {
+func (t *fileTool) Definition() *coretool.Definition {
 	if t.write {
-		return tool.Def(t.Name(), t.Description(), writeArgs{})
+		return coretool.Def(t.Name(), t.Description(), writeArgs{})
 	}
-	return tool.Def(t.Name(), t.Description(), readArgs{})
+	return coretool.Def(t.Name(), t.Description(), readArgs{})
 }
 
-func (t *fileTool) Execute(ctx context.Context, arguments string) (*tool.Result, error) {
+func (t *fileTool) Execute(ctx context.Context, arguments string) (*coretool.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if t.write {
-		args, err := tool.ParseArgs[writeArgs](arguments)
+		args, err := coretool.ParseArgs[writeArgs](arguments)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +75,7 @@ func (t *fileTool) Execute(ctx context.Context, arguments string) (*tool.Result,
 			if err := t.files.Edit(ctx, args.Path, args.Edits); err != nil {
 				return nil, err
 			}
-			return tool.TextResult(fmt.Sprintf("Edited %s: %d edits", args.Path, len(args.Edits))), nil
+			return coretool.TextResult(fmt.Sprintf("Edited %s: %d edits", args.Path, len(args.Edits))), nil
 		}
 		if args.Content == nil || !utf8.ValidString(*args.Content) {
 			return nil, fmt.Errorf("write requires UTF-8 content or edits")
@@ -84,9 +83,9 @@ func (t *fileTool) Execute(ctx context.Context, arguments string) (*tool.Result,
 		if err := t.files.Write(ctx, args.Path, []byte(*args.Content)); err != nil {
 			return nil, err
 		}
-		return tool.TextResult(fmt.Sprintf("Wrote %d bytes to %s", len(*args.Content), args.Path)), nil
+		return coretool.TextResult(fmt.Sprintf("Wrote %d bytes to %s", len(*args.Content), args.Path)), nil
 	}
-	args, err := tool.ParseArgs[readArgs](arguments)
+	args, err := coretool.ParseArgs[readArgs](arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +103,13 @@ func (t *fileTool) Execute(ctx context.Context, arguments string) (*tool.Result,
 		lines := strings.Split(string(data), "\n")
 		start := max(args.Offset-1, 0)
 		if start >= len(lines) {
-			return tool.TextResult(""), nil
+			return coretool.TextResult(""), nil
 		}
 		end := len(lines)
 		if args.Limit > 0 {
 			end = start + min(args.Limit, len(lines)-start)
 		}
-		return tool.TextResult(strings.Join(lines[start:end], "\n")), nil
+		return coretool.TextResult(strings.Join(lines[start:end], "\n")), nil
 	}
-	return tool.TextResult(string(data)), nil
+	return coretool.TextResult(string(data)), nil
 }

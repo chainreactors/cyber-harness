@@ -11,8 +11,8 @@ import (
 	"time"
 
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/eventbus"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 func TestStorageConfigValidation(t *testing.T) {

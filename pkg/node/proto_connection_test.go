@@ -26,17 +26,17 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"github.com/chainreactors/cyber/pkg/aopws"
-	"github.com/chainreactors/cyber/pkg/apptest"
-	"github.com/chainreactors/cyber/pkg/commands"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
 	proxytool "github.com/chainreactors/cyber/tools/proxy"
 	"github.com/gorilla/websocket"
@@ -122,7 +122,7 @@ func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
 	cc := connectionConfig{
 		Name:     "runner-1",
 		NodeID:   "runner-1",
-		Registry: commands.NewRegistry(),
+		Registry: coretool.NewCommandRegistry(),
 		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
@@ -159,7 +159,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
 	handleAgentToolMessage(
 		context.Background(),
-		connectionConfig{Registry: commands.NewRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
+		connectionConfig{Registry: coretool.NewCommandRegistry(), Logger: logger, Agent: panicAgentEndpoint{}},
 		&aop.Envelope{Id: "op-panic"},
 		&toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: request}},
 		send, &operationsMu, operations, make(map[string]time.Time),
@@ -495,7 +495,7 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 		done <- serveAgentConnection(context.Background(), connectionConfig{
 			Name:     "runner-1",
 			NodeID:   "runner-1",
-			Registry: commands.NewRegistry(),
+			Registry: coretool.NewCommandRegistry(),
 			Agent:    newSilentAgentEndpoint(),
 			Menu:     func() []*types.CommandSpec { return nil },
 		}, telemetry.NopLogger(), stream)
@@ -713,7 +713,7 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 	defer hub.Close(context.Background())
 	cc := connectionConfig{
 		Name: "runner-1", NodeID: "runner-1",
-		Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint(),
+		Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint(),
 		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
 			binding, err := proxytool.TrafficNamespace(hub.ProxyHub)
 			if err != nil {

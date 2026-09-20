@@ -1,10 +1,9 @@
 package app
 
 import (
-	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	"testing"
 )
 
 func TestProviderConfigSelectsActiveProfileAndFallbacks(t *testing.T) {

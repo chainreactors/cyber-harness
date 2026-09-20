@@ -10,7 +10,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/proxyclient"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
@@ -64,12 +64,12 @@ func (c *Command) QuickReference() string {
   NOTE: -f/-O write results to a file (-O json for JSON Lines); -o sets the stdout format.`
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("zombie", &err)
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	args = ensureOutputDrain(args)
-	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	proxyDial, err := proxyDialFor(egress.ProxyURL)
 	if err != nil {
 		return nil, err

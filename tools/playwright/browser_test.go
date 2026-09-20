@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/go-rod/rod/lib/launcher"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +16,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/go-rod/rod/lib/launcher"
 )
 
 // ---------------------------------------------------------------------------
@@ -177,7 +176,7 @@ func TestParseOpenOpts_NoSpeedUp(t *testing.T) {
 
 func TestExecute_NoSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	_, err := cmd.Run(context.Background(), &commands.Execution{Stdout: io.Discard, Stderr: io.Discard})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil {
 		t.Fatal("expected error for no subcommand")
 	}
@@ -188,7 +187,7 @@ func TestExecute_NoSubcommand(t *testing.T) {
 
 func TestExecute_UnknownSubcommand(t *testing.T) {
 	cmd := New(t.TempDir())
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"bogus"}, Stdout: io.Discard, Stderr: io.Discard})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"bogus"}, Stdout: io.Discard, Stderr: io.Discard})
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand")
 	}
@@ -271,7 +270,7 @@ func newTestServer(handler http.HandlerFunc) *httptest.Server {
 func execString(t *testing.T, cmd *Command, ctx context.Context, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
 	return output.String()
@@ -280,7 +279,7 @@ func execString(t *testing.T, cmd *Command, ctx context.Context, args []string) 
 // execStringErr is a test helper that runs cmd.Execute and returns (output, error).
 func execStringErr(cmd *Command, ctx context.Context, args []string) (string, error) {
 	var output bytes.Buffer
-	_, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(ctx, &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
 	return output.String(), err
 }
 

@@ -4,14 +4,13 @@ package main
 
 import (
 	"context"
+	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	types "github.com/chainreactors/cyber/core/types"
-	clientext "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 )
 
 func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
@@ -78,7 +77,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 }
 
 func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
-	base := &cfg.Option{Extensions: cfg.Values{clientext.ConfigKey: {"space": "case-1"}}}
+	base := &cfg.Option{Extensions: cfg.Values{ioaclient.ConfigKey: {"space": "case-1"}}}
 	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +98,7 @@ func TestEmbeddedAgentOptionUsesSameOriginIOA(t *testing.T) {
 
 func TestEmbeddedAgentOptionPreservesExplicitIOAAndNode(t *testing.T) {
 	base := &cfg.Option{
-		Extensions:  cfg.Values{clientext.ConfigKey: {"url": "http://ioa-token@127.0.0.1:18765"}},
+		Extensions:  cfg.Values{ioaclient.ConfigKey: {"url": "http://ioa-token@127.0.0.1:18765"}},
 		NodeOptions: cfg.NodeOptions{NodeName: "coordinator"},
 	}
 	option, err := embeddedAgentOption(base, "promo-demo", "127.0.0.1:18080")

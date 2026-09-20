@@ -14,15 +14,15 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+
 	"github.com/chainreactors/cyber/tools/files"
 )
 
-func fileSet(t *testing.T, cfg files.Config) (tool.Executor, *extension.Set) {
+func fileSet(t *testing.T, cfg files.Config) (coretool.Executor, *extension.Set) {
 	t.Helper()
-	registry := toolset.NewRegistry()
+	registry := coretool.NewToolRegistry()
 	f := fileext.New(cfg)
 	set, err := extension.New(
 		hosttest.Capabilities(),
@@ -64,7 +64,7 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := r.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`)
-		if err != nil || tool.ResultText(result) != text {
+		if err != nil || coretool.ResultText(result) != text {
 			t.Fatalf("read back: %v, %v", result, err)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, "note.txt"))
@@ -78,7 +78,7 @@ func TestFileExtensionRoundTripAndOwnership(t *testing.T) {
 	if len(r.ToolDefinitions()) != 0 {
 		t.Fatal("file definitions survived instance close")
 	}
-	if _, err := r.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, toolset.ErrUnavailable) {
+	if _, err := r.ExecuteTool(t.Context(), "read", `{"path":"note.txt"}`); !errors.Is(err, coretool.ErrUnavailable) {
 		t.Fatalf("closed tool remained callable: %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -117,7 +117,7 @@ func TestConstructionDoesNotOpenOrCreateDirectory(t *testing.T) {
 	if len(r.ToolDefinitions()) != 0 {
 		t.Fatal("partial startup published tools")
 	}
-	if _, err := r.ExecuteTool(t.Context(), "read", "{}"); !errors.Is(err, toolset.ErrUnavailable) {
+	if _, err := r.ExecuteTool(t.Context(), "read", "{}"); !errors.Is(err, coretool.ErrUnavailable) {
 		t.Fatalf("startup rollback did not close newly loaded dependency: %v", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestReadLimitsAndReadOnlyDiscovery(t *testing.T) {
 	if defs := r.ToolDefinitions(); len(defs) != 3 || defs[0].Name != "read" {
 		t.Fatalf("read-only discovery: %v", defs)
 	}
-	if _, err := r.ExecuteTool(t.Context(), "write", `{"path":"valid","content":"x"}`); !errors.Is(err, toolset.ErrUnknown) {
+	if _, err := r.ExecuteTool(t.Context(), "write", `{"path":"valid","content":"x"}`); !errors.Is(err, coretool.ErrUnknown) {
 		t.Fatalf("read-only write: %v", err)
 	}
 	for _, name := range []string{"large", "binary", "..", "missing"} {
@@ -180,7 +180,7 @@ func TestReadLimitsAndReadOnlyDiscovery(t *testing.T) {
 			t.Errorf("accepted invalid read: %s", name)
 		}
 	}
-	if result, err := r.ExecuteTool(t.Context(), "read", `{"path":"valid"}`); err != nil || tool.ResultText(result) != "a界" {
+	if result, err := r.ExecuteTool(t.Context(), "read", `{"path":"valid"}`); err != nil || coretool.ResultText(result) != "a界" {
 		t.Fatalf("UTF-8 byte limit: %v, %v", result, err)
 	}
 }
@@ -243,7 +243,7 @@ func TestProductionDependenciesStayIndependent(t *testing.T) {
 	}
 	allowed := []string{
 		"aop", "core/eventbus", "core/extension", "core/hooks", "core/operation", "core/registry", "core/resource",
-		"core/tool", "core/tool/hooks", "pkg/exts/files", "pkg/toolset", "tools/files",
+		"core/tool", "core/tool/hooks", "core/proc", "core/types", "pkg/exts/files", "tools/files",
 	}
 	for _, dep := range strings.Fields(string(output)) {
 		if !strings.HasPrefix(dep, prefix) {

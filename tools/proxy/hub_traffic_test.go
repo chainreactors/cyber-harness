@@ -12,8 +12,8 @@ import (
 
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/operation"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // hubClient builds an HTTP client through an opaque operation-correlation lease.

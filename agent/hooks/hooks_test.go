@@ -10,7 +10,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 )
 
@@ -197,14 +197,14 @@ func TestContinueOnErrorCollectsAndKeepsGoing(t *testing.T) {
 func TestToolResultTransformChaining(t *testing.T) {
 	r := corehooks.New()
 	var observed string
-	result := tool.TextResult("raw")
+	result := coretool.TextResult("raw")
 
 	toolhooks.After.On(r, "redact", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
-		ev.Result.Output = []*aop.Content{aop.Text(tool.ResultText(ev.Result) + "+redacted")}
+		ev.Result.Output = []*aop.Content{aop.Text(coretool.ResultText(ev.Result) + "+redacted")}
 		return struct{}{}, nil
 	})
 	toolhooks.After.On(r, "truncate", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
-		observed = tool.ResultText(ev.Result)
+		observed = coretool.ResultText(ev.Result)
 		ev.Result.IsError = true
 		ev.Result.Terminate = true
 		return struct{}{}, nil
@@ -217,8 +217,8 @@ func TestToolResultTransformChaining(t *testing.T) {
 	if observed != "raw+redacted" {
 		t.Fatalf("second handler saw %q, want the first handler's patch", observed)
 	}
-	if tool.ResultText(result) != "raw+redacted" {
-		t.Fatalf("result output = %q", tool.ResultText(result))
+	if coretool.ResultText(result) != "raw+redacted" {
+		t.Fatalf("result output = %q", coretool.ResultText(result))
 	}
 	if !result.IsError {
 		t.Fatal("result should be marked as error")
@@ -440,7 +440,7 @@ func TestConcurrentEmitWhileRegistering(t *testing.T) {
 					return
 				default:
 				}
-				if _, err := toolhooks.After.Emit(ctx, r, toolhooks.ResultEvent{Result: tool.TextResult("x")}); err != nil {
+				if _, err := toolhooks.After.Emit(ctx, r, toolhooks.ResultEvent{Result: coretool.TextResult("x")}); err != nil {
 					t.Errorf("emit: %v", err)
 					return
 				}
@@ -456,7 +456,7 @@ func TestConcurrentEmitWhileRegistering(t *testing.T) {
 			for j := 0; j < 200; j++ {
 				off := toolhooks.After.On(r, "racer", func(_ context.Context, ev toolhooks.ResultEvent) (struct{}, error) {
 					calls.Add(1)
-					ev.Result.Output = []*aop.Content{aop.Text(tool.ResultText(ev.Result) + "!")}
+					ev.Result.Output = []*aop.Content{aop.Text(coretool.ResultText(ev.Result) + "!")}
 					return struct{}{}, nil
 				})
 				offEnd := RunEnd.On(r, "racer", func(_ context.Context, _ RunEndEvent) (struct{}, error) {

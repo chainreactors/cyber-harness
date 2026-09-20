@@ -6,7 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	webext "github.com/chainreactors/cyber/pkg/exts/web"
+	node "github.com/chainreactors/cyber/pkg/node"
+	profile "github.com/chainreactors/cyber/pkg/profile"
 	"io/fs"
 	"net"
 	"net/http"
@@ -18,15 +25,6 @@ import (
 	"sync"
 	"time"
 
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/core/types"
-	cyberdist "github.com/chainreactors/cyber/pkg/aiscan"
-	serverext "github.com/chainreactors/cyber/pkg/exts/ioa/server"
-	node "github.com/chainreactors/cyber/pkg/node"
-	profile "github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/runner"
 	"github.com/chainreactors/cyber/pkg/web"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	ioaservice "github.com/chainreactors/cyber/tools/ioa/server"
@@ -82,7 +80,7 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 			}
 			candidateOption.ConfigFile = prepared.RuntimePath
 			candidateOption.Sections = defaultSections()
-			if _, err := runner.ResolveRuntimeConfig(&candidateOption); err != nil {
+			if _, err := cfg.ResolveRuntimeConfig(&candidateOption); err != nil {
 				return nil, err
 			}
 			// The staged YAML is resolved into the flags config, which stays the
@@ -114,7 +112,7 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 	}
 
 	routes := webext.New(service)
-	ioaExtension := serverext.NewBrowser(ioaservice.Config{AccessKey: accessKey}, serverext.BrowserOptions{
+	ioaExtension := ioaserver.NewBrowser(ioaservice.Config{AccessKey: accessKey}, ioaserver.BrowserOptions{
 		Authenticate: service.Auth().Authenticate,
 		AuthEnabled:  service.Auth().Enabled(),
 	})
@@ -231,7 +229,7 @@ func newSPAFileServer(fsys fs.FS) http.HandlerFunc {
 	}
 }
 
-func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*cyberdist.Profile, error) {
+func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetry.Logger) (*aiscanProfile, error) {
 	option := cfg.Option{}
 	if baseOption != nil {
 		option = *baseOption
@@ -244,7 +242,7 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 		option.Resolved = resolved
 		option.Extensions = resolved.Values()
 	}
-	p, err := cyberdist.New(cyberdist.Request{
+	p, err := newAIScanProfile(aiscanRequest{
 		Option: &option, ProviderMode: profile.ProviderOptional, Logger: logger,
 		SkipEngines: true, DisableIOA: true,
 	})

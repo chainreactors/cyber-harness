@@ -10,9 +10,9 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
@@ -37,14 +37,14 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 
 func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 	registry := hosttest.Commands(t,
-		commands.Command{
+		coretool.Command{
 			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
 			DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md",
-			Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
-		}, commands.Command{
+			Run:             func(context.Context, *coretool.Execution) (any, error) { return nil, nil },
+		}, coretool.Command{
 			Name: "tmux", Usage: "Usage: tmux <action>",
 			DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
-			Run:             func(context.Context, *commands.Execution) (any, error) { return nil, nil },
+			Run:             func(context.Context, *coretool.Execution) (any, error) { return nil, nil },
 		})
 	store, diagnostics := skills.LoadEmbeddedStore()
 	if len(diagnostics) != 0 {
@@ -76,7 +76,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 }
 
 func TestCommandSpecsMissingDescriptionPathStayVisible(t *testing.T) {
-	registry := hosttest.Commands(t, commands.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *commands.Execution) (any, error) { return nil, nil }})
+	registry := hosttest.Commands(t, coretool.Command{Name: "custom", Usage: "custom", Run: func(context.Context, *coretool.Execution) (any, error) { return nil, nil }})
 	catalog := RegistryCommandSpecs(registry, nil)
 	for _, spec := range catalog {
 		if spec.GetName() == "!custom" && spec.GetDescription() != "" {

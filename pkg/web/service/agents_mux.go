@@ -9,8 +9,8 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	"github.com/chainreactors/cyber/core/output"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/output"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	protobuf "google.golang.org/protobuf/proto"
 )

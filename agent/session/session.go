@@ -20,10 +20,10 @@ import (
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	toolpkg "github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -176,7 +176,7 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 	if strings.HasPrefix(line, "!") {
 		return s.executeBash(ctx, line, strings.TrimSpace(strings.TrimPrefix(line, "!")))
 	}
-	args, err := commands.SplitCommandLine(line)
+	args, err := coretool.SplitCommandLine(line)
 	if err != nil {
 		return commandOutcome{err: err}
 	}
@@ -371,7 +371,7 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if err != nil {
 		return commandOutcome{err: err}
 	}
-	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(toolpkg.ResultText(result), " \t\r\n"))
+	return commandText(line, CommandPresentationPreformatted, strings.TrimRight(coretool.ResultText(result), " \t\r\n"))
 }
 
 func commandText(line, presentation, text string) commandOutcome {
@@ -809,7 +809,7 @@ func (s *Session) Command(ctx context.Context, line string) (*types.CommandResul
 		return nil, fmt.Errorf("session is not configured")
 	}
 	if declaration, ok := state.runtime.lookupCommand(commandName(line)); ok && declaration.rotation {
-		args, err := commands.SplitCommandLine(line)
+		args, err := coretool.SplitCommandLine(line)
 		if err != nil {
 			return nil, err
 		}
@@ -891,7 +891,7 @@ func (s *Session) baseState() *sessionState {
 }
 
 func commandName(line string) string {
-	fields, err := commands.SplitCommandLine(strings.TrimSpace(line))
+	fields, err := coretool.SplitCommandLine(strings.TrimSpace(line))
 	if err != nil || len(fields) == 0 {
 		return ""
 	}
@@ -923,7 +923,7 @@ func (s *Session) rotateCommand(ctx context.Context, line string) (*types.Comman
 			state.emitCommandResult(outcome.result)
 			return outcome.result, nil
 		}
-		values, err := commands.SplitCommandLine(line)
+		values, err := coretool.SplitCommandLine(line)
 		if err != nil {
 			return nil, err
 		}

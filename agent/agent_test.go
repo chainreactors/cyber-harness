@@ -20,9 +20,9 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -352,7 +352,7 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 	bash := terminaltool.NewBashTool(dir, 5, nil)
 	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := hosttest.Commands(t,
-		commands.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
+		coretool.Command{Name: stub.Name(), Usage: stub.Usage(), Run: stub.Run},
 		tmuxCmd,
 	)
 	bash.SetCommandRegistry(commandRegistry)
@@ -1340,7 +1340,7 @@ func textMessage(role, text string) *aop.Message {
 }
 
 func toolResultMessage(callID, output string) *aop.Message {
-	return provider.ToolResultMessage(callID, tool.TextResult(output))
+	return provider.ToolResultMessage(callID, coretool.TextResult(output))
 }
 
 func imageMessage(role string, parts ...*aop.Content) *aop.Message {
@@ -1395,17 +1395,17 @@ func (t *recordingTool) Name() string { return t.name }
 func (t *recordingTool) Description() string { return "recording tool" }
 
 func (t *recordingTool) Definition() *aop.ToolDefinition {
-	return tool.Def(t.name, t.Description(), struct{}{})
+	return coretool.Def(t.name, t.Description(), struct{}{})
 }
 
-func (t *recordingTool) Execute(_ context.Context, arguments string) (*tool.Result, error) {
+func (t *recordingTool) Execute(_ context.Context, arguments string) (*coretool.Result, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, arguments)
 	if strings.Contains(arguments, "fail") {
 		return nil, fmt.Errorf("failed")
 	}
-	return tool.TextResult(t.output), nil
+	return coretool.TextResult(t.output), nil
 }
 
 func (t *recordingTool) callsSnapshot() []string {
@@ -1575,7 +1575,7 @@ type stubPseudoCommand struct {
 
 func (c *stubPseudoCommand) Name() string  { return c.name }
 func (c *stubPseudoCommand) Usage() string { return c.name }
-func (c *stubPseudoCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *stubPseudoCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	fmt.Fprint(execution.Stdout, c.output)
 	return nil, nil
 }
@@ -1602,7 +1602,7 @@ func hasToolMessage(messages []*aop.Message, toolCallID, contains string) bool {
 		if r == nil || r.CallId != toolCallID {
 			continue
 		}
-		if strings.Contains(tool.ResultText(r), contains) {
+		if strings.Contains(coretool.ResultText(r), contains) {
 			return true
 		}
 	}
@@ -1669,7 +1669,7 @@ func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, cont
 				continue
 			}
 			if r := provider.MessageToolResult(msg); r != nil && r.CallId == toolCallID {
-				actual = tool.ResultText(r)
+				actual = coretool.ResultText(r)
 				break
 			}
 		}
@@ -1677,7 +1677,7 @@ func assertToolResult(t *testing.T, req *ChatCompletionRequest, toolCallID, cont
 	}
 }
 
-func buildTmuxTestPrompt(tools tool.Executor, commandRegistry *commands.Registry) string {
+func buildTmuxTestPrompt(tools coretool.Executor, commandRegistry *coretool.CommandRegistry) string {
 	var sb strings.Builder
 	sb.WriteString("You are a test agent. You have one tool: bash.\n\n## Tool: bash\n")
 	for _, definition := range tools.ToolDefinitions() {

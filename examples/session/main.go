@@ -11,10 +11,9 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/base"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/harness"
 )
 
@@ -53,7 +52,7 @@ func run(ctx context.Context) (resultErr error) {
 		return err
 	}
 	h, err := harness.New(harness.Config{
-		Base: base.Config{
+		Base: harness.BaseConfig{
 			Directory: directory, SkillExclude: []string{"cyber"},
 			Provider: provider.StartupConfig{Mode: provider.StartupDisabled},
 		},

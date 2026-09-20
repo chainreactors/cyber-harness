@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"io"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	node "github.com/chainreactors/cyber/pkg/node"
 	"github.com/chainreactors/cyber/pkg/profile"
-	"github.com/chainreactors/cyber/pkg/runner"
+	"io"
 )
 
 // runAgentTransport selects exactly one Agent transport. Session, provider and
@@ -22,8 +20,8 @@ func runAgentTransport(ctx context.Context, newProfile func(profile.Request) (pr
 	case cfg.AgentTransportWeb:
 		return node.RunWebSocket(ctx, newProfile, option, logger)
 	case cfg.AgentTransportStdio:
-		return runner.RunStdio(ctx, newProfile, option, logger, input, output)
+		return runStdio(ctx, newProfile, option, logger, input, output)
 	default:
-		return runner.RunAgentMode(ctx, newProfile, option, logger, setInterrupt)
+		return runAgentMode(ctx, newProfile, option, logger, setInterrupt)
 	}
 }

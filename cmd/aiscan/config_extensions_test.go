@@ -1,9 +1,9 @@
 package main
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/types"
-	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 	"reflect"
@@ -65,7 +65,7 @@ func TestGeneratedDefaultsKeepSameOriginDerivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	option := &cfg.Option{AgentOptions: cfg.AgentOptions{ServerURL: "http://web.test"}, Extensions: values}
-	value, err := client.ReadOptions(option)
+	value, err := ioaclient.ReadOptions(option)
 	if err != nil || value.URL != "http://web.test/ioa" {
 		t.Fatalf("generated defaults disabled embedded IOA: %+v, %v", value, err)
 	}
@@ -77,7 +77,7 @@ func TestConfigUsesCanonicalExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fields := cfg.ValuesFromProto(value.Extensions)[client.ConfigKey]
+	fields := cfg.ValuesFromProto(value.Extensions)[ioaclient.ConfigKey]
 	if fields["url"] != "" || fields["space"] != "" {
 		t.Fatalf("zero presence lost: %#v", fields)
 	}
@@ -113,18 +113,18 @@ func TestConfigMasksAndRestoresURLCredentials(t *testing.T) {
 			t.Fatalf("view leaked %q", secret)
 		}
 	}
-	ioa := view.GetExtensions()[client.ConfigKey]
+	ioa := view.GetExtensions()[ioaclient.ConfigKey]
 	if ioa == nil || len(ioa.GetConfiguredSecrets()) != 1 || ioa.GetConfiguredSecrets()[0] != "token" {
 		t.Fatal("missing extension secret indicator")
 	}
-	incoming := cfg.Values{client.ConfigKey: {"url": ioa.GetValues().GetFields()["url"].GetStringValue()}}
+	incoming := cfg.Values{ioaclient.ConfigKey: {"url": ioa.GetValues().GetFields()["url"].GetStringValue()}}
 	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
-	if incoming[client.ConfigKey]["url"] != "https://credential@example.test/ioa" {
+	if incoming[ioaclient.ConfigKey]["url"] != "https://credential@example.test/ioa" {
 		t.Fatal("masked URL erased credential")
 	}
-	incoming[client.ConfigKey]["url"] = "https://different.test/ioa"
+	incoming[ioaclient.ConfigKey]["url"] = "https://different.test/ioa"
 	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
-	if strings.Contains(incoming[client.ConfigKey]["url"].(string), "credential") {
+	if strings.Contains(incoming[ioaclient.ConfigKey]["url"].(string), "credential") {
 		t.Fatal("credential copied to different host")
 	}
 }

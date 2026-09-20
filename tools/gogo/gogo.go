@@ -10,7 +10,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	gogocore "github.com/chainreactors/gogo/v2/core"
 	"github.com/chainreactors/sdk/gogo"
@@ -74,11 +74,11 @@ func (c *Command) QuickReference() string {
     gogo -i 10.0.0.1 -p top2 -f results.jsonl -O jl`
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("gogo", &err)
 	args := execution.Args
 	args = c.normalizeArgs(args)
-	egress := commands.ResolveExecutionEgress(execution, c.Proxy)
+	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	args = c.injectProxyURL(args, egress.ProxyURL)
 
 	if toolargs.BoolFlagEnabled(args, "--debug") {

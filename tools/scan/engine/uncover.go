@@ -31,7 +31,7 @@ type UncoverEngine struct {
 }
 
 // NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
-// not read process environment variables; core/config owns that boundary.
+// not read process environment variables; pkg/config owns that boundary.
 func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine {
 	if logger == nil {
 		logger = telemetry.NopLogger()

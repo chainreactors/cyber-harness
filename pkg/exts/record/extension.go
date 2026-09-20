@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	coretool "github.com/chainreactors/cyber/core/tool"
+
 	"github.com/chainreactors/cyber/tools/record"
 )
 
@@ -40,7 +40,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return toolset.ErrUnavailable
+		return coretool.ErrUnavailable
 	}
 	if m.registered {
 		return nil
@@ -53,7 +53,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	recorder := record.New(m.workDir, m.directory, m.maximum, backend)
-	if err := extension.Add[tool.Tool](scope, recorder); err != nil {
+	if err := extension.Add[coretool.Tool](scope, recorder); err != nil {
 		recorder.Close()
 		_ = backend.Close()
 		return fmt.Errorf("register record tool: %w", err)

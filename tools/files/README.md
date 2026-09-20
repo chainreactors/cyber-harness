@@ -5,7 +5,7 @@
 操作后关闭 root。超时返回不完整关闭，使用新 context 重试。
 
 `pkg/exts/files.Extension` 是唯一文件插件。它在 Load 时打开 Files，并把 read、write、ls、
-glob 原子贡献给 `pkg/toolset.Registry`；只读配置不发布 write。Profile 让 Tool Registry
+glob 原子贡献给 `core/tool.ToolRegistry`；只读配置不发布 write。Profile 让 Tool Registry
 依赖 files，因此 Registry 先 drain，再关闭文件资源。消费者直接得到 `*files.Files`；
 该类型从定义上不含 Open/Close，不需要 Access/Mounts、密封接口或 Borrow 包装。
 

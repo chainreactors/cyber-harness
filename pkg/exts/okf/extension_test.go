@@ -9,7 +9,7 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	skillsext "github.com/chainreactors/cyber/pkg/exts/skills"
 )
@@ -21,12 +21,12 @@ func TestExtensionPublishesPolicyCommandAndReference(t *testing.T) {
 	}
 	var (
 		resolver prompt.Resolver
-		executor commands.Executor
+		executor coretool.CommandExecutor
 		store    *skills.Store
 	)
 	set, err := extension.New(
 		extension.Provided[*hooks.Registry](hooks.New()),
-		commands.NewRegistry(),
+		coretool.NewCommandRegistry(),
 		library,
 		promptext.New(),
 		New(),
@@ -34,7 +34,7 @@ func TestExtensionPublishesPolicyCommandAndReference(t *testing.T) {
 			if resolver, err = extension.Use[prompt.Resolver](scope); err != nil {
 				return err
 			}
-			if executor, err = extension.Use[commands.Executor](scope); err != nil {
+			if executor, err = extension.Use[coretool.CommandExecutor](scope); err != nil {
 				return err
 			}
 			store, err = extension.Use[*skills.Store](scope)

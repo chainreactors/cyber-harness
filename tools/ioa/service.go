@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -263,7 +263,7 @@ func (r *Resource) Client() *ioaclient.Client {
 	return s.client
 }
 
-func (r *Resource) Commands() []commands.Command {
+func (r *Resource) Commands() []coretool.Command {
 	if r == nil || r.Service == nil {
 		return nil
 	}

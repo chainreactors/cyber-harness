@@ -2,7 +2,7 @@ package client
 
 import (
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"

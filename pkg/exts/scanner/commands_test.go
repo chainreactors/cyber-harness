@@ -25,8 +25,8 @@ import (
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"github.com/chainreactors/cyber/tools/curl"
 	"github.com/chainreactors/cyber/tools/gogo"
 	"github.com/chainreactors/cyber/tools/neutron"
@@ -47,7 +47,7 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
+func buildRegistry(t *testing.T, engineSet *engine.Set) *coretool.CommandRegistry {
 	t.Helper()
 	logger := telemetry.NopLogger()
 	events := coreevents.New()
@@ -64,30 +64,30 @@ func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
 	cyberhub := searchtools.NewCyberhubSearch(index)
 	values := scannerCommandValues(engineSet, t.TempDir(), events, logger)
 	values = append(values,
-		commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
-		commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
+		coretool.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
+		coretool.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
 	)
 	return hosttest.Commands(t, values...)
 }
 
-func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
+func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...coretool.Command) *coretool.CommandRegistry {
 	t.Helper()
 	values := scannerCommandValues(engineSet, workDir, events, logger)
 	values = append(values, extra...)
 	return hosttest.Commands(t, values...)
 }
 
-func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {
-	values := []commands.Command{
+func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []coretool.Command {
+	values := []coretool.Command{
 		curl.NewCommand(logger, "", events),
 		proton.NewCommand(workDir, engineSet.Resources, logger, "", events),
 	}
-	for _, factory := range []func() (commands.Command, error){
-		func() (commands.Command, error) { return gogo.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return neutron.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return spray.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return zombie.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return newScanCommand(engineSet, nil, "", events) },
+	for _, factory := range []func() (coretool.Command, error){
+		func() (coretool.Command, error) { return gogo.NewCommand(engineSet, logger, "", events) },
+		func() (coretool.Command, error) { return neutron.NewCommand(engineSet, logger, "", events) },
+		func() (coretool.Command, error) { return spray.NewCommand(engineSet, logger, "", events) },
+		func() (coretool.Command, error) { return zombie.NewCommand(engineSet, logger, "", events) },
+		func() (coretool.Command, error) { return newScanCommand(engineSet, nil, "", events) },
 	} {
 		if command, err := factory(); err == nil {
 			values = append(values, command)
@@ -228,7 +228,7 @@ func TestGogoInjectProxy(t *testing.T) {
 	cmd := gogo.New(nil).WithProxy(proxyAddr)
 
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("gogo --help with proxy: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestZombieExecuteWithProxy(t *testing.T) {
 	// Execute with --help just to verify no panic; the proxy is built
 	// but not exercised because --help exits before any network I/O.
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("zombie --help: %v", err)
 	}
@@ -389,7 +389,7 @@ func (r *functionalRecorder) since(mark int) []functionalEvent {
 	return append([]functionalEvent(nil), r.events[mark:]...)
 }
 
-func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *functionalRecorder, cases []functionalCase) {
+func runFunctionalCases(t *testing.T, registry *coretool.CommandRegistry, recorder *functionalRecorder, cases []functionalCase) {
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -404,7 +404,7 @@ func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *fun
 			defer cancel()
 
 			var stdout, stderr bytes.Buffer
-			parent := &commands.Execution{
+			parent := &coretool.Execution{
 				ID:     "functional-" + testCase.Name,
 				Stdin:  strings.NewReader(testCase.Stdin),
 				Stdout: &stdout,
@@ -426,7 +426,7 @@ func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *fun
 	}
 }
 
-func requireFunctionalCoverage(t *testing.T, registry *commands.Registry, cases []functionalCase, coveredElsewhere ...string) {
+func requireFunctionalCoverage(t *testing.T, registry *coretool.CommandRegistry, cases []functionalCase, coveredElsewhere ...string) {
 	t.Helper()
 	covered := make(map[string]bool, len(cases)+len(coveredElsewhere))
 	for _, testCase := range cases {

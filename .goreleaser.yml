@@ -44,7 +44,7 @@ builds:
     tags:
       - '{{ .Env.STANDARD_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}
+      - -s -w -X github.com/chainreactors/cyber/pkg/config.Version={{ .Version }}
 
   - id: aiscan-full
     main: ./cmd/aiscan
@@ -66,4 +66,4 @@ builds:
     tags:
       - '{{ .Env.FULL_TAGS }}'
     ldflags:
-      - -s -w -X github.com/chainreactors/cyber/core/config.Version={{ .Version }}
+      - -s -w -X github.com/chainreactors/cyber/pkg/config.Version={{ .Version }}

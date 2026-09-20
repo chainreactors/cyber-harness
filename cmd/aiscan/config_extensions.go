@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
 	types "github.com/chainreactors/cyber/core/types"
 	app "github.com/chainreactors/cyber/pkg/app"
-	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -93,7 +93,7 @@ func ownConfig(data []byte) (map[string]any, error) {
 		return nil, err
 	}
 	if _, legacy := document["ioa"]; legacy {
-		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", ioaclient.ConfigKey)
 	}
 	_, own := splitDocument(document, configurationProtoKeys)
 	for _, alias := range defaultSections().Aliases() {
@@ -123,7 +123,7 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 		return nil, err
 	}
 	if _, legacy := document["ioa"]; legacy {
-		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", ioaclient.ConfigKey)
 	}
 	projection, _ := splitDocument(document, configurationProtoKeys)
 	value, err := cfg.LoadDistributeConfigDocument(projection)
@@ -261,8 +261,8 @@ func dropNullValues(section map[string]any) {
 func configAPI() managementapi.ConfigOptions {
 	sections := defaultSections()
 	return managementapi.ConfigOptions{Sections: sections, Project: func(config *types.DistributeConfig, view *types.ConfigView) {
-		client.RedactView(view)
-		if ext := view.Extensions[server.ConfigKey]; ext != nil && ext.Values != nil {
+		ioaclient.RedactView(view)
+		if ext := view.Extensions[ioaserver.ConfigKey]; ext != nil && ext.Values != nil {
 			value := ext.Values.Fields["url"].GetStringValue()
 			if u, err := url.Parse(value); err == nil {
 				u.User = nil
@@ -274,7 +274,7 @@ func configAPI() managementapi.ConfigOptions {
 
 // Restoring a masked URL keeps saved credentials only for the same endpoint.
 func preserveURLCredentials(incoming, current cfg.Values) {
-	for _, key := range []string{client.ConfigKey, server.ConfigKey} {
+	for _, key := range []string{ioaclient.ConfigKey, ioaserver.ConfigKey} {
 		fields := incoming[key]
 		if fields == nil {
 			continue

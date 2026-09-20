@@ -2,6 +2,10 @@
 
 Historical design record. For the current implementation, read [composition and lifecycle](architecture/composition.md) and the [developer guide](development.md).
 
+**Superseded in part:** the reference distribution now lives in `cmd/aiscan`, and the public `pkg/aiscan.New` entry point has been removed. The decisions and examples below record the earlier design. Generic embedding uses `pkg/harness` or explicit extension composition; neither supplies the complete aiscan distribution automatically.
+
+Current package organization also uses `harness.BaseExtensions` in place of `base.New`, and keeps aiscan execution modes in `cmd/aiscan`. See [code organization](architecture.md#代码组织与依赖边界).
+
 Tracking issue: https://github.com/chainreactors/cyber-harness/issues/137
 
 ## Problem

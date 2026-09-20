@@ -9,9 +9,9 @@ import (
 
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+
 	searchtools "github.com/chainreactors/cyber/tools/search"
 )
 
@@ -44,18 +44,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		tavily.SetProxy(proxy)
 	}
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
-	fetchCommand := commands.Command{
+	fetchCommand := coretool.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/fetch.md",
 		Run:             fetch.Run,
 	}
 
 	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
-	entries := []commands.Command{fetchCommand}
+	entries := []coretool.Command{fetchCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := extension.Add[tool.Tool](scope, searchTool); err != nil {
+	if err := extension.Add[coretool.Tool](scope, searchTool); err != nil {
 		return err
 	}
 	if err := extension.Add(scope, entries...); err != nil {

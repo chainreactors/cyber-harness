@@ -18,7 +18,7 @@ flowchart LR
     B -.再关闭.-> A
 ```
 
-`base.New` 按顺序提供 hooks、events、commands、toolset、skills、prompt、egress、文件与终端、tmux、app 和 provider。基础组合不包括 Agent 循环与 Session。参考发行版再加入领域能力、观察器、协议与宿主；具体组成以 [base](../../pkg/base/base.go) 和 [aiscan profile](../../pkg/aiscan/profile.go) 为准。
+`harness.BaseExtensions` 按顺序提供 hooks、events、commands、toolset、skills、prompt、egress、文件与终端、tmux、app 和 provider。基础组合不包括 Agent 循环与 Session。参考发行版再加入领域能力、观察器、协议与宿主；具体组成以 [base](../../pkg/harness/base.go) 和 [aiscan profile](../../cmd/aiscan/profile.go) 为准。
 
 ## 贡献与借用
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -39,13 +39,13 @@ func (b *spaceBinding) initialize(id string) {
 	}
 }
 
-func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []commands.Command {
+func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []coretool.Command {
 	root := &rootCommand{client: client, binding: &spaceBinding{}, nodeName: nodeName, meta: meta}
 	return root.commands()
 }
 
-func (root *rootCommand) commands() []commands.Command {
-	return []commands.Command{
+func (root *rootCommand) commands() []coretool.Command {
+	return []coretool.Command{
 		{
 			Name: "ioa", Usage: root.Usage(),
 			DescriptionPath: "cyber://skills/ioa/SKILL.md",
@@ -78,7 +78,7 @@ The current space is injected as --space on send/read.
 Reference: cyber://skills/ioa/SKILL.md`
 }
 
-func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *rootCommand) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("ioa", &err)
 	args := execution.Args
 	if len(args) == 0 {
@@ -98,7 +98,7 @@ func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_
 
 // dispatchCLI runs send/read through the ioa instance's client CLI with the
 // current space injected as --space.
-func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execution, args []string) error {
+func (c *rootCommand) dispatchCLI(ctx context.Context, execution *coretool.Execution, args []string) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa space <name> <description> first")
@@ -121,7 +121,7 @@ func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execu
 
 // runSpace handles join (ioa CLI positional syntax) plus cyber's
 // binding-aware extras (list/nodes/topics).
-func (c *rootCommand) runSpace(ctx context.Context, execution *commands.Execution, args []string) error {
+func (c *rootCommand) runSpace(ctx context.Context, execution *coretool.Execution, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "list", "ls":

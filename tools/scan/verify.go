@@ -7,13 +7,13 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type indexedLoot struct {
 	index int
-	loot  output.Loot
+	loot  parsers.Loot
 }
 
 func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill func(string) string, coll *collector, level priority, logger telemetry.Logger) {
@@ -90,7 +90,7 @@ type verifyResult struct {
 	Status string
 }
 
-func runVerifyAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot output.Loot, logger telemetry.Logger) *verifyResult {
+func runVerifyAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot parsers.Loot, logger telemetry.Logger) *verifyResult {
 	sub := parent.Derive()
 	sub.Cfg = sub.Cfg.WithSystemPromptFunc(workerPrompt(VerifySystemTarget, skillPrompt, logger)).WithStream(false)
 	request, err := resolveWorkerPrompt(ctx, sub.Cfg.PromptResolver, prompt.Context{
@@ -117,7 +117,7 @@ func runVerifyAgent(ctx context.Context, parent *agent.Agent, skillPrompt string
 	return &verifyResult{Status: status}
 }
 
-func runSniperAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot output.Loot, logger telemetry.Logger) *verifyResult {
+func runSniperAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot parsers.Loot, logger telemetry.Logger) *verifyResult {
 	sub := parent.Derive()
 	sub.Cfg = sub.Cfg.WithSystemPromptFunc(workerPrompt(SniperSystemTarget, skillPrompt, logger)).WithStream(false)
 	request, err := resolveWorkerPrompt(ctx, sub.Cfg.PromptResolver, prompt.Context{
@@ -171,7 +171,7 @@ func resolveWorkerPrompt(ctx context.Context, resolver prompt.Resolver, input pr
 	return result.Prompt, nil
 }
 
-func filterLootsByPriority(loots []output.Loot, min priority) []indexedLoot {
+func filterLootsByPriority(loots []parsers.Loot, min priority) []indexedLoot {
 	var out []indexedLoot
 	for i, l := range loots {
 		if priority(l.Priority).atLeast(min) {
@@ -181,10 +181,10 @@ func filterLootsByPriority(loots []output.Loot, min priority) []indexedLoot {
 	return out
 }
 
-func filterFingerprintLoots(loots []output.Loot) []indexedLoot {
+func filterFingerprintLoots(loots []parsers.Loot) []indexedLoot {
 	var out []indexedLoot
 	for i, l := range loots {
-		if l.Kind == output.LootFingerprint {
+		if l.Kind == parsers.LootFingerprint {
 			focus, _ := l.Data["focus"].(bool)
 			if focus {
 				out = append(out, indexedLoot{index: i, loot: l})
@@ -194,7 +194,7 @@ func filterFingerprintLoots(loots []output.Loot) []indexedLoot {
 	return out
 }
 
-func annotateLoot(loot *output.Loot, status string) {
+func annotateLoot(loot *parsers.Loot, status string) {
 	if loot.Data == nil {
 		loot.Data = make(map[string]any)
 	}

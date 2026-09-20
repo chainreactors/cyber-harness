@@ -20,11 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/tools/playwright"
 	"os"
 	"os/signal"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/tools/playwright"
 )
 
 type request struct {
@@ -58,7 +57,7 @@ func main() {
 		}
 
 		var output bytes.Buffer
-		_, err := cmd.Run(ctx, &commands.Execution{Args: req.Args, Stdout: &output, Stderr: &output})
+		_, err := cmd.Run(ctx, &coretool.Execution{Args: req.Args, Stdout: &output, Stderr: &output})
 		resp := response{Output: output.String()}
 		if err != nil {
 			resp.Error = err.Error()

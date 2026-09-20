@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/output"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/output"
 	"google.golang.org/protobuf/proto"
 )
 

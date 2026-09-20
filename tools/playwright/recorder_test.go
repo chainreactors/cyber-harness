@@ -7,6 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/tools/headless"
+	"github.com/go-rod/rod/lib/launcher"
+	"gopkg.in/yaml.v3"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,11 +19,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/tools/headless"
-	"github.com/go-rod/rod/lib/launcher"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRecorderBasicActions(t *testing.T) {
@@ -332,7 +331,7 @@ func loginTestServer() *httptest.Server {
 func recExecString(t *testing.T, cmd *Command, ctx context.Context, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute(%v) error = %v", args, err)
 	}
 	return output.String()
@@ -341,7 +340,7 @@ func recExecString(t *testing.T, cmd *Command, ctx context.Context, args []strin
 // recExecStringErr is a test helper that runs cmd.Execute and returns (output, error).
 func recExecStringErr(cmd *Command, ctx context.Context, args []string) (string, error) {
 	var output bytes.Buffer
-	_, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(ctx, &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
 	return output.String(), err
 }
 
@@ -398,7 +397,7 @@ func TestIntegration_RecordFullLoginFlow(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"fill", "login", "#password", "secret123"})
 
 	// Select role
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: []string{"select-option", "login", "#role", "admin"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: []string{"select-option", "login", "#role", "admin"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		// select might fail depending on rod version, skip if error
 		t.Logf("select-option skipped: %v", err)
 	}
@@ -410,7 +409,7 @@ func TestIntegration_RecordFullLoginFlow(t *testing.T) {
 	recExecString(t, cmd, ctx, []string{"wait-for", "login", "--stable"})
 
 	// Extract text
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: []string{"inner-text", "login", "#status"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: []string{"inner-text", "login", "#status"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Logf("inner-text skipped: %v", err)
 	}
 
@@ -525,7 +524,7 @@ func TestIntegration_RecordStartStop(t *testing.T) {
 	}
 
 	// Do some actions
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: []string{"click", "s2", "#about-link"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+	if _, err := cmd.Run(ctx, &coretool.Execution{Args: []string{"click", "s2", "#about-link"}, Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Logf("click about link: %v (continuing)", err)
 	}
 

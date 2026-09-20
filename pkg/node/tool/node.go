@@ -20,9 +20,9 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/aopws"
-	"github.com/chainreactors/cyber/pkg/toolset"
+
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -44,7 +44,7 @@ type Config struct {
 	Token     string
 	Version   string
 	JSON      bool
-	Executor  tool.Executor
+	Executor  coretool.Executor
 	Events    *coreevents.Stream
 	Progress  *eventbus.Bus[*toolpb.Progress]
 	// RegisterNamespaces installs resource-control protocols on each new
@@ -330,7 +330,7 @@ func execute(ctx context.Context, cfg Config, operationID string, request *toolp
 		WorkDir: call.WorkingDirectory, CallID: operationID,
 		SessionID: request.SessionId, TurnID: request.TurnId, Emitter: cfg.ID,
 	}
-	event, err := toolset.ExecuteToolRequest(operation.ContextWithInvocation(ctx, invocation), operationID, request, cfg.Executor, cfg.Progress)
+	event, err := coretool.ExecuteToolRequest(operation.ContextWithInvocation(ctx, invocation), operationID, request, cfg.Executor, cfg.Progress)
 	if err != nil {
 		send(operationID, aop.NewProtocolError("INVALID_PAYLOAD", err.Error()))
 		return

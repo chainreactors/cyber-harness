@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 // BuildHello builds the AOP core agent registration message.
-func BuildHello(name string, executor tool.Executor, nodeID string, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
+func BuildHello(name string, executor coretool.Executor, nodeID string, runtimeInfo *aop.AgentRuntimeInfo) (*aop.AgentHello, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return nil, fmt.Errorf("node_id is required")
