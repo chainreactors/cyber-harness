@@ -32,7 +32,6 @@ import (
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"github.com/chainreactors/cyber/tools/resources"
@@ -51,7 +50,7 @@ func installScanner(t *testing.T, directory string, config Config, extra ...exte
 	if err != nil {
 		t.Fatal(err)
 	}
-	values = append(values, loopext.New(agent.StandardLoop{}), New(config, directory, telemetry.NopLogger()), searchext.New(searchext.Config{}))
+	values = append(values, loopext.New(agent.StandardLoop{}), New(config, directory), searchext.New(searchext.Config{}))
 	values = append(values, extra...)
 	var installed scannerInstallation
 	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {

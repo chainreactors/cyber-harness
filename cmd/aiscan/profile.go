@@ -132,10 +132,6 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if config.Session != nil {
 		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
 	}
-	if config.Base.Logger == nil {
-		config.Base.Logger = telemetry.NopLogger()
-	}
-	logger := config.Base.Logger
 	p := &aiscanProfile{}
 	nodeName := config.Option.NodeName
 	if config.IOA != nil && config.IOA.NodeName != "" {
@@ -186,7 +182,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		values = append(values, output)
 	}
 	if len(config.Observe) > 0 {
-		observer, err := observeext.New(observeext.Options{Kinds: config.Observe, Logger: logger})
+		observer, err := observeext.New(observeext.Options{Kinds: config.Observe})
 		if err != nil {
 			return nil, err
 		}

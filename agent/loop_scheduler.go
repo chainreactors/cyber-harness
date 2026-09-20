@@ -88,18 +88,6 @@ func NewLoopScheduler(ctx context.Context, ib inbox.Inbox, logger telemetry.Logg
 	}
 }
 
-func (s *LoopScheduler) SetLogger(logger telemetry.Logger) {
-	if s == nil {
-		return
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	s.mu.Lock()
-	s.log = logger
-	s.mu.Unlock()
-}
-
 func (s *LoopScheduler) Add(entry LoopEntry) (string, error) {
 	if strings.TrimSpace(entry.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")

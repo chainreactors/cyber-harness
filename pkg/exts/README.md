@@ -39,7 +39,9 @@ Bindings Point。具体插件贡献资源并由 Scope 自动撤销。Config、CL
 用于 Extension 实现及底层单元测试；不得在宿主中再建立初始化、注册或清理路径。`Declare` 与
 `NewConsole` 可以提供独立的声明和展示入口，但不重复创建功能实例。
 
-Session Extension 获取依赖并安装默认 JSONLHistory；Provider Extension 创建和发布 Provider 状态；
+Session Extension 获取依赖并安装默认 JSONLHistory；Session 命令在构造时校验并冻结，运行中不再注册。
+LoggerRef 由基础组合创建，Session、IOA、Scanner 与 Observe 借用同一引用，切换输出不逐层传播。
+Provider Extension 创建和发布 Provider 状态；
 Terminal Extension 发布 BashTool 与同一个进程 Manager 的具体和只读控制接口。
 
 

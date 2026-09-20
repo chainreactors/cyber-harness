@@ -76,31 +76,3 @@ func NewResource(config Config) (*Resource, error) {
 }
 
 var ErrUnavailable = errors.New("session runtime is unavailable")
-
-// RegisterCommand atomically appends a declaration and all aliases. Existing
-// commands are immutable; execution never holds the registration lock.
-func (rt *Runtime) RegisterCommand(command Command) error {
-	if rt == nil {
-		return fmt.Errorf("session runtime is required")
-	}
-	rt.lifecycle.Lock()
-	defer rt.lifecycle.Unlock()
-	if rt.closing {
-		return fmt.Errorf("session runtime is closing")
-	}
-	rt.commandMu.Lock()
-	defer rt.commandMu.Unlock()
-	extra := append(append([]Command(nil), rt.commands...), command)
-	values, index, err := validateCommands(extra)
-	if err != nil {
-		return err
-	}
-	rt.commands, rt.commandIndex = values, index
-	return nil
-}
-func (rt *Runtime) lookupCommand(name string) (Command, bool) {
-	rt.commandMu.RLock()
-	defer rt.commandMu.RUnlock()
-	c, ok := rt.commandIndex[name]
-	return c, ok
-}

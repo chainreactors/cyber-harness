@@ -46,7 +46,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	extensions = append(extensions, okfext.New(), loopext.New(loop), arsenal)
 
 	if !config.SkipEngines {
-		extensions = append(extensions, scannerext.New(config.Scanner, workDir, config.Logger))
+		extensions = append(extensions, scannerext.New(config.Scanner, workDir))
 	}
 	if optionalToolEnabled(config.Tools.OptionalTools, "search") {
 		extensions = append(extensions, searchext.New(searchext.Config{TavilyKeys: config.Tools.TavilyKeys}))

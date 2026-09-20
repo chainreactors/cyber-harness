@@ -188,7 +188,7 @@ func (s *commandSession) execute(ctx context.Context, input string) commandOutco
 		return commandOutcome{err: fmt.Errorf("command line is required")}
 	}
 	name := args[0]
-	declaration, ok := s.state.runtime.lookupCommand(name)
+	declaration, ok := s.state.runtime.commandIndex[name]
 	if !ok || declaration.rotation {
 		return commandOutcome{err: fmt.Errorf("command %q is not a Runtime command", name)}
 	}
@@ -840,7 +840,7 @@ func (s *Session) Command(ctx context.Context, line string) (*types.CommandResul
 	if state == nil {
 		return nil, fmt.Errorf("session is not configured")
 	}
-	if declaration, ok := state.runtime.lookupCommand(commandName(line)); ok && declaration.rotation {
+	if declaration, ok := state.runtime.commandIndex[commandName(line)]; ok && declaration.rotation {
 		args, err := coretool.SplitCommandLine(line)
 		if err != nil {
 			return nil, err

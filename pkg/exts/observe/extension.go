@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
+
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
@@ -20,7 +22,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"sync"
 )
 
 type Kind string
@@ -34,9 +35,8 @@ const (
 )
 
 type Options struct {
-	Kinds  []Kind
-	File   FileOptions
-	Logger telemetry.Logger
+	Kinds []Kind
+	File  FileOptions
 }
 
 type Extension struct {
@@ -72,13 +72,9 @@ func New(options Options) (*Extension, error) {
 	if fileOptions.MaxEntries == 0 && fileOptions.Ignore == nil && !fileOptions.Enabled {
 		fileOptions = defaultFileOptions()
 	}
-	logger := options.Logger
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
 	return &Extension{
 		kinds: kinds, file: fileOptions,
-		snapshots: make(map[string]Snapshot), logger: logger,
+		snapshots: make(map[string]Snapshot),
 	}, nil
 }
 
@@ -91,6 +87,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
+	logger, err := extension.Use[*telemetry.LoggerRef](scope)
+	if err != nil {
+		return err
+	}
+	e.logger = logger
 	registry, err := extension.Use[*corehooks.Registry](scope)
 	if err != nil {
 		return err

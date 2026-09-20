@@ -22,7 +22,7 @@ func TestInstallationSharesCapabilitiesAndRetargetableLogger(t *testing.T) {
 	var capturedProcesses *proc.Manager
 	h, err := harness.New(harness.Config{
 		Base:    harness.BaseConfig{Directory: t.TempDir()},
-		Session: &session.Config{}, Loop: agent.NoLoop(),
+		Session: &session.Config{Loop: agent.NoLoop()},
 		Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			var err error
 			if capturedLogger, err = extension.Use[*telemetry.LoggerRef](scope); err != nil {

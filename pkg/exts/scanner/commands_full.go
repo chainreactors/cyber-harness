@@ -11,6 +11,6 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func manifestScannerCommands(application aop.EventPublisher, engines *engine.Set, logger telemetry.Logger, proxyURL string) ([]coretool.Command, error) {
-	return []coretool.Command{katana.NewCommand(logger, proxyURL, application), passive.NewCommand(engines, logger)}, nil
+func manifestScannerCommands(application aop.EventPublisher, engines *engine.Set, logger telemetry.Logger, proxyURL string) []coretool.Command {
+	return []coretool.Command{katana.NewCommand(logger, proxyURL, application), passive.NewCommand(engines, logger)}
 }

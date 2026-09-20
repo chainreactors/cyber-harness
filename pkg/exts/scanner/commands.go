@@ -6,131 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/agent/provider"
-	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 
-	curltools "github.com/chainreactors/cyber/tools/curl"
-	gotools "github.com/chainreactors/cyber/tools/gogo"
-	neutrontools "github.com/chainreactors/cyber/tools/neutron"
-	protontools "github.com/chainreactors/cyber/tools/proton"
-	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/scan/engine"
-	searchtools "github.com/chainreactors/cyber/tools/search"
-	spraytools "github.com/chainreactors/cyber/tools/spray"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
-	zombietools "github.com/chainreactors/cyber/tools/zombie"
-	"github.com/chainreactors/sdk/pkg/association"
 )
-
-// borrowed is what the scanner reaches for that other extensions own. It is
-// named so the call below reads as a list of capabilities rather than a run of
-// positional arguments.
-type borrowed struct {
-	providers *provider.State
-	events    aop.EventPublisher
-	tools     coretool.Executor
-	commands  coretool.CommandExecutor
-	bash      *terminaltool.BashTool
-	skills    *skills.Store
-	prompts   prompt.Resolver
-}
-
-func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]coretool.Command, error) {
-	application := borrow.events
-	var scannerResources *resources.Set
-	if engineSet != nil {
-		scannerResources = engineSet.Resources
-	}
-
-	var options []scan.Option
-	model, providerConfig := borrow.providers.Current()
-	if model != nil {
-		if loop == nil {
-			return nil, fmt.Errorf("scanner agent loop must be supplied by the profile")
-		}
-		parent := agent.NewAgent(agent.Config{
-			Loop:           loop,
-			Provider:       model,
-			Tools:          borrow.tools,
-			Model:          providerConfig.Model,
-			MaxTokens:      providerConfig.MaxTokens,
-			ContextWindow:  providerConfig.ContextWindow,
-			Logger:         logger,
-			Bus:            application,
-			PromptResolver: borrow.prompts,
-		})
-		options = append(options,
-			scan.WithParent(parent),
-			scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-				return collectDeepBrowserArtifacts(ctx, borrow.commands, borrow.bash, targetURL, logger)
-			}),
-		)
-		if borrow.skills != nil {
-			options = append(options, scan.WithSkillReader(func(name string) string {
-				content, ok, err := borrow.skills.ReadVirtual("cyber://skills/scan/" + name + ".md")
-				if !ok || err != nil {
-					return ""
-				}
-				return content
-			}))
-		}
-	}
-	options = append(options, scan.WithLogger(logger))
-
-	var values []coretool.Command
-	values = append(values, curltools.NewCommand(logger, proxyURL, application))
-	if command, err := gotools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-		logger.Warnf("gogo unavailable: %v", err)
-	} else {
-		values = append(values, command)
-	}
-	if command, err := neutrontools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-		logger.Warnf("neutron unavailable: %v", err)
-	} else {
-		values = append(values, command)
-	}
-	if command, err := spraytools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-		logger.Warnf("spray unavailable: %v", err)
-	} else {
-		values = append(values, command)
-	}
-	if command, err := zombietools.NewCommand(engineSet, logger, proxyURL, application); err != nil {
-		logger.Warnf("zombie unavailable: %v", err)
-	} else {
-		values = append(values, command)
-	}
-	values = append(values, protontools.NewCommand(workDir, scannerResources, logger, proxyURL, application))
-	// cyberhub searches the fingerprint and POC index this extension builds, so
-	// it is contributed by its owner. A nil index is not an empty one: the
-	// command says how to configure the resources instead of reporting no hits.
-	var index *association.Index
-	if engineSet != nil {
-		index = engineSet.Index
-	}
-	cyberhub := searchtools.NewCyberhubSearch(index)
-	values = append(values, coretool.Command{
-		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
-		Run:             cyberhub.Run,
-	})
-	if command, err := newScanCommand(engineSet, options, proxyURL, application); err != nil {
-		logger.Warnf("scan unavailable: %v", err)
-	} else {
-		values = append(values, command)
-	}
-	manifestCommands, err := manifestScannerCommands(application, engineSet, logger, proxyURL)
-	if err != nil {
-		return nil, err
-	}
-	return append(values, manifestCommands...), nil
-}
 
 func executeRegistryCommand(ctx context.Context, registry coretool.CommandExecutor, bash *terminaltool.BashTool, commandLine string, timeout time.Duration) (string, error) {
 	if registry == nil || bash == nil {

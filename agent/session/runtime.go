@@ -28,7 +28,6 @@ type Runtime struct {
 	commands         []Command
 	commandIndex     map[string]Command
 	history          HistoryStore
-	commandMu        sync.RWMutex
 	logger           *telemetry.LoggerRef
 	config           Config
 	primarySessionID string
@@ -364,17 +363,7 @@ func (rt *Runtime) SetLogger(logger telemetry.Logger) {
 	if rt == nil || rt.logger == nil {
 		return
 	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
 	rt.logger.Set(logger)
-	logger = rt.logger
-	rt.mu.Lock()
-	rt.agentConfig.Logger = logger
-	for _, sess := range rt.sessions {
-		sess.agent.SetLogger(logger)
-	}
-	rt.mu.Unlock()
 }
 
 func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {

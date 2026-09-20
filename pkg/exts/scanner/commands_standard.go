@@ -9,6 +9,6 @@ import (
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func manifestScannerCommands(aop.EventPublisher, *engine.Set, telemetry.Logger, string) ([]coretool.Command, error) {
-	return nil, nil
+func manifestScannerCommands(aop.EventPublisher, *engine.Set, telemetry.Logger, string) []coretool.Command {
+	return nil
 }

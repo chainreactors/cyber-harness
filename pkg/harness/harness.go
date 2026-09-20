@@ -35,7 +35,6 @@ type Config struct {
 	Base       BaseConfig
 	Extensions []extension.Extension
 	Session    *agentsession.Config
-	Loop       agent.Loop
 }
 
 // Harness owns the assembled extension graph and the capabilities it
@@ -64,9 +63,7 @@ func New(config Config) (*Harness, error) {
 	h := &Harness{}
 	if config.Session != nil {
 		session := *config.Session
-		if config.Loop != nil {
-			session.Loop = config.Loop
-		} else if session.Loop == nil {
+		if session.Loop == nil {
 			session.Loop = agent.StandardLoop{}
 		}
 		entries = append(entries, loopext.New(session.Loop), sessionext.New(session))

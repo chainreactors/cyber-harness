@@ -8,7 +8,6 @@ import (
 	"github.com/chainreactors/cyber/agent/inbox"
 	providerpkg "github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -187,25 +186,6 @@ func (a *Agent) ContextWindow() int {
 		return a.Cfg.ContextWindow
 	}
 	return ModelContextWindow(a.Cfg.Model)
-}
-
-func (a *Agent) SetLogger(logger telemetry.Logger) {
-	if a == nil {
-		return
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	a.mu.Lock()
-	a.Cfg.Logger = logger
-	if a.Cfg.LoopScheduler != nil {
-		a.Cfg.LoopScheduler.SetLogger(logger)
-	}
-	tools := a.Cfg.Tools
-	a.mu.Unlock()
-	if sl, ok := tools.(interface{ SetLogger(telemetry.Logger) }); ok {
-		sl.SetLogger(logger)
-	}
 }
 
 // configSnapshot copies Cfg under the lock so a concurrent SetProvider can't

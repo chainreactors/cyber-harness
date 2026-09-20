@@ -31,10 +31,6 @@ func (c Command) invoke(ctx context.Context, session *Session, args []string) (r
 
 func commandDeclarations(extra []Command) ([]Command, map[string]Command, error) {
 	values := append(builtinCommands(), extra...)
-	return validateCommands(values)
-}
-
-func validateCommands(values []Command) ([]Command, map[string]Command, error) {
 	index := make(map[string]Command)
 	for i, value := range values {
 		if value.Spec == nil || value.Handler == nil {
@@ -61,14 +57,8 @@ func (rt *Runtime) CommandSpecs(remote bool) []*types.CommandSpec {
 	if rt == nil {
 		return nil
 	}
-	rt.commandMu.RLock()
-	defer rt.commandMu.RUnlock()
-	return commandSpecs(rt.commands, remote)
-}
-
-func commandSpecs(values []Command, remote bool) []*types.CommandSpec {
 	var specs []*types.CommandSpec
-	for _, value := range values {
+	for _, value := range rt.commands {
 		if !remote || value.AdvertiseRemote {
 			specs = append(specs, proto.CloneOf(value.Spec))
 		}

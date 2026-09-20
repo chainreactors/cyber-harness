@@ -46,7 +46,7 @@ go run ./examples/session
 
 ## 构建自己的应用
 
-通用应用可以直接使用 `pkg/harness`：`harness.New` 总是安装 `harness.BaseConfig`，把 `Session` 留空就是工具宿主，提供 `Session` 就会安装 `StandardLoop` 和会话运行时；`Loop` 可以替换为自己的循环，`Extensions` 可以加入场景专属工具或服务。这样可以在同一个 harness 包中组合工具型、对话型和领域型应用，同时由 `Harness.Load`、`Harness.Close` 统一管理生命周期。需要更细的生命周期控制时，仍可沿用示例的 `harness.BaseExtensions → append → extension.New`。
+通用应用可以直接使用 `pkg/harness`：`harness.New` 总是安装 `harness.BaseConfig`，把 `Session` 留空就是工具宿主，提供 `Session` 就会安装 `StandardLoop` 和会话运行时；`Session.Loop` 可以替换为自己的循环，`Extensions` 可以加入场景专属工具或服务。这样可以在同一个 harness 包中组合工具型、对话型和领域型应用，同时由 `Harness.Load`、`Harness.Close` 统一管理生命周期。需要更细的生命周期控制时，仍可沿用示例的 `harness.BaseExtensions → append → extension.New`。
 
 ```go
 h, err := harness.New(harness.Config{
