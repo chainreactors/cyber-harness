@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Plus, Settings, Trash2, Zap } from 'lucide-react'
 import { create } from '@bufbuild/protobuf'
-import { ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../cyber-proto'
+import { AgentConfigSchema, ConnectionCheckSchema, DistributeConfigSchema, LLMProbeResultSchema } from '../cyber-proto'
 import { getConfigStatus, llmConfigured, saveConfig, testLLM, testConn, listLLMModels } from '../api'
 import type { ConfigView, ConnectionCheck, DistributeConfig, LLMProbeResult, ServerStatus } from '../api'
 import { Button, Input, Select, SelectTrigger, SelectContent, SelectItem, SelectValue, Badge, Spinner, Callout, Field, Switch, ResultLine } from '@cyber/ui'
@@ -30,12 +30,14 @@ interface LLMProfileForm {
 
 interface ConfigFormState {
   llm: { active_profile: string; providers: LLMProfileForm[] }
-  cyberhub: { url: string; key: string; mode: string; proxy: string }
+  cyberhub: { url: string; key: string; mode: string; proxy: string; mitm?: boolean }
   recon: { fofa_key: string; hunter_api_key: string; proxy: string; limit?: number }
   scan: { verify: string }
   search: { tavily_keys: string }
   ioa: { url: string; token: string; node_name: string; space: string }
-  agent: { tools: string[]; timeout: number }
+  agent: NonNullable<DistributeConfig['agent']>
+  traffic: DistributeConfig['traffic']
+  extensions: DistributeConfig['extensions']
 }
 
 function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
@@ -66,14 +68,17 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
     scan: { verify: form.scan.verify },
     search: { tavilyKeys: form.search.tavily_keys },
     extensions: {
+      ...form.extensions,
       'ioa.client': {
+        ...form.extensions['ioa.client'],
         url: form.ioa.url,
         token: form.ioa.token,
         node_name: form.ioa.node_name,
         space: form.ioa.space,
       },
     },
-    agent: { tools: form.agent.tools, timeout: form.agent.timeout },
+    agent: form.agent,
+    traffic: form.traffic,
   })
 }
 
@@ -120,7 +125,9 @@ function emptyForm(name: string): ConfigFormState {
     scan: { verify: '' },
     search: { tavily_keys: '' },
     ioa: { url: '', token: '', node_name: '', space: '' },
-    agent: { tools: [], timeout: 0 },
+    agent: create(AgentConfigSchema),
+    traffic: undefined,
+    extensions: {},
   }
 }
 
@@ -160,7 +167,7 @@ function statusToForm(cs: ConfigView): ConfigFormState {
       active_profile: cs.llm?.activeProfile || profiles[0].id,
       providers: profiles,
     },
-    cyberhub: { url: cs.cyberhub?.url || '', key: '', mode: cs.cyberhub?.mode || '', proxy: cs.cyberhub?.proxy || '' },
+    cyberhub: { url: cs.cyberhub?.url || '', key: '', mode: cs.cyberhub?.mode || '', proxy: cs.cyberhub?.proxy || '', mitm: cs.cyberhub?.mitm },
     recon: { fofa_key: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
     scan: { verify: cs.scan?.verify || '' },
     search: { tavily_keys: '' },
@@ -170,7 +177,9 @@ function statusToForm(cs: ConfigView): ConfigFormState {
       node_name: typeof ioaValues.node_name === 'string' ? ioaValues.node_name : '',
       space: typeof ioaValues.space === 'string' ? ioaValues.space : '',
     },
-    agent: { tools: cs.agent?.tools || [], timeout: cs.agent?.timeout || 0 },
+    agent: create(AgentConfigSchema, cs.agent ?? {}),
+    traffic: cs.traffic,
+    extensions: Object.fromEntries(Object.entries(cs.extensions).map(([key, section]) => [key, section.values ?? {}])),
   }
 }
 
@@ -723,7 +732,7 @@ function AgentTab({ form, setForm }: Omit<TabProps, 'cs'>) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('timeout')}>
-        <Input type="number" value={form.agent.timeout || ''} onChange={(e) => setForm((f) => ({ ...f, agent: { ...f.agent, timeout: parseInt(e.target.value, 10) || 0 } }))} placeholder="3600" />
+        <Input type="number" value={form.agent.timeout ?? ''} onChange={(e) => setForm((f) => ({ ...f, agent: { ...f.agent, timeout: e.target.value === '' ? undefined : Number(e.target.value) } }))} placeholder="3600" />
       </Field>
       <Field label={t('optionalTools')}>
         <Input value={(form.agent.tools || []).join(', ')} onChange={(e) => { const tools = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); setForm((f) => ({ ...f, agent: { ...f.agent, tools } })) }} placeholder="search, browser" />

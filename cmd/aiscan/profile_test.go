@@ -77,6 +77,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	})
+	config.Base.Provider = provider.StartupConfig{Mode: provider.StartupOptional, Config: agent.ProviderConfig{Provider: "openai", Model: "test", APIKey: "test", BaseURL: "http://127.0.0.1:1/v1"}}
 	p, err := buildAIScanProfile(config)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +94,6 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime, _ := p.Runtime()
-	runtime.SetProvider(inertProvider{}, agent.ProviderConfig{})
 	first, err := runtime.EnsureSession(agentsession.SessionOptions{ID: "first"})
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +156,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 	config := minimalConfig(nil)
 	config.Session = &agentsession.Config{} // Sessions are selected, reasoning is not.
+	config.Base.Provider = provider.StartupConfig{Mode: provider.StartupOptional, Config: agent.ProviderConfig{Provider: "openai", Model: "test", APIKey: "test", BaseURL: "http://127.0.0.1:1/v1"}}
 	p, err := buildAIScanProfile(config)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +166,6 @@ func TestSessionProfileCanOmitAgentLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime, _ := p.Runtime()
-	runtime.SetProvider(inertProvider{}, agent.ProviderConfig{})
 	session, err := runtime.EnsureSession(agentsession.SessionOptions{ID: "history-only"})
 	if err != nil {
 		t.Fatal(err)

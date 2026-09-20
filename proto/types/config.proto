@@ -17,6 +17,7 @@ message DistributeConfig {
   AgentConfig agent = 7;
   map<string, google.protobuf.Struct> extensions = 8;
   NodeConfig node = 9;
+  TrafficConfig traffic = 10;
 }
 
 message NodeConfig {
@@ -48,6 +49,7 @@ message CyberhubConfig {
   string key = 2;
   string mode = 3;
   string proxy = 4;
+  optional bool mitm = 5;
 }
 
 message ReconConfig {
@@ -67,8 +69,19 @@ message SearchConfig {
 
 message AgentConfig {
   repeated string tools = 1;
-  int32 timeout = 2;
+  optional int32 timeout = 2;
   reserved 3;
+  int32 heartbeat = 4;
+  string eval_criteria = 5;
+  string eval_model = 6;
+  string eval_rounds = 7;
+  bool capture_provider_frames = 8;
+}
+
+message TrafficConfig {
+  string body_storage = 1;
+  int64 body_max_bytes = 2;
+  int64 body_retention_bytes = 3;
 }
 
 message LLMProviderView {
@@ -92,6 +105,7 @@ message LLMView {
 }
 
 message CyberhubView {
+  optional bool mitm = 5;
   string url = 1;
   bool key_configured = 2;
   string mode = 3;
@@ -119,6 +133,7 @@ message ConfigView {
   SearchView search = 7;
   AgentConfig agent = 9;
   map<string, ExtensionView> extensions = 10;
+  TrafficConfig traffic = 11;
 }
 
 message GetConfigRequest {}

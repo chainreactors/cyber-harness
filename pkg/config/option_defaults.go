@@ -1,5 +1,7 @@
 package config
 
+import "reflect"
+
 func ResolveString(value, fallback string) string {
 	if value != "" {
 		return value
@@ -8,14 +10,22 @@ func ResolveString(value, fallback string) string {
 }
 
 func ApplyDefaults(option *Option) {
-	option.CyberhubURL = ResolveString(option.CyberhubURL, DefaultCyberhubURL)
-	option.CyberhubKey = ResolveString(option.CyberhubKey, DefaultCyberhubKey)
-	mode := ResolveString(option.CyberhubMode, DefaultCyberhubMode)
-	option.CyberhubMode = ResolveString(mode, "merge")
-	option.Proxy = ResolveString(option.Proxy, DefaultScannerProxy)
-	option.NodeID = ResolveString(option.NodeID, DefaultNodeID)
-	option.NodeName = ResolveString(option.NodeName, DefaultNodeName)
-	if option.Model == "" {
-		option.Model = DefaultModel
+	defaults := map[string]string{
+		"Transport": "auto", "OutputFormat": "text", "ViewFormat": "terminal",
+		"CyberhubURL": DefaultCyberhubURL, "CyberhubKey": DefaultCyberhubKey,
+		"CyberhubMode": ResolveString(DefaultCyberhubMode, "merge"), "Proxy": DefaultScannerProxy,
+		"NodeID": DefaultNodeID, "NodeName": DefaultNodeName, "Model": DefaultModel,
 	}
+	visitOptions(option, func(field reflect.StructField, value reflect.Value, path string) {
+		if option.present[path] || option.fieldExplicit(field, value) || !value.IsZero() {
+			return
+		}
+
+		if field.Name == "Timeout" {
+			value.SetInt(3600)
+		}
+		if fallback, ok := defaults[field.Name]; ok {
+			value.SetString(fallback)
+		}
+	})
 }

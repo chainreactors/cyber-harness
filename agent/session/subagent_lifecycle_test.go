@@ -1,9 +1,10 @@
-package agent
+package session
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/chainreactors/cyber/agent"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,9 +17,11 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-type taskLoop func(context.Context, Config) (*Result, error)
+type taskLoop func(context.Context, agent.Config) (*agent.Result, error)
 
-func (f taskLoop) Run(ctx context.Context, cfg Config) (*Result, error) { return f(ctx, cfg) }
+func (f taskLoop) Run(ctx context.Context, cfg agent.Config) (*agent.Result, error) {
+	return f(ctx, cfg)
+}
 
 func TestTaskLifecycleOrdering(t *testing.T) {
 	for _, mode := range []string{"sync", "async", "fork"} {
@@ -27,6 +30,9 @@ func TestTaskLifecycleOrdering(t *testing.T) {
 			var started, ended atomic.Bool
 			var receiver func(context.Context, inbox.Message) error
 			agenthooks.SessionStart.On(registry, "record", func(ctx context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
+				if ev.ParentToolCallID == "" {
+					return struct{}{}, nil
+				}
 				if ev.ParentID != "parent" || ev.ParentToolCallID != "spawn" || ev.Input != "task" || ev.Delegation.Task != "task" {
 					return struct{}{}, fmt.Errorf("invalid task event: %+v", ev)
 				}
@@ -35,6 +41,9 @@ func TestTaskLifecycleOrdering(t *testing.T) {
 				return struct{}{}, ev.Deliver(ctx, inbox.NewMessage(inbox.OriginPeer, "user", "peer"))
 			})
 			agenthooks.SessionEnd.On(registry, "record", func(ctx context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
+				if ev.ParentToolCallID == "" {
+					return struct{}{}, nil
+				}
 				if ev.Output != "result" {
 					return struct{}{}, fmt.Errorf("missing final output")
 				}
@@ -44,7 +53,7 @@ func TestTaskLifecycleOrdering(t *testing.T) {
 				ended.Store(true)
 				return struct{}{}, nil
 			})
-			parent := NewAgent(Config{SessionID: "parent", Hooks: registry, Provider: &scriptedProvider{}, Loop: taskLoop(func(_ context.Context, cfg Config) (*Result, error) {
+			parent := agent.NewAgent(agent.Config{SessionID: "parent", Hooks: registry, Provider: &scriptedProvider{}, Loop: taskLoop(func(_ context.Context, cfg agent.Config) (*agent.Result, error) {
 				if !started.Load() {
 					return nil, fmt.Errorf("started before record")
 				}
@@ -52,11 +61,12 @@ func TestTaskLifecycleOrdering(t *testing.T) {
 				if len(messages) != 2 || messages[0].Origin != inbox.OriginUser || messages[1].Origin != inbox.OriginPeer {
 					return nil, fmt.Errorf("input order: %#v", messages)
 				}
-				return &Result{Output: "result", Stop: StopReasonCompleted}, nil
+				return &agent.Result{Output: "result", Stop: agent.StopReasonCompleted}, nil
 			})})
-			tool := NewSubAgentTool(nil)
-			defer tool.Close(context.Background())
-			ctx := operation.ContextWithInvocation(withToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
+
+			tool := newSubagentTestTool(t, parent.Cfg)
+			defer tool.runtime.close(context.Background())
+			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
 			result, err := tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode))
 			if err != nil {
 				t.Fatal(err)
@@ -86,12 +96,22 @@ func TestDispatchFailurePreventsEveryMode(t *testing.T) {
 			failure := errors.New("record unavailable")
 			var ends atomic.Int32
 			agenthooks.SessionStart.On(reg, "deny", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { return struct{}{}, failure })
-			agenthooks.SessionEnd.On(reg, "cleanup", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { ends.Add(1); return struct{}{}, nil })
+			agenthooks.SessionEnd.On(reg, "cleanup", func(_ context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
+				if ev.ParentToolCallID == "" {
+					return struct{}{}, nil
+				}
+				ends.Add(1)
+				return struct{}{}, nil
+			})
 			var ran atomic.Bool
-			parent := NewAgent(Config{Hooks: reg, Provider: &scriptedProvider{}, Loop: taskLoop(func(context.Context, Config) (*Result, error) { ran.Store(true); return &Result{}, nil })})
-			tool := NewSubAgentTool(nil)
-			defer tool.Close(context.Background())
-			ctx := operation.ContextWithInvocation(withToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
+			parent := agent.NewAgent(agent.Config{Hooks: reg, Provider: &scriptedProvider{}, Loop: taskLoop(func(context.Context, agent.Config) (*agent.Result, error) {
+				ran.Store(true)
+				return &agent.Result{}, nil
+			})})
+
+			tool := newSubagentTestTool(t, parent.Cfg)
+			defer tool.runtime.close(context.Background())
+			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"})
 			if _, err := tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode)); !errors.Is(err, failure) {
 				t.Fatalf("error: %v", err)
 			}
@@ -108,16 +128,20 @@ func TestTaskLifetimeAndFinalRecordDrain(t *testing.T) {
 	defer cancelParent()
 	entered, release := make(chan struct{}), make(chan struct{})
 	agenthooks.SessionEnd.On(reg, "record", func(ctx context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
-		if ctx.Err() != nil || ev.Stop != StopReasonCanceled {
+		if ev.ParentToolCallID == "" {
+			return struct{}{}, nil
+		}
+		if ctx.Err() != nil || ev.Stop != agent.StopReasonCanceled {
 			return struct{}{}, fmt.Errorf("invalid final context/stop")
 		}
 		close(entered)
 		<-release
 		return struct{}{}, nil
 	})
-	parent := NewAgent(Config{Lifetime: parentCtx, Hooks: reg, Provider: &scriptedProvider{}, Loop: taskLoop(func(ctx context.Context, _ Config) (*Result, error) { <-ctx.Done(); return nil, ctx.Err() })})
-	tool := NewSubAgentTool(nil)
-	ctx, cancelCall := context.WithCancel(operation.ContextWithInvocation(withToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"}))
+	parent := agent.NewAgent(agent.Config{Lifetime: parentCtx, Hooks: reg, Provider: &scriptedProvider{}, Loop: taskLoop(func(ctx context.Context, _ agent.Config) (*agent.Result, error) { <-ctx.Done(); return nil, ctx.Err() })})
+	ctx, cancelCall := context.WithCancel(operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "spawn"}))
+
+	tool := newSubagentTestTool(t, parent.Cfg)
 	if _, err := tool.Execute(ctx, `{"mode":"async","prompt":"task"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -135,14 +159,14 @@ func TestTaskLifetimeAndFinalRecordDrain(t *testing.T) {
 	}
 	deadline, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	if err := tool.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
+	if err := tool.runtime.close(deadline); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close: %v", err)
 	}
 	if parent.Cfg.Inbox.Len() != 0 {
 		t.Fatal("notified before final record")
 	}
 	close(release)
-	if err := tool.Close(t.Context()); err != nil {
+	if err := tool.runtime.close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if parent.Cfg.Inbox.Len() != 1 {
@@ -151,7 +175,8 @@ func TestTaskLifetimeAndFinalRecordDrain(t *testing.T) {
 }
 
 func TestSubagentMessageRemoved(t *testing.T) {
-	tool := NewSubAgentTool(nil)
+
+	tool := newSubagentTestTool(t, agent.Config{})
 	if _, err := tool.Execute(t.Context(), `{"action":"message","name":"worker","message":"hi"}`); err == nil {
 		t.Fatal("direct communication still enabled")
 	}

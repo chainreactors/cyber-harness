@@ -160,5 +160,7 @@ func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) 
 			Verbose: parsed.Verbose, Quiet: parsed.Quiet, NoColor: parsed.NoColor, Version: parsed.Version,
 		},
 	}
+	cfg.CaptureExplicitFlags(&option, parser)
+	option.MarkExplicit("transport")
 	return parsed, option, nil
 }

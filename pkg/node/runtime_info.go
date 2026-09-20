@@ -1,21 +1,17 @@
 package node
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"runtime"
 	"strings"
 
-	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -153,30 +149,6 @@ func AgentStatus(state *provider.State) *aop.AgentStatus {
 		}
 	}
 	return status
-}
-
-// ReloadConfig hot-swaps the LLM provider from a pushed protobuf config.
-func ReloadConfig(distribute *types.DistributeConfig, runtime *session.Runtime, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
-	if runtime == nil {
-		return nil, "", fmt.Errorf("agent runtime is not configured")
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	if distribute == nil {
-		return nil, "", fmt.Errorf("remote config is required")
-	}
-	providerConfig := cfg.ProviderConfigFromProto(distribute.GetLlm())
-	provider, resolved, err := runtime.ReloadResolvedProvider(providerConfig)
-	if err != nil {
-		return nil, "", err
-	}
-	model := resolved.Model
-	if option != nil {
-		cfg.ApplyResolvedProviderOptions(option, resolved)
-	}
-	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
-	return provider, model, nil
 }
 
 func statusOneLine(value string, limit int) string {

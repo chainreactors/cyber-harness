@@ -350,7 +350,7 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			if err := execution.WaitProcessCompletion(ctx); err != nil {
+			if err := execution.WaitProcessCompletion(context.WithoutCancel(ctx)); err != nil {
 				return nil, err
 			}
 			return execution, nil

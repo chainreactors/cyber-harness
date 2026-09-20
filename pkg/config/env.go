@@ -12,30 +12,42 @@ type envLookup func(string) (string, bool)
 
 // ResolveRuntimeConfig resolves parsed configuration with environment and defaults.
 func ResolveRuntimeConfig(option *Option) (string, error) {
-	explicit := *option
+	if option.Sections == nil {
+		option.Sections = NewSections()
+	}
+	explicit := explicitOptions(option)
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
 		return configPath, err
 	}
+	if err := finishRuntimeConfig(option, &explicit); err != nil {
+		return configPath, err
+	}
+	return configPath, nil
+}
+
+func finishRuntimeConfig(option, explicit *Option) error {
 	sections := option.Sections
 	if sections == nil {
 		sections = NewSections()
+		option.Sections = sections
 	}
-	option.Resolved, err = sections.ResolveSnapshot(configPath, explicit.Extensions, os.LookupEnv)
+	var err error
+	option.Resolved, err = sections.ResolveValues(option.Extensions, explicit.Extensions, os.LookupEnv)
 	if err != nil {
-		return configPath, err
+		return err
 	}
 	option.Extensions = option.Resolved.Values()
-	applyEnvironment(option, explicit, os.LookupEnv)
+	applyEnvironment(option, *explicit, os.LookupEnv)
 	if err := normalizeProviderOptions(option); err != nil {
-		return configPath, err
+		return err
 	}
 	ApplyDefaults(option)
 	if _, err := ResolveOutputPolicy(option); err != nil {
-		return configPath, err
+		return err
 	}
 	option.DataDir = ResolveDataDir(option.DataDir)
-	return configPath, nil
+	return nil
 }
 
 func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
@@ -46,7 +58,7 @@ func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
 }
 
 func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
-	providerExplicit := strings.TrimSpace(explicit.Provider) != ""
+	providerExplicit := explicit.hasExplicit("Provider")
 	if v := firstEnv(lookup, "CYBER_PROVIDER"); v != "" && !providerExplicit {
 		option.Provider = v
 	}
@@ -56,10 +68,10 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 
 	// CYBER_BASE_URL is cyber's own namespace: an intentional override that wins
 	// over a base URL set in the config file (CLI --base-url wins via the explicit gate).
-	if strings.TrimSpace(explicit.BaseURL) == "" {
+	if !explicit.hasExplicit("BaseURL") {
 		if v := firstEnv(lookup, "CYBER_BASE_URL"); v != "" {
 			option.BaseURL = v
-		} else if strings.TrimSpace(option.BaseURL) == "" {
+		} else if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") && !option.present["llm.base_url"] {
 			option.BaseURL = firstEnv(lookup, "LLM_BASE_URL")
 		}
 	}
@@ -75,7 +87,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// (config file / Settings UI). Apply only when nothing else set one. Mirrors the
 	// model handling below so a hub-launched agent that inherits the hub's env still
 	// honors the Settings-saved base URL.
-	if strings.TrimSpace(option.BaseURL) == "" {
+	if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") && !option.present["llm.base_url"] {
 		if v := providerBaseURLEnv(selectedProvider, lookup); v != "" {
 			option.BaseURL = v
 		}
@@ -84,10 +96,10 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// CYBER_MODEL is cyber's own namespace: an intentional
 	// override that still wins over a model set in the config file (CLI --model
 	// wins over it via the explicit gate).
-	if strings.TrimSpace(explicit.Model) == "" {
+	if !explicit.hasExplicit("Model") {
 		if v := firstEnv(lookup, "CYBER_MODEL"); v != "" {
 			option.Model = v
-		} else if strings.TrimSpace(option.Model) == "" {
+		} else if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") && !option.present["llm.model"] {
 			option.Model = firstEnv(lookup, "LLM_MODEL")
 		}
 	}
@@ -96,7 +108,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// style gateways export ANTHROPIC_MODEL. Treat them as a fallback only: they
 	// must not silently override a model the user configured for cyber (config
 	// file / Settings UI or --model). Apply only when nothing else set a model.
-	if strings.TrimSpace(option.Model) == "" {
+	if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") && !option.present["llm.model"] {
 		if v := providerModelEnv(selectedProvider, lookup); v != "" {
 			option.Model = v
 		}
@@ -104,10 +116,10 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 
 	// CYBER_API_KEY is cyber's own namespace: an intentional override that wins
 	// over a key set in the config file (CLI --api-key wins via the explicit gate).
-	if strings.TrimSpace(explicit.APIKey) == "" {
+	if !explicit.hasExplicit("APIKey") {
 		if v := firstEnv(lookup, "CYBER_API_KEY"); v != "" {
 			option.APIKey = v
-		} else if strings.TrimSpace(option.APIKey) == "" {
+		} else if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") && !option.present["llm.api_key"] {
 			option.APIKey = firstEnv(lookup, "LLM_API_KEY")
 		}
 	}
@@ -115,13 +127,13 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// present for *other* tools. Treat them as a fallback only so they never override
 	// a key the user configured for cyber (config file / Settings UI). Apply only
 	// when nothing else set one — same rationale as base URL and model above.
-	if strings.TrimSpace(option.APIKey) == "" {
+	if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") && !option.present["llm.api_key"] {
 		if v := providerAPIKeyEnv(selectedProvider, lookup); v != "" {
 			option.APIKey = v
 		}
 	}
 
-	if strings.TrimSpace(explicit.LLMProxy) == "" {
+	if !explicit.hasExplicit("LLMProxy") {
 		if v := firstEnv(lookup, "CYBER_LLM_PROXY"); v != "" {
 			option.LLMProxy = v
 		}
@@ -129,22 +141,22 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 }
 
 func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if strings.TrimSpace(explicit.CyberhubURL) == "" {
+	if !explicit.hasExplicit("CyberhubURL") {
 		if v := firstEnv(lookup, "CYBER_CYBERHUB_URL"); v != "" {
 			option.CyberhubURL = v
 		}
 	}
-	if strings.TrimSpace(explicit.CyberhubKey) == "" {
+	if !explicit.hasExplicit("CyberhubKey") {
 		if v := firstEnv(lookup, "CYBER_CYBERHUB_KEY"); v != "" {
 			option.CyberhubKey = v
 		}
 	}
-	if strings.TrimSpace(explicit.CyberhubMode) == "" {
+	if !explicit.hasExplicit("CyberhubMode") {
 		if v := firstEnv(lookup, "CYBER_CYBERHUB_MODE"); v != "" {
 			option.CyberhubMode = v
 		}
 	}
-	if strings.TrimSpace(explicit.Proxy) == "" {
+	if !explicit.hasExplicit("Proxy") {
 		if v := firstEnv(lookup, "CYBER_PROXY"); v != "" {
 			option.Proxy = v
 		}
@@ -152,22 +164,22 @@ func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) 
 }
 
 func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if strings.TrimSpace(explicit.FofaKey) == "" {
+	if !explicit.hasExplicit("FofaKey") {
 		if v := firstEnv(lookup, "FOFA_KEY"); v != "" {
 			option.FofaKey = v
 		}
 	}
-	if strings.TrimSpace(explicit.HunterAPIKey) == "" {
+	if !explicit.hasExplicit("HunterAPIKey") {
 		if v := firstEnv(lookup, "HUNTER_API_KEY"); v != "" {
 			option.HunterAPIKey = v
 		}
 	}
-	if strings.TrimSpace(explicit.TavilyKey) == "" {
+	if !explicit.hasExplicit("TavilyKey") {
 		if v := firstEnv(lookup, "TAVILY_API_KEY"); v != "" {
 			option.TavilyKey = v
 		}
 	}
-	if strings.TrimSpace(explicit.ReconProxy) == "" {
+	if !explicit.hasExplicit("ReconProxy") {
 		if v := firstEnv(lookup, "RECON_PROXY"); v != "" {
 			option.ReconProxy = v
 		}
@@ -176,18 +188,18 @@ func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
 }
 
 func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if strings.TrimSpace(explicit.DataDir) == "" {
+	if !explicit.hasExplicit("DataDir") {
 		if v := firstEnv(lookup, "CYBER_DATA_DIR"); v != "" {
 			option.DataDir = v
 		}
 	}
-	if strings.TrimSpace(explicit.RenderMode) == "" {
+	if !explicit.hasExplicit("RenderMode") {
 		option.RenderMode = firstEnv(lookup, "CYBER_RENDER")
 	}
-	if strings.TrimSpace(explicit.REPLMode) == "" {
+	if !explicit.hasExplicit("REPLMode") {
 		option.REPLMode = firstEnv(lookup, "CYBER_REPL")
 	}
-	if strings.TrimSpace(explicit.PlaywrightSession) == "" {
+	if !explicit.hasExplicit("PlaywrightSession") {
 		option.PlaywrightSession = firstEnv(lookup, "PLAYWRIGHT_CLI_SESSION")
 	}
 }
@@ -325,4 +337,18 @@ func firstEnv(lookup envLookup, names ...string) string {
 		}
 	}
 	return ""
+}
+
+// ResolveExecutionConfig resolves only scanner and execution configuration.
+// It deliberately does not inspect or normalize model-provider credentials.
+func ResolveExecutionConfig(option *Option) (string, error) {
+	explicit := explicitOptions(option)
+	configPath, err := LoadAndApplyConfig(option)
+	if err != nil {
+		return configPath, err
+	}
+	applyScannerEnvironment(option, explicit, os.LookupEnv)
+	applyReconEnvironment(option, explicit, os.LookupEnv)
+	applyRuntimeEnvironment(option, explicit, os.LookupEnv)
+	return configPath, nil
 }

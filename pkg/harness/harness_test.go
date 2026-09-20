@@ -69,6 +69,13 @@ func TestAgentHarnessDefaultsToStandardLoop(t *testing.T) {
 	h, err := harness.New(harness.Config{
 		Base:    harness.BaseConfig{Directory: t.TempDir(), Provider: provider.StartupConfig{Mode: provider.StartupDisabled}},
 		Session: &agentsession.Config{},
+		Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error {
+			state, err := extension.Use[*provider.State](scope)
+			if err == nil {
+				state.Set(providerStub{}, provider.ProviderConfig{Model: "stub"})
+			}
+			return err
+		}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +88,6 @@ func TestAgentHarnessDefaultsToStandardLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.SetProvider(providerStub{}, provider.ProviderConfig{Model: "stub"})
 	session, err := runtime.OpenSession(t.Context(), agentsession.SessionOptions{ID: "test"})
 	if err != nil {
 		t.Fatal(err)

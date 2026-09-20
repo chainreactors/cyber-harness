@@ -969,43 +969,92 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	}
 }
 
-func TestProviderSwapKeepsInFlightSnapshotAndUpdatesExistingSession(t *testing.T) {
-	old := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
-	var release sync.Once
-	defer release.Do(func() { close(old.release) })
+func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
+	old := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, old)
-	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "provider-swap"})
+	_, original := rt.providers.Current()
+	original.Provider, original.APIKey = "openai", "test"
+	rt.providers.Set(old, original)
+	started, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var calls int
+	rt.agentConfig.Loop = taskLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+		config.Inbox.Drain()
+		calls++
+		if calls == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return &agent.Result{Output: config.Model, Stop: agent.StopReasonCompleted}, nil
+	})
+	session, err := rt.OpenSession(t.Context(), SessionOptions{ID: "model-change"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	sibling, err := rt.OpenSession(t.Context(), SessionOptions{ID: "sibling"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-old.started:
-	case <-time.After(time.Second):
-		t.Fatal("inert provider did not start")
-	}
-	next := &runtimeSemanticProvider{}
-	rt.SetProvider(next, agent.ProviderConfig{Model: "new", MaxTokens: 1024, ContextWindow: 8192})
-	release.Do(func() { close(old.release) })
-	if _, err := run.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	if next.callCount() != 0 {
-		t.Fatal("in-flight run switched provider")
-	}
-	run, err = session.Run(context.Background(), RunInput{Content: []*aop.Content{aop.Text("again")}})
+	childConfig := rt.agentConfig.WithModel("child-model")
+	child, err := rt.OpenSession(t.Context(), SessionOptions{ID: "child", ParentSessionID: session.ID(), agentConfig: &childConfig})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run.Wait(); err != nil {
+	run, err := session.Run(t.Context(), RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	provider, config := rt.providers.Current()
-	if next.callCount() != 1 || provider != next || config.Model != "new" {
-		t.Fatal("provider change did not reach State and existing session")
+	<-started
+	if err := session.SetModel("next-model"); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	result, err := run.Wait()
+	if err != nil || result.Output != original.Model {
+		t.Fatalf("in-flight snapshot=%v, error=%v", result, err)
+	}
+	run, err = session.Run(t.Context(), RunInput{Content: []*aop.Content{aop.Text("again")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.Wait()
+	if err != nil || result.Output != "next-model" {
+		t.Fatalf("next run=%v, error=%v", result, err)
+	}
+	p, config := rt.providers.Current()
+	fresh, err := rt.OpenSession(t.Context(), SessionOptions{ID: "fresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != old || config.Model != original.Model || sibling.Model() != original.Model || fresh.Model() != original.Model || child.Model() != "child-model" {
+		t.Fatal("session model change escaped into Profile or other sessions")
+	}
+	if err := session.SetModel(""); err == nil || session.Model() != "next-model" {
+		t.Fatal("invalid model changed the session")
+	}
+	invalid := original
+	invalid.Provider = "unsupported"
+	rt.providers.Set(old, invalid)
+	if err := session.SetModel("failed-model"); err == nil || session.Model() != "next-model" {
+		t.Fatal("failed client construction changed the session")
+	}
+	rt.providers.Set(old, original)
+	if _, err := session.Command(t.Context(), "/clear"); err != nil {
+		t.Fatal(err)
+	}
+	if session.Model() != "next-model" {
+		t.Fatal("session rotation lost its model")
+	}
+	if err := rt.CloseSession(t.Context(), session.ID(), SessionCloseCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetModel("late-model"); err == nil {
+		t.Fatal("closed session accepted a model change")
 	}
 }
 

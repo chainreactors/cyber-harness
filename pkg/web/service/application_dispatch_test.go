@@ -6,11 +6,62 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	protobuf "google.golang.org/protobuf/proto"
 )
+
+// Like a Connect stream, Recv is released when its HTTP handler returns.
+// It deliberately has no Close method.
+type idleApplicationStream struct {
+	reading  chan struct{}
+	returned chan struct{}
+}
+
+func (s *idleApplicationStream) Recv() (*aop.Envelope, error) {
+	close(s.reading)
+	<-s.returned
+	return nil, io.EOF
+}
+func (*idleApplicationStream) Send(*aop.Envelope) error { return nil }
+
+func TestProfileSwitchReleasesApplicationWaitingForFirstEnvelope(t *testing.T) {
+	current, _, closed := newRecordingProfile(t)
+	candidate, _, _ := newRecordingProfile(t)
+	svc := NewService(ServiceConfig{Profile: current})
+	defer svc.Close(context.Background())
+	stream := &idleApplicationStream{reading: make(chan struct{}), returned: make(chan struct{})}
+	release := sync.OnceFunc(func() { close(stream.returned) })
+	defer release()
+	done := make(chan error, 1)
+	go func() {
+		defer release()
+		done <- svc.ServeApplication(t.Context(), stream)
+	}()
+	<-stream.reading
+	switched := make(chan error, 1)
+	go func() {
+		svc.configGate <- struct{}{}
+		defer func() { <-svc.configGate }()
+		switched <- svc.swapProfile(candidate)
+	}()
+	select {
+	case err := <-switched:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("profile switch blocked on idle application stream")
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("application exit = %v", err)
+	}
+	if !closed() || svc.profile != candidate {
+		t.Fatal("profile switch did not close and replace current profile")
+	}
+}
 
 type applicationTestStream struct {
 	mu       sync.Mutex

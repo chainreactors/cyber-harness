@@ -21,7 +21,6 @@ import (
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 
@@ -42,6 +41,10 @@ type SessionOptions struct {
 	// parent session instead; replaying those messages as events would append
 	// every large tool result again to JSONL and the durable event stream.
 	HistorySnapshot bool
+
+	completion  inboxpkg.Inbox
+	agentConfig *agent.Config
+	input       string
 }
 
 type SessionCloseReason string
@@ -127,10 +130,13 @@ type commandOutcome struct {
 }
 
 // Session lifecycle payloads belong to this extension; State only stamps and publishes events.
-func emitSessionStarted(application aop.EventPublisher, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+func emitSessionStarted(application aop.EventPublisher, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode, delegation *types.DelegationDetail) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	if historyMode != types.SessionHistory_MODE_UNSPECIFIED {
 		_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
+	}
+	if delegation != nil {
+		_ = types.SetDelegation(event, delegation)
 	}
 	application.Publish(event)
 }
@@ -207,8 +213,8 @@ func (s *commandSession) statusText() string {
 	rt.mu.RLock()
 	providers := rt.providers
 	tools, commandRegistry, store := rt.tools, rt.commandRegistry, rt.skills
-	provider := rt.agentConfig.Provider
-	model := rt.agentConfig.Model
+	config := s.state.agent.ConfigSnapshot()
+	provider, model := config.Provider, config.Model
 	providerConfig := agent.ProviderConfig{}
 	if providers != nil {
 		_, providerConfig = providers.Current()
@@ -229,11 +235,11 @@ func (s *commandSession) statusText() string {
 		model = "-"
 	}
 
-	contextWindow := providerConfig.ContextWindow
+	contextWindow := config.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = agent.ModelContextWindow(model)
 	}
-	maxTokens := providerConfig.MaxTokens
+	maxTokens := config.MaxTokens
 	if maxTokens <= 0 {
 		maxTokens = agent.DefaultMaxTokens
 	}
@@ -410,7 +416,7 @@ func (m *sessionMailbox) enqueue(message inboxpkg.Message) (func(), error) {
 		return nil, inboxpkg.ErrInboxClosed
 	}
 	err := m.base.Push(message)
-	if err != nil || m.active || m.automaticPending {
+	if err != nil || m.active || m.automaticPending || m.automatic == nil {
 		return nil, err
 	}
 	m.automaticPending = true
@@ -478,6 +484,12 @@ type sessionState struct {
 	closeReason SessionCloseReason
 	starting    bool
 	closeErr    error
+	completion  inboxpkg.Inbox
+	producer    *inboxpkg.ProducerHandle
+	delegation  *types.DelegationDetail
+	input       string
+	result      *agent.Result
+	runErr      error
 	finishClose sync.Once
 	closeDone   chan struct{}
 }
@@ -533,8 +545,11 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
 	mailbox := &sessionMailbox{base: baseInbox}
 	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.agentConfig.Logger)
-	agentCfg := rt.agentConfig.
-		WithStream(true).
+	agentCfg := rt.agentConfig.WithStream(true)
+	if options.agentConfig != nil {
+		agentCfg = *options.agentConfig
+	}
+	agentCfg = agentCfg.
 		WithInbox(mailbox).
 		WithSessionID(id).
 		WithAgentName(agentName).
@@ -552,13 +567,25 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	state := &sessionState{
 		runtime: rt, id: id, logicalID: logicalID, agentName: agentName, starting: true,
 		parentSessionID: options.ParentSessionID, parentToolCallID: options.ParentToolCallID,
-		agent: ag, inbox: mailbox,
+		agent: ag, inbox: mailbox, delegation: agentCfg.Delegation, input: options.input,
 		scheduler: scheduler, ctx: sessionCtx, cancel: cancel,
 		ops: make(chan *sessionOperation, rt.pendingLimit()), done: make(chan struct{}),
 	}
+	state.completion = options.completion
+	if state.completion != nil {
+		state.producer = state.completion.RegisterProducer("subagent:" + id)
+	}
 	public := &Session{state: state}
 	state.commands = &commandSession{state: state}
-	mailbox.automatic = func() { state.startAutomaticRun() }
+	if options.input != "" {
+		mailbox.active = true
+		_ = baseInbox.Push(inboxpkg.FromAOPMessage(agent.TextInput(options.input), inboxpkg.OriginUser))
+	}
+	// Delegated sessions execute one task and close; incoming messages are
+	// consumed by that task and must not schedule another run after it finishes.
+	if state.delegation == nil {
+		mailbox.automatic = func() { state.startAutomaticRun() }
+	}
 	rt.sessions[logicalID] = state
 	rt.wg.Add(1)
 	rt.mu.Unlock()
@@ -572,12 +599,13 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	}
 	startDone := make(chan struct{})
 	go func() { <-startDone; rt.runSession(state) }()
-	ev := agenthooks.SessionEvent{SessionID: id, ParentID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID, AgentName: agentName, Model: agentCfg.Model, Primary: logicalID == rt.primarySessionID, Deliver: state.deliver}
+	ev := agenthooks.SessionEvent{SessionID: id, ParentID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID, AgentName: agentName, Model: agentCfg.Model, Primary: logicalID == rt.primarySessionID, Deliver: state.deliver, Input: options.input, Delegation: state.delegation}
 	_, startErr := agenthooks.SessionStart.Emit(sessionCtx, rt.hooks, ev)
 	if startErr == nil {
 		startErr = sessionCtx.Err()
 	}
 	if startErr != nil {
+		state.runErr = startErr
 		state.mu.Lock()
 		state.closed = true
 		state.mu.Unlock()
@@ -591,8 +619,8 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		historyMode = types.SessionHistory_MODE_SNAPSHOT
 	}
 	emitSessionStarted(rt.events, id, agentName, &aop.SessionStarted{
-		Model: rt.agentConfig.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
-	}, historyMode)
+		Model: agentCfg.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
+	}, historyMode, state.delegation)
 	if options.HistorySnapshot && len(options.Messages) > 0 {
 		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
 	}
@@ -692,10 +720,23 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 			defer rt.operations.Done()
 			defer close(state.closeDone)
 			<-state.done
+
+			// Parent closure cancels and drains delegated sessions before releasing its inbox.
+			rt.mu.RLock()
+			var children []string
+			for id, child := range rt.sessions {
+				if child.parentSessionID == state.id && child.delegation != nil {
+					children = append(children, id)
+				}
+			}
+			rt.mu.RUnlock()
+			for _, id := range children {
+				_ = rt.CloseSession(context.Background(), id, SessionCloseCanceled)
+			}
 			state.scheduler.Stop()
 			state.inbox.Close()
 			endCtx, endCancel := context.WithTimeout(context.WithoutCancel(state.ctx), 5*time.Second)
-			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.hooks, agenthooks.SessionEvent{SessionID: state.id, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Cfg.Model, Reason: string(state.closeReason)})
+			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.hooks, agenthooks.SessionEvent{SessionID: state.id, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Model(), Reason: string(state.closeReason), Input: state.input, Output: resultOutput(state.result), Stop: sessionStop(state.result, state.runErr), Err: state.runErr, Delegation: state.delegation})
 			endCancel()
 			if state.closeErr != nil {
 				state.closeErr = fmt.Errorf("session end hooks failed: %v", state.closeErr)
@@ -703,6 +744,7 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 			// The canonical stream isolates and reports observer failures.
 			// Publication completes before this session identity is released.
 			emitSessionEnded(rt.events, state.id, state.agentName, string(state.closeReason))
+			state.notifyCompletion()
 			rt.mu.Lock()
 			if rt.sessions[logicalID] == state {
 				delete(rt.sessions, logicalID)
@@ -886,6 +928,50 @@ func (s *Session) MessagesSnapshot() []*aop.Message {
 	return cloneSessionMessages(state.agent.MessagesSnapshot())
 }
 
+// SetModel changes only this session's next run. Existing runs and children
+// keep their snapshots; the Profile's provider configuration is unchanged.
+func (s *Session) SetModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	state := s.currentState()
+	if state == nil {
+		return fmt.Errorf("session is not configured")
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed || state.ctx.Err() != nil {
+		return fmt.Errorf("session is closing")
+	}
+	if state.agent.Model() == model {
+		return nil
+	}
+	if state.runtime.providers == nil {
+		return fmt.Errorf("provider is not configured")
+	}
+	p, config, err := state.runtime.providers.ForModel(model, state.runtime.Logger)
+	if err != nil {
+		return err
+	}
+	state.agent.SetProviderConfig(p, config)
+	return nil
+}
+
+func (s *Session) Model() string {
+	if state := s.currentState(); state != nil {
+		return state.agent.Model()
+	}
+	return ""
+}
+
+func (s *Session) ContextWindow() int {
+	if state := s.currentState(); state != nil {
+		return state.agent.ContextWindow()
+	}
+	return 0
+}
+
 func cloneSessionMessages(messages []*aop.Message) []*aop.Message {
 	if messages == nil {
 		return nil
@@ -1014,13 +1100,14 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	logicalID := oldState.logicalID
 	agentName := oldState.agentName
 	prepared := prepareContinuationMessages(messages)
+	config := oldState.agent.ConfigSnapshot()
 	if err := rt.CloseSession(ctx, logicalID, reason); err != nil {
 		return nil, err
 	}
 	newID := rt.nextContinuationID(logicalID)
 	continuation, err := rt.OpenSession(ctx, SessionOptions{
 		ID: newID, LogicalID: logicalID, ParentSessionID: parentSessionID,
-		AgentName: agentName, Messages: prepared, HistorySnapshot: reason == SessionCloseCompacted,
+		AgentName: agentName, Messages: prepared, HistorySnapshot: reason == SessionCloseCompacted, agentConfig: &config,
 	})
 	if err != nil {
 		return nil, err
@@ -1144,9 +1231,10 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 					runResult.Stop = agent.StopReasonCanceled
 				}
 			}
+			s.result, s.runErr = runResult, runErr
 			s.emitTurnEnded(turnID, runResult, runErr)
 			s.inbox.setActive(false)
-			if runErr == nil {
+			if runErr == nil && s.delegation == nil {
 				s.inbox.kickAutomatic()
 			}
 			s.runtime.finishRun(run, runResult, runErr)
@@ -1157,6 +1245,7 @@ func (s *sessionState) startRun(ctx context.Context, input RunInput) (*Run, erro
 				result.Stop = agent.StopReasonError
 			}
 			s.emitTurnStarted(turnID)
+			s.result, s.runErr = result, err
 			s.emitTurnEnded(turnID, result, err)
 			s.runtime.finishRun(run, result, err)
 		},
@@ -1211,8 +1300,8 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.skills)
 	}
 	if input.EvalCriteria != "" {
-		provider, model, logger := s.runtime.providerSnapshot()
-		evalConfig := evaluator.NewLoopConfigWithInput(provider, model, logger, s.runtime.agentConfig.PromptResolver, message, input.EvalCriteria, input.EvalRounds)
+		config := s.agent.ConfigSnapshot()
+		evalConfig := evaluator.NewLoopConfigWithInput(config.Provider, config.Model, config.Logger, config.PromptResolver, message, input.EvalCriteria, input.EvalRounds)
 		evalConfig.TurnID = turnID
 		result, _, err := evaluator.RunWithEval(ctx, s.agent, evalConfig,
 			agent.WithTurnID(turnID), agent.WithRunMaxTurns(input.MaxTurns))
@@ -1391,10 +1480,16 @@ func (state *sessionState) deliver(ctx context.Context, message inboxpkg.Message
 		return ErrUnavailable
 	}
 	state.mu.Lock()
-	if state.closed || state.starting || state.ctx.Err() != nil {
+	if state.closed || state.ctx.Err() != nil {
 		state.mu.Unlock()
 		rt.lifecycle.Unlock()
 		return inboxpkg.ErrInboxClosed
+	}
+	if state.starting {
+		err := state.inbox.base.Push(message)
+		state.mu.Unlock()
+		rt.lifecycle.Unlock()
+		return err
 	}
 	kick, err := state.inbox.enqueue(message)
 	if err == nil {
@@ -1460,8 +1555,15 @@ func (rt *Runtime) unregisterRun(run *Run) {
 	rt.mu.Unlock()
 }
 
-func (rt *Runtime) providerSnapshot() (agent.Provider, string, telemetry.Logger) {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.agentConfig.Provider, rt.agentConfig.Model, rt.agentConfig.Logger
+func sessionStop(result *agent.Result, err error) agent.StopReason {
+	if errors.Is(err, context.Canceled) {
+		return agent.StopReasonCanceled
+	}
+	if err != nil {
+		return agent.StopReasonError
+	}
+	if result != nil {
+		return result.Stop
+	}
+	return agent.StopReasonCompleted
 }

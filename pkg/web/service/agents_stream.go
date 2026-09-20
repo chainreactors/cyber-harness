@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/pkg/aopconn"
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
-	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -39,7 +39,7 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		return fmt.Errorf("AgentHello node_id is required")
 	}
 
-	connection, err := web.NewConnection(parent, stream)
+	connection, err := aopconn.NewConnection(parent, stream)
 	if err != nil {
 		return err
 	}
@@ -109,5 +109,5 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		}
 		return nil
 	}
-	return connection.Run(nil, dispatch)
+	return connection.Run(dispatch)
 }

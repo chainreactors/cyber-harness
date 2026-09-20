@@ -14,7 +14,7 @@ CSTX 独占安全事实模型：IP、Port、URL/Web、App、Framework、Vulnerab
 
 | 平面 | 传输 | 职责 |
 | --- | --- | --- |
-| AOP 应用平面 | Application WS `/api/aop/application/ws`、Node WS `/api/aop/node/ws`、Application `AOPService.Connect` | Agent 会话、Turn、事件、工具、原始 Artifact、命令、file、exec、PTY、取消和实时 scan 事件 |
+| AOP 应用平面 | Application WS `/api/aop/application/ws`、Node WS `/api/aop/node/ws`、Application `AOPService.Connect` | Agent 会话、Turn、事件、工具、原始 Artifact、命令、file、PTY、取消和实时 scan 事件 |
 | Cyber 管理平面 | ConnectRPC unary | 查询、配置、Agent 列表与本地进程生命周期、Session 历史、Scan CRUD、原始 Artifact 归档同步、系统状态 |
 
 目标态不存在 JSON-RPC、AOP ChatService、独立 Agent socket、独立 terminal socket 或额外的 WebSocket wire。AOP 只定义一个 `Connect(stream Envelope)` 双向流；Connect/gRPC 与浏览器 WebSocket 适配到同一个 `EnvelopeStream` 服务核心。当前 Agent 默认仍使用 WebSocket，新增 gRPC 服务端不改变旧 Agent 或浏览器连接。管理 RPC 与 AOP 流由同一个 Connect handler 注册，但职责仍按 service 分离。
@@ -32,6 +32,8 @@ Agent 对外只使用 `--server-url` 作为 Cyber Web/AOP 基址。IOA 使用独
 - `aop.ProtocolMessage`：Agent 注册与 Session/Turn 生命周期；
 - `aop.Event`：message、tool、usage、status、error 和生命周期事件；
 - `aop.file`、`aop.exec`、`aop.pty`、`aop.tool`：通用扩展协议。
+
+Cyber 不注册或宣告 `aop.exec`；远程命令统一通过 `aop.tool` 的 tool.call 调用 bash 工具。上游 AOP 仍保留 exec 的通用协议定义。Web、Agent Node 和 Tool Node 共用 `pkg/aopconn.Connection` 的收发队列；`NamespaceMux` 只负责分发，工具调用的取消与清理由现有 `pkg/node/tool` 处理。
 
 这些扩展不是 Cyber DTO。PTY 和 file 对任何 AOP Agent 都成立，因此由 AOP 拥有。
 
@@ -191,3 +193,9 @@ session 只有一个概念、三种视图：协议视图 `aop.Session`（core）
 - Connect boundary：`pkg/web/connect.go`
 
 完成态验收：全仓只能由 `AOPClient` 创建浏览器 WebSocket；不存在 ChatService、WatchEventsResponse、WatchScanEventsResponse、AgentTransport frame、terminal 专用 socket、手写 wire DTO 或 grpc-go service 生成物。
+
+## 配置切换
+
+配置先构建并加载完整候选 Profile。加载失败保留旧 Profile；成功后停止旧任务准入、取消连接与执行、等待清理并关闭旧 Profile，再切换到候选。不迁移旧 Session、REPL 或任务。内容相同的配置不重建运行时。管理配置请求不计入被取消的业务工作，避免等待自身退出。
+
+Web 接收事件时复制输入、保留事件 ID，并按自己的时间线分配序号。分配序号、持久化与广播串行执行；持久化失败不提交终止标记。持久事件复用数据库按事件 ID 去重，流式增量不增加重放缓存。

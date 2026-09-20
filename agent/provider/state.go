@@ -75,6 +75,27 @@ func (s *State) Fallbacks() []Entry {
 	defer s.mu.RUnlock()
 	return append([]Entry(nil), s.fallbacks...)
 }
+
+// ForModel builds a session-local client from the Profile's provider settings.
+// The existing provider owner closes it after dependent sessions drain.
+func (s *State) ForModel(model string, logger telemetry.Logger) (Provider, ProviderConfig, error) {
+	current, config := s.Current()
+	if current != nil && config.Model == model {
+		return current, config, nil
+	}
+	if config.Model != model {
+		config.Images, config.ContextWindow = nil, 0
+	}
+	config.Model = model
+	p, resolved, err := initProvider(config, logger)
+	if err != nil {
+		return nil, ProviderConfig{}, err
+	}
+	s.mu.Lock()
+	s.owned = append(s.owned, p)
+	s.mu.Unlock()
+	return p, *resolved, nil
+}
 func (s *State) Set(p Provider, config ProviderConfig) {
 	s.install(p, config, Health{State: HealthConfigured, CheckedAt: time.Now()})
 }

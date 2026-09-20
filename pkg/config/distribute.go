@@ -42,7 +42,7 @@ func MarshalDistributeConfigYAML(pb *types.DistributeConfig) ([]byte, error) {
 	if pb == nil {
 		return nil, nil
 	}
-	jsonData, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(pb)
+	jsonData, err := (protojson.MarshalOptions{UseProtoNames: true, EmitDefaultValues: true}).Marshal(pb)
 	if err != nil {
 		return nil, err
 	}

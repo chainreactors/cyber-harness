@@ -1,9 +1,10 @@
-package web
+package aopconn
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	aop "github.com/chainreactors/cyber/aop"
@@ -18,9 +19,9 @@ type writeRequest struct {
 	result   chan error
 }
 
-// Connection is the root Web mechanism for one duplex EnvelopeStream. It owns
+// Connection is the shared transport mechanism for one duplex EnvelopeStream. It owns
 // exactly one reader and one FIFO writer; protocol and business state remain
-// behind the Service abstraction.
+// with the endpoint.
 type Connection struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -54,6 +55,7 @@ func NewConnection(parent context.Context, stream aop.EnvelopeStream) (*Connecti
 		done:       make(chan struct{}),
 		writerDone: make(chan struct{}),
 	}
+	context.AfterFunc(ctx, func() { c.stop(ctx.Err()) })
 	go c.writeLoop()
 	return c, nil
 }
@@ -101,8 +103,8 @@ func (c *Connection) Send(envelope *aop.Envelope) error {
 }
 
 // Run receives and dispatches envelopes until the stream, writer, handler, or
-// context terminates. A non-nil first envelope is dispatched before Recv.
-func (c *Connection) Run(first *aop.Envelope, handler func(context.Context, *aop.Envelope, aop.SendFunc) error) (runErr error) {
+// context terminates.
+func (c *Connection) Run(handler func(context.Context, *aop.Envelope, aop.SendFunc) error) (runErr error) {
 	if c == nil {
 		return ErrConnectionClosed
 	}
@@ -118,12 +120,6 @@ func (c *Connection) Run(first *aop.Envelope, handler func(context.Context, *aop
 	c.runMu.Unlock()
 
 	defer func() { c.stop(runErr) }()
-	if first != nil {
-		if err := handler(c.ctx, first, c.Send); err != nil {
-			return err
-		}
-	}
-
 	received := make(chan *aop.Envelope)
 	receiveErr := make(chan error, 1)
 	go func() {
@@ -155,7 +151,7 @@ func (c *Connection) Run(first *aop.Envelope, handler func(context.Context, *aop
 		case <-c.done:
 			return c.terminalError()
 		case <-c.ctx.Done():
-			return c.ctx.Err()
+			return c.terminalError()
 		}
 	}
 }
@@ -209,6 +205,9 @@ func (c *Connection) stop(err error) {
 		c.errMu.Unlock()
 		c.cancel()
 		close(c.done)
+		if closer, ok := c.stream.(io.Closer); ok {
+			_ = closer.Close()
+		}
 	})
 }
 

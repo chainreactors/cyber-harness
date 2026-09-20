@@ -26,6 +26,7 @@ func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts Zombi
 	if eng == nil {
 		return nil, fmt.Errorf("zombie engine is not available")
 	}
+
 	if opts.Debug {
 		telemetry.EnableLogsDebug()
 	}
@@ -47,24 +48,11 @@ func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts Zombi
 		return nil, err
 	}
 
-	out := make(chan *parsers.ZombieResult)
-	go func() {
-		defer telemetry.SDKGoRecover("zombie")
-		defer close(out)
-		for result := range resultCh {
-			if result == nil || !result.Success() {
-				continue
-			}
-			zombieResult, ok := result.Data().(*parsers.ZombieResult)
-			if !ok || zombieResult == nil {
-				continue
-			}
-			select {
-			case out <- zombieResult:
-			case <-ctx.Done():
-				return
-			}
+	return forwardResults(ctx, resultCh, func(result sdktypes.Result) (*parsers.ZombieResult, bool) {
+		if result == nil || !result.Success() {
+			return nil, false
 		}
-	}()
-	return out, nil
+		value, ok := result.Data().(*parsers.ZombieResult)
+		return value, ok && value != nil
+	}, func() {}), nil
 }

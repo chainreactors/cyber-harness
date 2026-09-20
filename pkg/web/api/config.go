@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"strings"
 
 	agentprovider "github.com/chainreactors/cyber/agent/provider"
@@ -209,6 +210,10 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
 	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
-	view.Agent = &types.AgentConfig{Tools: append([]string(nil), config.GetAgent().GetTools()...), Timeout: config.GetAgent().GetTimeout()}
+	view.Agent = proto.CloneOf(config.GetAgent())
+	view.Traffic = proto.CloneOf(config.GetTraffic())
+	if config.Cyberhub != nil {
+		view.Cyberhub.Mitm = config.Cyberhub.Mitm
+	}
 	return view
 }

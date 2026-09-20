@@ -580,7 +580,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 	toolCtx := operation.ContextWithInvocation(ctx, operation.Invocation{
 		CallID: tc.Id, SessionID: cfg.SessionID, TurnID: cfg.TurnID, Emitter: cfg.AgentName,
 	})
-	toolCtx = withToolAgentConfig(toolCtx, cfg)
+	toolCtx = ContextWithToolAgentConfig(toolCtx, cfg)
 	toolCtx = inbox.ContextWithInbox(toolCtx, cfg.Inbox)
 	execution := toolExecution{}
 	if execution.result == "" && !execution.isError {

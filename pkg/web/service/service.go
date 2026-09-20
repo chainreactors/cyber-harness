@@ -45,13 +45,6 @@ type Service struct {
 	store        *SQLiteStore
 	appMu        sync.Mutex
 	profile      profile.Profile
-	// profiles owns the current and retired profiles and counts active request leases.
-	// Entries survive cleanup timeouts; the profile itself owns lifecycle state.
-	profiles map[profile.Profile]int
-	// profileClose serializes release and error collection as one transaction.
-	profileClose chan struct{}
-	appChanged   chan struct{}
-	appError     error
 	closing      bool
 	api          *managementapi.API
 	auth         *Auth
@@ -64,8 +57,6 @@ type Service struct {
 	cancels      map[string]context.CancelFunc
 	scanNodeIDs  map[string]string
 	taskSessions map[string]string // taskID → sessionID
-	taskNodeIDs  map[string]string // taskID → nodeID
-	taskCanceled map[string]bool
 
 	eventMu    sync.Mutex
 	sessionSeq map[string]uint64
@@ -88,9 +79,6 @@ func NewService(cfg ServiceConfig) *Service {
 		configStore:  cfg.ConfigStore,
 		buildProfile: cfg.BuildProfile,
 		store:        cfg.Store,
-		profiles:     make(map[profile.Profile]int),
-		profileClose: make(chan struct{}, 1),
-		appChanged:   make(chan struct{}),
 		hub:          NewHub(),
 		sem:          make(chan struct{}, maxConcurrent),
 		timeout:      timeout,
@@ -98,14 +86,11 @@ func NewService(cfg ServiceConfig) *Service {
 		cancels:      make(map[string]context.CancelFunc),
 		scanNodeIDs:  make(map[string]string),
 		taskSessions: make(map[string]string),
-		taskNodeIDs:  make(map[string]string),
-		taskCanceled: make(map[string]bool),
 		sessionSeq:   make(map[string]uint64),
 		endedTurns:   make(map[string]bool),
 	}
 	if cfg.Profile != nil {
 		svc.profile = cfg.Profile
-		svc.profiles[cfg.Profile] = 0
 	}
 	configAPI := managementapi.NewConfig(svc, cfg.ConfigAPI)
 	svc.api = &managementapi.API{
@@ -160,60 +145,24 @@ func (s *Service) Close(ctx context.Context) (resultErr error) {
 		s.workDone = make(chan struct{})
 		go func() { s.work.Wait(); close(s.workDone) }()
 	}
-	s.profile = nil
-	s.applicationChangedLocked()
+	p := s.profile
 	s.appMu.Unlock()
-	defer func() {
-		s.appMu.Lock()
-		resultErr = errors.Join(resultErr, s.appError)
-		s.appError = nil
-		s.appMu.Unlock()
-	}()
-	s.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(s.cancels))
-	for _, cancel := range s.cancels {
-		cancels = append(cancels, cancel)
-	}
-	s.mu.Unlock()
-	for _, cancel := range cancels {
-		cancel()
-	}
 	select {
 	case <-s.workDone:
 	case <-ctx.Done():
 		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
 	}
 	resultErr = s.closePending(ctx)
-	for {
-		s.appMu.Lock()
-		remaining := len(s.profiles)
-		changed := s.appChanged
-		var ready []profile.Profile
-		for p, refs := range s.profiles {
-			if refs == 0 {
-				ready = append(ready, p)
-			}
-		}
-		s.appMu.Unlock()
-		if remaining == 0 {
-			return resultErr
-		}
-		if len(ready) > 0 {
-			var incomplete error
-			for _, ref := range ready {
-				incomplete = errors.Join(incomplete, s.closeApplication(ctx, ref))
-			}
-			if incomplete != nil {
-				return errors.Join(resultErr, incomplete)
-			}
-			continue
-		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return errors.Join(resultErr, extension.ErrCloseIncomplete, ctx.Err())
+	if p != nil {
+		err := p.Close(ctx)
+		resultErr = errors.Join(resultErr, err)
+		if !errors.Is(err, extension.ErrCloseIncomplete) {
+			s.appMu.Lock()
+			s.profile = nil
+			s.appMu.Unlock()
 		}
 	}
+	return resultErr
 }
 
 // API exposes the existing business service composition to transport adapters.
@@ -244,7 +193,7 @@ func generateID() string {
 func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 func (s *Service) Status() *types.SystemStatus {
-	providers, release := s.acquireProviders()
+	providers := s.providers()
 	status := &types.SystemStatus{Version: config.Version}
 	if providers != nil {
 		model, providerConfig := providers.Current()
@@ -253,7 +202,6 @@ func (s *Service) Status() *types.SystemStatus {
 		status.LlmModel = providerConfig.Model
 		status.LlmApiKeyConfigured = strings.TrimSpace(providerConfig.APIKey) != ""
 	}
-	release()
 	if response, err := s.api.Config.GetConfig(context.Background(), &types.GetConfigRequest{}); err == nil {
 		view := response.GetConfig()
 		status.ConfigPath = view.GetPath()
@@ -271,12 +219,12 @@ func (s *Service) Status() *types.SystemStatus {
 	return status
 }
 
-func (s *Service) beginWork() bool {
+func (s *Service) beginWork() (context.Context, bool) {
 	s.appMu.Lock()
 	defer s.appMu.Unlock()
-	if s.closing {
-		return false
+	if s.closing || s.workContext.Err() != nil {
+		return nil, false
 	}
 	s.work.Add(1)
-	return true
+	return s.workContext, true
 }

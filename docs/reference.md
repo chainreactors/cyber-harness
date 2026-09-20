@@ -225,7 +225,7 @@ misc:
 
 ### 多 LLM Profile 配置
 
-配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 可通过 `/provider` 查看配置，并用 `/provider set` 显式应用新配置。
+配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 的 `/provider` 只查看 Profile 配置；`/model` 只选择当前会话的模型，不修改 Profile、其他会话或已有子任务。Provider、端点和密钥通过配置文件或 Web 设置修改。
 
 Web 设置页拉取模型列表时使用当前编辑 Profile 的已保存密钥。若端点不提供 `GET /models`（返回 404），页面会保留手动模型输入，不把它显示为连接故障。
 

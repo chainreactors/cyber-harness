@@ -49,7 +49,6 @@ type Runtime struct {
 	resumeSessionID  string
 	ctx              context.Context
 	cancel           context.CancelFunc
-	providerMu       sync.Mutex
 	mu               sync.RWMutex
 	sessions         map[string]*sessionState
 	runs             map[string]*Run
@@ -358,52 +357,6 @@ func (rt *Runtime) close(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
-	if rt == nil || rt.providers == nil {
-		return nil, agent.ProviderConfig{}, fmt.Errorf("agent runtime is not configured")
-	}
-	rt.providerMu.Lock()
-	defer rt.providerMu.Unlock()
-	provider, resolved, err := rt.providers.Reload(rt.ctx, config, rt.Logger)
-	if err != nil {
-		return nil, agent.ProviderConfig{}, err
-	}
-	rt.applyProvider(provider, resolved)
-	return provider, resolved, nil
-}
-
-func (rt *Runtime) ReloadResolvedProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
-	return rt.reloadProvider(config)
-}
-
-// SetProvider atomically updates the runtime template and every existing
-// conversation session. Runs already in flight keep their provider snapshot.
-func (rt *Runtime) SetProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
-	if rt == nil {
-		return
-	}
-	rt.providerMu.Lock()
-	defer rt.providerMu.Unlock()
-	if rt.providers != nil {
-		rt.providers.Set(provider, providerConfig)
-	}
-	rt.applyProvider(provider, providerConfig)
-}
-
-func (rt *Runtime) applyProvider(provider agent.Provider, providerConfig agent.ProviderConfig) {
-	rt.mu.Lock()
-	rt.agentConfig.Provider = provider
-	if providerConfig.Model != "" {
-		rt.agentConfig.Model = providerConfig.Model
-	}
-	rt.agentConfig.MaxTokens = providerConfig.MaxTokens
-	rt.agentConfig.ContextWindow = providerConfig.ContextWindow
-	for _, sess := range rt.sessions {
-		sess.agent.SetProviderConfig(provider, providerConfig)
-	}
-	rt.mu.Unlock()
 }
 
 // Active reports whether the runtime accepts work.

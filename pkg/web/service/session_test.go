@@ -277,7 +277,19 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 	if request.GetSessionId() != "session-1" || request.GetTurnId() != "turn-1" {
 		t.Fatalf("cancel frame = %v", request)
 	}
-	pool.handleAgentEnvelope(fake, turnEndEnvelope(t, "turn-1", "session-1", "canceled"))
+	before, err := store.ListAOPEvents(ctx, "session-1", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range before {
+		if event.GetTurnEnded() != nil {
+			t.Fatal("cancel acceptance published a terminal before Runtime drained")
+		}
+	}
+	terminal := &aop.Event{Id: "runtime-terminal", SessionId: "session-1", TurnId: "turn-1", Emitter: "runtime",
+		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "canceled", Usage: &aop.TokenUsage{InputTokens: 17, OutputTokens: 9}, Error: &aop.ProtocolError{Code: "CANCELED", Message: "execution drained"}}},
+	}
+	pool.handleAgentEnvelope(fake, aop.MustWrap("terminal", "turn-1", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: terminal}}))
 	fake.mu.Lock()
 	_, firstPending := fake.tasks["turn-1"]
 	_, secondPending := fake.tasks["turn-2"]
@@ -297,6 +309,9 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 		terminalCount++
 		if event.TurnId != "turn-1" || event.GetTurnEnded().GetStopReason() != "canceled" {
 			t.Fatalf("unexpected terminal event after exact cancel: %v", event)
+		}
+		if event.Id != terminal.Id || !proto.Equal(event.GetTurnEnded(), terminal.GetTurnEnded()) {
+			t.Fatalf("Runtime terminal details were replaced: %v", event)
 		}
 	}
 	if terminalCount != 1 {

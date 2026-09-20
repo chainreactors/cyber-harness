@@ -46,12 +46,12 @@ func (p *gateProvider) ChatCompletion(ctx context.Context, req *agent.ChatComple
 	}
 	return &agent.ChatCompletionResponse{Choices: []agent.Choice{{Message: agent.TextMessage("assistant", "done")}}}, nil
 }
-func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer) (*AgentConsole, *apptest.Fixture) {
+func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer, configs ...agent.ProviderConfig) (*AgentConsole, *apptest.Fixture) {
 	t.Helper()
 	if option == nil {
 		option = &cfg.Option{}
 	}
-	rt, application := newConsoleRuntime(t, provider)
+	rt, application := newConsoleRuntime(t, provider, configs...)
 	session, err := rt.OpenSession(context.Background(), agentsession.SessionOptions{ID: "console-test"})
 	if err != nil {
 		t.Fatal(err)

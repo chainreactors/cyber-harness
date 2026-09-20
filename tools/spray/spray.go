@@ -11,6 +11,7 @@ import (
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
+	scanengine "github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/sdk/spray"
 	spraycore "github.com/chainreactors/spray/core"
@@ -67,6 +68,11 @@ func (c *Command) QuickReference() string {
 
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("spray", &err)
+	release, err := scanengine.AcquireSpray(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
 	var buf bytes.Buffer

@@ -10,6 +10,10 @@ Session 保留对话和运行状态，使下一次输入可以继续使用历史
 
 宿主协议的 Turn 是外部提交与取消的单位，内部模型轮次是循环计数。启用 Goal Evaluation 时，一次任务可能执行多次 Run。统计或接入时不要把三者的计数混用。
 
+配置级变更整体替换 Profile。终端 `/model` 仅修改当前 Session 下一次 Run 的模型；已运行任务和已有子任务保留各自快照，清空、压缩与恢复当前会话继续沿用该模型。`/provider` 只查看配置，终端不再原地修改全局 Provider。
+
+取消受理不代表执行已经退出。正常取消的 `TurnEnded` 由 Runtime 在执行结束后发布，携带最终 usage 和错误；Web 只在派发失败、断连或自身停止等待时提供兜底终态。
+
 ## 标准循环
 
 1. 检查 Provider 和执行上下文，解析本次 Run 的 system prompt，再执行 `BeforeRun` hook。
@@ -41,9 +45,9 @@ Session 保留对话和运行状态，使下一次输入可以继续使用历史
 
 ## 子 Agent 的派生
 
-本地子 Agent 也通过这套循环执行。派生时沿用父配置中的 Provider、工具等能力，但拥有自己的对话与 Inbox。`sync` 在当前调用中等待；`async` 从新对话开始，`fork` 则截取父对话的完整消息边界作为起点。Agent 类型可以补充指令、模型等配置。
+`agent/session` 的子代理工具由现有 Session 扩展安装，直接使用 `OpenSession → RunSession → CloseSession`。Session 拥有 Inbox、取消、生命周期事件和最终记录；工具没有独立的运行表或关闭流程。本地子 Agent 也通过这套循环执行。派生时沿用父配置中的 Provider、工具等能力，但拥有自己的对话与 Inbox。`sync` 在当前调用中等待；`async` 从新对话开始，`fork` 则截取父对话的完整消息边界作为起点。Agent 类型可以补充指令、模型等配置。
 
-异步子任务向父 Inbox 注册 producer，完成时投递结果并释放 producer。父循环由此知道仍有工作可能返回，而不是只根据当前模型有没有输出判断结束。子任务的进程内配置继承不提供文件、网络或浏览器隔离；它和跨进程 IOA 消息投递也属于不同生命周期。操作方式见[子 Agent](../user/web.md#子-agent)。
+异步子任务向父 Inbox 注册 producer。关闭 Session 时先完成 IOA 最终记录，再向父 Inbox 投递一次结果并释放 producer。父 Session 关闭会取消并等待子 Session；单次工具调用返回不会取消后台子任务。父循环由此知道仍有工作可能返回，而不是只根据当前模型有没有输出判断结束。子任务的进程内配置继承不提供文件、网络或浏览器隔离；它和跨进程 IOA 消息投递也属于不同生命周期。操作方式见[子 Agent](../user/web.md#子-agent)。
 
 ## 停止条件
 

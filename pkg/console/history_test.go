@@ -49,13 +49,17 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apptest.Fixture) {
+func newConsoleRuntime(t *testing.T, provider agent.Provider, configs ...agent.ProviderConfig) (*agentsession.Runtime, *apptest.Fixture) {
 	t.Helper()
 	a := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 	// The runtime reads provider state while loading, so the provider is set
 	// first. One graph: the session extension borrows the same capabilities a
 	// profile publishes, so the test publishes them once and mounts it alongside.
-	a.Providers.Set(provider, agent.ProviderConfig{Model: "test"})
+	config := agent.ProviderConfig{Model: "test"}
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	a.Providers.Set(provider, config)
 	rt := sessionext.New(agentsession.Config{Loop: agent.StandardLoop{}})
 	set := hosttest.Set(t, append(apptest.Entries(t, a), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := set.Load(t.Context()); err != nil {

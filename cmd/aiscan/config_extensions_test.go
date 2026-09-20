@@ -4,12 +4,55 @@ import (
 	"github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestRuntimeSettingsSurviveViewAndFileRoundTrip(t *testing.T) {
+	source := []byte(`agent:
+  timeout: 0
+  heartbeat: 7
+  eval_criteria: finish
+  eval_model: judge
+  eval_rounds: "3"
+  capture_provider_frames: true
+cyberhub:
+  mitm: false
+traffic:
+  body_storage: disk
+  body_max_bytes: 123
+  body_retention_bytes: 456
+`)
+	value, err := parseConfig(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := managementapi.ConfigView(value, "", true)
+	if !proto.Equal(view.Agent, value.Agent) || !proto.Equal(view.Traffic, value.Traffic) || view.Cyberhub.Mitm == nil || *view.Cyberhub.Mitm {
+		t.Fatalf("settings missing in view: %v", view)
+	}
+	// The settings page submits these same values from its view.
+	updated := &types.DistributeConfig{Agent: view.Agent, Traffic: view.Traffic, Cyberhub: &types.CyberhubConfig{Mitm: view.Cyberhub.Mitm}}
+	data, err := marshalConfig(updated, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := parseConfig(data)
+	if err != nil || !proto.Equal(value, roundTrip) {
+		t.Fatalf("round trip=%v, error=%v\n%s", roundTrip, err, data)
+	}
+	var option cfg.Option
+	if err := cfg.LoadConfigBytes(data, &option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Timeout != 0 || option.Heartbeat != 7 || option.EvalCriteria != "finish" || option.EvalModel != "judge" || option.EvalRounds != "3" || !option.CaptureProviderFrames || option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" || option.BodyMaxBytes != 123 || option.BodyRetentionBytes != 456 {
+		t.Fatal("saved settings were not restored by the runtime loader")
+	}
+}
 
 // The generated cyber.yaml is written to the flags schema, which is wider than
 // the proto the settings page speaks. Reading it must not fail and saving it
@@ -35,7 +78,7 @@ func TestConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("settings lost on save:\nbefore %#v\nafter  %#v", before, after)
 	}
-	for _, key := range []string{"misc", "output", "traffic", "llm"} {
+	for _, key := range []string{"misc", "output", "llm"} {
 		if after[key] == nil {
 			t.Fatalf("section %q missing from the saved file", key)
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,123 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func TestRoutedChildEventsShareParentTimelineSequence(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "parent")
+	svc := NewService(ServiceConfig{Store: store})
+	defer svc.Close(context.Background())
+	for i, origin := range []string{"parent", "child", "parent"} {
+		svc.BroadcastAOPEvent("parent", &aop.Event{
+			Id: strconv.Itoa(i), SessionId: origin, TurnId: "turn", Seq: 50,
+			Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}},
+		})
+	}
+	events, err := store.ListAOPEvents(t.Context(), "parent", 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events=%v, error=%v", events, err)
+	}
+	if events[0].Seq != 1 || events[1].Seq != 2 || events[1].SessionId != "child" {
+		t.Fatalf("routed timeline lost ordering or origin: %v", events)
+	}
+	// A new service must continue the destination timeline even for a child origin.
+	restarted := NewService(ServiceConfig{Store: store})
+	defer restarted.Close(context.Background())
+	restarted.BroadcastAOPEvent("parent", &aop.Event{Id: "after-restart", SessionId: "child",
+		Payload: &aop.Event_Message{Message: &aop.Message{Role: "assistant", Content: []*aop.Content{aop.Text("next")}}},
+	})
+	events, err = store.ListAOPEvents(t.Context(), "parent", 10)
+	if err != nil || len(events) != 3 || events[2].Seq != 3 {
+		t.Fatalf("restarted timeline=%v, error=%v", events, err)
+	}
+}
+
+func TestWebTimelineConcurrentOrderingAndRestartDedup(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "timeline")
+	svc := NewService(ServiceConfig{Store: store})
+	defer svc.Close(context.Background())
+	deliveries, stop := svc.hub.SubscribeAOP("timeline")
+	defer stop()
+	var writers sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			event := &aop.Event{Id: strconv.Itoa(i), SessionId: "timeline", Seq: 900,
+				Payload: &aop.Event_Message{Message: &aop.Message{Id: strconv.Itoa(i), Role: "assistant", Content: []*aop.Content{aop.Text("text")}}}}
+			svc.BroadcastAOPEvent("timeline", event)
+			if event.Seq != 900 {
+				t.Error("source event mutated")
+			}
+		}()
+	}
+	writers.Wait()
+	stored, err := store.ListAOPEvents(t.Context(), "timeline", 100)
+	if err != nil || len(stored) != 20 {
+		t.Fatalf("events=%d error=%v", len(stored), err)
+	}
+	for seq := uint64(1); seq <= 20; seq++ {
+		select {
+		case delivery := <-deliveries:
+			if delivery.Event.Seq != seq {
+				t.Fatalf("wire order=%d expected=%d", delivery.Event.Seq, seq)
+			}
+		default:
+			t.Fatal("missing delivery")
+		}
+	}
+	restarted := NewService(ServiceConfig{Store: store})
+	defer restarted.Close(context.Background())
+	replay, cancelReplay := restarted.hub.SubscribeAOP("timeline")
+	defer cancelReplay()
+	restarted.BroadcastAOPEvent("timeline", stored[0])
+	select {
+	case <-replay:
+		t.Fatal("durable duplicate was republished after restart")
+	default:
+	}
+	restarted.BroadcastAOPEvent("timeline", &aop.Event{Id: "new", SessionId: "timeline", Payload: &aop.Event_Message{Message: &aop.Message{Role: "assistant", Content: []*aop.Content{aop.Text("new")}}}})
+	if got := (<-replay).Event.Seq; got != 21 {
+		t.Fatalf("restart sequence=%d", got)
+	}
+}
+
+func TestFailedPersistenceDoesNotSealTurn(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	createStoredSession(t, store, "retry")
+	svc := NewService(ServiceConfig{Store: store})
+	defer svc.Close(context.Background())
+	event := &aop.Event{Id: "terminal", SessionId: "retry", TurnId: "turn", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}
+	if _, err := store.db.Exec(`CREATE TRIGGER reject_event BEFORE INSERT ON chat_aop_events BEGIN SELECT RAISE(FAIL, 'storage unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.acceptAOPEvent("retry", proto.CloneOf(event)); err == nil {
+		t.Fatal("persistence failure was hidden")
+	}
+	if _, err := store.db.Exec(`DROP TRIGGER reject_event`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.acceptAOPEvent("retry", proto.CloneOf(event)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.ListAOPEvents(t.Context(), "retry", 10)
+	if err != nil || len(stored) != 1 || stored[0].Seq != 1 {
+		t.Fatalf("retry events=%v error=%v", stored, err)
+	}
+}
 
 func TestHubBroadcastAOPReliableSurvivesBackpressure(t *testing.T) {
 	hub := NewHub()
@@ -114,7 +232,12 @@ func TestBroadcastAOPEventPersistsCanonicalProtoJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || !proto.Equal(events[0], event) {
+	expected := proto.CloneOf(event)
+	expected.Seq = 1
+	if event.Seq != 7 {
+		t.Fatal("incoming timeline was mutated")
+	}
+	if len(events) != 1 || !proto.Equal(events[0], expected) {
 		t.Fatalf("persisted events = %+v, want %+v", events, event)
 	}
 }
@@ -250,7 +373,7 @@ func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
 	// An in-flight task id is not a scan binding. The completion fan-out resolves
 	// the durable session_scans relation, so a stray task registration must not
 	// leak a result card into a session the scan was never bound to.
-	service.registerSessionTask("scan-stray", "session-unbound", "")
+	service.registerSessionTask("scan-stray", "session-unbound")
 	service.broadcastScanComplete("scan-stray")
 
 	events, err := store.ListAOPEvents(context.Background(), "session-unbound", 10)

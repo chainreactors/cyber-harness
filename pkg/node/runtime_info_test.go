@@ -65,7 +65,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 	if got["!tmux"] == nil || got["!tmux"].usage != "!tmux - PTY session manager" {
 		t.Fatalf("!tmux = %+v", got["!tmux"])
 	}
-	if got["!tmux"].description != "PTY session manager built into cyber. Bash commands stay foreground by default and move to background only when the agent sets wait." {
+	if got["!tmux"].description != "PTY session manager built into cyber. Commands can release their foreground wait on a wait deadline or an interrupting Inbox message." {
 		t.Fatalf("!tmux description = %q", got["!tmux"].description)
 	}
 }

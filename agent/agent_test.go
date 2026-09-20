@@ -1258,7 +1258,7 @@ func TestSetProviderConfigHotSwapsModelLimits(t *testing.T) {
 	ag.SetProviderConfig(provider, ProviderConfig{
 		Model: "glm-5.2[1m]", MaxTokens: 32768, ContextWindow: 1000000,
 	})
-	cfg := ag.configSnapshot()
+	cfg := ag.ConfigSnapshot()
 	if cfg.Provider != provider || cfg.Model != "glm-5.2[1m]" || cfg.MaxTokens != 32768 || cfg.ContextWindow != 1000000 {
 		t.Fatalf("hot-swapped config = %+v", cfg)
 	}

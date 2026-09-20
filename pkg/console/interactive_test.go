@@ -268,8 +268,7 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	option := &cfg.Option{}
-	repl, _ := newTestConsole(t, option, nil, &stdout, &stderr)
-	repl.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "openai", BaseURL: srv.URL + "/v1", APIKey: "sk-test", Model: "model-a"})
+	repl, _ := newTestConsole(t, option, nil, &stdout, &stderr, agent.ProviderConfig{Provider: "openai", BaseURL: srv.URL + "/v1", APIKey: "sk-test", Model: "model-a"})
 	session := repl.session
 
 	if _, err := executeAndWait(repl, "/model"); err != nil {
@@ -288,8 +287,8 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 	if changed.Model != "model-b" {
 		t.Fatalf("changed model = %q, want model-b", changed.Model)
 	}
-	if option.Model != "model-b" {
-		t.Fatalf("option model = %q, want model-b", option.Model)
+	if option.Model != "" {
+		t.Fatalf("session model leaked into startup options: %q", option.Model)
 	}
 	status, err := session.Command(t.Context(), "/status")
 	if err != nil {
@@ -300,6 +299,13 @@ func TestAgentConsoleModelCommandListsAndSwitches(t *testing.T) {
 	}
 	if out := stdout.String(); !strings.Contains(out, "Model ready: openai / model-b") {
 		t.Fatalf("switch output = %q", out)
+	}
+	if _, err := executeAndWait(repl, "/provider set --model global-change"); err == nil {
+		t.Fatal("terminal still accepts global provider mutation")
+	}
+	_, profileConfig := repl.runtime.ProviderState()
+	if profileConfig.Model != "model-a" || repl.session.Model() != "model-b" {
+		t.Fatal("terminal changed Profile configuration or lost its session model")
 	}
 }
 

@@ -131,7 +131,7 @@ func cyber() {
 		cancel context.CancelFunc
 	)
 	switch {
-	case parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent:
+	case parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent || option.Timeout == 0:
 		ctx, cancel = context.WithCancel(context.Background())
 	default:
 		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
@@ -196,13 +196,14 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	mode := selectedMode(parser)
 	option := buildOption(&cli, parser)
+	cfg.CaptureExplicitFlags(&option, parser)
 	action := cli.registry.Selected()
 	option.Extensions = cli.registry.Values()
 	finalizeOptions(&option, action)
-	if cli.Timeout > 0 {
+	if flag := parser.Group.FindOptionByLongName("timeout"); flag != nil && flag.IsSet() {
 		option.Timeout = cli.Timeout
 	}
-	if option.Timeout <= 0 {
+	if option.Timeout == 0 && !option.Explicit["timeout"] {
 		// Commands that own their options through the extension registry (the IOA
 		// queries, for one) never receive AgentOptions, so nothing else supplies
 		// this default. A zero deadline would cancel the context before the
@@ -257,11 +258,15 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	option := cfg.Option{MiscOptions: cli.MiscOptions}
 	finalizeOptions(&option, nil)
 	mergeManualScannerOptions(&option, manual)
+	cfg.CaptureExplicitFlags(&option, parser)
+	for flag := range manual.Explicit {
+		option.MarkExplicit(flag)
+	}
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
 	option.Timeout = cli.Timeout
-	if option.Timeout <= 0 {
+	if option.Timeout == 0 && !option.Explicit["timeout"] {
 		option.Timeout = 3600
 	}
 
@@ -611,6 +616,7 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 				break
 			}
 			matched = true
+			option.MarkExplicit(f.names[0])
 			if f.arity == 0 {
 				if hasValue {
 					f.apply(option, value)

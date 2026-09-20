@@ -33,7 +33,7 @@ ioa send/read   ── SDK ClientAPI / StreamAPI ──→ 内存 Service 或外
 
 Core 不依赖 IOA，不提供通讯 Binder、Recorder 或第二套 Session 注册中心。普通 Session 的投递复用 admission、mailbox 和自动调度；派生任务只接收运行期间的输入。借用的投递函数在生命周期结束后失效，旧 Session ID 不会映射到替代会话。
 
-装配顺序是基础能力、IOA ext、native/session 等执行扩展；逆序关闭时先取消并等待执行收尾，再释放 IOA。后台子任务跨越单次工具调用，但受父执行生命周期和 SubAgentTool 所有者约束。
+装配顺序是基础能力、IOA ext、native/session 等执行扩展；逆序关闭时先取消并等待执行收尾，再释放 IOA。子代理工具由 Session 扩展安装，通过现有 Runtime 的 OpenSession、RunSession、CloseSession 执行。后台任务跨越单次工具调用，但受父 Session 和 Runtime 生命周期约束；最终记录与一次父 Inbox 通知在 Session 关闭中完成。
 
 ## 派发、返回与通讯
 

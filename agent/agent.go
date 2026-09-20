@@ -54,7 +54,7 @@ func (a *Agent) run(ctx context.Context, userMsg *aop.Message, opts ...RunOption
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.configSnapshot()
+	cfg := a.ConfigSnapshot()
 	cfg = cfg.init()
 	for _, opt := range opts {
 		if opt != nil {
@@ -109,7 +109,7 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.configSnapshot()
+	cfg := a.ConfigSnapshot()
 	cfg = cfg.init()
 	for _, opt := range opts {
 		if opt != nil {
@@ -188,9 +188,9 @@ func (a *Agent) ContextWindow() int {
 	return ModelContextWindow(a.Cfg.Model)
 }
 
-// configSnapshot copies Cfg under the lock so a concurrent SetProvider can't
+// ConfigSnapshot copies Cfg under the lock so a concurrent SetProvider can't
 // tear the read a run takes at its start.
-func (a *Agent) configSnapshot() Config {
+func (a *Agent) ConfigSnapshot() Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg
@@ -199,7 +199,7 @@ func (a *Agent) configSnapshot() Config {
 // Derive creates a new Agent with the same infrastructure (provider, tools,
 // model, logger) but clean state. Use for spawning independent agent tasks.
 func (a *Agent) Derive() *Agent {
-	cfg := a.configSnapshot()
+	cfg := a.ConfigSnapshot()
 	return deriveNamedFromConfig(cfg, cfg.AgentName, "", nil)
 }
 
@@ -210,7 +210,7 @@ func (a *Agent) DeriveNamed(name string) *Agent {
 }
 
 func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
-	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
+	return deriveNamedFromConfig(a.ConfigSnapshot(), name, parentToolCallID, detail)
 }
 
 func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {

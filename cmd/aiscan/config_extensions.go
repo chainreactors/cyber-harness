@@ -17,8 +17,7 @@ import (
 )
 
 // cyber.yaml is wider than the shared proto schema: --init also emits local
-// sections and switches (misc, output, traffic, the flat LLM
-// shorthand, the agent evaluation settings, cyberhub.mitm). The settings page
+// sections and switches (misc, output, and the flat LLM shorthand). The settings page
 // rewrites the whole file, so those keys have to survive a read/write cycle
 // instead of being rejected as unknown fields or dropped by the rewrite.
 
@@ -171,7 +170,7 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 		Llm: runtimeLLMConfig(option),
 		Cyberhub: &types.CyberhubConfig{
 			Url: option.CyberhubURL, Key: option.CyberhubKey,
-			Mode: option.CyberhubMode, Proxy: option.Proxy,
+			Mode: option.CyberhubMode, Proxy: option.Proxy, Mitm: option.Mitm,
 		},
 		Recon: &types.ReconConfig{
 			FofaKey: option.FofaKey, HunterApiKey: option.HunterAPIKey,
@@ -179,7 +178,8 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 		},
 		Scan:       &types.ScanConfig{Verify: option.ScanConfig.Verify},
 		Search:     &types.SearchConfig{TavilyKeys: strings.Join(keys, ",")},
-		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: int32(option.Timeout)},
+		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: proto.Int32(int32(option.Timeout)), Heartbeat: int32(option.Heartbeat), EvalCriteria: option.EvalCriteria, EvalModel: option.EvalModel, EvalRounds: option.EvalRounds, CaptureProviderFrames: option.CaptureProviderFrames},
+		Traffic:    &types.TrafficConfig{BodyStorage: option.BodyStorage, BodyMaxBytes: option.BodyMaxBytes, BodyRetentionBytes: option.BodyRetentionBytes},
 		Node:       &types.NodeConfig{Id: option.NodeID, Name: option.NodeName},
 		Extensions: extensions,
 	}

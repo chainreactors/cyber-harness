@@ -1,4 +1,4 @@
-package web
+package aopconn
 
 import (
 	"context"
@@ -59,7 +59,7 @@ func (s *connectionTestStream) Send(envelope *aop.Envelope) error {
 	return nil
 }
 
-func TestConnectionDispatchesFirstAndReceivedEnvelopes(t *testing.T) {
+func TestConnectionDispatchesReceivedEnvelopes(t *testing.T) {
 	stream := newConnectionTestStream()
 	connection, err := NewConnection(context.Background(), stream)
 	if err != nil {
@@ -68,11 +68,12 @@ func TestConnectionDispatchesFirstAndReceivedEnvelopes(t *testing.T) {
 	dispatched := make(chan string, 2)
 	done := make(chan error, 1)
 	go func() {
-		done <- connection.Run(&aop.Envelope{Id: "first"}, func(_ context.Context, envelope *aop.Envelope, _ aop.SendFunc) error {
+		done <- connection.Run(func(_ context.Context, envelope *aop.Envelope, _ aop.SendFunc) error {
 			dispatched <- envelope.Id
 			return nil
 		})
 	}()
+	stream.recvCh <- &aop.Envelope{Id: "first"}
 	stream.recvCh <- &aop.Envelope{Id: "second"}
 	stream.recvErr <- io.EOF
 	if got := <-dispatched; got != "first" {
@@ -164,7 +165,8 @@ func TestConnectionHandlerFailureConverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.Close()
-	err = connection.Run(&aop.Envelope{Id: "first"}, func(context.Context, *aop.Envelope, aop.SendFunc) error { return want })
+	go func() { stream.recvCh <- &aop.Envelope{Id: "first"}; stream.recvErr <- io.EOF }()
+	err = connection.Run(func(context.Context, *aop.Envelope, aop.SendFunc) error { return want })
 	if !errors.Is(err, want) {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -213,7 +215,7 @@ func TestConnectionContextCancellation(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- connection.Run(nil, func(context.Context, *aop.Envelope, aop.SendFunc) error { return nil })
+		done <- connection.Run(func(context.Context, *aop.Envelope, aop.SendFunc) error { return nil })
 	}()
 	cancel()
 	select {

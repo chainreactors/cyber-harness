@@ -15,6 +15,7 @@ type Sources struct {
 // Resolved is a configuration snapshot, never a container of runtime services.
 // It belongs to one configuration evaluation and is not updated in place.
 type Resolved struct {
+	cli    Values
 	values Values
 	typed  map[string]any
 }
@@ -59,7 +60,7 @@ func cloneFields(fields map[string]any) map[string]any {
 // Every declared section is validated, including sections omitted by the user.
 func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, bool)) (*Resolved, error) {
 	r.Seal()
-	result := &Resolved{values: Values{}, typed: map[string]any{}}
+	result := &Resolved{cli: CloneValues(cli), values: Values{}, typed: map[string]any{}}
 	for _, input := range []Values{file, cli} {
 		for key := range input {
 			if _, ok := r.declarations[key]; !ok {

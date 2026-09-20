@@ -157,7 +157,8 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 }
 
 func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) {
-	if !s.beginWork() {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
 		return
 	}
 	defer s.work.Done()
@@ -175,7 +176,7 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 	request.TurnId = taskID
 	request.SessionId = sessionID
 	s.resetTurnTerminal(sessionID, taskID)
-	s.registerSessionTask(taskID, sessionID, agent.NodeID())
+	s.registerSessionTask(taskID, sessionID)
 	resultCh, err := s.agents.DispatchRun(agent.NodeID(), request)
 	if err != nil {
 		s.finishSessionTask(taskID)
@@ -190,13 +191,13 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 		var ok bool
 		select {
 		case res, ok = <-resultCh:
-		case <-s.workContext.Done():
+		case <-workCtx.Done():
+			_ = s.agents.CancelTask(agent.NodeID(), taskID, sessionID)
+			s.finishSessionTask(taskID)
+			s.broadcastHubTurnEnded(sessionID, taskID, "canceled", workCtx.Err().Error())
 			return
 		}
-		canceled := s.finishSessionTask(taskID)
-		if canceled {
-			return
-		}
+		s.finishSessionTask(taskID)
 		if !ok {
 			s.broadcastHubTurnEnded(sessionID, taskID, "agent_disconnected", "agent disconnected")
 			return
@@ -208,7 +209,8 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 }
 
 func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) {
-	if !s.beginWork() {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
 		return "", fmt.Errorf("web service is closing")
 	}
 	defer s.work.Done()
@@ -247,7 +249,7 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		return "", fmt.Errorf("agent is not connected")
 	}
 	taskID := generateID()
-	s.registerSessionTask(taskID, sessionID, agent.NodeID())
+	s.registerSessionTask(taskID, sessionID)
 	resultCh, err := s.agents.DispatchCommand(agent.NodeID(), taskID, &types.CommandRequest{SessionId: sessionID, Line: line})
 	if err != nil {
 		s.finishSessionTask(taskID)
@@ -260,11 +262,14 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		var ok bool
 		select {
 		case res, ok = <-resultCh:
-		case <-s.workContext.Done():
+		case <-workCtx.Done():
+			_ = s.agents.CancelTask(agent.NodeID(), taskID, sessionID)
+			s.finishSessionTask(taskID)
+			s.broadcastHubError(sessionID, "command_failed", workCtx.Err().Error(), nil)
 			return
 		}
-		canceled := s.finishSessionTask(taskID)
-		if !ok || canceled {
+		s.finishSessionTask(taskID)
+		if !ok {
 			return
 		}
 		if res.Err != "" {

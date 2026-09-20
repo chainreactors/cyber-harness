@@ -38,6 +38,7 @@ func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index 
 	if engine == nil {
 		return nil, errors.New("neutron engine is not available")
 	}
+
 	if opts.Debug {
 		common.NeutronLog = telemetry.EnableLogsDebug()
 	} else {
@@ -81,7 +82,7 @@ func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index 
 			select {
 			case out <- execResult:
 			case <-ctx.Done():
-				return
+				// Cancellation does not release the caller before upstream drains.
 			}
 		}
 	}()
@@ -126,7 +127,7 @@ func neutronExecuteTemplatesConcurrent(ctx context.Context, engine *sdkneutron.E
 						select {
 						case <-limiter:
 						case <-ctx.Done():
-							return
+							// Keep draining the SDK stream.
 						}
 					}
 					task := sdkneutron.NewExecuteTask(target)
@@ -143,7 +144,7 @@ func neutronExecuteTemplatesConcurrent(ctx context.Context, engine *sdkneutron.E
 						select {
 						case out <- execResult:
 						case <-ctx.Done():
-							return
+							// Keep draining the SDK stream.
 						}
 					}
 				}

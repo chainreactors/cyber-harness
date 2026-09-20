@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/pkg/aopconn"
 	"strconv"
 	"sync"
 
@@ -10,7 +11,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	types "github.com/chainreactors/cyber/core/types"
-	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -19,8 +19,8 @@ type applicationPTYRoute struct {
 	unsubscribe func()
 }
 
-func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelope, registerNamespaces func(*aop.NamespaceMux) error) error {
-	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil || first == nil {
+func (s *Service) serveApplication(connection *aopconn.Connection, registerNamespaces func(*aop.NamespaceMux) error) error {
+	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil {
 		return fmt.Errorf("application AOP connection is unavailable")
 	}
 	ctx := connection.Context()
@@ -106,6 +106,12 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		value, ok := message.(*aop.ProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected application core message %T", message)
+		}
+		if value.GetAgentHello() != nil {
+			err := fmt.Errorf("AgentHello is only accepted by the node endpoint")
+			fail(envelope.GetId(), "WRONG_ENDPOINT", err)
+			connection.Close()
+			return nil
 		}
 		sessions := s.api.Sessions
 		switch payload := value.Message.(type) {
@@ -359,5 +365,5 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		}
 		return nil
 	}
-	return connection.Run(first, dispatch)
+	return connection.Run(dispatch)
 }

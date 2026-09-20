@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 
 	aop "github.com/chainreactors/cyber/aop"
@@ -12,32 +13,78 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// BroadcastAOPEvent accepts a copy into the Web-owned timeline. Node sequence
+// numbers belong to a different publication stream and never order this one.
 func (s *Service) BroadcastAOPEvent(sessionID string, event *aop.Event) {
 	if s == nil || s.hub == nil || sessionID == "" || event == nil || event.Payload == nil {
 		return
 	}
-	if !s.prepareAOPEvent(sessionID, event) {
+	recreated, err := s.acceptAOPEvent(sessionID, proto.CloneOf(event))
+	if err != nil {
+		slog.Error("persist AOP event", "session", sessionID, "error", err)
 		return
 	}
-	recreated := s.sessionWasRecreated(sessionID, event)
-	var cursor int64
-	if s.store != nil {
-		storedCursor, persisted, err := s.store.AppendAOPEvent(context.Background(), sessionID, event)
-		if err != nil {
-			return
-		}
-		// A positive cursor with persisted=false means this event ID was already
-		// accepted. Do not fan it out a second time. Streaming deltas are not
-		// persisted and intentionally have cursor 0, so they remain live-only.
-		if storedCursor > 0 && !persisted {
-			return
-		}
-		cursor = storedCursor
-	}
-	s.broadcastAOPEvent(sessionID, event, cursor)
 	if recreated {
 		s.broadcastSystemMessage(sessionID, SysSessionContextReset, "The node recreated this session; the agent no longer has the earlier conversation in context.", nil)
 	}
+}
+
+func (s *Service) acceptAOPEvent(sessionID string, event *aop.Event) (bool, error) {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if event.SessionId == "" {
+		event.SessionId = sessionID
+	}
+	if event.Id == "" {
+		event.Id = generateID()
+	}
+	if event.EmittedAt == nil {
+		event.EmittedAt = timestamppb.Now()
+	}
+	key := sessionID
+	if s.sessionSeq == nil {
+		s.sessionSeq = make(map[string]uint64)
+	}
+	if s.endedTurns == nil {
+		s.endedTurns = make(map[string]bool)
+	}
+	terminal := event.SessionId + "\x00" + event.TurnId
+	if event.GetTurnEnded() != nil && event.TurnId != "" && s.endedTurns[terminal] {
+		return false, nil
+	}
+	if _, initialized := s.sessionSeq[key]; !initialized {
+		var maximum uint64
+		if s.store != nil {
+			var err error
+			maximum, err = s.store.MaxAOPEventSeq(context.Background(), key)
+			if err != nil {
+				return false, err
+			}
+		}
+		s.sessionSeq[key] = maximum
+	}
+	recreated := s.sessionWasRecreated(sessionID, event)
+	event.Seq = s.sessionSeq[key] + 1
+	var cursor int64
+	if s.store != nil {
+		var persisted bool
+		var err error
+		cursor, persisted, err = s.store.AppendAOPEvent(context.Background(), sessionID, event)
+		if err != nil {
+			return false, err
+		}
+		if cursor > 0 && !persisted {
+			return false, nil
+		}
+	}
+	// Commit in-memory state only after persistence succeeded, so a retry after
+	// storage failure can still publish the terminal event.
+	s.sessionSeq[key] = event.Seq
+	if event.GetTurnEnded() != nil && event.TurnId != "" {
+		s.endedTurns[terminal] = true
+	}
+	s.broadcastAOPEvent(sessionID, event, cursor)
+	return recreated, nil
 }
 
 // sessionWasRecreated reports that a SessionStarted event announces a session
@@ -70,49 +117,6 @@ func (s *Service) PublishUserMessage(sessionID, turnID string, message *aop.Mess
 		Emitter:   "cyber.web",
 		Payload:   &aop.Event_Message{Message: userMessage},
 	})
-}
-
-func (s *Service) prepareAOPEvent(sessionID string, event *aop.Event) bool {
-	if event.SessionId == "" {
-		event.SessionId = sessionID
-	}
-	if event.Id == "" {
-		event.Id = generateID()
-	}
-	if event.EmittedAt == nil {
-		event.EmittedAt = timestamppb.Now()
-	}
-	sequenceKey := event.SessionId
-	if event.Seq == 0 && s.store != nil {
-		s.eventMu.Lock()
-		_, initialized := s.sessionSeq[sequenceKey]
-		s.eventMu.Unlock()
-		if !initialized {
-			if maximum, err := s.store.MaxAOPEventSeq(context.Background(), sequenceKey); err == nil {
-				s.eventMu.Lock()
-				if _, exists := s.sessionSeq[sequenceKey]; !exists {
-					s.sessionSeq[sequenceKey] = maximum
-				}
-				s.eventMu.Unlock()
-			}
-		}
-	}
-	s.eventMu.Lock()
-	defer s.eventMu.Unlock()
-	if event.GetTurnEnded() != nil && event.TurnId != "" {
-		terminalKey := sequenceKey + "\x00" + event.TurnId
-		if s.endedTurns[terminalKey] {
-			return false
-		}
-		s.endedTurns[terminalKey] = true
-	}
-	if event.Seq == 0 {
-		s.sessionSeq[sequenceKey]++
-		event.Seq = s.sessionSeq[sequenceKey]
-	} else if event.Seq > s.sessionSeq[sequenceKey] {
-		s.sessionSeq[sequenceKey] = event.Seq
-	}
-	return true
 }
 
 func (s *Service) resetTurnTerminal(sessionID, turnID string) {

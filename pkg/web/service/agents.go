@@ -136,19 +136,13 @@ func (s *nodeState) convergeOnToolResult(taskID string, ev *aop.Event) {
 	s.finishTask(taskID, res)
 }
 
-// convergeOnTurnEnd closes a chat task when the ROOT agent session ends.
-// A canceled run still carries the ctx error ("context canceled") — only
-// non-canceled stops surface it as a task error.
-func (s *nodeState) convergeOnTurnEnd(taskID string, ev *aop.Event) {
-	if taskID == "" {
-		return
+// convergeOnTurnEnd releases the waiter after the Runtime terminal was forwarded.
+// Its error is already in that event; returning it again would synthesize a
+// second Web terminal for the same turn.
+func (s *nodeState) convergeOnTurnEnd(taskID string, _ *aop.Event) {
+	if taskID != "" {
+		s.finishTask(taskID, taskResult{})
 	}
-	d := ev.GetTurnEnded()
-	res := taskResult{}
-	if d.StopReason != "canceled" && d.Error != nil {
-		res.Err = d.Error.Message
-	}
-	s.finishTask(taskID, res)
 }
 
 func (s *nodeState) closeAllTasks() {

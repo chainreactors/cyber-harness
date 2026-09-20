@@ -1,8 +1,9 @@
-package agent
+package session
 
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/agent"
 	"testing"
 	"time"
 
@@ -36,7 +37,7 @@ func TestSubagentWithMemoryIOA(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			parent := NewAgent(Config{SessionID: "parent", Hooks: reg, Provider: &scriptedProvider{}, Messages: []*aop.Message{TextInput("private inherited history")}, Loop: taskLoop(func(ctx context.Context, cfg Config) (*Result, error) {
+			parent := agent.NewAgent(agent.Config{SessionID: "parent", Hooks: reg, Provider: &scriptedProvider{}, Messages: []*aop.Message{agent.TextInput("private inherited history")}, Loop: taskLoop(func(ctx context.Context, cfg agent.Config) (*agent.Result, error) {
 				records, err := ioa.Service().ReadPublic(ctx, ioa.Service().ReceiveSpace(), protocols.ReadOptions{All: true})
 				if err != nil || len(records) != 1 || records[0].Content["message"] != "task" {
 					return nil, fmt.Errorf("missing dispatch before execution: %v %v", records, err)
@@ -44,11 +45,12 @@ func TestSubagentWithMemoryIOA(t *testing.T) {
 				if records[0].Meta["subagent"].(map[string]any)["session_id"] != cfg.SessionID {
 					return nil, fmt.Errorf("wrong child identity")
 				}
-				return &Result{Output: "done", Stop: StopReasonCompleted}, nil
+				return &agent.Result{Output: "done", Stop: agent.StopReasonCompleted}, nil
 			})})
-			tool := NewSubAgentTool(nil)
-			defer tool.Close(context.Background())
-			ctx := operation.ContextWithInvocation(withToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "dispatch"})
+
+			tool := newSubagentTestTool(t, parent.Cfg)
+			defer tool.runtime.close(context.Background())
+			ctx := operation.ContextWithInvocation(agent.ContextWithToolAgentConfig(t.Context(), parent.Cfg), operation.Invocation{CallID: "dispatch"})
 			if _, err = tool.Execute(ctx, fmt.Sprintf(`{"mode":%q,"prompt":"task"}`, mode)); err != nil {
 				t.Fatal(err)
 			}

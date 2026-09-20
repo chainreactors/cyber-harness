@@ -467,6 +467,7 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.agentConfig.Model = "gpt-test"
+	rt.agentConfig.MaxTokens, rt.agentConfig.ContextWindow = 8192, 128000
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-status", AgentName: "node-test"})
 	if err != nil {

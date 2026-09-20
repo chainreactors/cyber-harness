@@ -41,7 +41,8 @@ func scanStatusToDB(value types.ScanStatus) string {
 }
 
 func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*types.Scan, error) {
-	if !s.beginWork() {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
 		return nil, fmt.Errorf("web service is closing")
 	}
 	defer s.work.Done()
@@ -76,7 +77,7 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		return nil, fmt.Errorf("store create: %w", err)
 	}
 
-	runCtx, cancel := context.WithCancel(s.workContext)
+	runCtx, cancel := context.WithCancel(workCtx)
 	s.mu.Lock()
 	s.cancels[scan.Id] = cancel
 	s.mu.Unlock()

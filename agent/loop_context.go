@@ -22,7 +22,7 @@ func LoopSchedulerFromContext(ctx context.Context) *LoopScheduler {
 	if scheduler, _ := ctx.Value(loopSchedulerContextKey{}).(*LoopScheduler); scheduler != nil {
 		return scheduler
 	}
-	if cfg, ok := toolAgentConfig(ctx); ok {
+	if cfg, ok := ToolAgentConfig(ctx); ok {
 		return cfg.LoopScheduler
 	}
 	return nil

@@ -19,8 +19,27 @@ func runRemoteConsole(ctx context.Context, rt *agentsession.Runtime, session *ag
 		control = rlterm.NewControl(true, 80, 24)
 	}
 	writer := &remoteTerminalWriter{w: output}
-	return newAgentConsole(ctx, rt, session, option, rlterm.Stream(input, writer, writer, control), bindings).Start()
+	return newAgentConsole(ctx, rt, session, option, rlterm.Stream(remoteTerminalReader{ctx, input}, writer, writer, control), bindings).Start()
 }
+
+// proc closes the input pipe on cancellation. Windows readline only recognizes
+// EOF as an end of input, so translate canceled reads at the terminal boundary.
+type remoteTerminalReader struct {
+	ctx context.Context
+	io.Reader
+}
+
+func (r remoteTerminalReader) Read(p []byte) (int, error) {
+	if r.ctx.Err() != nil {
+		return 0, io.EOF
+	}
+	n, err := r.Reader.Read(p)
+	if err != nil && r.ctx.Err() != nil {
+		err = io.EOF
+	}
+	return n, err
+}
+
 func isSessionBootstrapEvent(event *aop.Event) bool {
 	if event == nil || event.TurnId != "" {
 		return false

@@ -361,58 +361,60 @@ func newRecordingProfile(t *testing.T) (*recordingProfile, *provider.State, func
 	return value, app, closed.Load
 }
 
-func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
-	old, oldApp, oldClosed := newRecordingProfile(t)
+func TestSwapProfileCancelsAndDrainsOldWork(t *testing.T) {
+	old, _, oldClosed := newRecordingProfile(t)
 	next, _, _ := newRecordingProfile(t)
 	svc := NewService(ServiceConfig{Profile: old})
 	defer svc.Close(context.Background())
-
-	leased, release := svc.acquireProviders()
-	if leased != oldApp {
-		t.Fatal("acquireProviders() returned the wrong app")
+	ctx, ok := svc.beginWork()
+	if !ok {
+		t.Fatal("work rejected")
 	}
+	drained := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		if oldClosed() {
+			t.Error("profile closed before work drained")
+		}
+		if _, ok := svc.beginWork(); ok {
+			t.Error("admitted old work after cancellation")
+			svc.work.Done()
+		}
+		svc.work.Done()
+		close(drained)
+	}()
 	if err := svc.swapProfile(next); err != nil {
 		t.Fatal(err)
 	}
-	if oldClosed() {
-		t.Fatal("old app closed while a scan still held a lease")
-	}
-	release()
-	if !oldClosed() {
-		t.Fatal("old app remained open after the final lease released")
+	<-drained
+	if !oldClosed() || svc.profile != next {
+		t.Fatal("old profile not replaced")
 	}
 }
-
-func TestServiceCloseRetainsLeasedProfileAndRetries(t *testing.T) {
-	p, app, closed := newRecordingProfile(t)
+func TestServiceCloseCancelsWorkAndRetriesDrain(t *testing.T) {
+	p, _, closed := newRecordingProfile(t)
 	svc := NewService(ServiceConfig{Profile: p})
-	leased, release := svc.acquireProviders()
-	defer release()
-	if leased != app {
-		t.Fatal("wrong shared app")
+	work, ok := svc.beginWork()
+	if !ok {
+		t.Fatal("work rejected")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := svc.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.Canceled) {
-		t.Fatalf("Close = %v", err)
+	if err := svc.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
+		t.Fatalf("Close=%v", err)
 	}
-	if closed() {
-		t.Fatal("profile closed while leased")
+	if work.Err() == nil || closed() {
+		t.Fatal("close did not cancel before draining")
 	}
-	if next, done := svc.acquireProviders(); next != nil {
-		done()
-		t.Fatal("service admitted work after closing")
+	if svc.providers() != nil {
+		t.Fatal("closed service exposed providers")
 	}
-	release()
-	release() // A request can only release its lease once.
+	svc.work.Done()
 	if err := svc.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !closed() {
-		t.Fatal("profile remained open after release")
-	}
-	if len(svc.profiles) != 0 {
-		t.Fatal("completed profiles remained owned")
+	if !closed() || svc.profile != nil {
+		t.Fatal("profile not closed")
 	}
 }
 
@@ -431,7 +433,7 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 	if closed() {
 		t.Fatal("service released a candidate it did not own")
 	}
-	if len(svc.profiles) != 0 {
+	if svc.profile != nil {
 		t.Fatal("service retained rejected candidate")
 	}
 }

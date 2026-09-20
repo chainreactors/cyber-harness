@@ -11,6 +11,9 @@ import (
 var Version = "dev"
 
 type Option struct {
+	// Explicit records flags actually supplied by the caller, including zero values.
+	Explicit       map[string]bool `no-flag:"true" config:"-"`
+	present        map[string]bool
 	Resolved       *Resolved `no-flag:"true" config:"-"`
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
@@ -88,7 +91,7 @@ type AgentOptions struct {
 	Skills                []string `short:"s" long:"skill" description:"Skill to apply (name or file path). Can specify multiple"`
 	Tools                 []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable. Arsenal is always loaded"`
 	TaskFile              string   `long:"task-file" description:"File containing task description"`
-	Heartbeat             int      `long:"heartbeat" description:"Heartbeat interval in minutes: periodically wake the agent to review context (0 disables)" default:"0"`
+	Heartbeat             int      `long:"heartbeat" config:"heartbeat" description:"Heartbeat interval in minutes: periodically wake the agent to review context (0 disables)" default:"0"`
 	Timeout               int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`

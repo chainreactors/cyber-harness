@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	gkcfg "github.com/gookit/config/v2"
 	yamldrv "github.com/gookit/config/v2/yaml"
@@ -15,7 +16,7 @@ func newConfigLoader() *gkcfg.Config {
 	c := gkcfg.New("cyber")
 	c.WithOptions(func(opt *gkcfg.Options) {
 		opt.DecoderConfig.TagName = "config"
-		opt.ParseDefault = true
+		opt.ParseDefault = false
 	})
 	c.AddDriver(yamldrv.Driver)
 	return c
@@ -45,6 +46,21 @@ func decodeConfig(c *gkcfg.Config, v interface{}) error {
 		return err
 	}
 	applyExplicitReconNumericOptions(c, v)
+	if option, ok := v.(*Option); ok {
+		if option.Sections != nil {
+			var err error
+			option.Extensions, err = option.Sections.Normalize(c.Data())
+			if err != nil {
+				return err
+			}
+		}
+		option.present = make(map[string]bool)
+		visitOptions(option, func(field reflect.StructField, value reflect.Value, path string) {
+			if c.Exists(path) {
+				option.present[path] = true
+			}
+		})
+	}
 	return nil
 }
 
@@ -89,51 +105,12 @@ func LoadAndApplyConfig(option *Option) (string, error) {
 		return "", fmt.Errorf("config file %s: %w", configPath, err)
 	}
 
-	var loaded Option
+	loaded := Option{Sections: option.Sections}
 	if err := LoadConfig(configPath, &loaded); err != nil {
 		return configPath, fmt.Errorf("load config %s: %w", configPath, err)
 	}
 	mergeOption(option, &loaded)
 	return configPath, nil
-}
-
-func mergeOption(dst, src *Option) {
-	dst.Provider = ResolveString(dst.Provider, src.Provider)
-	dst.BaseURL = ResolveString(dst.BaseURL, src.BaseURL)
-	dst.APIKey = ResolveString(dst.APIKey, src.APIKey)
-	dst.Model = ResolveString(dst.Model, src.Model)
-	if dst.MaxTokens == 0 {
-		dst.MaxTokens = src.MaxTokens
-	}
-	if dst.ContextWindow == 0 {
-		dst.ContextWindow = src.ContextWindow
-	}
-	dst.LLMProxy = ResolveString(dst.LLMProxy, src.LLMProxy)
-	dst.CyberhubURL = ResolveString(dst.CyberhubURL, src.CyberhubURL)
-	dst.CyberhubKey = ResolveString(dst.CyberhubKey, src.CyberhubKey)
-	dst.CyberhubMode = ResolveString(dst.CyberhubMode, src.CyberhubMode)
-	dst.FofaKey = ResolveString(dst.FofaKey, src.FofaKey)
-	dst.HunterAPIKey = ResolveString(dst.HunterAPIKey, src.HunterAPIKey)
-	dst.ReconProxy = ResolveString(dst.ReconProxy, src.ReconProxy)
-	if dst.ReconLimit == nil && src.ReconLimit != nil {
-		dst.ReconLimit = src.ReconLimit
-	}
-	dst.Proxy = ResolveString(dst.Proxy, src.Proxy)
-	dst.ServerURL = ResolveString(dst.ServerURL, src.ServerURL)
-	dst.Transport = ResolveString(dst.Transport, src.Transport)
-	dst.NodeName = ResolveString(dst.NodeName, src.NodeName)
-	dst.NodeID = ResolveString(dst.NodeID, src.NodeID)
-	if len(dst.Providers) == 0 && len(src.Providers) > 0 {
-		dst.Providers = src.Providers
-	}
-	dst.ActiveProfile = ResolveString(dst.ActiveProfile, src.ActiveProfile)
-	dst.ScanConfig.Verify = ResolveString(dst.ScanConfig.Verify, src.ScanConfig.Verify)
-	dst.SearchConfig.TavilyKeys = ResolveString(dst.SearchConfig.TavilyKeys, src.SearchConfig.TavilyKeys)
-	if len(dst.Tools) == 0 && len(src.Tools) > 0 {
-		dst.Tools = src.Tools
-	}
-	mergeOutputOptions(&dst.OutputOptions, &src.OutputOptions)
-	dst.DataDir = ResolveString(dst.DataDir, src.DataDir)
 }
 
 func InitDefaultConfig() string {

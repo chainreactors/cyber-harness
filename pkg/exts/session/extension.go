@@ -93,6 +93,20 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := extension.Provide[*session.Runtime](scope, resource.Runtime()); err != nil {
 		return err
 	}
+
+	tool := session.NewSubAgentTool(resource.Runtime(), func(name string) (session.AgentType, error) {
+		skill, ok := store.ByName(name)
+		if !ok {
+			return session.AgentType{}, fmt.Errorf("agent type %q not found", name)
+		}
+		if !skill.Agent {
+			return session.AgentType{}, fmt.Errorf("skill %q is not configured as an agent type", name)
+		}
+		return session.AgentType{FormattedPrompt: store.FormatInvocation(skill, ""), Model: skill.AgentModel, Background: skill.AgentBackground}, nil
+	})
+	if err := extension.Add[coretool.Tool](scope, tool); err != nil {
+		return err
+	}
 	return e.resource.Start(scope.Init(), scope.Lifetime())
 }
 

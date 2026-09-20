@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chainreactors/cyber/core/telemetry"
 	gogopkg "github.com/chainreactors/gogo/v2/pkg"
 	"github.com/chainreactors/sdk/gogo"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
@@ -30,6 +29,7 @@ func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoScanOptions)
 	if eng == nil {
 		return nil, fmt.Errorf("gogo engine is not available")
 	}
+
 	CleanupGogoTempFiles()
 	runOpt := buildGogoRunnerOption(opts)
 	gogoCtx := gogo.NewContext().
@@ -46,27 +46,13 @@ func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoScanOptions)
 		return nil, err
 	}
 
-	out := make(chan *parsers.GOGOResult)
-	go func() {
-		defer telemetry.SDKGoRecover("gogo")
-		defer CleanupGogoTempFiles()
-		defer close(out)
-		for result := range resultCh {
-			if result == nil || !result.Success() {
-				continue
-			}
-			gogoResult, ok := result.Data().(*parsers.GOGOResult)
-			if !ok || gogoResult == nil {
-				continue
-			}
-			select {
-			case out <- gogoResult:
-			case <-ctx.Done():
-				return
-			}
+	return forwardResults(ctx, resultCh, func(result sdktypes.Result) (*parsers.GOGOResult, bool) {
+		if result == nil || !result.Success() {
+			return nil, false
 		}
-	}()
-	return out, nil
+		value, ok := result.Data().(*parsers.GOGOResult)
+		return value, ok && value != nil
+	}, CleanupGogoTempFiles), nil
 }
 
 func buildGogoRunnerOption(opts GogoScanOptions) *gogopkg.RunnerOption {

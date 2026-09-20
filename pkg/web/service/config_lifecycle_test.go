@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/chainreactors/cyber/core/extension"
 	profile "github.com/chainreactors/cyber/pkg/profile"
@@ -61,8 +62,6 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 				BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return current, buildErr },
 			})
 			defer svc.Close(context.Background())
-			_, release := svc.acquireProviders()
-			defer release()
 			if _, err := svc.SaveConfig(t.Context(), configForModel("new")); err == nil {
 				t.Fatal("builder reused the active profile")
 			} else if buildErr != nil && !errors.Is(err, buildErr) {
@@ -78,5 +77,50 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 				t.Fatal("rejected candidate changed the transaction")
 			}
 		})
+	}
+}
+
+func TestSaveConfigSkipsIdenticalContent(t *testing.T) {
+	current, _, closed := newRecordingProfile(t)
+	store := &transactionalConfigStore{cfg: configForModel("same")}
+	svc := NewService(ServiceConfig{Profile: current, ConfigStore: store,
+		BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) {
+			t.Fatal("identical configuration rebuilt the profile")
+			return nil, nil
+		},
+	})
+	defer svc.Close(context.Background())
+	if _, err := svc.SaveConfig(t.Context(), configForModel("same")); err != nil {
+		t.Fatal(err)
+	}
+	if closed() {
+		t.Fatal("identical configuration closed the profile")
+	}
+}
+
+func TestSaveConfigCancelsWorkWithoutWaitingOnItsOwnRequest(t *testing.T) {
+	current, _, closed := newRecordingProfile(t)
+	candidate, _, _ := newRecordingProfile(t)
+	svc := NewService(ServiceConfig{Profile: current, ConfigStore: &transactionalConfigStore{cfg: configForModel("old")},
+		BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return candidate, nil },
+	})
+	defer svc.Close(context.Background())
+	work, admitted := svc.beginWork()
+	if !admitted {
+		t.Fatal("work rejected")
+	}
+	go func() { <-work.Done(); svc.work.Done() }()
+	done := make(chan error, 1)
+	go func() { _, err := svc.SaveConfig(t.Context(), configForModel("new")); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload waited on its own request")
+	}
+	if !closed() || svc.profile != candidate {
+		t.Fatal("profile switch did not finish")
 	}
 }
