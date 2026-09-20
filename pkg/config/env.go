@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/chainreactors/cyber/agent/provider"
 )
 
 type envLookup func(string) (string, bool)
@@ -262,8 +264,8 @@ func providerAPIKeyEnv(providerName string, lookup envLookup) string {
 }
 
 func canonicalEnvProvider(providerName string) string {
-	providerName = NormalizeProvider(providerName)
-	if !IsSupportedProvider(providerName) {
+	providerName = provider.NormalizeProvider(providerName)
+	if !provider.IsSupportedProvider(providerName) {
 		return ""
 	}
 	return providerName
@@ -288,11 +290,11 @@ func normalizeProviderOptions(option *Option) error {
 }
 
 func normalizeProviderName(name string) string {
-	return NormalizeProvider(name)
+	return provider.NormalizeProvider(name)
 }
 
 func inferProviderName(baseURL string) string {
-	return InferProviderFromBaseURL(baseURL)
+	return provider.InferFromBaseURL(baseURL)
 }
 
 func resolveProviderName(name, baseURL string) (string, error) {
@@ -300,7 +302,7 @@ func resolveProviderName(name, baseURL string) (string, error) {
 	if name == "" {
 		name = inferProviderName(baseURL)
 	}
-	if !IsSupportedProvider(name) {
+	if !provider.IsSupportedProvider(name) {
 		return "", fmt.Errorf("unsupported provider %q: use openai/anthropic or a known OpenAI-compatible vendor", name)
 	}
 	return name, nil

@@ -57,7 +57,7 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 	defer server.Close()
 	client := New(ioatools.Config{
 		URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true,
-	}, Dependencies{})
+	})
 	set, err := extension.New(hosttest.Capabilities(), promptext.New(), client)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestConsoleQueriesReuseExtensionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	bindings := ConsoleBindings(client.Service(), "", "")
+	bindings := consoleBindings(client.Service(), "", "")
 	view := consoleapi.View{Out: &output, Err: &output, Table: func(title string, rows [][]string) { fmt.Fprintln(&output, title, rows) }}
 	arguments := map[string][]string{
 		"/spaces": {}, "/nodes": {}, "/messages": {"team"}, "/context": {"team", "message"},

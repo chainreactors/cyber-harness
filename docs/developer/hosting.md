@@ -55,3 +55,21 @@ Wait 返回最终结果与错误，结果还包含 Stop、用量和消息。自�
 stdio 的 Envelope 流与 CLI 的 Event JSONL 历史文件不同，不能互相替代。Web 环境还把会话执行与配置、历史查询分开：实时执行走 AOP，管理查询使用 ConnectRPC。建立连接、创建会话、提交与取消的具体调用见[外部接入教程](../integration.md)，字段见 [API 参考](../api.md)。
 
 本地 subagent、IOA 和 Web Node 也有不同的状态归属。subagent 派生对话但可共享工具环境；IOA 在 Space 中交换消息；Web Node 提供远程执行位置。使用与部署见[Web 与协作](../user/web.md)，不能仅因它们都涉及多个 Agent 就使用同一种身份或恢复策略。
+
+## 借用已安装能力
+
+嵌入入口使用 `harness.New`，需要自定义顺序时使用 `harness.BaseExtensions` 配合具体功能 Extension。
+不要在宿主中直接调用 Session Resource、Provider 初始化或 BashTool 构造方法。
+
+加载后通过 `Runtime()` 运行会话，通过 `Providers()`、`Events()`、`Progress()`、`Processes()` 借用
+需要的能力。取得的对象由 Profile 拥有；宿主仅关闭自身订阅、连接和 Profile。Console 持久 REPL
+显式接收进程 Manager，不通过 Session 获取具体 BashTool。共享事件流的订阅和发布使用同一实例。
+
+
+需要 Session 协议时，在命名空间注册表和 Session 之后安装 `sessionext.NewProtocol()`；不要在宿主里
+调用 `Runtime.NamespaceBindings()` 再手工贡献。IOA 查询只安装 `ioaclient.New(config)`；需要协作时再安装
+`NewCollaboration`，展示通过 `NewConsole` 借用同一个已安装 Service。
+
+Web 宿主使用 `webext.New(webext.Config{Database: path, ...})`。数据库、Service 和 AgentPool 由 Extension
+创建并关闭；业务操作从 `Service()` 借用。HTTP 停止后关闭整个 Set，不能先关闭 Set 再继续使用路由快照。
+可运行的完整实现见 [ACP Server](../../examples/acp/server/main.go)。

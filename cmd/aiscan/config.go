@@ -5,7 +5,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/telemetry"
-	app "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
@@ -14,7 +13,7 @@ import (
 )
 
 // appConfig selects the reusable capability packs in the reference
-// distribution. Shared runtime state remains in app.State.
+// distribution. Runtime capabilities are owned by their extensions.
 type appConfig struct {
 	Resolved      *cfg.Resolved
 	DataDir       string
@@ -39,8 +38,8 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 	return appConfig{
 		DataDir: dataDir, Resolved: option.Resolved,
 		Provider: provider.StartupConfig{
-			Mode: providerMode, Config: app.ProviderConfig(option),
-			Fallbacks: app.FallbackProviderConfigs(option),
+			Mode: providerMode, Config: cfg.ProviderConfig(option),
+			Fallbacks: cfg.FallbackProviderConfigs(option),
 		},
 		Scanner: scannerext.Config{
 			Resources: resources.Options{

@@ -18,7 +18,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
@@ -151,12 +150,16 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return fmt.Errorf("load scanner profile: %w", err)
 	}
 	defer p.Close(context.Background())
-	application, err := p.State()
+	providers, err := p.Providers()
 	if err != nil {
 		return err
 	}
-	_, providerConfig := application.ProviderState()
-	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
+	_, providerConfig := providers.Current()
+	cfg.ApplyResolvedProviderOptions(option, providerConfig)
+	application, err := p.Events()
+	if err != nil {
+		return err
+	}
 
 	// A host without a session runtime still runs commands: the registry and
 	// the tool are capabilities its graph publishes either way.
@@ -310,11 +313,11 @@ func scannerCommandSupportsDebug(name string) bool {
 	}
 }
 
-func emitSessionStarted(application *apppkg.State, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
+func emitSessionStarted(application aop.EventPublisher, sessionID, agentName string, started *aop.SessionStarted, historyMode types.SessionHistory_Mode) {
 	event := &aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionStarted{SessionStarted: started}}
 	_ = types.SetSessionHistory(event, &types.SessionHistory{Mode: historyMode})
 	application.Publish(event)
 }
-func emitSessionEnded(application *apppkg.State, sessionID, agentName, reason string) {
+func emitSessionEnded(application aop.EventPublisher, sessionID, agentName, reason string) {
 	application.Publish(&aop.Event{SessionId: sessionID, Emitter: agentName, Payload: &aop.Event_SessionEnded{SessionEnded: &aop.SessionEnded{Reason: reason}}})
 }

@@ -32,6 +32,10 @@ type ServiceConfig struct {
 }
 
 type Service struct {
+	workContext context.Context
+	stopWork    context.CancelFunc
+	work        sync.WaitGroup
+	workDone    chan struct{}
 	// configGate serializes update/activation with shutdown. Service owns both
 	// candidate and published profiles throughout the transaction.
 	configGate   chan struct{}
@@ -77,7 +81,9 @@ func NewService(cfg ServiceConfig) *Service {
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
+	workContext, stopWork := context.WithCancel(context.Background())
 	svc := &Service{
+		workContext: workContext, stopWork: stopWork,
 		configGate:   make(chan struct{}, 1),
 		configStore:  cfg.ConfigStore,
 		buildProfile: cfg.BuildProfile,
@@ -146,7 +152,14 @@ func (s *Service) Close(ctx context.Context) (resultErr error) {
 	}
 	defer func() { <-s.configGate }()
 	s.appMu.Lock()
+	if !s.closing {
+		s.stopWork()
+	}
 	s.closing = true
+	if s.workDone == nil {
+		s.workDone = make(chan struct{})
+		go func() { s.work.Wait(); close(s.workDone) }()
+	}
 	s.profile = nil
 	s.applicationChangedLocked()
 	s.appMu.Unlock()
@@ -164,6 +177,11 @@ func (s *Service) Close(ctx context.Context) (resultErr error) {
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+	select {
+	case <-s.workDone:
+	case <-ctx.Done():
+		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
 	}
 	resultErr = s.closePending(ctx)
 	for {
@@ -226,13 +244,11 @@ func generateID() string {
 func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 func (s *Service) Status() *types.SystemStatus {
-	app, release := s.acquireApp()
-	provider, providerConfig := app.ProviderState()
-	status := &types.SystemStatus{
-		Version:      config.Version,
-		LlmAvailable: provider != nil,
-	}
-	if app != nil {
+	providers, release := s.acquireProviders()
+	status := &types.SystemStatus{Version: config.Version}
+	if providers != nil {
+		model, providerConfig := providers.Current()
+		status.LlmAvailable = model != nil
 		status.LlmProvider = providerConfig.Provider
 		status.LlmModel = providerConfig.Model
 		status.LlmApiKeyConfigured = strings.TrimSpace(providerConfig.APIKey) != ""
@@ -253,4 +269,14 @@ func (s *Service) Status() *types.SystemStatus {
 		}
 	}
 	return status
+}
+
+func (s *Service) beginWork() bool {
+	s.appMu.Lock()
+	defer s.appMu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.work.Add(1)
+	return true
 }

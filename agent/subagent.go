@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
@@ -33,13 +34,15 @@ type subAgentInfo struct {
 	Mode      string
 	StartedAt time.Time
 	Cancel    context.CancelFunc
-	Inbox     inbox.Inbox
+	SessionID string
 }
 
 type SubAgentTool struct {
 	resolve AgentTypeResolver
 	mu      sync.Mutex
 	running map[string]*subAgentInfo
+	closed  bool
+	workers sync.WaitGroup
 }
 
 func NewSubAgentTool(resolve AgentTypeResolver) *SubAgentTool {
@@ -56,12 +59,11 @@ func (t *SubAgentTool) Description() string {
 }
 
 type SubAgentArgs struct {
-	Action  string `json:"action,omitempty"  jsonschema:"description=create: spawn subagent. list: show running. kill: cancel by name. message: send message to running subagent.,enum=create,enum=list,enum=kill,enum=message"`
+	Action  string `json:"action,omitempty"  jsonschema:"description=create: spawn subagent. list: show running. kill: cancel by session ID or name. Use ioa send for communication.,enum=create,enum=list,enum=kill"`
 	Prompt  string `json:"prompt"            jsonschema:"description=Task description for the subagent (required for create)"`
 	Mode    string `json:"mode,omitempty"    jsonschema:"description=sync: block until done. async: background with fresh context. fork: background inheriting parent conversation (cache-friendly). Default: async.,enum=sync,enum=async,enum=fork"`
 	Type    string `json:"type,omitempty"    jsonschema:"description=Agent type name (a skill with agent:true)"`
 	Name    string `json:"name,omitempty"    jsonschema:"description=Human-readable label for tracking"`
-	Message string `json:"message,omitempty" jsonschema:"description=Message to send (action=message requires name)"`
 	Timeout string `json:"timeout,omitempty" jsonschema:"description=Optional timeout for sync mode (e.g. 30s or 2m). Returns error on timeout."`
 }
 
@@ -84,16 +86,10 @@ func (t *SubAgentTool) Execute(ctx context.Context, arguments string) (*coretool
 			return nil, err
 		}
 		return coretool.TextResult(output), nil
-	case "message":
-		output, err := t.sendMessage(args.Name, args.Message)
-		if err != nil {
-			return nil, err
-		}
-		return coretool.TextResult(output), nil
 	case "", "create":
 		output, err := t.create(ctx, args.Prompt, args.Type, args.Name, args.Mode, args.Timeout)
 		if err != nil {
-			return nil, err
+			return coretool.TextResult(output), err
 		}
 		return coretool.TextResult(output), nil
 	default:
@@ -157,14 +153,7 @@ func (t *SubAgentTool) create(ctx context.Context, prompt, typeName, name, mode,
 		sub.LoadMessages(truncateToLastCompleteBoundary(parentCfg.Messages))
 	}
 
-	switch mode {
-	case "sync":
-		return t.runSync(ctx, sub, prompt, name, typeName, timeout)
-	case "fork":
-		return t.runFork(ctx, sub, prompt, name, typeName, parentInbox, parentCfg.Logger)
-	default:
-		return t.runAsync(ctx, sub, prompt, name, typeName, parentInbox, parentCfg.Logger)
-	}
+	return t.runTask(ctx, sub, prompt, name, typeName, mode, timeout, parentInbox, parentCfg.Logger)
 }
 
 func delegationFromToolCall(toolName string, args any) (*types.DelegationDetail, bool) {
@@ -208,96 +197,161 @@ func delegationDetail(task, typeName, name, mode string) *types.DelegationDetail
 	return detail
 }
 
-func (t *SubAgentTool) runSync(ctx context.Context, sub *Agent, prompt, name, typeName, timeoutStr string) (string, error) {
-	subCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	if timeoutStr != "" {
-		timeout, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			return "", fmt.Errorf("invalid timeout %q: %w", timeoutStr, err)
-		}
-		subCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+// runTask admits and records a task synchronously, including background tasks.
+func (t *SubAgentTool) runTask(ctx context.Context, sub *Agent, input, name, typeName, mode, timeout string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
+	if mode != "sync" && mode != "async" && mode != "fork" {
+		return "", fmt.Errorf("unknown subagent mode %q", mode)
 	}
-
-	r, err := runDerivedSession(subCtx, sub, prompt)
+	var duration time.Duration
+	if timeout != "" {
+		var err error
+		duration, err = time.ParseDuration(timeout)
+		if err != nil || duration <= 0 || mode != "sync" {
+			return "", fmt.Errorf("timeout requires sync mode and a positive duration")
+		}
+	}
+	base := ctx
+	if mode != "sync" {
+		base = context.WithoutCancel(ctx)
+	}
+	taskCtx, cancel := context.WithCancel(base)
+	stopLifetime := func() bool { return false }
+	if sub.Cfg.Lifetime != nil {
+		stopLifetime = context.AfterFunc(sub.Cfg.Lifetime, cancel)
+	}
+	stopTimeout := func() {}
+	if duration > 0 {
+		var c context.CancelFunc
+		taskCtx, c = context.WithTimeout(taskCtx, duration)
+		stopTimeout = c
+	}
+	sub.Cfg.Lifetime = taskCtx
+	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
+	id := sub.SessionID()
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		cancel()
+		stopLifetime()
+		stopTimeout()
+		return "", fmt.Errorf("subagent tool is closed")
+	}
+	t.running[id] = &subAgentInfo{Name: name, Type: typeName, Mode: mode, StartedAt: time.Now(), Cancel: cancel, SessionID: id}
+	t.workers.Add(1)
+	t.mu.Unlock()
+	cleanup := func() { cancel(); stopLifetime(); stopTimeout(); t.untrack(id); t.workers.Done() }
+	if err := sub.Cfg.Inbox.Push(inbox.FromAOPMessage(TextInput(input), inbox.OriginUser)); err != nil {
+		cleanup()
+		return "", err
+	}
+	ev := sessionEvent(sub.configSnapshot(), "")
+	ev.Input = input
+	ev.Deliver = func(ctx context.Context, msg inbox.Message) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := taskCtx.Err(); err != nil {
+			return err
+		}
+		return sub.Cfg.Inbox.Push(msg)
+	}
+	// The dispatch call's deadline still bounds registration for async execution.
+	startCtx, cancelStart := context.WithCancel(ctx)
+	stopStart := context.AfterFunc(taskCtx, cancelStart)
+	_, err := hooks.SessionStart.Emit(startCtx, sub.Cfg.Hooks, ev)
+	stopStart()
+	cancelStart()
+	if err == nil {
+		err = taskCtx.Err()
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Sprintf("subagent %q timed out after %s", name, timeoutStr), nil
-		}
-		return fmt.Sprintf("subagent %q failed: %s", name, err), nil
+		sub.Cfg.Inbox.Close()
+		ev.Reason, ev.Stop, ev.Err = "start_failed", StopReasonError, err
+		endCtx, endCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		_, endErr := hooks.SessionEnd.Emit(endCtx, sub.Cfg.Hooks, ev)
+		endCancel()
+		cleanup()
+		return "", errors.Join(err, endErr)
 	}
-	return fmt.Sprintf("<subagent_result name=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, typeName, resultOutput(r)), nil
-}
-
-func (t *SubAgentTool) runAsync(ctx context.Context, sub *Agent, prompt, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
-	// Background work outlives the tool call that started it: the caller cancels
-	// the invocation context as soon as Execute returns.
-	subCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
-	t.track(name, typeName, "async", cancel, sub.Cfg.Inbox)
-	producer := parentInbox.RegisterProducer("subagent:" + name)
-
+	sub.Cfg.emitter.sessionStart(sub.Cfg.Model)
+	if mode == "sync" {
+		defer cleanup()
+		r, err := runDerivedSession(taskCtx, sub)
+		if err != nil {
+			return fmt.Sprintf("subagent %q (session=%s) failed: %s\n%s", name, id, err, resultOutput(r)), err
+		}
+		return fmt.Sprintf("<subagent_result name=%q session_id=%q type=%q status=\"completed\">\n%s\n</subagent_result>", name, id, typeName, resultOutput(r)), nil
+	}
+	producer := parentInbox.RegisterProducer("subagent:" + id)
 	go func() {
+		defer cleanup()
 		defer producer.Done()
-		defer t.untrack(name)
-		defer cancel()
-		r, err := runDerivedSession(subCtx, sub, prompt)
-		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
+		r, err := runDerivedSession(taskCtx, sub)
+		t.pushCompletion(parentInbox, logger, id, name, typeName, r, err)
 	}()
-
-	return fmt.Sprintf("Started subagent %q (mode=async, type=%s). Will notify on completion.", name, typeName), nil
+	return fmt.Sprintf("Started subagent %q (session=%s, mode=%s, type=%s). Will notify on completion.", name, id, mode, typeName), nil
 }
 
-func (t *SubAgentTool) runFork(ctx context.Context, sub *Agent, directive, name, typeName string, parentInbox inbox.Inbox, logger telemetry.Logger) (string, error) {
-	subCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	sub.Cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
-	t.track(name, typeName, "fork", cancel, sub.Cfg.Inbox)
-	producer := parentInbox.RegisterProducer("subagent:" + name)
-
-	go func() {
-		defer producer.Done()
-		defer t.untrack(name)
-		defer cancel()
-		r, err := runDerivedSession(subCtx, sub, directive)
-		t.pushCompletion(parentInbox, logger, name, typeName, r, err)
-	}()
-
-	return fmt.Sprintf("Started subagent %q (mode=fork, type=%s). Inherits parent context. Will notify on completion.", name, typeName), nil
-}
-
-func runDerivedSession(ctx context.Context, sub *Agent, prompt string) (*Result, error) {
+func runDerivedSession(ctx context.Context, sub *Agent) (result *Result, err error) {
 	turnID := randomID()
-	sub.beginSession()
 	emitter := sub.configSnapshot().emitter.turn(turnID)
 	emitter.turnStart()
-	result, err := sub.Run(ctx, TextInput(prompt), WithTurnID(turnID))
-	stop := StopReasonError
-	var usage *aop.TokenUsage
-	contextTokens := 0
-	if result != nil {
-		stop = result.Stop
-		usage = result.TotalUsage
-		contextTokens = result.ContextTokens
-	} else if errors.Is(err, context.Canceled) {
-		stop = StopReasonCanceled
-	}
-	emitter.turnEnd(stop, usage, contextTokens, err)
-	reason := string(stop)
-	if reason == "" {
-		reason = string(StopReasonCompleted)
-	}
-	sub.endSession(reason)
-	return result, err
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("subagent execution panicked: %v", recovered)
+		}
+		sub.Cfg.Inbox.Close()
+		stop := StopReasonError
+		var usage *aop.TokenUsage
+		tokens := 0
+		if result != nil {
+			stop, usage, tokens = result.Stop, result.TotalUsage, result.ContextTokens
+		}
+		if err != nil {
+			stop = StopReasonError
+		}
+		if errors.Is(err, context.Canceled) {
+			stop = StopReasonCanceled
+		}
+		if stop == "" {
+			stop = StopReasonCompleted
+		}
+		emitter.turnEnd(stop, usage, tokens, err)
+		ev := sessionEvent(sub.configSnapshot(), string(stop))
+		ev.Output, ev.Stop, ev.Err = resultOutput(result), stop, err
+		endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, endErr := hooks.SessionEnd.Emit(endCtx, sub.Cfg.Hooks, ev)
+		err = errors.Join(err, endErr)
+		sub.Cfg.emitter.sessionEnd(string(stop))
+	}()
+	return sub.run(ctx, nil, WithTurnID(turnID))
 }
 
-func (t *SubAgentTool) pushCompletion(parentInbox inbox.Inbox, logger telemetry.Logger, name, typeName string, r *Result, err error) {
+// Close revokes admission before waiting, so new tasks cannot race the join.
+func (t *SubAgentTool) Close(ctx context.Context) error {
+	t.mu.Lock()
+	t.closed = true
+	for _, task := range t.running {
+		task.Cancel()
+	}
+	t.mu.Unlock()
+	done := make(chan struct{})
+	go func() { t.workers.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (t *SubAgentTool) pushCompletion(parentInbox inbox.Inbox, logger telemetry.Logger, sessionID, name, typeName string, r *Result, err error) {
 	status, content := subagentCompletion(r, err)
 
 	msg := inbox.NewMessage(inbox.OriginSystem, "user",
-		fmt.Sprintf("<subagent_completion name=%q type=%q status=%q>\n%s\n</subagent_completion>", name, typeName, status, content))
-	msg.Meta = map[string]any{"subagent": name, "type": typeName, "status": status}
+		fmt.Sprintf("<subagent_completion name=%q session_id=%q type=%q status=%q>\n%s\n</subagent_completion>", name, sessionID, typeName, status, content))
+	msg.Meta = map[string]any{"subagent": name, "session_id": sessionID, "type": typeName, "status": status}
 	if err := parentInbox.Push(msg); err != nil {
 		logger.Warnf("inbox push subagent completion %s: %s", name, err)
 	}
@@ -335,26 +389,6 @@ func subagentCompletion(r *Result, err error) (string, string) {
 	return status, fmt.Sprintf("Error: %s", err)
 }
 
-func (t *SubAgentTool) sendMessage(name, message string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("name is required for message action")
-	}
-	if message == "" {
-		return "", fmt.Errorf("message is required")
-	}
-	t.mu.Lock()
-	info, ok := t.running[name]
-	t.mu.Unlock()
-	if !ok {
-		return "", fmt.Errorf("no running subagent named %q", name)
-	}
-	msg := inbox.NewMessage(inbox.OriginUser, "user", message)
-	if err := info.Inbox.Push(msg); err != nil {
-		return fmt.Sprintf("Subagent %q inbox: %s, message dropped.", name, err), nil
-	}
-	return fmt.Sprintf("Message sent to subagent %q.", name), nil
-}
-
 func (t *SubAgentTool) list() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -363,35 +397,33 @@ func (t *SubAgentTool) list() string {
 	}
 	var sb strings.Builder
 	sb.WriteString("Running subagents:\n")
-	for name, info := range t.running {
+	for id, info := range t.running {
 		elapsed := time.Since(info.StartedAt).Round(time.Second)
-		sb.WriteString(fmt.Sprintf("  - %s (type=%s, mode=%s, running %s)\n", name, info.Type, info.Mode, elapsed))
+		sb.WriteString(fmt.Sprintf("  - %s (session=%s, type=%s, mode=%s, running %s)\n", info.Name, id, info.Type, info.Mode, elapsed))
 	}
 	return sb.String()
 }
 
 func (t *SubAgentTool) kill(name string) (string, error) {
 	t.mu.Lock()
-	info, ok := t.running[name]
+	info := t.running[name]
+	if info == nil {
+		for _, candidate := range t.running {
+			if candidate.Name == name {
+				if info != nil {
+					t.mu.Unlock()
+					return "", fmt.Errorf("ambiguous name %q; use session ID", name)
+				}
+				info = candidate
+			}
+		}
+	}
 	t.mu.Unlock()
-	if !ok {
-		return "", fmt.Errorf("no running subagent named %q", name)
+	if info == nil {
+		return "", fmt.Errorf("no running subagent %q", name)
 	}
 	info.Cancel()
 	return fmt.Sprintf("Subagent %q canceled.", name), nil
-}
-
-func (t *SubAgentTool) track(name, typeName, mode string, cancel context.CancelFunc, ib inbox.Inbox) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.running[name] = &subAgentInfo{
-		Name:      name,
-		Type:      typeName,
-		Mode:      mode,
-		StartedAt: time.Now(),
-		Cancel:    cancel,
-		Inbox:     ib,
-	}
 }
 
 func (t *SubAgentTool) untrack(name string) {
@@ -403,7 +435,14 @@ func (t *SubAgentTool) untrack(name string) {
 func (t *SubAgentTool) uniqueName(base string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if _, exists := t.running[base]; !exists {
+	exists := false
+	for _, info := range t.running {
+		if info.Name == base {
+			exists = true
+			break
+		}
+	}
+	if !exists {
 		return base
 	}
 	b := make([]byte, 4)

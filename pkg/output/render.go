@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	eventjsonl "github.com/chainreactors/cyber/core/events/jsonl"
+
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/charmbracelet/glamour"
@@ -40,7 +42,7 @@ func RenderEventFile(path, format, outputPath string) error {
 		defer file.Close()
 		writer = file
 	}
-	events, err := ReadJSONL(path)
+	events, err := eventjsonl.ReadJSONL(path)
 	if err != nil {
 		return err
 	}

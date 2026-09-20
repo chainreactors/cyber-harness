@@ -1,29 +1,28 @@
-package app
+package config
 
 import (
 	"strings"
 
 	"github.com/chainreactors/cyber/agent/provider"
 	types "github.com/chainreactors/cyber/core/types"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 func defaultProviderConfig() provider.ProviderConfig {
 	return provider.ProviderConfig{
-		Provider: provider.NormalizeProvider(cfg.DefaultProvider),
-		BaseURL:  cfg.DefaultBaseURL,
-		APIKey:   cfg.DefaultAPIKey,
-		Model:    cfg.DefaultModel,
+		Provider: provider.NormalizeProvider(DefaultProvider),
+		BaseURL:  DefaultBaseURL,
+		APIKey:   DefaultAPIKey,
+		Model:    DefaultModel,
 	}
 }
 
 // HasSingleProviderFields reports whether the flat single-provider flags win
 // over the profile list, which is how the runtime resolves the active provider.
-func HasSingleProviderFields(option *cfg.Option) bool {
+func HasSingleProviderFields(option *Option) bool {
 	return option.Provider != "" || option.BaseURL != "" || option.APIKey != "" || option.Model != ""
 }
 
-func entryToProviderConfig(entry cfg.LLMProviderEntry) provider.ProviderConfig {
+func entryToProviderConfig(entry LLMProviderEntry) provider.ProviderConfig {
 	providerName := strings.TrimSpace(entry.Provider)
 	if providerName == "" {
 		providerName = provider.InferFromBaseURL(entry.BaseURL)
@@ -49,7 +48,7 @@ func entryToProviderConfig(entry cfg.LLMProviderEntry) provider.ProviderConfig {
 
 // activeProviderIndex resolves the primary provider profile by ActiveProfile
 // id; list position is meaningless, so an unset or unknown id selects index 0.
-func activeProviderIndex(option *cfg.Option) int {
+func activeProviderIndex(option *Option) int {
 	if option.ActiveProfile != "" {
 		for i, entry := range option.Providers {
 			if entry.ID == option.ActiveProfile {
@@ -60,7 +59,7 @@ func activeProviderIndex(option *cfg.Option) int {
 	return 0
 }
 
-func applyProviderLimits(providerConfig *provider.ProviderConfig, option *cfg.Option) {
+func applyProviderLimits(providerConfig *provider.ProviderConfig, option *Option) {
 	if option.MaxTokens != 0 {
 		providerConfig.MaxTokens = option.MaxTokens
 	}
@@ -69,7 +68,7 @@ func applyProviderLimits(providerConfig *provider.ProviderConfig, option *cfg.Op
 	}
 }
 
-func ProviderConfig(option *cfg.Option) provider.ProviderConfig {
+func ProviderConfig(option *Option) provider.ProviderConfig {
 	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
 		applyProviderLimits(&cfg, option)
@@ -99,7 +98,7 @@ func ProviderConfig(option *cfg.Option) provider.ProviderConfig {
 	return cfg
 }
 
-func FallbackProviderConfigs(option *cfg.Option) []provider.ProviderConfig {
+func FallbackProviderConfigs(option *Option) []provider.ProviderConfig {
 	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
 		active := activeProviderIndex(option)
 		var configs []provider.ProviderConfig
@@ -118,7 +117,7 @@ func FallbackProviderConfigs(option *cfg.Option) []provider.ProviderConfig {
 	return configs
 }
 
-func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig provider.ProviderConfig) {
+func ApplyResolvedProviderOptions(option *Option, providerConfig provider.ProviderConfig) {
 	option.Provider = providerConfig.Provider
 	option.BaseURL = providerConfig.BaseURL
 	option.APIKey = providerConfig.APIKey
@@ -131,7 +130,7 @@ func ApplyResolvedProviderOptions(option *cfg.Option, providerConfig provider.Pr
 // canonical config proto. This is the only provider-config path used when a
 // DistributeConfig is already in hand (remote agents, hub reload).
 func ProviderConfigFromProto(llm *types.LLMConfig) provider.ProviderConfig {
-	active := cfg.ActiveLLMProvider(llm)
+	active := ActiveLLMProvider(llm)
 	if active == nil {
 		return defaultProviderConfig()
 	}
@@ -143,7 +142,7 @@ func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []provider.ProviderC
 	if llm == nil {
 		return nil
 	}
-	active := cfg.ActiveLLMProvider(llm)
+	active := ActiveLLMProvider(llm)
 	var configs []provider.ProviderConfig
 	for _, profile := range llm.Providers {
 		if active != nil && profile.Id == active.Id {
@@ -155,7 +154,7 @@ func FallbackProviderConfigsFromProto(llm *types.LLMConfig) []provider.ProviderC
 }
 
 func providerConfigFromProto(profile *types.LLMProviderConfig) provider.ProviderConfig {
-	profile = cfg.NormalizeLLMProvider(profile)
+	profile = NormalizeLLMProvider(profile)
 	if profile == nil {
 		return defaultProviderConfig()
 	}

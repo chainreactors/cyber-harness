@@ -11,7 +11,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 )
@@ -36,7 +35,7 @@ func (r fixedPromptResolver) Build(context.Context, agentprompt.Context) agentpr
 func TestResolveSystemPromptUsesConfigResolver(t *testing.T) {
 	rt := &Runtime{
 		agentConfig: agent.Config{PromptResolver: fixedPromptResolver("runtime")},
-		logger:      telemetry.NopLogger(),
+		logger:      telemetry.NewLoggerRef(nil),
 	}
 	result, err := rt.resolveSystemPrompt(t.Context(), nil)
 	if err != nil || result != "runtime" {
@@ -60,17 +59,17 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := apptest.NewState(t, telemetry.NopLogger(), nil)
+			application := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 			resolver := defaultPromptResolver(t)
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"cyber"}, State: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
+			rt, err := newUnitResource(t, application, Config{BaseSkills: []string{"cyber"}, SelectedSkills: option.Skills, Logger: telemetry.NewLoggerRef(nil), Loop: agent.StandardLoop{}, PromptResolver: resolver})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := hosttest.Set(t, extension.Provided[*apppkg.State](application), rt)
+			rtSet := hosttest.Set(t, extension.Provided[*apptest.Fixture](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

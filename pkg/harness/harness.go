@@ -12,11 +12,14 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/proc"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -39,12 +42,15 @@ type Config struct {
 // publishes. Constructing a Harness does not start resources; call Load
 // before using any accessor and Close it even when Load fails.
 type Harness struct {
-	set      *extension.Set
-	app      *apppkg.State
-	runtime  *agentsession.Runtime
-	tools    coretool.Executor
-	commands coretool.CommandExecutor
-	bash     *terminaltool.BashTool
+	set       *extension.Set
+	providers *provider.State
+	events    *events.Stream
+	progress  *eventbus.Bus[*toolpb.Progress]
+	processes *proc.Manager
+	runtime   *agentsession.Runtime
+	tools     coretool.Executor
+	commands  coretool.CommandExecutor
+	bash      *terminaltool.BashTool
 }
 
 // New builds a harness without loading it.
@@ -70,9 +76,19 @@ func New(config Config) (*Harness, error) {
 	// stable surface to run against.
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		var err error
-		if h.app, err = extension.Use[*apppkg.State](scope); err != nil {
+		if h.providers, err = extension.Use[*provider.State](scope); err != nil {
 			return err
 		}
+		if h.events, err = extension.Use[*events.Stream](scope); err != nil {
+			return err
+		}
+		if h.progress, err = extension.Use[*eventbus.Bus[*toolpb.Progress]](scope); err != nil {
+			return err
+		}
+		if h.processes, err = extension.Use[*proc.Manager](scope); err != nil {
+			return err
+		}
+
 		if h.tools, err = extension.Use[coretool.Executor](scope); err != nil {
 			return err
 		}
@@ -116,14 +132,6 @@ func (h *Harness) Close(ctx context.Context) error {
 // Active reports whether the graph is loaded and accepting work.
 func (h *Harness) Active() bool { return h != nil && h.set != nil && h.set.Active() }
 
-// State returns the shared application state after Load.
-func (h *Harness) State() (*apppkg.State, error) {
-	if !h.Active() || h.app == nil {
-		return nil, fmt.Errorf("harness is not active")
-	}
-	return h.app, nil
-}
-
 // Runtime returns the session runtime for a conversational harness.
 func (h *Harness) Runtime() (*agentsession.Runtime, error) {
 	if !h.Active() || h.runtime == nil {
@@ -154,4 +162,36 @@ func (h *Harness) Bash() (*terminaltool.BashTool, error) {
 		return nil, fmt.Errorf("harness is not active")
 	}
 	return h.bash, nil
+}
+
+// Providers borrows a capability from the active installation.
+func (h *Harness) Providers() (*provider.State, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.providers, nil
+}
+
+// Events borrows a capability from the active installation.
+func (h *Harness) Events() (*events.Stream, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.events, nil
+}
+
+// Progress borrows a capability from the active installation.
+func (h *Harness) Progress() (*eventbus.Bus[*toolpb.Progress], error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.progress, nil
+}
+
+// Processes borrows a capability from the active installation.
+func (h *Harness) Processes() (*proc.Manager, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.processes, nil
 }

@@ -2,6 +2,7 @@
 package native
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/chainreactors/cyber/agent"
@@ -11,7 +12,7 @@ import (
 	looptool "github.com/chainreactors/cyber/tools/loop"
 )
 
-type Extension struct{}
+type Extension struct{ subagent *agent.SubAgentTool }
 
 func New() *Extension { return &Extension{} }
 
@@ -33,6 +34,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			Model:           skill.AgentModel, Background: skill.AgentBackground,
 		}, nil
 	})
+	e.subagent = subagent
 	if err := extension.Add[coretool.Tool](scope, subagent); err != nil {
 		return err
 	}
@@ -40,3 +42,10 @@ func (e *Extension) Load(scope *extension.Scope) error {
 }
 
 var _ extension.Extension = (*Extension)(nil)
+
+func (e *Extension) Close(ctx context.Context) error {
+	if e.subagent == nil {
+		return nil
+	}
+	return e.subagent.Close(ctx)
+}

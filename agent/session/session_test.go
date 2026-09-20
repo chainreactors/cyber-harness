@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	coreevents "github.com/chainreactors/cyber/core/events"
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/inbox"
@@ -459,10 +460,10 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}`))
 	}))
 	defer srv.Close()
-	if _, _, err := rt.app.ReloadProvider(context.Background(), agent.ProviderConfig{
+	if _, _, err := rt.providers.Reload(context.Background(), agent.ProviderConfig{
 		Provider: "openai", Model: "gpt-test", BaseURL: srv.URL + "/v1", APIKey: "test",
 		ContextWindow: 128000, MaxTokens: 8192, Timeout: 45,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rt.agentConfig.Model = "gpt-test"
@@ -677,12 +678,12 @@ func newBareRuntime(t *testing.T, values []coretool.Command, provider agent.Prov
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	application := apptest.NewState(t, nil, nil)
+	application := apptest.NewFixture(t, nil, nil)
 	rt := &Runtime{
-		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
-		commandRegistry: reg, tools: tools, bash: bash,
+		history: JSONLHistory{}, primarySessionID: "main-repl", providers: application.Providers, events: application.Stream, logger: application.Logger, ctx: ctx, cancel: cancel,
+		commandRegistry: reg, tools: tools, shell: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application.Stream, Logger: telemetry.NewLoggerRef(nil), PromptResolver: defaultPromptResolver(t)},
 		closeDone:   make(chan struct{}), loaded: true,
 	}
 	commandValues, commandIndex, err := commandDeclarations(nil)

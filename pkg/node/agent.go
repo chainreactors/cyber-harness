@@ -9,12 +9,12 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
 	profile "github.com/chainreactors/cyber/pkg/profile"
@@ -51,29 +51,37 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 		return err
 	}
 	defer p.Close(context.Background())
-	application, err := p.State()
+	providers, err := p.Providers()
 	if err != nil {
 		return err
 	}
-	_, providerConfig := application.ProviderState()
-	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
+	_, providerConfig := providers.Current()
+	cfg.ApplyResolvedProviderOptions(option, providerConfig)
 	rt, err := p.Runtime()
 	if err != nil {
 		return err
 	}
-	repl, err := console.StartPersistent(rt, option, p.ConsoleBindings())
+	processes, err := p.Processes()
+	if err != nil {
+		return err
+	}
+	progress, err := p.Progress()
+	if err != nil {
+		return err
+	}
+	repl, err := console.StartPersistent(rt, processes, option, p.ConsoleBindings())
 	if err != nil {
 		return err
 	}
 	defer repl.Close()
 
 	chatHandler := &chatAgentHandler{
-		rt:     rt,
-		app:    application,
-		option: option,
-		logger: logger,
-		ready:  make(chan struct{}),
-		status: p.AgentStatus,
+		rt:        rt,
+		providers: providers,
+		option:    option,
+		logger:    logger,
+		ready:     make(chan struct{}),
+		status:    p.AgentStatus,
 	}
 
 	connectionDone := make(chan struct{})
@@ -88,7 +96,7 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 			Registry:           rt.CommandRegistry(),
 			Executor:           rt.Tools(),
 			Agent:              rt,
-			Progress:           application.Progress,
+			Progress:           progress,
 			Hooks:              rt.Hooks(),
 			Logger:             logger,
 			Chat:               chatHandler,
@@ -101,7 +109,7 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 		_ = connect(ctx, connection)
 	}()
 
-	if provider, _ := application.ProviderState(); provider == nil {
+	if provider, _ := providers.Current(); provider == nil {
 		select {
 		case <-chatHandler.ready:
 		case <-ctx.Done():
@@ -109,7 +117,7 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 			return nil
 		}
 	}
-	if provider, _ := application.ProviderState(); provider == nil {
+	if provider, _ := providers.Current(); provider == nil {
 		logger.Warnf("no LLM provider configured; remote REPL and PTY are available, autonomous agent loop is disabled")
 		<-ctx.Done()
 		<-connectionDone
@@ -158,7 +166,7 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 
 type chatAgentHandler struct {
 	rt        *agentsession.Runtime
-	app       *apppkg.State
+	providers *provider.State
 	option    *cfg.Option
 	logger    telemetry.Logger
 	ready     chan struct{}
@@ -201,7 +209,7 @@ func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.
 	if h.status != nil {
 		return result, h.status()
 	}
-	return result, AgentStatus(h.app)
+	return result, AgentStatus(h.providers)
 }
 
 // ---------------------------------------------------------------------------

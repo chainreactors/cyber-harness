@@ -15,7 +15,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -142,13 +141,13 @@ func commandDescription(store *skills.Store, location string) string {
 }
 
 // AgentStatus reports Agent provider/model health; the Profile adds its status.
-func AgentStatus(app *apppkg.State) *aop.AgentStatus {
+func AgentStatus(state *provider.State) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
-	if app != nil {
-		_, providerConfig := app.ProviderState()
+	if state != nil {
+		_, providerConfig := state.Current()
 		status.Provider = providerConfig.Provider
 		status.Model = providerConfig.Model
-		health := app.ProviderHealth()
+		health := state.Health()
 		if health.State == provider.HealthFailed || (health.State == provider.HealthNotConfigured && health.Error != "") {
 			status.ConfigError = statusOneLine(health.Error, 240)
 		}
@@ -167,14 +166,14 @@ func ReloadConfig(distribute *types.DistributeConfig, runtime *session.Runtime, 
 	if distribute == nil {
 		return nil, "", fmt.Errorf("remote config is required")
 	}
-	providerConfig := apppkg.ProviderConfigFromProto(distribute.GetLlm())
+	providerConfig := cfg.ProviderConfigFromProto(distribute.GetLlm())
 	provider, resolved, err := runtime.ReloadResolvedProvider(providerConfig)
 	if err != nil {
 		return nil, "", err
 	}
 	model := resolved.Model
 	if option != nil {
-		apppkg.ApplyResolvedProviderOptions(option, resolved)
+		cfg.ApplyResolvedProviderOptions(option, resolved)
 	}
 	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
 	return provider, model, nil

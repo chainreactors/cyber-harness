@@ -3,11 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/cyber/core/resource"
-	configpkg "github.com/chainreactors/cyber/pkg/config"
-	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	webext "github.com/chainreactors/cyber/pkg/exts/web"
-	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,9 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/core/resource"
+	configpkg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/extension"
 	types "github.com/chainreactors/cyber/core/types"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
 	web "github.com/chainreactors/cyber/pkg/web"
@@ -26,7 +25,7 @@ import (
 )
 
 func newHandler(service web.Service, static http.Handler) *web.Handler {
-	handler, err := web.NewHandler(service.Auth(), static, loadedRoutes(service)...)
+	handler, err := web.NewHandler(service.Auth(), static, web.ManagementRoutes(service)...)
 	if err != nil {
 		panic(err)
 	}
@@ -34,25 +33,9 @@ func newHandler(service web.Service, static http.Handler) *web.Handler {
 }
 
 func registerConnectServices(mux *http.ServeMux, service web.Service) {
-	for _, route := range loadedRoutes(service) {
+	for _, route := range web.ManagementRoutes(service) {
 		mux.Handle(route.Pattern, route.Handler)
 	}
-}
-
-func loadedRoutes(service web.Service) []web.Route {
-	routes := webext.New(service)
-	set, err := extension.New(routes)
-	if err != nil {
-		panic(err)
-	}
-	if err := set.Load(context.Background()); err != nil {
-		panic(err)
-	}
-	result := routes.Routes()
-	if err := set.Close(context.Background()); err != nil {
-		panic(err)
-	}
-	return result
 }
 
 func newAccessKeyAuth(key string) func(http.Handler) http.Handler {

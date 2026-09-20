@@ -81,8 +81,8 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if value.URL == "" {
-		return nil, nil
+	if option == nil {
+		option = &cfg.Option{}
 	}
 	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
 }

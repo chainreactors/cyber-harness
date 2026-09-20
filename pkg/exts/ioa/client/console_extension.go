@@ -1,28 +1,22 @@
 package client
 
 import (
-	"fmt"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/console/api"
 	"github.com/chainreactors/cyber/tools/ioa"
 )
 
-// ConsoleExtension installs IOA presentation only when a profile selects a TUI.
-type ConsoleExtension struct {
-	bindings *api.Bindings
-}
+type ConsoleConfig struct{ Space, Endpoint string }
+type ConsoleExtension struct{ options ConsoleConfig }
 
-func NewConsole(reader ioa.Reader, space, endpoint string) (*ConsoleExtension, error) {
-	if reader == nil {
-		return nil, fmt.Errorf("IOA presentation requires IOA reader")
-	}
-	return &ConsoleExtension{bindings: ConsoleBindings(reader, space, endpoint)}, nil
+func NewConsole(options ConsoleConfig) *ConsoleExtension {
+	return &ConsoleExtension{options: options}
 }
 func (e *ConsoleExtension) Load(scope *extension.Scope) error {
-	if err := scope.Init().Err(); err != nil {
+	reader, err := extension.Use[*ioa.Service](scope)
+	if err != nil {
 		return err
 	}
-	return extension.Add(scope, e.bindings)
+	return extension.Add(scope, consoleBindings(reader, e.options.Space, e.options.Endpoint))
 }
 
 var _ extension.Extension = (*ConsoleExtension)(nil)

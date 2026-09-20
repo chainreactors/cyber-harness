@@ -11,7 +11,6 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
@@ -29,7 +28,7 @@ func (inertProvider) ChatCompletion(context.Context, *provider.ChatCompletionReq
 }
 
 func TestSessionCloseDoesNotCloseBorrowedLoop(t *testing.T) {
-	application := &apppkg.State{}
+	application := apptest.NewFixture(t, nil, nil)
 	l := loopext.New(loopFunc(func(context.Context, agent.Config) (*agent.Result, error) { return &agent.Result{Output: "alive"}, nil }))
 	s := sessionext.New(agentsession.Config{})
 	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), l, s)...)
@@ -66,10 +65,10 @@ func TestLoopPrecedesSessionInCompositionOrder(t *testing.T) {
 		managed <- loop
 		return &agent.Result{Stop: agent.StopReasonCompleted}, nil
 	})
-	application := &apppkg.State{}
-	application.SetProvider(inertProvider{}, agent.ProviderConfig{})
+	application := apptest.NewFixture(t, nil, nil)
+	application.Providers.Set(inertProvider{}, agent.ProviderConfig{})
 	loop := loopext.New(selected)
-	sessions := sessionext.New(agentsession.Config{State: application})
+	sessions := sessionext.New(agentsession.Config{Providers: application.Providers})
 	set, err := extension.New(append(apptest.Entries(t, application), promptext.New(), loop, sessions)...)
 	if err != nil {
 		t.Fatal(err)

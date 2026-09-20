@@ -10,7 +10,6 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
@@ -28,10 +27,10 @@ type agentProfile struct {
 }
 
 func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string, bashTimeout int) (*agentProfile, error) {
-	sessionConfig := agentsession.Config{
-		NodeName: cfg.ResolveNodeName(option.NodeName),
-		Option:   &option, Logger: logger, PrimarySessionID: "main", Loop: agent.StandardLoop{},
-	}
+	sessionConfig := sessionext.ConfigFromOption(&option, agentsession.Config{
+		NodeName:         cfg.ResolveNodeName(option.NodeName),
+		PrimarySessionID: "main", Loop: agent.StandardLoop{},
+	})
 	loop := loopext.New(sessionConfig.Loop)
 
 	// This build routes nothing, so it publishes the disabled endpoint and
@@ -42,8 +41,8 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 		SkillExclude: []string{"cyber"},
 		Terminal:     terminalext.Config{Timeout: bashTimeout},
 		Provider: provider.StartupConfig{
-			Mode: provider.StartupRequired, Config: apppkg.ProviderConfig(&option),
-			Fallbacks: apppkg.FallbackProviderConfigs(&option),
+			Mode: provider.StartupRequired, Config: cfg.ProviderConfig(&option),
+			Fallbacks: cfg.FallbackProviderConfigs(&option),
 		},
 		Logger: logger,
 	})

@@ -1,28 +1,13 @@
 package client
 
 import (
-	"context"
-	"testing"
-	"time"
-
-	inboxpkg "github.com/chainreactors/cyber/agent/inbox"
 	ioaclient "github.com/chainreactors/ioa/client"
+	"testing"
 )
 
-func TestSubscribeIOASpaceTypedNilStreamReturns(t *testing.T) {
-	var concrete *ioaclient.Client
-	var stream ioaclient.StreamAPI = concrete
-	done := make(chan struct{})
-	go func() {
-		subscribeIOASpace(context.Background(), stream, "space-1", func() string { return "node-1" }, func(inboxpkg.Message) error {
-			return nil
-		}, nil, nil)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("typed-nil IOA stream did not return")
+func TestTypedNilDependency(t *testing.T) {
+	var client *ioaclient.Client
+	if !isNilIOADependency(client) {
+		t.Fatal("typed nil was not recognized")
 	}
 }

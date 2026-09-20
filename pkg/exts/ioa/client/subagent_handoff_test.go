@@ -1,218 +1,194 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"sync"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	aop "github.com/chainreactors/cyber/aop"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/core/types"
-	ioaclient "github.com/chainreactors/ioa/client"
+	coretool "github.com/chainreactors/cyber/core/tool"
+
+	agenthooks "github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/types"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
+	ioaserver "github.com/chainreactors/ioa/server"
 )
 
-type handoffClient struct {
-	mu         sync.Mutex
-	spaceCalls int
-	bodies     []protocols.SendMessage
-}
-
-func (c *handoffClient) NodeID() string { return "parent-node" }
-func (c *handoffClient) RegisterNode(context.Context, string, string, map[string]any) (protocols.Node, error) {
-	return protocols.Node{ID: c.NodeID()}, nil
-}
-func (c *handoffClient) Space(context.Context, string, string, ...string) (protocols.SpaceInfo, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.spaceCalls++
-	return protocols.SpaceInfo{ID: "space-1", Name: "test"}, nil
-}
-func (c *handoffClient) Send(_ context.Context, spaceID string, body protocols.SendMessage) (protocols.Message, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.bodies = append(c.bodies, body)
-	return protocols.Message{ID: "message-" + string(rune('0'+len(c.bodies))), SpaceID: spaceID}, nil
-}
-func (c *handoffClient) Read(context.Context, string, protocols.ReadOptions) ([]protocols.Message, error) {
-	return nil, nil
-}
-
-func (c *handoffClient) snapshot() (int, []protocols.SendMessage) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.spaceCalls, append([]protocols.SendMessage(nil), c.bodies...)
-}
-
-func waitHandoffBodies(t *testing.T, client *handoffClient, count int) (int, []protocols.SendMessage) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		spaceCalls, bodies := client.snapshot()
-		if len(bodies) >= count {
-			return spaceCalls, bodies
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	_, bodies := client.snapshot()
-	t.Fatalf("messages = %d, want %d", len(bodies), count)
-	return 0, bodies
-}
-
-func handoffEvent(t *testing.T, sessionID, agentName string, event *aop.Event) *aop.Event {
-	t.Helper()
-	event.SessionId = sessionID
-	event.Emitter = agentName
-	return event
-}
-
-func TestIOAHandoffFromAOPBus(t *testing.T) {
-	client := &handoffClient{}
-	bus := coreevents.New()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
-	defer cancel()
-
-	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
-		Model:            "test-model",
-		ParentSessionId:  "parent-session",
-		ParentToolCallId: "spawn-1",
-	}}})
-	if err := types.SetDelegation(start, &types.DelegationDetail{
-		Task:      "inspect target",
-		AgentName: "worker",
-		RunMode:   types.DelegationRunForeground,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	bus.Publish(start)
-
-	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{
-		Id: "m-1", Role: "assistant", Content: []*aop.Content{aop.Text("inspection complete")},
-	}}}))
-	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
-
-	spaceCalls, bodies := waitHandoffBodies(t, client, 2)
-	if spaceCalls != 1 {
-		t.Fatalf("space calls = %d, want 1", spaceCalls)
-	}
-	for i, body := range bodies {
-		if body.ContentType != "handoff" {
-			t.Fatalf("message %d content_type = %q", i, body.ContentType)
-		}
-		if len(body.Content) != 2 || body.Content["title"] == nil || body.Content["message"] == nil {
-			t.Fatalf("message %d content = %#v, want native handoff title/message", i, body.Content)
-		}
-	}
-	delegate, returned := bodies[0], bodies[1]
-	if delegate.Refs != nil {
-		t.Fatalf("delegate refs = %#v, want nil", delegate.Refs)
-	}
-	meta, ok := delegate.Meta["subagent"].(map[string]any)
-	if !ok {
-		t.Fatalf("delegate meta = %#v", delegate.Meta)
-	}
-	if meta["phase"] != "delegate" || meta["parent_tool_call_id"] != "spawn-1" || meta["mode"] != "sync" {
-		t.Fatalf("delegate meta = %#v", meta)
-	}
-	if delegate.Content["message"] != "inspect target" {
-		t.Fatalf("delegate message = %#v", delegate.Content["message"])
-	}
-	retMeta, ok := returned.Meta["subagent"].(map[string]any)
-	if !ok || retMeta["phase"] != "return" || retMeta["status"] != "completed" {
-		t.Fatalf("return meta = %#v", returned.Meta)
-	}
-	if returned.Content["message"] != "inspection complete" {
-		t.Fatalf("return message = %#v", returned.Content["message"])
-	}
-	refs := returned.Refs
-	if refs == nil || len(refs.Messages) != 1 || refs.Messages[0] != "message-1" {
-		t.Fatalf("return refs = %#v, want delegation message %q", refs, "message-1")
+func TestHandoffAndSessionRouting(t *testing.T) {
+	for _, backend := range []string{"memory", "http"} {
+		t.Run(backend, func(t *testing.T) {
+			config := service.Config{Space: "work", AutoRegister: true}
+			if backend == "http" {
+				store := ioaserver.NewMemoryStore()
+				defer store.Close()
+				server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "test-key")))
+				defer server.Close()
+				config.URL = strings.Replace(server.URL, "http://", "http://test-key@", 1)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			reg := hooks.New()
+			connection := New(config)
+			e := NewCollaboration(CollaborationOptions{})
+			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = set.Load(ctx); err != nil {
+				t.Fatal(err)
+			}
+			defer set.Close(context.Background())
+			got := make(chan inbox.Message, 4)
+			ev := agenthooks.SessionEvent{SessionID: "child", ParentID: "parent", ParentToolCallID: "call", AgentName: "worker", Model: "test", Input: "skill + task", Delegation: &types.DelegationDetail{Task: "task", RunMode: types.DelegationRunForeground}, Deliver: func(_ context.Context, m inbox.Message) error { got <- m; return nil }}
+			if _, err = agenthooks.SessionStart.Emit(ctx, reg, ev); err != nil {
+				t.Fatal(err)
+			}
+			client := e.service.Client()
+			space := e.Service().ReceiveSpace()
+			history, err := client.Read(ctx, space, protocols.ReadOptions{All: true})
+			if err != nil || len(history) != 1 {
+				t.Fatalf("dispatch: %v %v", history, err)
+			}
+			if history[0].Content["input"] != "skill + task" || history[0].Content["message"] != "task" {
+				t.Fatalf("input: %#v", history[0])
+			}
+			msg, err := client.Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": "sibling input"}, Refs: &protocols.Ref{Nodes: []string{client.NodeID()}}, Meta: map[string]any{"source_session_id": "sibling", "target_session_id": "child"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case m := <-got:
+				if m.Meta["message_id"] != msg.ID || m.Origin != inbox.OriginPeer {
+					t.Fatalf("input: %#v", m)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if err = e.deliver(ctx, msg); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case m := <-got:
+				t.Fatalf("duplicate: %#v", m)
+			default:
+			}
+			ev.Output = "result"
+			ev.Stop = agenthooks.StopReasonCompleted
+			if _, err = agenthooks.SessionEnd.Emit(ctx, reg, ev); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = agenthooks.SessionEnd.Emit(ctx, reg, ev); err != nil {
+				t.Fatal(err)
+			}
+			history, err = client.Read(ctx, space, protocols.ReadOptions{All: true})
+			if err != nil || len(history) != 3 {
+				t.Fatalf("history: %v %v", history, err)
+			}
+			if history[2].Refs.Messages[0] != history[0].ID || history[2].Content["message"] != "result" {
+				t.Fatalf("return: %#v", history[2])
+			}
+			msg.ID = "late"
+			if err = e.deliver(ctx, msg); err == nil {
+				t.Fatal("closed task still receives")
+			}
+		})
 	}
 }
 
-func TestIOAHandoffFailedRun(t *testing.T) {
-	client := &handoffClient{}
-	bus := coreevents.New()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
-	defer cancel()
-
-	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
-		ParentSessionId: "parent-session", ParentToolCallId: "spawn-2",
-	}}})
-	if err := types.SetDelegation(start, &types.DelegationDetail{
-		Task:      "inspect target",
-		AgentName: "worker",
-		RunMode:   types.DelegationRunBackground,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	bus.Publish(start)
-	bus.Publish(handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{
-		StopReason: "error", Error: &aop.ProtocolError{Message: "boom"},
-	}}}))
-
-	_, bodies := waitHandoffBodies(t, client, 2)
-	retMeta, ok := bodies[1].Meta["subagent"].(map[string]any)
-	if !ok || retMeta["status"] != "failed" || retMeta["mode"] != "async" {
-		t.Fatalf("return meta = %#v", bodies[1].Meta)
-	}
-	if bodies[1].Content["message"] != "boom" {
-		t.Fatalf("return message = %#v", bodies[1].Content["message"])
-	}
-}
-
-func TestIOAHandoffIgnoresNonDelegationSessions(t *testing.T) {
-	client := &handoffClient{}
-	bus := coreevents.New()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
-	defer cancel()
-
-	bus.Publish(handoffEvent(t, "root-session", "cyber", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{Model: "test-model"}}}))
-	bus.Publish(handoffEvent(t, "root-session", "cyber", &aop.Event{Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}}))
-
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		_, bodies := client.snapshot()
-		if len(bodies) > 0 {
-			t.Fatalf("unexpected handoff messages: %#v", bodies)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-func TestIOAHandoffTypedNilClientIsDisabled(t *testing.T) {
-	var concrete *ioaclient.Client
-	var client protocols.ClientAPI = concrete
-	if !isNilIOADependency(client) {
-		t.Fatal("typed-nil IOA client was treated as configured")
-	}
-
-	bus := coreevents.New()
-	cancel := subscribeIOAHandoffContext(context.Background(), bus, client, "test", nil)
-	defer cancel()
-
-	start := handoffEvent(t, "child-session", "worker", &aop.Event{Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{
-		ParentSessionId: "parent-session", ParentToolCallId: "spawn-typed-nil",
-	}}})
-	if err := types.SetDelegation(start, &types.DelegationDetail{Task: "inspect target", AgentName: "worker"}); err != nil {
-		t.Fatal(err)
-	}
-	bus.Publish(start)
-}
-
-func subscribeIOAHandoffContext(ctx context.Context, stream *coreevents.Stream, client protocols.ClientAPI, space string, logger telemetry.Logger) func() {
-	if isNilIOADependency(client) {
-		return func() {}
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	sub, err := consumeHandoff(stream, newHandoff(ctx, client, space, logger, nil))
+func TestRoutingRejectsOtherNodesAndAmbiguousDefaults(t *testing.T) {
+	connection := New(service.Config{})
+	e := NewCollaboration(CollaborationOptions{})
+	reg := hooks.New()
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
-	return func() { defer cancel(); _ = sub.Close(context.Background()) }
+	if err = set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+	got := make(chan inbox.Message, 2)
+	for _, id := range []string{"one", "two"} {
+		_, err = agenthooks.SessionStart.Emit(t.Context(), reg, agenthooks.SessionEvent{SessionID: id, Deliver: func(_ context.Context, m inbox.Message) error { got <- m; return nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	msg := protocols.Message{ID: "foreign", Sender: "peer", Refs: protocols.Ref{Nodes: []string{"other-node"}}, Meta: map[string]any{"target_session_id": "one"}}
+	if err = e.deliver(t.Context(), msg); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-got:
+		t.Fatal("wrong node delivered")
+	default:
+	}
+	msg.Refs = protocols.Ref{}
+	msg.Meta = nil
+	if err = e.deliver(t.Context(), msg); err == nil {
+		t.Fatal("ambiguous broadcast accepted")
+	}
+}
+
+func TestSpaceSwitchMovesSubscriptionButKeepsDispatchReference(t *testing.T) {
+	reg := hooks.New()
+	connection := New(service.Config{RegisterCommands: true})
+	commands := coretool.NewCommandRegistry()
+	e := NewCollaboration(CollaborationOptions{})
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), commands, connection, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close(context.Background())
+	got := make(chan inbox.Message, 1)
+	ev := agenthooks.SessionEvent{SessionID: "child", Delegation: &types.DelegationDetail{Task: "task"}, Deliver: func(_ context.Context, m inbox.Message) error { got <- m; return nil }}
+	if _, err = agenthooks.SessionStart.Emit(t.Context(), reg, ev); err != nil {
+		t.Fatal(err)
+	}
+	oldSpace := e.Service().ReceiveSpace()
+	var output bytes.Buffer
+	if _, err = commands.Run(t.Context(), []string{"ioa", "space", "new-space", "new work"}, &coretool.Execution{Stdout: &output}); err != nil {
+		t.Fatal(err)
+	}
+	space := e.Service().ReceiveSpace()
+	if space == oldSpace {
+		t.Fatal("space unchanged")
+	}
+	client := e.service.Client()
+	if _, err = client.Send(t.Context(), space, protocols.SendMessage{Content: map[string]any{"text": "new"}, Meta: map[string]any{"target_session_id": "child"}, Refs: &protocols.Ref{Nodes: []string{client.NodeID()}}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-got:
+	case <-time.After(time.Second):
+		t.Fatal("subscription did not follow binding")
+	}
+	ev.Output = "done"
+	ev.Stop = agenthooks.StopReasonCompleted
+	if _, err = agenthooks.SessionEnd.Emit(t.Context(), reg, ev); err != nil {
+		t.Fatal(err)
+	}
+	records, err := client.Read(t.Context(), oldSpace, protocols.ReadOptions{All: true})
+	if err != nil || len(records) != 2 || records[1].Refs.Messages[0] != records[0].ID {
+		t.Fatalf("lost dispatch space: %v %v", records, err)
+	}
+}
+
+func TestPeerInputExposesReplyAddress(t *testing.T) {
+	msg := protocols.Message{Content: map[string]any{"text": "offer"}, Meta: map[string]any{"source_session_id": "sibling-a", "target_session_id": "sibling-b"}}
+	text := formatIOAMessage(msg)
+	if !strings.Contains(text, "source_session_id=sibling-a") || !strings.Contains(text, "target_session_id=sibling-b") || !strings.HasSuffix(text, "offer") {
+		t.Fatalf("peer cannot address reply: %s", text)
+	}
 }

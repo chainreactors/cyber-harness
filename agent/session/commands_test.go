@@ -2,16 +2,16 @@ package session
 
 import (
 	"context"
-	"github.com/chainreactors/cyber/core/types"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 	"strings"
 	"testing"
+
+	"github.com/chainreactors/cyber/core/types"
 )
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
 	spec := &types.CommandSpec{Name: "/inspect", Aliases: []string{"/peek"}, Description: "Inspect this session"}
-	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}, Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+	owner, err := newUnitResource(t, nil, Config{Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 		return commandText("/inspect", CommandPresentationPlain, s.ID()+":"+strings.Join(args, "|")).result, nil
 	}}}})
 	// Use the already-loaded minimal test host; no provider or transport starts.
@@ -58,7 +58,7 @@ func TestCommandDeclarationsRejectAmbiguousNames(t *testing.T) {
 		{{Spec: &types.CommandSpec{Name: "missing-slash"}, Handler: handler}},
 		{{Spec: &types.CommandSpec{Name: "/custom"}}},
 	} {
-		if _, err := New(Config{Commands: commands}); err == nil {
+		if _, err := newUnitResource(t, nil, Config{Commands: commands}); err == nil {
 			t.Fatalf("accepted invalid declarations: %v", commands)
 		}
 	}
@@ -90,7 +90,7 @@ func TestCommandFailureDoesNotStrandSessionQueue(t *testing.T) {
 }
 
 func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
-	owner, err := New(Config{})
+	owner, err := newUnitResource(t, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
 // session hands it to the next run.
 func TestEvalRoundsCommandSetsSessionPacing(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
-	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}})
+	owner, err := newUnitResource(t, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

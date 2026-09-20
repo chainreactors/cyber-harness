@@ -3,19 +3,20 @@ package console
 import (
 	"context"
 	"fmt"
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/provider"
-	agentsession "github.com/chainreactors/cyber/agent/session"
-	aop "github.com/chainreactors/cyber/aop"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	cfg "github.com/chainreactors/cyber/pkg/config"
-	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
+	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
 
 type gateProvider struct {
@@ -45,7 +46,7 @@ func (p *gateProvider) ChatCompletion(ctx context.Context, req *agent.ChatComple
 	}
 	return &agent.ChatCompletionResponse{Choices: []agent.Choice{{Message: agent.TextMessage("assistant", "done")}}}, nil
 }
-func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer) (*AgentConsole, *apppkg.State) {
+func newTestConsole(t *testing.T, option *cfg.Option, provider agent.Provider, stdout, stderr io.Writer) (*AgentConsole, *apptest.Fixture) {
 	t.Helper()
 	if option == nil {
 		option = &cfg.Option{}

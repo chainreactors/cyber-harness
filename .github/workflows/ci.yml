@@ -78,7 +78,7 @@ jobs:
           fi
 
       - name: Check repository architecture and dependencies
-        run: go test -count=1 ./core/resource ./core/extension ./core/registry ./pkg/exts ./cmd/agent
+        run: go test -count=1 ./internal/architecture ./core/resource ./core/extension ./core/registry ./pkg/exts ./cmd/agent
 
       - name: Build the minimal agent
         run: |
@@ -141,7 +141,7 @@ jobs:
         run: |
           git diff --check HEAD
           git diff --ignore-submodules=dirty --exit-code -- \
-            .gitmodules templates web/frontend/cyber-ui
+            .gitmodules tools/templates web/frontend/cyber-ui
 
       # release-build.yml drives `goreleaser build` from this file, so a field
       # this repository cannot spell correctly would otherwise surface for the

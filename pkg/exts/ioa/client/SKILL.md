@@ -8,7 +8,7 @@ internal: true
 
 IOA provides shared message spaces for agent coordination through a single pseudo-command: `ioa` with `space`, `send`, and `read` subcommands.
 
-Each cyber instance binds to one space. After joining, all send/read operations automatically target that space — no space ID needed.
+With the IOA extension installed, an empty URL uses a process-local memory space without an HTTP listener; an external URL uses that server. Each cyber instance binds to one space. After joining, all send/read operations automatically target that space — no space ID needed.
 
 The wire protocol (message envelope, typed content formats) is defined by the `chainreactors/ioa` module. Its protocol skills are loaded as internal skills — read them for exact message formats:
 
@@ -41,11 +41,13 @@ Send a message to the current space:
 ```
 ioa send --content '{"content": "recon complete, 3 hosts found"}'                     Broadcast to all
 ioa send --ref-nodes <node_id> --content '{"content": "scan 10.0.0.1 for web vulns"}' Send to a specific node
+ioa send --target-session <session_id> --content '{"text": "follow-up for a sibling"}'  Send within this node
+ioa send --ref-nodes <node_id> --target-session <session_id> --content '{"text": "follow-up"}'  Send to a remote session
 ioa send --ref-messages <message_id> --content '{"content": "confirmed, SQLi"}'       Reply to a message
 ioa send checkpoint --kind verify --title "SQLi" --content "..." --target <url> --status confirmed
 ```
 
-**CRITICAL**: The `--content` value must be a JSON object with a **`"content"` key** containing the message text. The swarm protocol parses `"content"` to route messages — any other key name (e.g. `"message"`, `"text"`) will be silently dropped. Additional fields (`"kind"`, `"targets"`, etc.) are optional metadata.
+The `--content` value must be a JSON object. Raw peer messages may use `"text"`; swarm messages use `"content"` for protocol routing. Typed protocols follow their own schemas.
 
 Typed protocol sends (`ioa send <protocol> [flags]`) are registered by the ioa module — `checkpoint` supports `--kind`, `--title`, `--content`, `--target`, `--status`. Raw sends accept `--content-type`, `--meta`, and `--content-schema`.
 
@@ -66,20 +68,24 @@ Without `--all`, only messages explicitly directed at your node are returned.
 
 ### Background Monitoring
 
-Loop workers do not receive peer messages automatically unless heartbeat is enabled. For situational awareness, poll intentionally with `ioa read --all --limit <N>` before and after long work, or use `ioa read --listen` for a live stream. If the worker was started with `--heartbeat`, the runtime periodically loads recent IOA messages into the heartbeat prompt.
+Running Sessions receive addressed peer messages through their existing Inbox. Parent and child tasks share a Node ID; use the Session ID returned by `subagent create` or `subagent list` to address a child or sibling. Without a Session target, external messages enter the primary or sole ordinary Session. A finished child stops receiving; dispatch a new task to continue.
+
+Initial dispatch and final result are automatically recorded as linked handoffs before execution and before completion notification. The initial record includes the task and actual input, never the inherited model history. Do not duplicate these records manually. `subagent.message` is removed; all ongoing communication uses `ioa send`.
+
+A successful send returns a saved message ID, not a consumption receipt. Late joiners explicitly use `ioa read` for context; history is not automatically replayed. Local memory is lost when the extension closes. External failures do not switch to a private local space.
 
 ## 2. Message Format
 
-The envelope carries `content_type` (raw text when unset, or a protocol type like `checkpoint`/`handoff`/`swarm`/`team`) plus a JSON content body. **Every content body must have a `"content"` key** with the text body — except typed protocol bodies, which follow their own schema (see the protocol skills above; each also has `ioa://skills/<name>/schema.json`).
+The envelope carries `content_type` (raw text when unset, or a protocol type like `checkpoint`/`handoff`/`swarm`/`team`) plus a JSON content body. Raw messages can use a `"text"` field. Swarm messages use `"content"`; typed protocol bodies follow their own schema (see the protocol skills above; each also has `ioa://skills/<name>/schema.json`).
 
 ### Refs
 
-- `reply --to <msg_id>`: reference a prior message (reply, follow-up)
-- `to --node <node_id>`: address a specific node. Omit to broadcast to all space members.
+- `--ref-messages <msg_id>`: reference a prior message (reply, follow-up)
+- `--ref-nodes <node_id>`: address a specific node. Omit to broadcast to all space members.
 
 ## 3. Coordination Rules
 
-1. **Read before write** — always `ioa read all` before starting work. A peer may have already claimed your target.
+1. **Read before write** — always `ioa read --all` before starting work. A peer may have already claimed your target.
 2. **Claim before work** — announce your scope before any significant operation.
 3. **Share as you go** — emit loots immediately, not in a final batch. Peers need your data to make decisions now.
 4. **No noise** — the space is shared memory, not chat. No "ok", "thanks", or thinking-out-loud.
@@ -87,8 +93,8 @@ The envelope carries `content_type` (raw text when unset, or a protocol type lik
 
 When coordinating workers from a heartbeat/coordinator role:
 
-- **Workers are single-task** — they cannot respond to messages while busy. Do NOT send status checks; wait for the completion message.
-- **Dispatch once, wait for completion** — send one task per worker, wait for their result before sending the next.
+- **Workers receive while running** — addressed input enters their Inbox and is consumed at the next loop boundary. Delivery does not interrupt an active model/tool call or guarantee a reply.
+- **Dispatch once, wait for completion** — use one task per child. A completed child is closed; dispatch a fresh child for later work.
 - **Do NOT scan targets yourself** — the coordinator only uses `ioa send`/`ioa read`; react to results and dispatch follow-ups.
 
 ## 4. Multi-Agent Swarm

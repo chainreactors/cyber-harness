@@ -18,7 +18,7 @@ import (
 	service "github.com/chainreactors/cyber/tools/ioa/server"
 )
 
-// The query CLI owns a client-only graph with no Agent, inbox, or event output.
+// Query commands own only the IOA resource; they do not install Agent hooks.
 func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Options, output ioaclient.ConsoleOptions, args ioaclient.ConsoleArgs, env hostcli.Environment) (resultErr error) {
 	ioaURL := option.URL
 	if ioaURL == "" {
@@ -29,8 +29,8 @@ func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Opti
 		return err
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
-	client := ioaclient.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister}, ioaclient.Dependencies{Logger: env.Logger})
-	set, err := extension.New(client)
+	connection := ioaclient.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister})
+	set, err := extension.New(extension.Provided(telemetry.NewLoggerRef(env.Logger)), connection)
 	if err != nil {
 		return err
 	}
@@ -42,19 +42,19 @@ func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Opti
 	}
 	switch mode {
 	case "spaces":
-		return ioaclient.RunIOASpaces(ctx, client.Service(), &output, env.Out, env.Err)
+		return ioaclient.RunIOASpaces(ctx, connection.Service(), &output, env.Out, env.Err)
 	case "nodes":
-		return ioaclient.RunIOANodes(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOANodes(ctx, connection.Service(), &output, args, env.Out, env.Err)
 	case "messages":
 		if args.Space == "" {
 			return fmt.Errorf("space is required")
 		}
-		return ioaclient.RunIOAMessages(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOAMessages(ctx, connection.Service(), &output, args, env.Out, env.Err)
 	case "context":
 		if args.Space == "" || args.MessageID == "" {
 			return fmt.Errorf("space and message ID are required")
 		}
-		return ioaclient.RunIOAContext(ctx, client.Service(), &output, args, env.Out, env.Err)
+		return ioaclient.RunIOAContext(ctx, connection.Service(), &output, args, env.Out, env.Err)
 	}
 	return fmt.Errorf("unknown query %s", mode)
 }

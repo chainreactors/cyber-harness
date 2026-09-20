@@ -9,8 +9,11 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 )
@@ -20,7 +23,11 @@ import (
 type Profile interface {
 	Load(context.Context) error
 	Close(context.Context) error
-	State() (*apppkg.State, error)
+	Active() bool
+	Providers() (*provider.State, error)
+	Events() (*events.Stream, error)
+	Progress() (*eventbus.Bus[*toolpb.Progress], error)
+	Processes() (*proc.Manager, error)
 	Runtime() (*agentsession.Runtime, error)
 	RegisterNamespaces(*aop.NamespaceMux) error
 	AgentStatus() *aop.AgentStatus

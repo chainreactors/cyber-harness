@@ -2,13 +2,14 @@ package harness
 
 import (
 	"github.com/chainreactors/cyber/agent/provider"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/egress"
+	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	appext "github.com/chainreactors/cyber/pkg/exts/app"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	providerext "github.com/chainreactors/cyber/pkg/exts/provider"
@@ -53,10 +54,12 @@ func BaseExtensions(c BaseConfig) ([]extension.Extension, error) {
 	}
 	// Each entry borrows only from the ones ahead of it: the registries publish
 	// the executors, the egress provider publishes the routing endpoint the
-	// terminal needs, and the application is assembled before anything reads it.
+	// terminal needs. Session and product consumers are installed after this base.
 	return []extension.Extension{
 		extension.Provided[*hooks.Registry](hooks.New()),
 		extension.Provided[*events.Stream](events.New()),
+		extension.Provided[*eventbus.Bus[*toolpb.Progress]](eventbus.New[*toolpb.Progress]()),
+		extension.Provided[*telemetry.LoggerRef](telemetry.NewLoggerRef(c.Logger)),
 		coretool.NewCommandRegistry(),
 		coretool.NewToolRegistry(),
 		library,
@@ -65,8 +68,7 @@ func BaseExtensions(c BaseConfig) ([]extension.Extension, error) {
 		fileext.New(files.Config{Directory: c.Directory}),
 		terminalext.New(terminal),
 		tmuxext.New(),
-		appext.New(c.Logger),
-		providerext.New(c.Provider, c.Logger),
+		providerext.New(c.Provider),
 	}, nil
 }
 

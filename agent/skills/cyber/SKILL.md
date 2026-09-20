@@ -123,4 +123,4 @@ Non-findings without impact chain: fingerprints, CORS/security headers, GraphQL 
 3. Non-interactive output only. No progress bars or unbounded streaming.
 4. Conservative threads/timeouts for localhost or fragile services.
 5. Use `scan --verify=high` when the user asks to validate risky findings.
-6. Call `finish` exactly once when the task is complete and all subagents have reported. Do not call it while subagents are running.
+6. Produce your final answer when the task is complete and all subagents have reported. Do not end the turn while subagents are running.

@@ -1,4 +1,4 @@
-package config
+package provider
 
 import "strings"
 
@@ -71,11 +71,11 @@ func ProviderBaseURL(name string) string {
 	return protocolBaseURLs[name]
 }
 
-// InferProviderFromBaseURL guesses the wire protocol from the base URL when no
+// InferFromBaseURL guesses the wire protocol from the base URL when no
 // provider is set. The official Anthropic endpoint is unambiguous; everything
 // else speaks the OpenAI protocol in the common case. A wrong guess is caught
 // later as an actionable 404 from the provider, not a silent failure.
-func InferProviderFromBaseURL(baseURL string) string {
+func InferFromBaseURL(baseURL string) string {
 	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
 		return ProviderAnthropic
 	}

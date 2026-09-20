@@ -73,7 +73,7 @@ linters:
     paths:
       - template\.go$
       - vendor
-      - templates
+      - tools/templates
       - ^dist/
       - third_party$
       - builtin$

@@ -17,6 +17,11 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 	if p == nil || stream == nil {
 		return fmt.Errorf("node AOP stream is unavailable")
 	}
+	parent, release, err := p.admitStream(parent, stream)
+	if err != nil {
+		return err
+	}
+	defer release()
 	first, err := stream.Recv()
 	if err != nil {
 		return err

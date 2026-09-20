@@ -7,12 +7,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/cyber/core/extension"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/agent/skills"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
 func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
@@ -20,13 +25,13 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 		http.Error(w, "unauthorized\ninvalid API key", http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	app := &apppkg.State{}
-	if _, _, err := app.ReloadProvider(context.Background(), agent.ProviderConfig{
+	app := apptest.NewFixture(t, nil, nil)
+	if _, _, err := app.Providers.Reload(context.Background(), agent.ProviderConfig{
 		Provider: "openai", Model: "gpt-test", BaseURL: server.URL + "/v1", APIKey: "test",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	status := AgentStatus(app)
+	status := AgentStatus(app.Providers)
 	if status.GetProvider() != "openai" || status.GetModel() != "gpt-test" {
 		t.Fatalf("status provider/model = %+v", status)
 	}
@@ -36,26 +41,16 @@ func TestAgentStatusIncludesLLMHealthFailure(t *testing.T) {
 }
 
 func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
-	registry := hosttest.Commands(t,
-		coretool.Command{
-			Name: "gogo", Usage: "Usage:\n  gogo [OPTIONS]",
-			DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md",
-			Run:             func(context.Context, *coretool.Execution) (any, error) { return nil, nil },
-		}, coretool.Command{
-			Name: "tmux", Usage: "Usage: tmux <action>",
-			DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
-			Run:             func(context.Context, *coretool.Execution) (any, error) { return nil, nil },
-		})
-	store, diagnostics := skills.LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("load embedded skills diagnostics = %+v", diagnostics)
-	}
-
-	resource, err := session.NewResource(session.Config{State: &apppkg.State{}, CommandRegistry: registry, Skills: store})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime := resource.Runtime()
+	f := apptest.NewFixture(t, nil, nil)
+	installed := sessionext.New(session.Config{})
+	hosttest.Load(t, t.Context(), append(apptest.Entries(t, f),
+		promptext.New(), loopext.New(agent.NoLoop()),
+		extension.Func{LoadFunc: func(scope *extension.Scope) error {
+			return extension.Add(scope,
+				coretool.Command{Name: "gogo", Usage: "Usage: gogo [OPTIONS]", DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md", Run: func(context.Context, *coretool.Execution) (any, error) { return nil, nil }},
+			)
+		}}, installed)...)
+	runtime := installed.Runtime()
 	catalog := CommandSpecs(runtime)
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
 	for _, spec := range catalog {
@@ -67,7 +62,7 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 	if got["!gogo"].description != "Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery." {
 		t.Fatalf("!gogo description = %q", got["!gogo"].description)
 	}
-	if got["!tmux"] == nil || got["!tmux"].usage != "!tmux <action>" {
+	if got["!tmux"] == nil || got["!tmux"].usage != "!tmux - PTY session manager" {
 		t.Fatalf("!tmux = %+v", got["!tmux"])
 	}
 	if got["!tmux"].description != "PTY session manager built into cyber. Bash commands stay foreground by default and move to background only when the agent sets wait." {

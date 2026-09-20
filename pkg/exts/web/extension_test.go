@@ -3,12 +3,12 @@ package web_test
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
 	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	webpkg "github.com/chainreactors/cyber/pkg/web"
-	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
 
 type routeContributor struct {
@@ -20,9 +20,7 @@ func (c routeContributor) Load(scope *extension.Scope) error {
 }
 
 func TestExtensionsContributeTypedRoutes(t *testing.T) {
-	service := webservice.NewService(webservice.ServiceConfig{})
-	defer service.Close(context.Background())
-	routes := webext.New(service)
+	routes := webext.New(webext.Config{Database: filepath.Join(t.TempDir(), "web.db")})
 	plugin := routeContributor{route: webpkg.Route{
 		Pattern: "GET /fixture", Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 	}}
@@ -47,9 +45,7 @@ func TestExtensionsContributeTypedRoutes(t *testing.T) {
 }
 
 func TestRouteContributionRemovalAndDuplicates(t *testing.T) {
-	service := webservice.NewService(webservice.ServiceConfig{})
-	defer service.Close(context.Background())
-	routes := webext.New(service)
+	routes := webext.New(webext.Config{Database: filepath.Join(t.TempDir(), "web.db")})
 	set, err := extension.New(routes)
 	if err != nil {
 		t.Fatal(err)

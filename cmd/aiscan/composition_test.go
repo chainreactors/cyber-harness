@@ -74,7 +74,7 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if application, err := profile.State(); err == nil && application != nil {
+	if application, err := profile.Providers(); err == nil && application != nil {
 		t.Fatal("the application existed before the graph loaded")
 	}
 	if err := profile.Load(t.Context()); err != nil {
@@ -82,7 +82,7 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = profile.Close(context.Background()) })
 
-	if _, err := profile.State(); err != nil {
+	if _, err := profile.Providers(); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := profile.Runtime()
@@ -93,7 +93,7 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 		t.Fatal("the session runtime was not published")
 	}
 	// The runtime borrowed these; nothing threaded them in.
-	if runtime.CommandRegistry() == nil || runtime.Tools() == nil || runtime.Bash() == nil || runtime.Skills() == nil {
+	if runtime.CommandRegistry() == nil || runtime.Tools() == nil || runtime.Skills() == nil {
 		t.Error("the session runtime is missing capabilities its extensions published")
 	}
 }

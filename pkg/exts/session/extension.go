@@ -4,16 +4,17 @@ package session
 import (
 	"context"
 	"fmt"
+
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
-
+	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -22,9 +23,7 @@ type Extension struct {
 	resource *session.Resource
 }
 
-// New keeps the profile's choices. The application it runs against is borrowed
-// during Load, because the application is itself assembled from capabilities
-// and does not exist before the graph starts loading.
+// New selects session parameters. Load borrows capabilities from their owners.
 func New(config session.Config) *Extension { return &Extension{config: config} }
 
 // Runtime is the session runtime. It is nil until this extension has loaded.
@@ -39,7 +38,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || scope == nil {
 		return fmt.Errorf("session extension is unavailable")
 	}
-	application, err := extension.Use[*apppkg.State](scope)
+	providers, err := extension.Use[*provider.State](scope)
 	if err != nil {
 		return err
 	}
@@ -73,9 +72,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	config := e.config
 	config.Loop = loop
-	config.State = application
+	config.Providers = providers
+	if config.Events, err = extension.Use[*events.Stream](scope); err != nil {
+		return err
+	}
+	if config.Logger, err = extension.Use[*telemetry.LoggerRef](scope); err != nil {
+		return err
+	}
+	if config.History == nil {
+		config.History = session.JSONLHistory{}
+	}
 	config.Hooks, config.Tools, config.CommandRegistry = hookRegistry, tools, commandRegistry
-	config.Skills, config.Bash = store, bash
+	config.Skills, config.Shell = store, bash
 	config.PromptResolver = promptResolver
 	resource, err := session.NewResource(config)
 	if err != nil {

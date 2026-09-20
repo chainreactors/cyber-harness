@@ -30,9 +30,7 @@ func TestSubAgentSyncReturnsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if got := coretool.ResultText(result); got != `<subagent_result name="worker" type="" status="completed">
-child result
-</subagent_result>` {
+	if got := coretool.ResultText(result); !strings.Contains(got, `name="worker" session_id="`) || !strings.Contains(got, "child result") {
 		t.Fatalf("result = %q", got)
 	}
 }

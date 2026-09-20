@@ -136,7 +136,7 @@ func TestProfileOwnsAgentLifecycleAndRetainsResourcesDuringClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("profile shutdown did not cancel the run")
 	}
-	if _, err := p.State(); err == nil {
+	if _, err := p.Providers(); err == nil {
 		t.Fatal("closing profile still published State")
 	}
 	if _, err := second.Run(t.Context(), agentsession.RunInput{Message: agent.TextInput("too late")}); err == nil {
@@ -198,7 +198,7 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.State(); err == nil {
+	if _, err := p.Providers(); err == nil {
 		t.Fatal("State available before Load")
 	}
 	if err := p.RegisterNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
@@ -207,7 +207,7 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.State(); err != nil {
+	if _, err := p.Providers(); err != nil {
 		t.Fatal(err)
 	}
 	mux := aop.NewNamespaceMux(t.Context())
@@ -225,7 +225,7 @@ func TestApplicationOnlyProfile(t *testing.T) {
 	if err := p.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.State(); err == nil {
+	if _, err := p.Providers(); err == nil {
 		t.Fatal("State available after Close")
 	}
 	if err := p.RegisterNamespaces(aop.NewNamespaceMux(t.Context())); err == nil {
@@ -241,7 +241,7 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 	if err := p.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	application, err := p.State()
+	application, err := p.Providers()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestRuntimeUsesProfileApplicationWithoutOwningIt(t *testing.T) {
 	// The runtime has no accessor handing the application out. What matters is
 	// that both read one provider state, so setting it on one is visible on the
 	// other.
-	application.SetProvider(inertProvider{}, agent.ProviderConfig{Model: "shared"})
+	application.Set(inertProvider{}, agent.ProviderConfig{Model: "shared"})
 	if _, providerConfig := run.ProviderState(); providerConfig.Model != "shared" {
 		t.Fatal("Runtime did not use the profile application")
 	}

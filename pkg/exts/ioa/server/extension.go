@@ -10,20 +10,15 @@ import (
 	service "github.com/chainreactors/cyber/tools/ioa/server"
 )
 
-type BrowserOptions struct {
-	Authenticate func(*http.Request) bool
-	AuthEnabled  bool
-}
-
 type Extension struct {
 	resource *service.Resource
-	browser  *BrowserOptions
+	browser  bool
 }
 
 func New(config service.Config) *Extension { return &Extension{resource: service.New(config)} }
 
-func NewBrowser(config service.Config, browser BrowserOptions) *Extension {
-	return &Extension{resource: service.New(config), browser: &browser}
+func NewBrowser(config service.Config) *Extension {
+	return &Extension{resource: service.New(config), browser: true}
 }
 
 func (e *Extension) Server() *service.Server { return e.resource.Server }
@@ -32,10 +27,14 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := e.resource.Start(scope.Init()); err != nil {
 		return err
 	}
-	if e.browser == nil {
+	if !e.browser {
 		return nil
 	}
-	handler, err := BrowserHandler(scope.Init(), e.Server(), e.browser.Authenticate, e.browser.AuthEnabled)
+	auth, err := extension.Use[webpkg.Auth](scope)
+	if err != nil {
+		return err
+	}
+	handler, err := browserHandler(scope.Init(), e.Server(), auth.Authenticate, auth.Enabled())
 	if err != nil {
 		return err
 	}

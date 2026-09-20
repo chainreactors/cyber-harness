@@ -7,20 +7,22 @@ import (
 	"strings"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/namespaces"
+	"github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-
+	nativeext "github.com/chainreactors/cyber/pkg/exts/native"
 	observeext "github.com/chainreactors/cyber/pkg/exts/observe"
 	proxyext "github.com/chainreactors/cyber/pkg/exts/proxy"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
@@ -83,7 +85,10 @@ func parseObserve(value string) []observeext.Kind {
 // aiscanProfile owns one reference-distribution extension graph.
 type aiscanProfile struct {
 	extensions *extension.Set
-	app        *apppkg.State
+	providers  *provider.State
+	events     *events.Stream
+	progress   *eventbus.Bus[*toolpb.Progress]
+	processes  *proc.Manager
 	commands   coretool.CommandExecutor
 	bash       *terminaltool.BashTool
 	runtime    *agentsession.Runtime
@@ -193,54 +198,47 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		if len(diagnostics) > 0 {
 			return nil, fmt.Errorf("load IOA skills: %v", diagnostics)
 		}
-		deps := ioaclient.Dependencies{Logger: logger, Skills: []skills.Bundle{bundle}}
-		if config.Session != nil {
-			deps.Deliver = func(ctx context.Context, message inbox.Message) error {
-				if p.extensions == nil || !p.extensions.Active() {
-					return agentsession.ErrUnavailable
-				}
-				return p.runtime.Deliver(ctx, message)
-			}
-		}
-		ioa = ioaclient.New(*config.IOA, deps)
-		values = append(values, ioa)
+		ioa = ioaclient.New(*config.IOA)
+		values = append(values, ioa, ioaclient.NewCollaboration(ioaclient.CollaborationOptions{Skills: []skills.Bundle{bundle}}))
 	}
+	values = append(values, nativeext.New())
 	presents := config.Session != nil || ioa != nil
 	if presents {
 		values = append(values, tuiext.New())
 	}
 	if ioa != nil {
-		p.ioa = ioa.Service()
-		presentation, err := ioaclient.NewConsole(p.ioa, config.IOA.Space, config.IOA.URL)
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, presentation)
+		values = append(values, ioaclient.NewConsole(ioaclient.ConsoleConfig{Space: config.IOA.Space, Endpoint: config.IOA.URL}))
 	}
 	if config.Session != nil {
 		values = append(values, ptyext.New())
 		agentConfig := *config.Session
 		agentConfig.NodeName = nodeName
-		agentConfig.Option, agentConfig.Logger = config.Option, logger
+		agentConfig = sessionext.ConfigFromOption(config.Option, agentConfig)
 		values = append(values, sessionext.New(agentConfig))
-		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
-			runtime, err := extension.Use[*agentsession.Runtime](scope)
-			if err != nil {
-				return err
-			}
-			return extension.Add(scope, runtime.NamespaceBindings()...)
-		}})
+		values = append(values, sessionext.NewProtocol())
 		values = append(values, sessionext.NewConsole())
 	}
 	// Last in the slice, so it borrows after everything is published and
 	// releases before anything is torn down. This is how a composition root
 	// reads what the graph assembled without reaching into the registry.
 	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		application, err := extension.Use[*apppkg.State](scope)
-		if err != nil {
+		var err error
+		if ioa != nil {
+			p.ioa = ioa.Service()
+		}
+		if p.providers, err = extension.Use[*provider.State](scope); err != nil {
 			return err
 		}
-		p.app = application
+		if p.events, err = extension.Use[*events.Stream](scope); err != nil {
+			return err
+		}
+		if p.progress, err = extension.Use[*eventbus.Bus[*toolpb.Progress]](scope); err != nil {
+			return err
+		}
+		if p.processes, err = extension.Use[*proc.Manager](scope); err != nil {
+			return err
+		}
+
 		if p.commands, err = extension.Use[coretool.CommandExecutor](scope); err != nil {
 			return err
 		}
@@ -274,13 +272,6 @@ func (p *aiscanProfile) Load(ctx context.Context) error {
 		return fmt.Errorf("Cyber profile is required")
 	}
 	return p.extensions.Load(ctx)
-}
-
-func (p *aiscanProfile) State() (*apppkg.State, error) {
-	if p == nil || p.extensions == nil || !p.extensions.Active() || p.app == nil {
-		return nil, fmt.Errorf("Cyber profile is not active")
-	}
-	return p.app, nil
 }
 
 func (p *aiscanProfile) Runtime() (*agentsession.Runtime, error) {
@@ -320,7 +311,7 @@ func (p *aiscanProfile) AgentStatus() *aop.AgentStatus {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {
 		return &aop.AgentStatus{}
 	}
-	status := nodepkg.AgentStatus(p.app)
+	status := nodepkg.AgentStatus(p.providers)
 	if p.ioa != nil {
 		collaboration := p.ioa.Status()
 		status.Bound, status.Space = collaboration.Bound, collaboration.Space
@@ -369,4 +360,40 @@ func newCyberProfileFromRequest(request profilepkg.Request) (profilepkg.Profile,
 		Option: request.Option, ProviderMode: request.ProviderMode,
 		Session: request.Session, Logger: request.Logger,
 	})
+}
+
+// Providers borrows a capability from the active installation.
+func (p *aiscanProfile) Providers() (*provider.State, error) {
+	if !p.Active() {
+		return nil, fmt.Errorf("profile is not active")
+	}
+	return p.providers, nil
+}
+
+// Events borrows a capability from the active installation.
+func (p *aiscanProfile) Events() (*events.Stream, error) {
+	if !p.Active() {
+		return nil, fmt.Errorf("profile is not active")
+	}
+	return p.events, nil
+}
+
+// Progress borrows a capability from the active installation.
+func (p *aiscanProfile) Progress() (*eventbus.Bus[*toolpb.Progress], error) {
+	if !p.Active() {
+		return nil, fmt.Errorf("profile is not active")
+	}
+	return p.progress, nil
+}
+
+// Processes borrows a capability from the active installation.
+func (p *aiscanProfile) Processes() (*proc.Manager, error) {
+	if !p.Active() {
+		return nil, fmt.Errorf("profile is not active")
+	}
+	return p.processes, nil
+}
+
+func (p *aiscanProfile) Active() bool {
+	return p != nil && p.extensions != nil && p.extensions.Active()
 }

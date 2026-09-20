@@ -1,8 +1,11 @@
 package hooks
 
 import (
+	"context"
+	"github.com/chainreactors/cyber/agent/inbox"
 	aop "github.com/chainreactors/cyber/aop"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/types"
 )
 
 // Aliases keep event definitions readable without pulling agent in (that
@@ -89,16 +92,26 @@ type RunEndEvent struct {
 
 var RunEnd = corehooks.NewPoint[RunEndEvent, struct{}]("run_end")
 
+// SessionEvent lends Deliver only for this execution's lifetime. The owner
+// closes admission before SessionEnd; extensions never own or close the Inbox.
 type SessionEvent struct {
-	SessionID string
-	ParentID  string
-	AgentName string
-	Model     string
-	Reason    string
+	ParentToolCallID string
+	Delegation       *types.DelegationDetail
+	Input            string
+	Primary          bool
+	Deliver          func(context.Context, inbox.Message) error
+	Output           string
+	Stop             StopReason
+	Err              error
+	SessionID        string
+	ParentID         string
+	AgentName        string
+	Model            string
+	Reason           string
 }
 
 var (
-	SessionStart = corehooks.NewPoint[SessionEvent, struct{}]("session_start")
+	SessionStart = corehooks.NewPoint[SessionEvent, struct{}]("session_start").WithErrorPolicy(corehooks.FailClosed)
 	SessionEnd   = corehooks.NewPoint[SessionEvent, struct{}]("session_end")
 )
 

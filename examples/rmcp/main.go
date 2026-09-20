@@ -8,6 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/chainreactors/cyber/core/egress"
+	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
+
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
@@ -17,11 +20,14 @@ import (
 	"github.com/chainreactors/cyber/core/hooks"
 )
 
-func newRegistry(workDir string) (coretool.Executor, *terminaltool.BashTool, *extension.Set) {
-	bash := terminaltool.NewBashTool(workDir, 300, nil)
+func newRegistry(workDir string) (coretool.Executor, *extension.Set) {
 	registry := coretool.NewToolRegistry()
-	contribution := extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[coretool.Tool](scope, bash) }}
-	set, err := extension.New(extension.Provided[*hooks.Registry](hooks.New()), registry, contribution)
+	set, err := extension.New(
+		extension.Provided[*hooks.Registry](hooks.New()),
+		extension.Provided[egress.Endpoint](egress.Disabled()),
+		coretool.NewCommandRegistry(), registry,
+		terminalext.New(terminalext.Config{Directory: workDir, Timeout: 300}),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -29,7 +35,7 @@ func newRegistry(workDir string) (coretool.Executor, *terminaltool.BashTool, *ex
 		_ = set.Close(context.Background())
 		panic(err)
 	}
-	return registry, bash, set
+	return registry, set
 }
 
 func main() {
@@ -57,8 +63,7 @@ func main() {
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: os.Stderr})
 
 	workDir, _ := os.Getwd()
-	tools, bash, set := newRegistry(workDir)
-	defer bash.Close()
+	tools, set := newRegistry(workDir)
 	defer set.Close(context.Background())
 
 	logger.Infof("rmcp tools ready: bash (workdir %s)", workDir)

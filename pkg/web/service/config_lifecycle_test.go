@@ -61,7 +61,7 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 				BuildProfile: func(context.Context, *PreparedConfig) (profile.Profile, error) { return current, buildErr },
 			})
 			defer svc.Close(context.Background())
-			_, release := svc.acquireApp()
+			_, release := svc.acquireProviders()
 			defer release()
 			if _, err := svc.SaveConfig(t.Context(), configForModel("new")); err == nil {
 				t.Fatal("builder reused the active profile")
@@ -71,7 +71,7 @@ func TestConfigBuilderCannotReturnActiveProfileAsCandidate(t *testing.T) {
 			if closed() {
 				t.Fatal("candidate cleanup closed the active profile")
 			}
-			if _, err := current.State(); err != nil {
+			if _, err := current.Providers(); err != nil {
 				t.Fatalf("active profile was revoked: %v", err)
 			}
 			if activeModel(store.cfg) != "old" || svc.pending != nil {

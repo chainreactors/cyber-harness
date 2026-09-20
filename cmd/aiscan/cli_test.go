@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	"reflect"
 	"slices"
 	"strings"
@@ -12,11 +11,10 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
-
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -331,7 +329,7 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 	if opt.BaseURL != "https://api.deepseek.com" || opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
-	pcfg := apppkg.ProviderConfig(&opt)
+	pcfg := cfg.ProviderConfig(&opt)
 	if pcfg.Provider != "openai" {
 		t.Fatalf("provider = %q, want openai protocol", pcfg.Provider)
 	}
@@ -442,7 +440,7 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 	if opt.AI || opt.APIKey != "KEY" || opt.Model != "deepseek-v4-pro" || opt.BaseURL != "https://api.deepseek.com" {
 		t.Fatalf("llm options = %#v", opt.LLMOptions)
 	}
-	pcfg := apppkg.ProviderConfig(&opt)
+	pcfg := cfg.ProviderConfig(&opt)
 	if pcfg.Provider != "openai" {
 		t.Fatalf("provider = %q, want openai protocol", pcfg.Provider)
 	}

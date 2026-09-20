@@ -2,6 +2,7 @@ package pty
 
 import (
 	"fmt"
+
 	"github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	"github.com/chainreactors/cyber/core/extension"
@@ -34,7 +35,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		Prototype: &ptypb.ProtocolMessage{},
 		Open: func() aop.NamespaceHandler {
 			opts := append([]Option{WithOpeners(e.sessions.Openers())}, e.opts...)
-			return NewRouter(e.sessions, opts...).Handler()
+			return newRouter(e.sessions, opts...).Handler()
 		},
 	})
 }

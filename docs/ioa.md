@@ -4,54 +4,46 @@
 
 先在两个终端分别运行 `aiscan ioa serve` 和配置好模型的 `aiscan agent --ioa-url http://127.0.0.1:8765 --space lab`。后者在没有任务输入时保持交互会话；带 `-p` 时仍是一次性任务。本章继续解释身份、投递、配置与资源所有权。
 
-IOA 提供基于 HTTP、SSE 和消息空间的多 Agent 协作。Cyber 通过两个独立扩展集成：
+IOA 是可插拔的 Agent 协作扩展。产品默认安装客户端扩展：未配置 URL 时使用 SDK Service、SQLite `:memory:` 和 Hub，在进程内调用，不监听 HTTP 端口；配置 URL 时连接外部 IOA。外部故障不会降级成隔离的内存空间。Web Agent 的默认地址仍为 `<server-url>/ioa`。
 
-| 扩展 | 所有权 | 对外业务能力 |
+| 扩展 | 所有权 | 对外能力 |
 | --- | --- | --- |
-| `pkg/exts/ioa/client` | 身份注册、重试、收信、handoff 消费、命令贡献 | `Service()`：业务服务与状态，无扩展 Load/Close |
-| `pkg/exts/ioa/server` | Store、Service、认证、HTTP/SSE 请求排空 | `Server()`，无 Start/Close |
-
-客户端与服务端使用 IOA HTTP 协议通信。原始实现在 `tools/ioa` 与 `tools/ioa/server`，
-不依赖 Extension 宿主。连接目标仍由 `--ioa-url` 决定；Web Agent 未指定时使用
-`<server-url>/ioa`。Web/AOP 的节点路由与 IOA 身份仍是两个独立协议边界。
+| `pkg/exts/ioa/client` | 本地或外部客户端、收信、Session 路由、同步 handoff、命令 | `Service()` / Reader 与状态 |
+| `pkg/exts/ioa/server` | 独立服务的 Store、Service、认证、HTTP/SSE | `Server()` |
 
 ## 客户端装配
 
 ```text
-Command Registry ── ioa 命令 ──→ IOA Client
-AOP Event Stream ── handoff ───→ IOA Client
-Agent Inbox      ←─ peer 消息 ─ IOA Client
-Console / CLI    ── Reader ───→ IOA Client
+Agent / Session ── 同步 SessionStart / SessionEnd Hooks ──→ IOA ext
+Agent Inbox     ←─ 借用的投递函数 ←─ ext 私有 Session 路由
+ioa send/read   ── SDK ClientAPI / StreamAPI ──→ 内存 Service 或外部服务器
 ```
 
-Profile 构造客户端并传入配置、Skills 和可选投递函数；客户端在 Load 时通过 `Add` 贡献命令、知识与提示词，通过 `Use` 借用共享 Event Stream。
-客户端不导入 Agent Extension，Agent 不导入 IOA SDK。
-没有投递函数时仍可使用命令和 skills，不启动自动收信。
+Core 不依赖 IOA，不提供通讯 Binder、Recorder 或第二套 Session 注册中心。普通 Session 的投递复用 admission、mailbox 和自动调度；派生任务只接收运行期间的输入。借用的投递函数在生命周期结束后失效，旧 Session ID 不会映射到替代会话。
 
-基础能力与 Command/Tool Registry 先加载，随后安装 IOA Client，再安装会话与展示扩展；
-关闭顺序相反。具体组合见 [Profile](../cmd/aiscan/profile.go)。只有整个 Set 加载成功并发布后，投递函数才允许调用 Agent 的 `Deliver`。
-该入口选择主会话，否则选择唯一会话；无会话、多会话歧义、关闭或队列满时返回错误。
-不会自动创建会话。忙碌会话接收追加输入，空闲会话通过既有 Inbox 机制自动执行。
+装配顺序是基础能力、IOA ext、native/session 等执行扩展；逆序关闭时先取消并等待执行收尾，再释放 IOA。后台子任务跨越单次工具调用，但受父执行生命周期和 SubAgentTool 所有者约束。
 
-注册、加入配置 Space 失败会重试，随后建立 SSE；订阅断开也会重连。
-注册和订阅寿命不受初始化 context 结束影响。自身消息按当前 Node ID 过滤。
-`ioa space` 切换的是命令当前 Space；自动收信和 handoff 继续使用启动配置中的 Space。
+## 派发、返回与通讯
 
-handoff 通过同一个 AOP Stream 的有界 Consumer 生成，保留 delegate/return 内容和引用关系。
-队列上限为 256 个事件、16 MiB。发送失败被记录，不终止后续事件消费；队列溢出会停止
-该订阅并记录错误和丢弃数量。`Service().Status()` 提供 Bound、Space、LastError 和 Dropped。
-关闭时先取消并等待收信，再排空 handoff，最后释放客户端资源；超时可通过 Set.Close 重试。
-已完成资源回收但输出失败时返回普通错误，不再报告资源未关闭。
+sync、async、fork 派发都先同步写入 handoff，再启动子任务。记录包括标题、任务、实际输入、父子 Session ID 和派发 tool-call ID；fork 继承的模型历史不复制到 IOA。派发记录失败则任务不启动。
 
-当前没有离线补投或可靠 outbox。没有会话时拒绝输入，网络发送失败不自动重发。
+结束时关闭输入入口，同步写入引用派发消息的结果，再通过原调用机制返回或通知父任务。成功、失败、取消均记录终态；记录失败会向父任务明确报告。收尾使用有期限且不随任务取消的上下文，不依赖异步 AOP 观察流。
 
-本地与远程 Console 只接收 `pkg/console/api.Bindings`。客户端的 `console` 子包持有 Reader，
-提供 `/spaces`、`/nodes`、`/messages`、`/context`、补全和状态行，复用同一个已注册身份。
-Reader 只有查询能力，不能注册、切换命令 Space、订阅或关闭客户端；查询随扩展关闭而取消并排空。
+父子、兄弟任务共享 Node ID，以已有 Session ID 区分：
 
-独立查询 CLI 在 `cmd/aiscan` 装配仅含 client ext 的图；配置连接测试使用一次性的只读 client ext，
-支持已有 bearer token，且不自动注册节点。Console、Node、Runner 和 Web 不直接构造 IOA SDK。
+```text
+ioa send --target-session <session_id> --content '{"text":"follow-up"}'
+ioa send --ref-nodes <node_id> --target-session <session_id> --content '{"text":"remote follow-up"}'
+ioa read --message <dispatch_message_id>
+```
 
+Session ID 可从派发返回值和 `subagent list` 获取。源 Session 从执行上下文注入，目标 Session 放入 IOA metadata；继续复用 Sender、Refs.Nodes 和 Refs.Messages。同 Node 定向消息不会被自身发送者过滤。没有目标 Session 的外部消息只进入主会话或唯一普通会话，歧义时拒绝投递。
+
+`subagent.message` 已移除。未安装 IOA ext 时仍可派发并返回一次结果，但不存在持续通讯通道。子任务结束后不再接收消息；需要继续工作时重新派发，并引用既有记录。
+
+`ioa space` 切换命令空间及自动订阅，派发结果仍写入对应派发发生的空间。成功发送只表示 IOA 已保存消息，不表示目标已消费。后来者显式 `ioa read`，不自动回放历史。当前不提供可靠 outbox、消费回执或离线补投。
+
+Console 只借用 Reader，复用扩展身份；Reader 不拥有注册、订阅和关闭能力。独立查询 CLI 与连接测试直接拥有 IOA Resource，无需创建 Agent 或安装生命周期 Hooks。连接测试通过注册交换访问密钥，再执行查询。
 
 ## 启动声明与配置
 

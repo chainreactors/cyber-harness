@@ -10,7 +10,6 @@ import (
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	app "github.com/chainreactors/cyber/pkg/app"
 
 	searchtools "github.com/chainreactors/cyber/tools/search"
 )
@@ -34,7 +33,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	application, err := extension.Use[*app.State](scope)
+	application, err := extension.Use[*provider.State](scope)
 	if err != nil {
 		return err
 	}
@@ -67,8 +66,8 @@ func (e *Extension) Load(scope *extension.Scope) error {
 // providerWebSearch adapts the configured model's own web search, when it has
 // one, to the search tool's signature. It lives here because it is search
 // behavior, not composition.
-func providerWebSearch(application *app.State) func(context.Context, string, int) (string, error) {
-	model, _ := application.ProviderState()
+func providerWebSearch(application *provider.State) func(context.Context, string, int) (string, error) {
+	model, _ := application.Current()
 	searcher, ok := model.(provider.WebSearchProvider)
 	if !ok {
 		return nil

@@ -131,10 +131,12 @@ type Config struct {
 	Bus              aop.EventPublisher
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
-	Hooks            *corehooks.Registry
-	MaxTurns         int
-	LoopScheduler    *LoopScheduler
-	Inbox            inbox.Inbox
+	Hooks         *corehooks.Registry
+	MaxTurns      int
+	LoopScheduler *LoopScheduler
+	Inbox         inbox.Inbox
+	// Lifetime bounds derived work independently of one tool invocation.
+	Lifetime         context.Context
 	Expander         *inbox.Expander
 	MaxResultSize    int
 	MaxParallelTools int

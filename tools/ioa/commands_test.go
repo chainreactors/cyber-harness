@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/core/operation"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -732,4 +733,33 @@ func (c *fullFakeIOAClient) GetSpaceInfo(_ context.Context, spaceID string) (pro
 		}
 	}
 	return protocols.SpaceInfo{}, fmt.Errorf("space %q not found", spaceID)
+}
+
+func TestSendAddsSessionProvenance(t *testing.T) {
+	nodeID := protocols.NewID()
+	resource := New(Config{NodeID: nodeID}, nil)
+	if err := resource.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer resource.Close(context.Background())
+	commands := resource.Service.Commands()
+	ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{SessionID: "source"})
+	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"--target-session", "child", "--content", `{"text":"hello"}`, "--meta", `{"source_session_id":"forged","target_session_id":"wrong"}`}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("messages: %v %v", messages, err)
+	}
+	m := messages[0]
+	if m.Meta["source_session_id"] != "source" || m.Meta["target_session_id"] != "child" || len(m.Refs.Nodes) != 1 || m.Refs.Nodes[0] != nodeID {
+		t.Fatalf("provenance: %#v", m)
+	}
+	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"handoff", "--target-session=child", "--title", "task", "--message", "work"}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err = resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
+	if err != nil || len(messages) != 2 || messages[1].Meta["source_session_id"] != "source" {
+		t.Fatalf("typed send: %v %v", messages, err)
+	}
 }

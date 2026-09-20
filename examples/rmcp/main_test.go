@@ -91,8 +91,7 @@ func TestToolNodeAgainstHub(t *testing.T) {
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		tools, bash, set := newRegistry(t.TempDir())
-		defer bash.Close()
+		tools, set := newRegistry(t.TempDir())
 		defer set.Close(context.Background())
 		errCh <- toolnode.Run(ctx, toolnode.Config{
 			ServerURL: server.URL, WSPath: "/ws/runner", ID: "rmcp-1", Token: "test-token",

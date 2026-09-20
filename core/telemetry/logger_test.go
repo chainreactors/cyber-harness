@@ -47,6 +47,20 @@ func TestSuppressGlobalNonErrorsKeepsOnlyErrors(t *testing.T) {
 	}
 }
 
+func TestGlobalSDKSettingsCannotSilenceApplicationLogger(t *testing.T) {
+	oldGlobal := logs.Log
+	defer func() { logs.Log = oldGlobal }()
+	var buf bytes.Buffer
+	logger := GlobalLogger(LogConfig{Output: &buf})
+	logs.Log.SetQuiet(true)
+	logs.Log.SetLevel(logs.ErrorLevel)
+	logs.Log.Warnf("SDK warning")
+	logger.Warnf("application delivery failed")
+	if got := buf.String(); got != "● application delivery failed\n" {
+		t.Fatalf("application diagnostics lost to SDK settings: %q", got)
+	}
+}
+
 func TestErrorOnlyLoggerSuppressesNonErrors(t *testing.T) {
 	var buf bytes.Buffer
 	logger := ErrorOnlyLogger(NewLogger(LogConfig{Output: &buf}))

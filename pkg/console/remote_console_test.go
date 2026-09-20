@@ -3,9 +3,10 @@ package console
 import (
 	"bytes"
 	"context"
+	"testing"
+
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/pkg/config"
-	"testing"
 )
 
 func TestSubscribeAgentOutputTracksRotatedRuntimeSession(t *testing.T) {
@@ -17,7 +18,7 @@ func TestSubscribeAgentOutputTracksRotatedRuntimeSession(t *testing.T) {
 	}
 	stdout.Reset()
 	emit := func(id, text string) {
-		application.Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
+		application.Stream.Publish(&aop.Event{SessionId: id, Payload: &aop.Event_Message{Message: &aop.Message{Id: "command", Role: "assistant", Content: []*aop.Content{aop.Text(text)}}}})
 	}
 	emit(oldID, "stale")
 	emit("sibling", "sibling")

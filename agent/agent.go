@@ -42,6 +42,12 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	if err != nil {
 		return nil, err
 	}
+	return a.run(ctx, userMsg, opts...)
+}
+
+// run also accepts already queued input, used when a child must publish its
+// receiver only after the initial task is in its inbox.
+func (a *Agent) run(ctx context.Context, userMsg *aop.Message, opts ...RunOption) (*Result, error) {
 	runCtx, cancel, err := a.startRun(ctx)
 	if err != nil {
 		return nil, err
@@ -73,9 +79,11 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
-	msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
-	if err := cfg.Inbox.Push(msg); err != nil {
-		return nil, fmt.Errorf("push prompt: %w", err)
+	if userMsg != nil {
+		msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
+		if err := cfg.Inbox.Push(msg); err != nil {
+			return nil, fmt.Errorf("push prompt: %w", err)
+		}
 	}
 
 	result, runErr := cfg.Loop.Run(runCtx, cfg)
@@ -87,18 +95,6 @@ func (a *Agent) SessionID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg.SessionID
-}
-
-func (a *Agent) beginSession() {
-	cfg := a.configSnapshot()
-	cfg.emitter.sessionStart(cfg.Model)
-	emitSessionStart(context.Background(), cfg)
-}
-
-func (a *Agent) endSession(reason string) {
-	cfg := a.configSnapshot()
-	cfg.emitter.sessionEnd(reason)
-	emitSessionEnd(context.Background(), cfg, reason)
 }
 
 // Continue resumes the agent without a new prompt (e.g. after tool results).
@@ -242,6 +238,7 @@ func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *ty
 		Loop:     cfg.Loop,
 		Provider: cfg.Provider,
 		Tools:    cfg.Tools,
+		Lifetime: cfg.Lifetime,
 		Model:    cfg.Model,
 		// Children inherit either the explicit prompt or its run-scoped resolver,
 		// along with the environment, tool, and skill context it renders.

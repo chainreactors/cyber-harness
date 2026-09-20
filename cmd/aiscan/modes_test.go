@@ -6,6 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
@@ -13,7 +19,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
@@ -46,7 +51,7 @@ func (scannerCommands) Run(context.Context, []string, *coretool.Execution) (any,
 }
 
 type scannerProfile struct {
-	app          *apppkg.State
+	app          *apptest.Fixture
 	runtimeErr   error
 	loaded       bool
 	closed       bool
@@ -58,7 +63,7 @@ func (p *scannerProfile) Close(context.Context) error {
 	p.closed = true
 	return nil
 }
-func (p *scannerProfile) State() (*apppkg.State, error) { return p.app, nil }
+
 func (p *scannerProfile) Runtime() (*agentsession.Runtime, error) {
 	p.runtimeCalls++
 	return nil, p.runtimeErr
@@ -85,8 +90,8 @@ func TestLoadAgentProfileRejectsNilConstructorAndResult(t *testing.T) {
 
 func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	runtimeErr := errors.New("profile runtime sentinel")
-	application := &apppkg.State{}
-	application.SetProvider(scannerProvider{}, provider.ProviderConfig{})
+	application := apptest.NewFixture(t, nil, nil)
+	application.Providers.Set(scannerProvider{}, provider.ProviderConfig{})
 	p := &scannerProfile{app: application, runtimeErr: runtimeErr}
 	var request profilepkg.Request
 	newProfile := func(value profilepkg.Request) (profilepkg.Profile, error) {
@@ -154,3 +159,22 @@ func TestDirectScannerJSONOutputUsesCommandSpecificFlags(t *testing.T) {
 		})
 	}
 }
+
+func (p *scannerProfile) Active() bool { return p.loaded && !p.closed }
+
+func (p *scannerProfile) Providers() (*provider.State, error) {
+	if !p.Active() {
+		return nil, errors.New("profile is not active")
+	}
+	return p.app.Providers, nil
+}
+
+func (p *scannerProfile) Events() (*events.Stream, error) {
+	if !p.Active() {
+		return nil, errors.New("profile is not active")
+	}
+	return p.app.Stream, nil
+}
+
+func (p *scannerProfile) Progress() (*eventbus.Bus[*toolpb.Progress], error) { return nil, nil }
+func (p *scannerProfile) Processes() (*procbus.Manager, error)               { return nil, nil }

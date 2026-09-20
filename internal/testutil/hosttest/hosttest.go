@@ -13,6 +13,7 @@ import (
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
@@ -83,6 +84,9 @@ func Capabilities() extension.Extension {
 			return err
 		}
 		if err := extension.Provide[*events.Stream](scope, stream); err != nil {
+			return err
+		}
+		if err := extension.Provide(scope, telemetry.NewLoggerRef(nil)); err != nil {
 			return err
 		}
 		return extension.Provide[egress.Endpoint](scope, egress.Disabled())

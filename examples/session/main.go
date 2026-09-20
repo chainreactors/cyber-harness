@@ -12,8 +12,6 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/harness"
 )
 
@@ -57,7 +55,7 @@ func run(ctx context.Context) (resultErr error) {
 			Provider: provider.StartupConfig{Mode: provider.StartupDisabled},
 		},
 		Session: &agentsession.Config{
-			Option: &cfg.Option{}, Logger: telemetry.NopLogger(), PrimarySessionID: "main",
+			PrimarySessionID: "main",
 		},
 	})
 	if err != nil {

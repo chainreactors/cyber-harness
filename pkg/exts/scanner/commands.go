@@ -8,12 +8,12 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
-	app "github.com/chainreactors/cyber/pkg/app"
 
 	curltools "github.com/chainreactors/cyber/tools/curl"
 	gotools "github.com/chainreactors/cyber/tools/gogo"
@@ -33,23 +33,24 @@ import (
 // named so the call below reads as a list of capabilities rather than a run of
 // positional arguments.
 type borrowed struct {
-	application *app.State
-	tools       coretool.Executor
-	commands    coretool.CommandExecutor
-	bash        *terminaltool.BashTool
-	skills      *skills.Store
-	prompts     prompt.Resolver
+	providers *provider.State
+	events    aop.EventPublisher
+	tools     coretool.Executor
+	commands  coretool.CommandExecutor
+	bash      *terminaltool.BashTool
+	skills    *skills.Store
+	prompts   prompt.Resolver
 }
 
 func buildScannerCommands(borrow borrowed, engineSet *engine.Set, config Config, loop agent.Loop, workDir, proxyURL string, logger telemetry.Logger) ([]coretool.Command, error) {
-	application := borrow.application
+	application := borrow.events
 	var scannerResources *resources.Set
 	if engineSet != nil {
 		scannerResources = engineSet.Resources
 	}
 
 	var options []scan.Option
-	model, providerConfig := application.ProviderState()
+	model, providerConfig := borrow.providers.Current()
 	if model != nil {
 		if loop == nil {
 			return nil, fmt.Errorf("scanner agent loop must be supplied by the profile")

@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
+
 	types "github.com/chainreactors/cyber/core/types"
-	app "github.com/chainreactors/cyber/pkg/app"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
@@ -12,8 +14,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
-	"net/url"
-	"strings"
 )
 
 // cyber.yaml is wider than the shared proto schema: --init also emits local
@@ -192,9 +192,9 @@ func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
 // leading profile instead of being dropped.
 func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig { //nolint:unused // used by projectRuntimeConfig in the full-tag web build
 	llm := &types.LLMConfig{}
-	flat := app.HasSingleProviderFields(option)
+	flat := cfg.HasSingleProviderFields(option)
 	if flat {
-		active := app.ProviderConfig(option)
+		active := cfg.ProviderConfig(option)
 		llm.Providers = append(llm.Providers, &types.LLMProviderConfig{
 			Provider: active.Provider, BaseUrl: active.BaseURL, ApiKey: active.APIKey,
 			Model: active.Model, Proxy: active.Proxy, Timeout: int32(active.Timeout),

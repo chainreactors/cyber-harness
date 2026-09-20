@@ -10,7 +10,6 @@ import (
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	arsenalext "github.com/chainreactors/cyber/pkg/exts/arsenal"
-	nativeext "github.com/chainreactors/cyber/pkg/exts/native"
 	okfext "github.com/chainreactors/cyber/pkg/exts/okf"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
@@ -44,7 +43,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	}
 	// The loop installation publishes agent.Loop, so it precedes every
 	// extension that runs against one.
-	extensions = append(extensions, okfext.New(), loopext.New(loop), arsenal, nativeext.New())
+	extensions = append(extensions, okfext.New(), loopext.New(loop), arsenal)
 
 	if !config.SkipEngines {
 		extensions = append(extensions, scannerext.New(config.Scanner, workDir, config.Logger))

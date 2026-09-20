@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/chainreactors/cyber/agent"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
-	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	"io"
 	"net"
 	"net/http"
@@ -20,6 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	execpb "github.com/chainreactors/cyber/aop/exec"
@@ -28,17 +29,19 @@ import (
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"github.com/chainreactors/cyber/pkg/aopws"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 
+	proxyext "github.com/chainreactors/cyber/pkg/exts/proxy"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
-	proxytool "github.com/chainreactors/cyber/tools/proxy"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -215,10 +218,11 @@ func TestCancelOperationSealsTheCallArtifactWindow(t *testing.T) {
 
 func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
-	app := apptest.NewState(t, telemetry.NopLogger(), nil)
+	app := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 
-	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
+	rt := sessionext.New(agentsession.Config{Logger: telemetry.NewLoggerRef(nil)})
+	ns := namespaces.New()
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), ns, promptext.New(), loopext.New(agent.StandardLoop{}), rt, sessionext.NewProtocol())...)
 	if err := rtSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -625,9 +629,10 @@ func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 }
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
-	app := apptest.NewState(t, telemetry.NopLogger(), nil)
-	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger()})
-	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
+	app := apptest.NewFixture(t, telemetry.NopLogger(), nil)
+	rt := sessionext.New(agentsession.Config{Logger: telemetry.NewLoggerRef(nil)})
+	ns := namespaces.New()
+	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), ns, promptext.New(), loopext.New(agent.StandardLoop{}), rt, sessionext.NewProtocol())...)
 	if err := rtSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -640,14 +645,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	}
 	err := serveAgentConnection(context.Background(), connectionConfig{
 		Name: "embedded", NodeID: "embedded", Registry: rt.Runtime().CommandRegistry(), Agent: rt.Runtime(),
-		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
-			for _, binding := range rt.Runtime().NamespaceBindings() {
-				if err := binding.Register(mux); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
+		RegisterNamespaces: ns.Bind,
 	}, telemetry.NopLogger(), stream)
 	if err != io.EOF {
 		t.Fatalf("connection: %v", err)
@@ -709,19 +707,13 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 			Message: &trafficpb.ProtocolMessage_Query{Query: &trafficpb.Query{State: true}},
 		}),
 	}
-	hub := proxytool.NewProxyHub(proxytool.NewState(""), proxytool.NewFlowStore(8), t.TempDir(), false, nil)
-	defer hub.Close(context.Background())
+	ns := namespaces.New()
+	registry := coretool.NewCommandRegistry()
+	hosttest.Load(t, t.Context(), extension.Provided(hooks.New()), ns, registry, proxyext.New(proxyext.Config{WorkDir: t.TempDir()}))
 	cc := connectionConfig{
-		Name: "runner-1", NodeID: "runner-1",
-		Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint(),
-		RegisterNamespaces: func(mux *aop.NamespaceMux) error {
-			binding, err := proxytool.TrafficNamespace(hub.ProxyHub)
-			if err != nil {
-				return err
-			}
-			return binding.Register(mux)
-		},
+		Name: "runner-1", NodeID: "runner-1", Registry: registry, Agent: newSilentAgentEndpoint(), RegisterNamespaces: ns.Bind,
 	}
+
 	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {
 		t.Fatalf("serveAgentConnection error = %v, want EOF", err)
 	}

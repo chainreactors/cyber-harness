@@ -6,12 +6,13 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/egress"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	app "github.com/chainreactors/cyber/pkg/app"
 
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
@@ -25,11 +26,10 @@ type Config struct {
 }
 
 type Extension struct {
-	application *app.State
-	config      Config
-	workDir     string
-	logger      telemetry.Logger
-	engines     *engine.Set
+	config  Config
+	workDir string
+	logger  telemetry.Logger
+	engines *engine.Set
 }
 
 func New(config Config, workDir string, logger telemetry.Logger) *Extension {
@@ -43,7 +43,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || scope == nil {
 		return fmt.Errorf("scanner extension is not configured")
 	}
-	application, err := extension.Use[*app.State](scope)
+	providers, err := extension.Use[*provider.State](scope)
 	if err != nil {
 		return err
 	}
@@ -78,14 +78,17 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := extension.Add(scope, scannerPromptContribution()); err != nil {
 		return err
 	}
-	e.application = application
+	stream, err := extension.Use[*events.Stream](scope)
+	if err != nil {
+		return err
+	}
 	proxyURL := endpoint.ProxyURL()
 	if proxyURL == "" {
 		proxyURL = e.config.Resources.Proxy
 	}
 	e.engines = initEngines(scope.Init(), e.config, e.logger)
 	values, err := buildScannerCommands(borrowed{
-		application: application, tools: tools, commands: commandRegistry, bash: bash, skills: store, prompts: promptResolver,
+		providers: providers, events: stream, tools: tools, commands: commandRegistry, bash: bash, skills: store, prompts: promptResolver,
 	}, e.engines, e.config, loop, e.workDir, proxyURL, e.logger)
 	if err != nil || len(values) == 0 {
 		return err

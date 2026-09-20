@@ -7,34 +7,34 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	web "github.com/chainreactors/cyber/pkg/web"
 )
 
 func (s *Service) aiAvailable() bool {
-	app, release := s.acquireApp()
+	providers, release := s.acquireProviders()
 	defer release()
-	if app == nil {
+	if providers == nil {
 		return false
 	}
-	provider, _ := app.ProviderState()
+	provider, _ := providers.Current()
 	return provider != nil
 }
 
-func (s *Service) acquireApp() (*apppkg.State, func()) {
+func (s *Service) acquireProviders() (*provider.State, func()) {
 	p, release := s.acquireProfile()
 	if p == nil {
 		return nil, release
 	}
-	app, err := p.State()
+	providers, err := p.Providers()
 	if err != nil {
 		release()
 		return nil, func() {}
 	}
-	return app, release
+	return providers, release
 }
 
 func (s *Service) acquireProfile() (profile.Profile, func()) {
@@ -78,8 +78,8 @@ func (s *Service) swapProfile(next profile.Profile) error {
 	if s == nil || next == nil {
 		return fmt.Errorf("service and profile are required")
 	}
-	if _, err := next.State(); err != nil {
-		return err
+	if !next.Active() {
+		return fmt.Errorf("profile is not active")
 	}
 	s.appMu.Lock()
 	if s.closing {

@@ -118,8 +118,8 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		if next == nil {
 			return nil, fmt.Errorf("reload cyber runtime returned no app")
 		}
-		if _, err := next.State(); err != nil {
-			return nil, fmt.Errorf("config candidate is not ready: %w", err)
+		if !next.Active() {
+			return nil, fmt.Errorf("config candidate is not ready: profile is not active")
 		}
 	}
 	if err := s.configStore.CommitDistributeConfig(ctx, prepared); err != nil {

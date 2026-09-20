@@ -3,14 +3,14 @@ package console
 import (
 	"context"
 	"fmt"
+	"io"
+
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	procbus "github.com/chainreactors/cyber/core/proc"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 	"github.com/chainreactors/utils/proc"
-	"io"
 )
 
 const MainREPLName = "main-repl"
@@ -22,11 +22,10 @@ type REPL struct {
 	done   chan struct{}
 }
 
-func StartPersistent(rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
-	if !rt.Configured() {
+func StartPersistent(rt *agentsession.Runtime, manager *procbus.Manager, option *cfg.Option, bindings *consoleapi.Bindings) (*REPL, error) {
+	if !rt.Active() {
 		return nil, fmt.Errorf("main repl requires a runtime")
 	}
-	manager := bashManager(rt.Bash())
 	if manager == nil {
 		return nil, fmt.Errorf("pty manager unavailable")
 	}
@@ -70,11 +69,4 @@ func (r *REPL) Close() {
 	}
 	r.cancel()
 	<-r.done
-}
-
-func bashManager(bash *terminaltool.BashTool) *procbus.Manager {
-	if bash == nil {
-		return nil
-	}
-	return bash.Manager()
 }

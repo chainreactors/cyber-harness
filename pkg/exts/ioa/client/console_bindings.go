@@ -3,13 +3,14 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
-func ConsoleBindings(reader ioatools.Reader, space, endpoint string) *consoleapi.Bindings {
+func consoleBindings(reader ioatools.Reader, space, endpoint string) *consoleapi.Bindings {
 	endpoint = redactIOAURL(endpoint)
 	return &consoleapi.Bindings{
 		Commands: func(view consoleapi.View) []*cobra.Command { return commandBindings(reader, view) },

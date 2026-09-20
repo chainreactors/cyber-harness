@@ -6,14 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/core/types"
-	cfg "github.com/chainreactors/cyber/pkg/config"
-	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
-	webext "github.com/chainreactors/cyber/pkg/exts/web"
-	node "github.com/chainreactors/cyber/pkg/node"
-	profile "github.com/chainreactors/cyber/pkg/profile"
 	"io/fs"
 	"net"
 	"net/http"
@@ -25,6 +17,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
+	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
+	node "github.com/chainreactors/cyber/pkg/node"
+	profile "github.com/chainreactors/cyber/pkg/profile"
+
 	"github.com/chainreactors/cyber/pkg/web"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	ioaservice "github.com/chainreactors/cyber/tools/ioa/server"
@@ -33,44 +34,28 @@ import (
 )
 
 func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webCommand, logger telemetry.Logger) (resultErr error) {
-	store, err := webservice.NewSQLiteStore(opts.DB)
-	if err != nil {
-		return fmt.Errorf("open database: %s", err)
-	}
-	defer store.Close()
-	// The initial app must use the fully resolved option, including values loaded
-	// from the config file and environment. explicitOption is only the seed for
-	// later staged reloads, where the candidate config is resolved independently.
-	p, err := initWebProfile(ctx, option, logger)
-	if err != nil {
-		if p != nil {
-			err = errors.Join(err, p.Close(context.Background()))
-		}
-		return fmt.Errorf("init aiscan: %w", err)
-	}
-	defer func() {
-		if p != nil {
-			resultErr = errors.Join(resultErr, p.Close(context.Background()))
-		}
-	}()
-	application, err := p.State()
-	if err != nil {
-		return err
-	}
-
-	if provider, _ := application.ProviderState(); provider == nil {
-		logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in cyber.yaml or env"))
-	}
-
 	configFile := option.ConfigFile
 	accessKey := opts.Token
 	if accessKey == "" {
 		accessKey = protocols.NewToken()
 	}
-	service := webservice.NewService(webservice.ServiceConfig{
+	webConfig := webext.Config{
+		Database: opts.DB,
+		InitialProfile: func(ctx context.Context) (profile.Profile, error) {
+			p, err := initWebProfile(ctx, option, logger)
+			if err != nil {
+				return p, err
+			}
+			providers, err := p.Providers()
+			if err != nil {
+				return p, err
+			}
+			if model, _ := providers.Current(); model == nil {
+				logger.Warnf("%s", telemetry.StartupLine("skip", "llm", "AI disabled: set api_key in cyber.yaml or env"))
+			}
+			return p, nil
+		},
 		ConfigAPI:   configAPI(),
-		Store:       store,
-		Profile:     p,
 		AccessKey:   accessKey,
 		ConfigStore: &webConfigStore{explicit: configFile, runtime: option},
 		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Profile, error) {
@@ -94,28 +79,18 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 		},
 		MaxConcurrent: opts.MaxScans,
 		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
-	})
-	p = nil // Service now owns the initial Profile and all replacements.
-	defer func() { resultErr = errors.Join(resultErr, service.Close(context.Background())) }()
-
-	var pool *webservice.AgentPool
-	if option.Debug {
-		pool = webservice.NewAgentPool(service.Hub(), store, "*")
-	} else {
-		pool = webservice.NewAgentPool(service.Hub(), store)
 	}
-	service.SetAgentPool(pool)
+	if option.Debug {
+		webConfig.AllowedOrigins = []string{"*"}
+	}
 
 	staticSub, err := fs.Sub(webstatic.FS, "static")
 	if err != nil {
 		return fmt.Errorf("load static assets: %s", err)
 	}
 
-	routes := webext.New(service)
-	ioaExtension := ioaserver.NewBrowser(ioaservice.Config{AccessKey: accessKey}, ioaserver.BrowserOptions{
-		Authenticate: service.Auth().Authenticate,
-		AuthEnabled:  service.Auth().Enabled(),
-	})
+	routes := webext.New(webConfig)
+	ioaExtension := ioaserver.NewBrowser(ioaservice.Config{AccessKey: accessKey})
 	webSet, err := extension.New(routes, ioaExtension)
 	if err != nil {
 		return err
@@ -132,7 +107,7 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
 
-	httpHandler, err := web.NewHandler(service.Auth(), newSPAFileServer(staticSub), routes.Routes()...)
+	httpHandler, err := web.NewHandler(routes.Service().Auth(), newSPAFileServer(staticSub), routes.Routes()...)
 	if err != nil {
 		return err
 	}

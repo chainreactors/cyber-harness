@@ -13,12 +13,12 @@ import (
 
 // Stable system-message codes mirrored by the frontend i18n catalog.
 const (
-	SysNoRunningTask     = "no_running_task"
-	SysPaused            = "paused"
-	SysFileUploaded      = "file_uploaded"
-	SysNoAgentsConnected = "no_agents_connected"
-	SysAgentsList        = "agents_list"
-	SysAgentNotConnected = "agent_not_connected"
+	SysNoRunningTask       = "no_running_task"
+	SysPaused              = "paused"
+	SysFileUploaded        = "file_uploaded"
+	SysNoAgentsConnected   = "no_agents_connected"
+	SysAgentsList          = "agents_list"
+	SysAgentNotConnected   = "agent_not_connected"
 	SysSessionContextReset = "session_context_reset"
 	SysHelp                = "help"
 )
@@ -157,6 +157,10 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 }
 
 func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) {
+	if !s.beginWork() {
+		return
+	}
+	defer s.work.Done()
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -179,8 +183,16 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 		return
 	}
 
+	s.work.Add(1)
 	go func() {
-		res, ok := <-resultCh
+		defer s.work.Done()
+		var res taskResult
+		var ok bool
+		select {
+		case res, ok = <-resultCh:
+		case <-s.workContext.Done():
+			return
+		}
 		canceled := s.finishSessionTask(taskID)
 		if canceled {
 			return
@@ -196,6 +208,10 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 }
 
 func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) {
+	if !s.beginWork() {
+		return "", fmt.Errorf("web service is closing")
+	}
+	defer s.work.Done()
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return "", fmt.Errorf("command line is required")
@@ -211,7 +227,8 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		switch verb {
 		case "help", "agents":
 			operationID := generateID()
-			go s.runHubCommand(sessionID, verb, args)
+			s.work.Add(1)
+			go func() { defer s.work.Done(); s.runHubCommand(sessionID, verb, args) }()
 			return operationID, nil
 		case "clear":
 			return "", fmt.Errorf("clear requires ResetSession")
@@ -236,8 +253,16 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		s.finishSessionTask(taskID)
 		return "", err
 	}
+	s.work.Add(1)
 	go func() {
-		res, ok := <-resultCh
+		defer s.work.Done()
+		var res taskResult
+		var ok bool
+		select {
+		case res, ok = <-resultCh:
+		case <-s.workContext.Done():
+			return
+		}
 		canceled := s.finishSessionTask(taskID)
 		if !ok || canceled {
 			return

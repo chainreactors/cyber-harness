@@ -4,13 +4,14 @@ package terminal
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	procbus "github.com/chainreactors/cyber/core/proc"
 	coretool "github.com/chainreactors/cyber/core/tool"
-	"sync"
-	"time"
 
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
@@ -80,6 +81,9 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	if err := extension.Provide[*terminaltool.BashTool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[*procbus.Manager](scope, bash.Manager()); err != nil {
 		return err
 	}
 	if err := extension.Provide[procbus.Sessions](scope, bash.Manager()); err != nil {

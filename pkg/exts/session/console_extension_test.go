@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	coreevents "github.com/chainreactors/cyber/core/events"
@@ -9,16 +10,16 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 	"github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 
-	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
-	"github.com/spf13/cobra"
 	"strings"
 	"testing"
+
+	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
+	"github.com/spf13/cobra"
 )
 
 func TestProviderDependencyAndPerTerminalSessionDispatch(t *testing.T) {
@@ -89,11 +90,7 @@ func TestMissingProviderLoadFailsContribution(t *testing.T) {
 }
 
 // newTestApplication is the application this package's tests run against.
-func newTestApplication(t *testing.T) *apppkg.State {
+func newTestApplication(t *testing.T) *apptest.Fixture {
 	t.Helper()
-	application, err := apppkg.New(nil, coreevents.New())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return application
+	return apptest.NewFixture(t, nil, coreevents.New())
 }

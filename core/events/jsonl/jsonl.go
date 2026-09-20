@@ -1,4 +1,4 @@
-package output
+package jsonl
 
 import (
 	"bufio"

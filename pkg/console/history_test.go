@@ -2,13 +2,14 @@ package console
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
-	"os"
-	"path/filepath"
-	"testing"
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
@@ -17,8 +18,6 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 )
@@ -50,14 +49,14 @@ func (p *consoleProvider) ChatCompletion(context.Context, *provider.ChatCompleti
 	}, nil
 }
 
-func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apppkg.State) {
+func newConsoleRuntime(t *testing.T, provider agent.Provider) (*agentsession.Runtime, *apptest.Fixture) {
 	t.Helper()
-	a := apptest.NewState(t, telemetry.NopLogger(), nil)
+	a := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 	// The runtime reads provider state while loading, so the provider is set
 	// first. One graph: the session extension borrows the same capabilities a
 	// profile publishes, so the test publishes them once and mounts it alongside.
-	a.SetProvider(provider, agent.ProviderConfig{Model: "test"})
-	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	a.Providers.Set(provider, agent.ProviderConfig{Model: "test"})
+	rt := sessionext.New(agentsession.Config{Loop: agent.StandardLoop{}})
 	set := hosttest.Set(t, append(apptest.Entries(t, a), promptext.New(), loopext.New(agent.StandardLoop{}), rt)...)
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)

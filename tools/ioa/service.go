@@ -10,7 +10,16 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
+	ioaserver "github.com/chainreactors/ioa/server"
 )
+
+// sdkClient collects only capabilities consumed by the IOA integration.
+type sdkClient interface {
+	ioaclient.StreamAPI
+	Reader
+	Bound() bool
+	EnsureRegistered(context.Context, string, string, map[string]any) error
+}
 
 type Config struct {
 	URL              string
@@ -31,21 +40,23 @@ type Service struct {
 	config Config
 	logger telemetry.Logger
 
-	client       *ioaclient.Client
-	cancel       context.CancelFunc
-	retry        chan struct{}
-	loaded       bool
-	closed       bool
-	attempted    bool
-	binding      *spaceBinding
-	receiveSpace *spaceBinding
-	ready        chan struct{}
-	lifetime     context.Context
-	statusMu     sync.Mutex
-	lastError    error
-	dropped      uint64
-	queries      sync.WaitGroup
-	done         chan struct{}
+	client      sdkClient
+	beforeSpace func(context.Context, string) error
+	closeStore  func() error
+	closeErr    error
+	cancel      context.CancelFunc
+	retry       chan struct{}
+	loaded      bool
+	closed      bool
+	attempted   bool
+	binding     *spaceBinding
+	ready       chan struct{}
+	lifetime    context.Context
+	statusMu    sync.Mutex
+	lastError   error
+	dropped     uint64
+	queries     sync.WaitGroup
+	done        chan struct{}
 }
 
 // Resource owns one Service's client connection and registration retry. The
@@ -57,10 +68,16 @@ type Resource struct {
 // New constructs an inert instance. Network work begins in Start.
 func New(config Config, logger telemetry.Logger) *Resource {
 	config.NodeMeta = cloneNodeMeta(config.NodeMeta)
+	if config.NodeName == "" {
+		config.NodeName = "cyber"
+	}
+	if config.URL == "" && config.Space == "" {
+		config.Space = "default"
+	}
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	return &Resource{Service: &Service{config: config, logger: logger, binding: &spaceBinding{}, receiveSpace: &spaceBinding{}, ready: make(chan struct{})}}
+	return &Resource{Service: &Service{config: config, logger: logger, binding: &spaceBinding{}, ready: make(chan struct{})}}
 }
 
 func cloneNodeMeta(source map[string]any) map[string]any {
@@ -74,7 +91,7 @@ func cloneNodeMeta(source map[string]any) map[string]any {
 	return result
 }
 
-// Load binds and registers the configured client. ctx bounds initial setup;
+// Start binds and registers the configured client. ctx bounds initial setup;
 // registration retries use the instance lifetime and stop in Close.
 func (r *Resource) Start(ctx context.Context) error {
 	if r == nil || r.Service == nil {
@@ -96,16 +113,13 @@ func (r *Resource) Start(ctx context.Context) error {
 		return err
 	}
 	s.attempted = true
-	client, err := newIOAClient(s.config)
+	client, closeStore, err := newIOAClient(s.config)
 	if err != nil {
 		return err
 	}
-	if client == nil {
-		s.loaded = true
-		return nil
-	}
-	if s.config.Identity != nil {
-		if err := client.Bind(s.config.Identity); err != nil {
+	s.closeStore = closeStore
+	if remote, ok := client.(*ioaclient.Client); ok && s.config.Identity != nil {
+		if err := remote.Bind(s.config.Identity); err != nil {
 			return fmt.Errorf("bind ioa identity: %w", err)
 		}
 	}
@@ -113,6 +127,10 @@ func (r *Resource) Start(ctx context.Context) error {
 	s.client, s.cancel = client, cancel
 	s.lifetime = lifetime
 	if err := s.setup(ctx); err != nil {
+		if s.config.URL == "" {
+			cancel()
+			return err
+		}
 		if ctx.Err() != nil {
 			cancel()
 			return ctx.Err()
@@ -131,7 +149,7 @@ func (r *Resource) Start(ctx context.Context) error {
 }
 
 func (s *Service) setup(ctx context.Context) error {
-	if s.config.AutoRegister {
+	if s.config.AutoRegister || s.config.URL == "" {
 		if err := s.client.EnsureRegistered(ctx, s.config.NodeName, "", s.config.NodeMeta); err != nil {
 			return err
 		}
@@ -176,7 +194,6 @@ func (s *Service) configureSpace(ctx context.Context) error {
 		return err
 	}
 	s.binding.initialize(info.ID)
-	s.receiveSpace.set(info.ID)
 	return nil
 }
 
@@ -199,7 +216,7 @@ func (s *Service) WaitReady(ctx context.Context) error {
 	}
 }
 
-func (s *Service) ReceiveSpace() string { return s.receiveSpace.get() }
+func (s *Service) ReceiveSpace() string { return s.binding.get() }
 
 type Status struct {
 	Bound     bool
@@ -241,39 +258,45 @@ func (s *Service) ReportDropped(count uint64) {
 	s.statusMu.Unlock()
 }
 
-func newIOAClient(config Config) (*ioaclient.Client, error) {
+func newIOAClient(config Config) (sdkClient, func() error, error) {
 	if config.URL == "" {
-		return nil, nil
+		store, err := ioaserver.NewSQLiteStore(":memory:")
+		if err != nil {
+			return nil, nil, err
+		}
+		return ioaserver.NewLocalClient(ioaserver.NewService(store, ""), config.NodeID), store.Close, nil
 	}
+	var client *ioaclient.Client
+	var err error
 	if config.Token != "" {
-		return ioaclient.NewClientWithToken(config.URL, config.Token)
+		client, err = ioaclient.NewClientWithToken(config.URL, config.Token)
+	} else {
+		client, err = ioaclient.NewClient(config.URL, config.NodeID)
 	}
-	return ioaclient.NewClient(config.URL, config.NodeID)
+	return client, nil, err
 }
 
-// Client lends the SDK handle to the owning extension. Hosts receive Service
-// or Reader and cannot acquire the underlying SDK client.
-func (r *Resource) Client() *ioaclient.Client {
-	if r == nil || r.Service == nil {
+// Client lends streaming operations to collaboration. The returned interface
+// has no connection lifecycle operations.
+func (s *Service) Client() ioaclient.StreamAPI {
+	if s == nil {
 		return nil
 	}
-	s := r.Service
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.client
 }
 
-func (r *Resource) Commands() []coretool.Command {
-	if r == nil || r.Service == nil {
+func (s *Service) Commands() []coretool.Command {
+	if s == nil {
 		return nil
 	}
-	s := r.Service
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.client == nil || s.closed {
 		return nil
 	}
-	root := &rootCommand{client: s.client, binding: s.binding, nodeName: s.config.NodeName, meta: s.config.NodeMeta}
+	root := &rootCommand{beforeSpace: s.changeSpace, client: s.client, binding: s.binding, nodeName: s.config.NodeName, meta: s.config.NodeMeta}
 	return root.commands()
 }
 
@@ -298,6 +321,9 @@ func (r *Resource) Close(ctx context.Context) error {
 				<-s.retry
 			}
 			s.queries.Wait()
+			if s.closeStore != nil {
+				s.closeErr = s.closeStore()
+			}
 			close(s.done)
 		}()
 	}
@@ -305,13 +331,48 @@ func (r *Resource) Close(ctx context.Context) error {
 	s.mu.Unlock()
 	select {
 	case <-done:
-		return nil
+		return s.closeErr
 	default:
 	}
 	select {
 	case <-done:
-		return nil
+		return s.closeErr
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// SetSpaceChangeHandler installs the owning extension's subscription boundary before commands are exposed.
+func (s *Service) SetSpaceChangeHandler(fn func(context.Context, string) error) {
+	s.mu.Lock()
+	s.beforeSpace = fn
+	s.mu.Unlock()
+}
+
+// ReadySpace captures a binding only after its subscription is established.
+// It shares the command switch lock, so starting a task cannot restore a stale feed.
+func (s *Service) ReadySpace(ctx context.Context) (string, error) {
+	if err := s.WaitReady(ctx); err != nil {
+		return "", err
+	}
+	s.binding.mu.Lock()
+	defer s.binding.mu.Unlock()
+	space := s.binding.spaceID
+	if space == "" {
+		return "", fmt.Errorf("IOA space is not configured")
+	}
+	if err := s.changeSpace(ctx, space); err != nil {
+		return "", err
+	}
+	return space, nil
+}
+
+func (s *Service) changeSpace(ctx context.Context, space string) error {
+	s.mu.RLock()
+	handler := s.beforeSpace
+	s.mu.RUnlock()
+	if handler != nil {
+		return handler(ctx, space)
+	}
+	return nil
 }

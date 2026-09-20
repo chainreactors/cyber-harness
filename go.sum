@@ -213,8 +213,8 @@ github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45 h1:wIKAvAP
 github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45/go.mod h1:ba7u/7/I9yV7TvuWj+VV9QYz9NmlLdh6UK9kxRRft+E=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744 h1:5Bj73ddSftvWEgjo3dEOUis1CuwPaX8JsSAIZCujfxE=
 github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744/go.mod h1:Em8DiV1Rh59FCd9zN4RQBi3RnUt9yPWD/oxPEPTyXIk=
-github.com/chainreactors/ioa v0.1.2-0.20260914080230-0fff59a906db h1:7yRkOKWklK/sABXbqGJqUqM4s/3bckzjDo6o8dGME5g=
-github.com/chainreactors/ioa v0.1.2-0.20260914080230-0fff59a906db/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
+github.com/chainreactors/ioa v0.1.2-0.20260920053655-e9bc60bdd4f8 h1:pEVokRxDyRCYOIi4aJAiX+kUCsC++Z39UYovW8lObCM=
+github.com/chainreactors/ioa v0.1.2-0.20260920053655-e9bc60bdd4f8/go.mod h1:IqHyULc67RKEmr9qsyPpJzgSGJRK8JeRXXXVthQu5Z8=
 github.com/chainreactors/katana v1.7.0-aiscan.1 h1:D+vODGa1nqjLv4RLqrmYkdUdqjN0H410Q2A8fSyhuak=
 github.com/chainreactors/katana v1.7.0-aiscan.1/go.mod h1:WoUoGQxtclK4GGIrbxbKxL8MQcRYbwKLHT0y9gLQDMI=
 github.com/chainreactors/libcstx/go v0.4.2-0.20260915062605-a4bd085cbb12 h1:LhIfxiie1NjyiFo7wmuv9eOdJOA3KsHWXvs69ggr/ME=

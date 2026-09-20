@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/chainreactors/cyber/core/operation"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -29,6 +31,19 @@ func (b *spaceBinding) set(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.spaceID = id
+}
+
+// Serialize switching the receive subscription and publishing the command binding.
+func (b *spaceBinding) change(ctx context.Context, id string, before func(context.Context, string) error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if before != nil {
+		if err := before(ctx, id); err != nil {
+			return err
+		}
+	}
+	b.spaceID = id
+	return nil
 }
 
 func (b *spaceBinding) initialize(id string) {
@@ -58,10 +73,11 @@ func (root *rootCommand) commands() []coretool.Command {
 // to the ioa instance's client CLI (go-flags based) with the bound space
 // injected; space keeps cyber's current-space binding semantics.
 type rootCommand struct {
-	client   protocols.ClientAPI
-	binding  *spaceBinding
-	nodeName string
-	meta     map[string]any
+	beforeSpace func(context.Context, string) error
+	client      protocols.ClientAPI
+	binding     *spaceBinding
+	nodeName    string
+	meta        map[string]any
 }
 
 func (c *rootCommand) Usage() string {
@@ -70,7 +86,7 @@ func (c *rootCommand) Usage() string {
 Subcommands:
   ioa space <name> <description> [--tag t]      Join or create a space (sets it as current)
   ioa space list|nodes|topics                   Inspect spaces and current-space members
-  ioa send --content <json> [--ref-nodes ids] [--ref-messages ids] [--content-type t]
+  ioa send --content <json> [--ref-nodes ids] [--target-session id] [--ref-messages ids] [--content-type t]
   ioa send <protocol> [flags]                   Typed protocol send (checkpoint, handoff, ...)
   ioa read [--all] [--limit N] [--after id] [--message id] [--direction d] [--listen]
 
@@ -106,6 +122,27 @@ func (c *rootCommand) dispatchCLI(ctx context.Context, execution *coretool.Execu
 	if err := ensureNode(ctx, c.client, c.nodeName, c.meta); err != nil {
 		return err
 	}
+	target := ""
+	if args[0] == "send" {
+		cleaned := []string{args[0]}
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--target-session" {
+				i++
+				if i >= len(args) || args[i] == "" {
+					return fmt.Errorf("--target-session requires a session ID")
+				}
+				target = args[i]
+			} else if strings.HasPrefix(args[i], "--target-session=") {
+				target = strings.TrimPrefix(args[i], "--target-session=")
+				if target == "" {
+					return fmt.Errorf("--target-session requires a session ID")
+				}
+			} else {
+				cleaned = append(cleaned, args[i])
+			}
+		}
+		args = cleaned
+	}
 	opts := &ioaclient.CommandOptions{}
 	parser := ioaclient.NewCommandParser(opts)
 	full := append([]string{args[0], "--space", spaceID}, args[1:]...)
@@ -116,7 +153,11 @@ func (c *rootCommand) dispatchCLI(ctx context.Context, execution *coretool.Execu
 	if len(remaining) > 0 {
 		return fmt.Errorf("ioa %s: unknown subcommand or argument %q", args[0], remaining[0])
 	}
-	return ioaclient.Dispatch(ctx, c.client, c.nodeName, opts, parser.Active, execution.Stdout)
+	client := c.client
+	if args[0] == "send" {
+		client = sessionSender{ClientAPI: c.client, source: operation.InvocationFromContext(ctx).SessionID, target: target}
+	}
+	return ioaclient.Dispatch(ctx, client, c.nodeName, opts, parser.Active, execution.Stdout)
 }
 
 // runSpace handles join (ioa CLI positional syntax) plus cyber's
@@ -146,7 +187,9 @@ func (c *rootCommand) runSpace(ctx context.Context, execution *coretool.Executio
 	if err != nil {
 		return err
 	}
-	c.binding.set(info.ID)
+	if err := c.binding.change(ctx, info.ID, c.beforeSpace); err != nil {
+		return err
+	}
 	return writeJSON(execution.Stdout, struct {
 		protocols.SpaceInfo
 		StartMessages []protocols.Message `json:"start_messages"`
@@ -236,4 +279,36 @@ func writeJSON(writer io.Writer, v any) error {
 	}
 	_, err = writer.Write(data)
 	return err
+}
+
+// sessionSender adds execution provenance to all SDK send protocols.
+type sessionSender struct {
+	protocols.ClientAPI
+	source, target string
+}
+
+func (c sessionSender) Send(ctx context.Context, space string, body protocols.SendMessage) (protocols.Message, error) {
+	meta := make(map[string]any, len(body.Meta)+2)
+	for k, v := range body.Meta {
+		meta[k] = v
+	}
+	delete(meta, "source_session_id")
+	delete(meta, "target_session_id")
+	if c.source != "" {
+		meta["source_session_id"] = c.source
+	}
+	if c.target != "" {
+		meta["target_session_id"] = c.target
+		if body.Refs == nil {
+			body.Refs = &protocols.Ref{}
+		} else {
+			refs := *body.Refs
+			body.Refs = &refs
+		}
+		if len(body.Refs.Nodes) == 0 {
+			body.Refs.Nodes = []string{c.NodeID()}
+		}
+	}
+	body.Meta = meta
+	return c.ClientAPI.Send(ctx, space, body)
 }

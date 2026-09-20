@@ -12,7 +12,7 @@ import (
 )
 
 func TestStandaloneResourceAndLiveCommandRegistration(t *testing.T) {
-	resource, err := NewResource(Config{Loop: agent.StandardLoop{}})
+	resource, err := newUnitResource(t, nil, Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestStandaloneResourceAndLiveCommandRegistration(t *testing.T) {
 }
 
 func TestConcurrentCommandRegistrationAndDiscovery(t *testing.T) {
-	resource, err := NewResource(Config{})
+	resource, err := newUnitResource(t, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

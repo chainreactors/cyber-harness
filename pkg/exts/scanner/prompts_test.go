@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/cyber/core/extension"
+
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/utils/parsers"
@@ -12,16 +14,13 @@ import (
 
 func scannerPromptResolver(t *testing.T, contributions ...prompt.Contribution) prompt.Resolver {
 	t.Helper()
-	registry := prompt.NewRegistry()
-	values := append([]prompt.Contribution{scannerPromptContribution()}, contributions...)
-	if _, err := registry.Add(values...); err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.Activate(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = registry.Close(context.Background()) })
-	return registry
+	installed := installScanner(t, t.TempDir(), Config{}, extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		if len(contributions) == 0 {
+			return nil
+		}
+		return extension.Add(scope, contributions...)
+	}})
+	return installed.prompts
 }
 
 func TestScannerWorkerPromptCanBeExtended(t *testing.T) {

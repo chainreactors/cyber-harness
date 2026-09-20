@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	eventjsonl "github.com/chainreactors/cyber/core/events/jsonl"
 	"github.com/chainreactors/cyber/core/telemetry"
-	coretool "github.com/chainreactors/cyber/core/tool"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	cfg "github.com/chainreactors/cyber/pkg/config"
-	"github.com/chainreactors/cyber/pkg/output"
 )
 
 // HistoryStore supplies recovery without coupling the runtime to a filesystem.
@@ -25,7 +23,7 @@ func (JSONLHistory) Load(ctx context.Context, path string) (*History, error) {
 	}
 	return ReadHistory(path)
 }
-func (JSONLHistory) Validate(path string) error { return output.ValidateJSONLTarget(path) }
+func (JSONLHistory) Validate(path string) error { return eventjsonl.ValidateJSONLTarget(path) }
 
 // Resource owns one Runtime installation. Consumers borrow Runtime while the
 // owning extension alone starts and closes Resource.
@@ -47,28 +45,31 @@ func NewResource(config Config) (*Resource, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Option == nil {
-		config.Option = &cfg.Option{}
+	for _, dependency := range []struct {
+		name    string
+		missing bool
+	}{
+		{"loop", config.Loop == nil}, {"providers", config.Providers == nil},
+		{"events", config.Events == nil}, {"hooks", config.Hooks == nil},
+		{"tools", config.Tools == nil}, {"commands", config.CommandRegistry == nil},
+		{"skills", config.Skills == nil},
+	} {
+		if dependency.missing {
+			return nil, fmt.Errorf("session requires %s", dependency.name)
+		}
 	}
+
 	if config.Logger == nil {
-		config.Logger = telemetry.NopLogger()
+		config.Logger = telemetry.NewLoggerRef(nil)
 	}
-	if config.History == nil {
-		config.History = JSONLHistory{}
-	}
-	application := config.State
-	if application == nil {
-		application = &apppkg.State{}
-	}
-	tools := config.Tools
-	if tools == nil {
-		tools = coretool.EmptyExecutor()
-	}
+	config.BaseSkills = append([]string(nil), config.BaseSkills...)
+	config.SelectedSkills = append([]string(nil), config.SelectedSkills...)
+	config.Commands = declared
 	return &Resource{runtime: &Runtime{
 		commands: declared, commandIndex: index, history: config.History,
-		app: application, option: config.Option, logger: config.Logger, config: config,
-		hooks: config.Hooks, tools: tools, commandRegistry: config.CommandRegistry,
-		skills: config.Skills, bash: config.Bash,
+		providers: config.Providers, events: config.Events, logger: config.Logger, config: config,
+		hooks: config.Hooks, tools: config.Tools, commandRegistry: config.CommandRegistry,
+		skills: config.Skills, shell: config.Shell,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		closeDone: make(chan struct{}),
 	}}, nil
