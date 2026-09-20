@@ -220,7 +220,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	ctx := context.Background()
 	app := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 
-	rt := sessionext.New(agentsession.Config{Logger: telemetry.NewLoggerRef(nil)})
+	rt := sessionext.New(agentsession.Config{Logger: telemetry.NopLogger()})
 	ns := namespaces.New()
 	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), ns, promptext.New(), loopext.New(agent.StandardLoop{}), rt, sessionext.NewProtocol())...)
 	if err := rtSet.Load(ctx); err != nil {
@@ -630,7 +630,7 @@ func TestWebSocketStreamClosesWhenContextEnds(t *testing.T) {
 
 func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 	app := apptest.NewFixture(t, telemetry.NopLogger(), nil)
-	rt := sessionext.New(agentsession.Config{Logger: telemetry.NewLoggerRef(nil)})
+	rt := sessionext.New(agentsession.Config{Logger: telemetry.NopLogger()})
 	ns := namespaces.New()
 	rtSet := hosttest.Set(t, append(apptest.Entries(t, app), ns, promptext.New(), loopext.New(agent.StandardLoop{}), rt, sessionext.NewProtocol())...)
 	if err := rtSet.Load(t.Context()); err != nil {

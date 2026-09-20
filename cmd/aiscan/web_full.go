@@ -133,7 +133,7 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 		}
 		telemetry.SafeGo("embedded-agent", func() {
 			defer close(embeddedDone)
-			if err := node.RunWebSocket(embeddedCtx, newCyberProfileFromRequest, &agentOption, logger); err != nil && ctx.Err() == nil {
+			if err := node.RunWebSocket(embeddedCtx, newAIScanProfile, &agentOption, logger); err != nil && ctx.Err() == nil {
 				logger.Warnf("embedded agent stopped: %s", err)
 			}
 		})
@@ -217,10 +217,12 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 		option.Resolved = resolved
 		option.Extensions = resolved.Values()
 	}
-	p, err := newAIScanProfile(aiscanRequest{
-		Option: &option, ProviderMode: profile.ProviderOptional, Logger: logger,
-		SkipEngines: true, DisableIOA: true,
-	})
+	config, err := configFromOption(&option, profile.ProviderOptional, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	config.Base.SkipEngines, config.IOA = true, nil
+	p, err := buildAIScanProfile(config)
 	if err != nil {
 		return nil, err
 	}

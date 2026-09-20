@@ -35,7 +35,7 @@ func (r fixedPromptResolver) Build(context.Context, agentprompt.Context) agentpr
 func TestResolveSystemPromptUsesConfigResolver(t *testing.T) {
 	rt := &Runtime{
 		agentConfig: agent.Config{PromptResolver: fixedPromptResolver("runtime")},
-		logger:      telemetry.NewLoggerRef(nil),
+		Logger:      telemetry.NopLogger(),
 	}
 	result, err := rt.resolveSystemPrompt(t.Context(), nil)
 	if err != nil || result != "runtime" {
@@ -64,7 +64,7 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := newUnitResource(t, application, Config{BaseSkills: []string{"cyber"}, SelectedSkills: option.Skills, Logger: telemetry.NewLoggerRef(nil), Loop: agent.StandardLoop{}, PromptResolver: resolver})
+			rt, err := newUnitResource(t, application, Config{BaseSkills: []string{"cyber"}, SelectedSkills: option.Skills, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}

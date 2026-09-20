@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
 )
 
@@ -93,7 +92,7 @@ func TestLoggerRetargetReachesExistingSessionsAndDerivedAgents(t *testing.T) {
 	}
 	child := first.state.agent.Derive()
 	var logs bytes.Buffer
-	runtime.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
+	runtime.Logger.SetOutput(&logs)
 	first.state.agent.Cfg.Logger.Infof("existing session")
 	child.Cfg.Logger.Infof("existing child")
 	if _, err := first.state.scheduler.Add(agent.LoopEntry{Name: "existing-scheduler", Prompt: "wait", Interval: time.Hour}); err != nil {
@@ -113,7 +112,7 @@ func TestLoggerRetargetReachesExistingSessionsAndDerivedAgents(t *testing.T) {
 		}
 	}
 	before := logs.Len()
-	runtime.SetLogger(nil)
+	runtime.Logger.SetOutput(nil)
 	child.Cfg.Logger.Infof("discarded")
 	if logs.Len() != before {
 		t.Fatal("old destination still receives logs")

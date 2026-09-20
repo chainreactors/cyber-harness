@@ -45,17 +45,6 @@ type config struct {
 	Output  string
 }
 
-// aiscanRequest is the complete host input for the reference distribution. Option
-// must already be resolved by the host's declaration graph.
-type aiscanRequest struct {
-	Option       *cfg.Option
-	ProviderMode provider.StartupMode
-	Session      *agentsession.Config
-	Logger       telemetry.Logger
-	SkipEngines  bool
-	DisableIOA   bool
-}
-
 func configFromOption(option *cfg.Option, providerMode provider.StartupMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (config, error) {
 	if option == nil {
 		return config{}, fmt.Errorf("cyber profile option is required")
@@ -98,31 +87,6 @@ type aiscanProfile struct {
 }
 
 var _ profilepkg.Profile = (*aiscanProfile)(nil)
-
-// newAIScanProfile constructs an unpublished reference-distribution profile. The caller
-// owns the result and must close it, including after a failed Load.
-func newAIScanProfile(request aiscanRequest) (*aiscanProfile, error) {
-	switch request.ProviderMode {
-	case provider.StartupDisabled, provider.StartupRequired, provider.StartupOptional:
-	default:
-		return nil, fmt.Errorf("invalid provider mode %d", request.ProviderMode)
-	}
-	if request.Option == nil {
-		return nil, fmt.Errorf("cyber profile option is required")
-	}
-	if request.Option.Resolved == nil {
-		return nil, fmt.Errorf("cyber profile option must be resolved by the host")
-	}
-	config, err := configFromOption(request.Option, request.ProviderMode, request.Session, request.Logger)
-	if err != nil {
-		return nil, err
-	}
-	config.Base.SkipEngines = request.SkipEngines
-	if request.DisableIOA {
-		config.IOA = nil
-	}
-	return buildAIScanProfile(config)
-}
 
 func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if config.Option == nil {
@@ -336,9 +300,13 @@ func (p *aiscanProfile) Shell() (coretool.CommandExecutor, *terminaltool.BashToo
 	return p.commands, p.bash
 }
 
-// newCyberProfileFromRequest adapts host-owned declaration resolution to the
-// local reference distribution constructor.
-func newCyberProfileFromRequest(request profilepkg.Request) (profilepkg.Profile, error) {
+// newAIScanProfile resolves host inputs and constructs the product extension set.
+func newAIScanProfile(request profilepkg.Request) (profilepkg.Profile, error) {
+	switch request.ProviderMode {
+	case provider.StartupDisabled, provider.StartupRequired, provider.StartupOptional:
+	default:
+		return nil, fmt.Errorf("invalid provider mode %d", request.ProviderMode)
+	}
 	if request.Option == nil {
 		return nil, fmt.Errorf("cyber profile option is required")
 	}
@@ -352,10 +320,11 @@ func newCyberProfileFromRequest(request profilepkg.Request) (profilepkg.Profile,
 		option.Extensions = resolved.Values()
 		request.Option = &option
 	}
-	return newAIScanProfile(aiscanRequest{
-		Option: request.Option, ProviderMode: request.ProviderMode,
-		Session: request.Session, Logger: request.Logger,
-	})
+	config, err := configFromOption(request.Option, request.ProviderMode, request.Session, request.Logger)
+	if err != nil {
+		return nil, err
+	}
+	return buildAIScanProfile(config)
 }
 
 // Providers borrows a capability from the active installation.

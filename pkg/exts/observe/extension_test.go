@@ -32,7 +32,7 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 	set, err := extension.New(
 		extension.Provided[*hooks.Registry](hookRegistry),
 		extension.Provided[*coreevents.Stream](stream),
-		extension.Provided[*telemetry.LoggerRef](telemetry.NewLoggerRef(nil)),
+		extension.Provided[telemetry.Logger](telemetry.NopLogger()),
 		registry,
 		observer,
 		fileTools,

@@ -76,7 +76,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if config.Events, err = extension.Use[*events.Stream](scope); err != nil {
 		return err
 	}
-	if config.Logger, err = extension.Use[*telemetry.LoggerRef](scope); err != nil {
+	if config.Logger, err = extension.Use[telemetry.Logger](scope); err != nil {
 		return err
 	}
 	if config.History == nil {

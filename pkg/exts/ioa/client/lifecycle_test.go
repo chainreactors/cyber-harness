@@ -73,7 +73,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true})
 			adapter := NewCollaboration(CollaborationOptions{})
 			registry := hooks.New()
-			set, err := extension.New(extension.Provided[*hooks.Registry](registry), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, adapter)
+			set, err := extension.New(extension.Provided[*hooks.Registry](registry), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +152,7 @@ func TestClientRecordsDuringDependentClose(t *testing.T) {
 			return err
 		},
 	}
-	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e, dependent)
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e, dependent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestRecordFailuresAreSynchronous(t *testing.T) {
 			reg := hooks.New()
 			connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true, Space: DefaultSpace})
 			e := NewCollaboration(CollaborationOptions{})
-			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
+			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,7 +242,7 @@ func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
 	reg := hooks.New()
 	connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true, Space: DefaultSpace})
 	e := NewCollaboration(CollaborationOptions{})
-	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
 	if err != nil {
 		t.Fatal(err)
 	}

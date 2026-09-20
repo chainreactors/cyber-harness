@@ -84,7 +84,7 @@ Skills、PromptResolver、Shell 和 History。它不依赖应用配置、宿主�
 操作明确不可用；默认文件 History 由 Session Extension 安装，Resource 不自行选择实现。
 
 Provider Extension 拥有 Provider 状态及本地创建的客户端；Terminal Extension 拥有 BashTool 和进程
-Manager；Session Extension 拥有 Session Resource。事件流、Progress、LoggerRef 和 Hooks 由基础组合
+Manager；Session Extension 拥有 Session Resource。事件流、Progress、Logger 和 Hooks 由基础组合
 各创建一份并共享。消费者排空之后才关闭依赖，Session 不关闭借用对象。Web 的能力借用始终位于
 Profile 租约内，退休实例在最后一个使用者释放后关闭。
 

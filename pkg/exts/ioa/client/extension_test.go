@@ -16,7 +16,7 @@ import (
 
 func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
 	adapter := New(service.Config{})
-	hosttest.Load(t, t.Context(), extension.Provided(telemetry.NewLoggerRef(nil)), adapter)
+	hosttest.Load(t, t.Context(), extension.Provided(telemetry.NopLogger()), adapter)
 	svc := adapter.Service()
 	if svc == nil {
 		t.Fatal("missing installed service")
@@ -35,7 +35,7 @@ func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	registry := coretool.NewCommandRegistry()
 	ioa := New(service.Config{URL: server.URL, RegisterCommands: true})
 	set, err := extension.New(
-		extension.Provided(telemetry.NewLoggerRef(nil)), extension.Provided(hooks.New()),
+		extension.Provided(telemetry.NopLogger()), extension.Provided(hooks.New()),
 		registry,
 		ioa,
 	)

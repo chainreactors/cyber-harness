@@ -49,7 +49,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if e == nil || scope == nil {
 		return fmt.Errorf("scanner extension is not configured")
 	}
-	logger, err := extension.Use[*telemetry.LoggerRef](scope)
+	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
 		return err
 	}

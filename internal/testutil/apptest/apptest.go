@@ -24,7 +24,7 @@ import (
 type Fixture struct {
 	Providers *provider.State
 	Stream    *events.Stream
-	Logger    *telemetry.LoggerRef
+	Logger    telemetry.Logger
 	Hooks     *hooks.Registry
 	Tools     coretool.Executor
 	Commands  coretool.CommandExecutor
@@ -34,10 +34,13 @@ type Fixture struct {
 
 func NewFixture(t testing.TB, logger telemetry.Logger, stream *events.Stream) *Fixture {
 	t.Helper()
+	if logger == nil {
+		logger = telemetry.NopLogger()
+	}
 	if stream == nil {
 		stream = events.New()
 	}
-	return &Fixture{Providers: &provider.State{}, Stream: stream, Logger: telemetry.NewLoggerRef(logger)}
+	return &Fixture{Providers: &provider.State{}, Stream: stream, Logger: logger}
 }
 
 func Entries(t testing.TB, f *Fixture) []extension.Extension {
@@ -49,7 +52,7 @@ func Entries(t testing.TB, f *Fixture) []extension.Extension {
 	return []extension.Extension{
 		extension.Provided[*hooks.Registry](hooks.New()),
 		extension.Provided[*events.Stream](f.Stream),
-		extension.Provided[*telemetry.LoggerRef](f.Logger),
+		extension.Provided[telemetry.Logger](f.Logger),
 		extension.Provided[egress.Endpoint](egress.Disabled()),
 		coretool.NewCommandRegistry(), coretool.NewToolRegistry(), library,
 		providerext.New(provider.StartupConfig{Mode: provider.StartupDisabled}),

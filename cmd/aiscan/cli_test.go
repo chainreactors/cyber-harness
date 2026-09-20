@@ -283,7 +283,7 @@ func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
 func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Output: &logBuf})
-	err := runDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
+	err := runDirectScannerMode(context.Background(), newAIScanProfile, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {
@@ -300,7 +300,7 @@ func TestDirectScannerModeSuppressesInitInfoByDefault(t *testing.T) {
 func TestDirectScannerModeDebugShowsInitInfo(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := telemetry.NewLogger(telemetry.LogConfig{Debug: true, Output: &logBuf})
-	err := runDirectScannerMode(context.Background(), newCyberProfileFromRequest, &cfg.Option{
+	err := runDirectScannerMode(context.Background(), newAIScanProfile, &cfg.Option{
 		MiscOptions: cfg.MiscOptions{Debug: true, NoColor: true},
 	}, []string{"scan", "-i", "http://127.0.0.1:1", "--timeout", "1", "--no-color"}, logger)
 	if err != nil {

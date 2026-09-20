@@ -96,6 +96,7 @@ type warningChannelLogger struct {
 	warnings chan string
 }
 
+func (*warningChannelLogger) SetOutput(io.Writer)       {}
 func (*warningChannelLogger) Debugf(string, ...any)     {}
 func (*warningChannelLogger) Infof(string, ...any)      {}
 func (*warningChannelLogger) Errorf(string, ...any)     {}

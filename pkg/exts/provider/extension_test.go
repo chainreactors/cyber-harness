@@ -18,7 +18,7 @@ func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
 		t.Fatal("constructor initialized provider")
 	}
 	failure := errors.New("later extension failed")
-	set, err := extension.New(extension.Provided[*telemetry.LoggerRef](telemetry.NewLoggerRef(nil)), resource,
+	set, err := extension.New(extension.Provided[telemetry.Logger](telemetry.NopLogger()), resource,
 		extension.Func{LoadFunc: func(*extension.Scope) error { return failure }})
 	if err != nil {
 		t.Fatal(err)

@@ -30,7 +30,7 @@ func TestRecordManifestTags(t *testing.T) {
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	option := &cfg.Option{}
 	option.DataDir = t.TempDir()
-	profile, err := newCyberProfileFromRequest(profilepkg.Request{
+	profile, err := newAIScanProfile(profilepkg.Request{
 		Option:       option,
 		ProviderMode: profilepkg.ProviderDisabled,
 		Session:      &agentsession.Config{},

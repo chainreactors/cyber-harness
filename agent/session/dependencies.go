@@ -60,14 +60,14 @@ func NewResource(config Config) (*Resource, error) {
 	}
 
 	if config.Logger == nil {
-		config.Logger = telemetry.NewLoggerRef(nil)
+		config.Logger = telemetry.NopLogger()
 	}
 	config.BaseSkills = append([]string(nil), config.BaseSkills...)
 	config.SelectedSkills = append([]string(nil), config.SelectedSkills...)
 	config.Commands = declared
 	return &Resource{runtime: &Runtime{
 		commands: declared, commandIndex: index, history: config.History,
-		providers: config.Providers, events: config.Events, logger: config.Logger, config: config,
+		providers: config.Providers, events: config.Events, Logger: config.Logger, config: config,
 		hooks: config.Hooks, tools: config.Tools, commandRegistry: config.CommandRegistry,
 		skills: config.Skills, shell: config.Shell,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),

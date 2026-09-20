@@ -86,7 +86,7 @@ func Capabilities() extension.Extension {
 		if err := extension.Provide[*events.Stream](scope, stream); err != nil {
 			return err
 		}
-		if err := extension.Provide(scope, telemetry.NewLoggerRef(nil)); err != nil {
+		if err := extension.Provide(scope, telemetry.NopLogger()); err != nil {
 			return err
 		}
 		return extension.Provide[egress.Endpoint](scope, egress.Disabled())

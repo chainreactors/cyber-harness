@@ -69,7 +69,7 @@ func testConnection(ctx context.Context, in, stored *types.DistributeConfig) []*
 		// endpoints reject an access key outright — so a server that requires one
 		// can only be proven reachable by exchanging the key first.
 		connection := New(ioatools.Config{URL: accessKeyURL(value.URL, value.Token), NodeName: cfg.ResolveNodeName(value.NodeName), AutoRegister: true})
-		set, err := extension.New(extension.Provided(telemetry.NewLoggerRef(nil)), connection)
+		set, err := extension.New(extension.Provided(telemetry.NopLogger()), connection)
 		if err != nil {
 			return "", err
 		}

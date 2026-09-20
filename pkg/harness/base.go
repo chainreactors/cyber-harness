@@ -38,6 +38,9 @@ type BaseConfig struct {
 // BaseExtensions returns the default capabilities in load order. The caller
 // owns their extension.Set and chooses any additional extensions explicitly.
 func BaseExtensions(c BaseConfig) ([]extension.Extension, error) {
+	if c.Logger == nil {
+		c.Logger = telemetry.NopLogger()
+	}
 	library, err := skillsext.NewLibrary(skillsext.LibraryConfig{
 		Directory: c.Directory, Paths: c.SkillPaths, Exclude: c.SkillExclude,
 	})
@@ -59,7 +62,7 @@ func BaseExtensions(c BaseConfig) ([]extension.Extension, error) {
 		extension.Provided[*hooks.Registry](hooks.New()),
 		extension.Provided[*events.Stream](events.New()),
 		extension.Provided[*eventbus.Bus[*toolpb.Progress]](eventbus.New[*toolpb.Progress]()),
-		extension.Provided[*telemetry.LoggerRef](telemetry.NewLoggerRef(c.Logger)),
+		extension.Provided[telemetry.Logger](c.Logger),
 		coretool.NewCommandRegistry(),
 		coretool.NewToolRegistry(),
 		library,

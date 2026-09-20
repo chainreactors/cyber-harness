@@ -20,6 +20,9 @@ import (
 
 // Query commands own only the IOA resource; they do not install Agent hooks.
 func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Options, output ioaclient.ConsoleOptions, args ioaclient.ConsoleArgs, env hostcli.Environment) (resultErr error) {
+	if env.Logger == nil {
+		env.Logger = telemetry.NopLogger()
+	}
 	ioaURL := option.URL
 	if ioaURL == "" {
 		ioaURL = "http://127.0.0.1:8765"
@@ -30,7 +33,7 @@ func runIOAClientCommand(ctx context.Context, mode string, option ioaclient.Opti
 	}
 	autoRegister := parsed.User != nil && parsed.User.Username() != ""
 	connection := ioaclient.New(ioatools.Config{URL: ioaURL, NodeName: "cyber-cli", AutoRegister: autoRegister})
-	set, err := extension.New(extension.Provided(telemetry.NewLoggerRef(env.Logger)), connection)
+	set, err := extension.New(extension.Provided(env.Logger), connection)
 	if err != nil {
 		return err
 	}

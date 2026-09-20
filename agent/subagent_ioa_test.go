@@ -24,7 +24,7 @@ func TestSubagentWithMemoryIOA(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			reg := hooks.New()
 			ioa := ioaext.New(ioatools.Config{})
-			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), ioa, ioaext.NewCollaboration(ioaext.CollaborationOptions{}))
+			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), ioa, ioaext.NewCollaboration(ioaext.CollaborationOptions{}))
 			if err != nil {
 				t.Fatal(err)
 			}

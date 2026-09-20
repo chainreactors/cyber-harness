@@ -309,7 +309,7 @@ func loadTestApplication(t *testing.T, application *apptest.Fixture) *extension.
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
 	a := apptest.NewFixture(t, nil, nil)
-	rt, err := newUnitResource(t, a, Config{Logger: telemetry.NewLoggerRef(nil), Loop: agent.StandardLoop{}})
+	rt, err := newUnitResource(t, a, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
-	rt, err := newUnitResource(t, app, Config{Logger: telemetry.NewLoggerRef(nil), Loop: agent.StandardLoop{}})
+	rt, err := newUnitResource(t, app, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +810,7 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	if interactive {
 		primary = "main-repl"
 	}
-	runtimeResource, err := newUnitResource(t, app, Config{Resume: option.Resume, SelectedSkills: option.Skills, Heartbeat: time.Duration(option.Heartbeat) * time.Minute, CaptureProviderFrames: option.CaptureProviderFrames, Logger: telemetry.NewLoggerRef(nil), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
+	runtimeResource, err := newUnitResource(t, app, Config{Resume: option.Resume, SelectedSkills: option.Skills, Heartbeat: time.Duration(option.Heartbeat) * time.Minute, CaptureProviderFrames: option.CaptureProviderFrames, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
 	if err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -924,7 +924,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer unsubscribe.Cancel()
 	var runtimes []*Resource
 	for range 2 {
-		rt, err := newUnitResource(t, a, Config{Logger: telemetry.NewLoggerRef(nil), Loop: agent.StandardLoop{}})
+		rt, err := newUnitResource(t, a, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}

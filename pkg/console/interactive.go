@@ -21,7 +21,6 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -185,7 +184,7 @@ func (r *AgentConsole) Start() error {
 		return fmt.Errorf("create console history directory: %w", err)
 	}
 	r.menu.AddHistorySourceFile("history", history)
-	r.activateConsoleLogger()
+	r.runtime.Logger.SetOutput(r.stderr)
 	if r.option.EvalCriteria != "" {
 		if err := r.command("/eval " + r.option.EvalCriteria); err != nil {
 			return err
@@ -196,19 +195,6 @@ func (r *AgentConsole) Start() error {
 		return r.startFastInput()
 	}
 	return r.startReadline()
-}
-
-func (r *AgentConsole) activateConsoleLogger() {
-	if r == nil {
-		return
-	}
-	consoleLogger := telemetry.NewLogger(telemetry.LogConfig{
-		Debug:  r.option != nil && r.option.Debug,
-		Quiet:  r.option != nil && r.option.Quiet,
-		Output: r.stderr,
-		Color:  r.option == nil || !r.option.NoColor,
-	})
-	r.runtime.SetLogger(consoleLogger)
 }
 
 func (r *AgentConsole) startFastInput() error {

@@ -38,7 +38,7 @@ func TestHandoffAndSessionRouting(t *testing.T) {
 			reg := hooks.New()
 			connection := New(config)
 			e := NewCollaboration(CollaborationOptions{})
-			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
+			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +107,7 @@ func TestRoutingRejectsOtherNodesAndAmbiguousDefaults(t *testing.T) {
 	connection := New(service.Config{})
 	e := NewCollaboration(CollaborationOptions{})
 	reg := hooks.New()
-	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), connection, e)
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestSpaceSwitchMovesSubscriptionButKeepsDispatchReference(t *testing.T) {
 	connection := New(service.Config{RegisterCommands: true})
 	commands := coretool.NewCommandRegistry()
 	e := NewCollaboration(CollaborationOptions{})
-	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NewLoggerRef(nil)), commands, connection, e)
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), commands, connection, e)
 	if err != nil {
 		t.Fatal(err)
 	}

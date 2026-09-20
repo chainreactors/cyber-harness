@@ -680,10 +680,10 @@ func newBareRuntime(t *testing.T, values []coretool.Command, provider agent.Prov
 	}
 	application := apptest.NewFixture(t, nil, nil)
 	rt := &Runtime{
-		history: JSONLHistory{}, primarySessionID: "main-repl", providers: application.Providers, events: application.Stream, logger: application.Logger, ctx: ctx, cancel: cancel,
+		history: JSONLHistory{}, primarySessionID: "main-repl", providers: application.Providers, events: application.Stream, Logger: application.Logger, ctx: ctx, cancel: cancel,
 		commandRegistry: reg, tools: tools, shell: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application.Stream, Logger: telemetry.NewLoggerRef(nil), PromptResolver: defaultPromptResolver(t)},
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application.Stream, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
 		closeDone:   make(chan struct{}), loaded: true,
 	}
 	commandValues, commandIndex, err := commandDeclarations(nil)

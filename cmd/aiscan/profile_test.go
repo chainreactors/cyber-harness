@@ -30,12 +30,11 @@ func (f profileLoop) Run(ctx context.Context, config agent.Config) (*agent.Resul
 func TestNewRejectsInvalidRequests(t *testing.T) {
 	tests := []struct {
 		name    string
-		request aiscanRequest
+		request profilepkg.Request
 		want    string
 	}{
-		{name: "nil option", request: aiscanRequest{}, want: "option is required"},
-		{name: "unresolved option", request: aiscanRequest{Option: &cfg.Option{}}, want: "must be resolved"},
-		{name: "invalid provider mode", request: aiscanRequest{ProviderMode: provider.StartupMode(99)}, want: "invalid provider mode"},
+		{name: "nil option", request: profilepkg.Request{}, want: "option is required"},
+		{name: "invalid provider mode", request: profilepkg.Request{ProviderMode: provider.StartupMode(99)}, want: "invalid provider mode"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -327,5 +326,19 @@ func TestFromOptionOwnsEventOutputSelection(t *testing.T) {
 				t.Fatalf("output = %q, want %q", config.Output, test.want)
 			}
 		})
+	}
+}
+
+func TestProfileResolvesHostInputWithoutMutatingIt(t *testing.T) {
+	option := &cfg.Option{}
+	p, err := newAIScanProfile(profilepkg.Request{Option: option, ProviderMode: provider.StartupDisabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if option.Resolved != nil || option.Extensions != nil {
+		t.Fatal("profile construction mutated host input")
 	}
 }

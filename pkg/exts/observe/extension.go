@@ -87,7 +87,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	logger, err := extension.Use[*telemetry.LoggerRef](scope)
+	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
 		return err
 	}

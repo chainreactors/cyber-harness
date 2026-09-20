@@ -25,10 +25,11 @@ import (
 // ---------------------------------------------------------------------------
 
 type Runtime struct {
+	// Logger is borrowed from the installation; SetOutput keeps existing consumers attached.
+	Logger           telemetry.Logger
 	commands         []Command
 	commandIndex     map[string]Command
 	history          HistoryStore
-	logger           *telemetry.LoggerRef
 	config           Config
 	primarySessionID string
 	providers        *provider.State
@@ -82,7 +83,7 @@ type Config struct {
 	Resume                string
 	SelectedSkills        []string
 	CaptureProviderFrames bool
-	Logger                *telemetry.LoggerRef
+	Logger                telemetry.Logger
 	PrimarySessionID      string
 	PromptResolver        prompt.Resolver
 	PromptTarget          prompt.Target
@@ -155,7 +156,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	logger, rc := rt.logger, rt.config
+	logger, rc := rt.Logger, rt.config
 	runtimeCtx, runtimeCancel := context.WithCancel(lifetime)
 	rt.ctx, rt.cancel = runtimeCtx, runtimeCancel
 	rt.primarySessionID = rc.PrimarySessionID
@@ -294,7 +295,7 @@ func (rt *Runtime) resolveSystemPrompt(ctx context.Context, config *agent.Config
 	}
 	result := resolver.Build(ctx, input)
 	for _, diagnostic := range result.Diagnostics {
-		rt.logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
+		rt.Logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
 	}
 	return result.Prompt, nil
 }
@@ -359,20 +360,13 @@ func (rt *Runtime) close(ctx context.Context) error {
 	}
 }
 
-func (rt *Runtime) SetLogger(logger telemetry.Logger) {
-	if rt == nil || rt.logger == nil {
-		return
-	}
-	rt.logger.Set(logger)
-}
-
 func (rt *Runtime) reloadProvider(config agent.ProviderConfig) (agent.Provider, agent.ProviderConfig, error) {
 	if rt == nil || rt.providers == nil {
 		return nil, agent.ProviderConfig{}, fmt.Errorf("agent runtime is not configured")
 	}
 	rt.providerMu.Lock()
 	defer rt.providerMu.Unlock()
-	provider, resolved, err := rt.providers.Reload(rt.ctx, config, rt.logger)
+	provider, resolved, err := rt.providers.Reload(rt.ctx, config, rt.Logger)
 	if err != nil {
 		return nil, agent.ProviderConfig{}, err
 	}

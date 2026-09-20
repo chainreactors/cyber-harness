@@ -25,7 +25,7 @@ func New(config provider.StartupConfig) *Extension {
 // Load owns and publishes the provider state for this installation.
 func (e *Extension) Load(scope *extension.Scope) error {
 	e.state = &provider.State{}
-	logger, err := extension.Use[*telemetry.LoggerRef](scope)
+	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
 		return err
 	}

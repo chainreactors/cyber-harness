@@ -18,14 +18,14 @@ import (
 )
 
 func TestInstallationSharesCapabilitiesAndRetargetableLogger(t *testing.T) {
-	var capturedLogger *telemetry.LoggerRef
+	var capturedLogger telemetry.Logger
 	var capturedProcesses *proc.Manager
 	h, err := harness.New(harness.Config{
 		Base:    harness.BaseConfig{Directory: t.TempDir()},
 		Session: &session.Config{Loop: agent.NoLoop()},
 		Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			var err error
-			if capturedLogger, err = extension.Use[*telemetry.LoggerRef](scope); err != nil {
+			if capturedLogger, err = extension.Use[telemetry.Logger](scope); err != nil {
 				return err
 			}
 			capturedProcesses, err = extension.Use[*proc.Manager](scope)
@@ -76,7 +76,7 @@ func TestInstallationSharesCapabilitiesAndRetargetableLogger(t *testing.T) {
 		t.Fatalf("event stream split: count=%d seq=%d,%d", count, first.Seq, second.Seq)
 	}
 	var logs bytes.Buffer
-	rt.SetLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
+	rt.Logger.SetOutput(&logs)
 	capturedLogger.Infof("shared log destination")
 	if !strings.Contains(logs.String(), "shared log destination") {
 		t.Fatal("runtime did not retarget shared logger")

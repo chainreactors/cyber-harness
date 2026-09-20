@@ -25,7 +25,7 @@ func (e *Extension) Service() *service.Service {
 	return e.resource.Service
 }
 func (e *Extension) Load(scope *extension.Scope) error {
-	logger, err := extension.Use[*telemetry.LoggerRef](scope)
+	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
 		return err
 	}
