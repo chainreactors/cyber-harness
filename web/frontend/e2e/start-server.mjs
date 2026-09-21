@@ -127,7 +127,7 @@ const editionValue = (key) => {
 const build = spawnSync('go', [
   'build',
   '-tags', editionValue('FULL_CAPS_TAGS'),
-  '-ldflags', '-X github.com/chainreactors/cyber/core/config.Version=1.0.0-rc1',
+  '-ldflags', '-X github.com/chainreactors/cyber/pkg/config.Version=1.0.0-rc1',
   '-o', binary,
   './cmd/aiscan',
 ], {
