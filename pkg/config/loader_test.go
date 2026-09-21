@@ -433,23 +433,13 @@ func TestInitDefaultConfig(t *testing.T) {
 	if opt.Mitm != nil && !*opt.Mitm {
 		t.Error("generated config disables MITM capture")
 	}
-	for _, want := range []string{
-		"output:",
-		"preset: \"default\"",
-		"# reasoning: \"hidden\"",
-		"# tool_results: \"hidden\"",
-		"# live_status: true",
-		"# mitm: true",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("generated config missing %q", want)
-		}
+	if opt.APIKey != "" || opt.Model != "" || opt.Timeout != 0 || opt.Mitm != nil {
+		t.Fatal("template sets defaults instead of leaving values unspecified")
 	}
-	// An uncommented `mitm: false` would turn capture off for anyone who ran
-	// --init, which contradicts the documented "enabled by default".
-	if strings.Contains(content, "\n  mitm:") {
-		t.Error("generated config must leave MITM capture to its default")
+	if !strings.Contains(content, "# llm:") {
+		t.Fatal("missing minimal configuration example")
 	}
+
 }
 
 func TestFullPriorityChain(t *testing.T) {

@@ -43,7 +43,9 @@ The agent lets the model choose tool calls. The scan pipeline chooses work throu
 
 ## Configure a model
 
-Create `cyber.yaml` in your working directory:
+Run `aiscan init` to configure your model in `~/.cyber/cyber.yaml`. For project overrides, use `aiscan init --project`. These are shared cyber-harness commands, also available in the minimal `agent` CLI. Existing files are preserved. [Configuration guide](docs/configuration.md).
+
+Example `cyber.yaml`:
 
 ```yaml
 llm:

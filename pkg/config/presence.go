@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 
@@ -9,15 +10,16 @@ import (
 
 // visitOptions follows the existing configuration schema, including newly added
 // fields. Runtime-only members are deliberately outside that schema.
-func visitOptions(option *Option, visit func(reflect.StructField, reflect.Value, string)) {
-	var walk func(reflect.Value, string)
-	walk = func(value reflect.Value, prefix string) {
+func visitOptions(option *Option, visit func(reflect.StructField, reflect.Value, string, bool)) {
+	var walk func(reflect.Value, string, bool)
+	walk = func(value reflect.Value, prefix string, local bool) {
 		for i := 0; i < value.NumField(); i++ {
 			field := value.Type().Field(i)
 			if !field.IsExported() || field.Tag.Get("config") == "-" {
 				continue
 			}
 			key := field.Tag.Get("config")
+			fieldLocal := local || field.Tag.Get("local") == "true" || key == ""
 			if key == "" {
 				key = field.Name
 			}
@@ -27,13 +29,13 @@ func visitOptions(option *Option, visit func(reflect.StructField, reflect.Value,
 			}
 			v := value.Field(i)
 			if v.Kind() == reflect.Struct {
-				walk(v, path)
+				walk(v, path, fieldLocal)
 				continue
 			}
-			visit(field, v, path)
+			visit(field, v, path, fieldLocal)
 		}
 	}
-	walk(reflect.ValueOf(option).Elem(), "")
+	walk(reflect.ValueOf(option).Elem(), "", false)
 }
 
 // CaptureExplicitFlags distinguishes parser defaults from supplied flags. It
@@ -78,7 +80,7 @@ func explicitOptions(option *Option) Option {
 	if option.Explicit == nil {
 		return out
 	}
-	visitOptions(&out, func(field reflect.StructField, value reflect.Value, _ string) {
+	visitOptions(&out, func(field reflect.StructField, value reflect.Value, _ string, _ bool) {
 		if field.Name != "Extensions" && !option.fieldExplicit(field, value) {
 			value.SetZero()
 		}
@@ -90,18 +92,32 @@ func explicitOptions(option *Option) Option {
 }
 
 func mergeOption(dst, src *Option) {
+	mergeOptions(dst, src, false)
+}
+
+// File input merges present fields; a distributed input replaces all shared
+// fields. Local ownership is declared in Option, never reconstructed by callers.
+func mergeOptions(dst, src *Option, distributed bool) {
 	source := make(map[string]reflect.Value)
-	visitOptions(src, func(_ reflect.StructField, value reflect.Value, path string) { source[path] = value })
-	visitOptions(dst, func(field reflect.StructField, value reflect.Value, path string) {
+	present := maps.Clone(src.present)
+	if present == nil {
+		present = make(map[string]bool)
+	}
+	visitOptions(src, func(_ reflect.StructField, value reflect.Value, path string, _ bool) { source[path] = value })
+	visitOptions(dst, func(field reflect.StructField, value reflect.Value, path string, local bool) {
+		if distributed && local {
+			present[path] = dst.present[path]
+			return
+		}
 		if field.Name != "Extensions" && dst.fieldExplicit(field, value) {
 			return
 		}
 		other := source[path]
-		if src.present[path] || !other.IsZero() {
+		if distributed || src.present[path] || !other.IsZero() {
 			value.Set(other)
 		}
 	})
-	dst.present = src.present
+	dst.present = present
 }
 
 func (o *Option) hasExplicit(name string) bool {

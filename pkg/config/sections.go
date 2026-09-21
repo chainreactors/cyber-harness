@@ -115,6 +115,17 @@ func (r *Sections) Seal() {
 	r.sealed = true
 	r.mu.Unlock()
 }
+
+// Has only queries declarations; the host owns the declaration lifecycle.
+func (r *Sections) Has(key string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.declarations[key]
+	return ok
+}
 func CloneValues(values Values) Values {
 	out := Values{}
 	for key, fields := range values {
@@ -156,6 +167,9 @@ func (r *Sections) Normalize(document map[string]any) (Values, error) {
 			return nil, fmt.Errorf("extensions: %w", err)
 		}
 	}
+	if out == nil {
+		out = Values{}
+	}
 	for alias, key := range r.aliases {
 		if raw, ok := document[alias]; ok {
 			b, err := json.Marshal(raw)
@@ -173,6 +187,9 @@ func (r *Sections) Normalize(document map[string]any) (Values, error) {
 				}
 			}
 			if existing, ok := out[key]; ok {
+				if fields == nil {
+					fields = map[string]any{}
+				}
 				for name, value := range fields {
 					if current, present := existing[name]; present && !reflect.DeepEqual(current, value) {
 						return nil, fmt.Errorf("conflicting configuration %s.%s and extensions.%s.%s", alias, name, key, name)

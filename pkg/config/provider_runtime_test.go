@@ -38,6 +38,23 @@ func TestProviderConfigExplicitFieldsWin(t *testing.T) {
 	}
 }
 
+func TestSelectedProfileOverrideDoesNotRepeatActiveFallback(t *testing.T) {
+	option := Option{LLMOptions: LLMOptions{
+		ActiveProfile: "primary", Model: "override",
+		Providers: []LLMProviderEntry{
+			{ID: "primary", Provider: "openai", Model: "original"},
+			{ID: "secondary", Provider: "openai", Model: "backup"},
+		},
+	}}
+	if ProviderConfig(&option).Model != "override" {
+		t.Fatal("selected profile ignored field override")
+	}
+	fallbacks := FallbackProviderConfigs(&option)
+	if len(fallbacks) != 1 || fallbacks[0].Model != "backup" {
+		t.Fatalf("active profile repeated in fallbacks: %+v", fallbacks)
+	}
+}
+
 func TestProviderConfigFromProtoSelectsActiveProfileAndFallbacks(t *testing.T) {
 	llm := &types.LLMConfig{
 		ActiveProfile: "openai",

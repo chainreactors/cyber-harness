@@ -16,7 +16,7 @@ func ApplyDefaults(option *Option) {
 		"CyberhubMode": ResolveString(DefaultCyberhubMode, "merge"), "Proxy": DefaultScannerProxy,
 		"NodeID": DefaultNodeID, "NodeName": DefaultNodeName, "Model": DefaultModel,
 	}
-	visitOptions(option, func(field reflect.StructField, value reflect.Value, path string) {
+	visitOptions(option, func(field reflect.StructField, value reflect.Value, path string, _ bool) {
 		if option.present[path] || option.fieldExplicit(field, value) || !value.IsZero() {
 			return
 		}

@@ -297,7 +297,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
       onClose={onClose}
       icon={Settings}
       title={t('settings')}
-      description={cs?.path || status?.configPath || 'config.yaml'}
+      description={cs?.path || status?.configPath || 'cyber.yaml'}
       contentProps={{ onInteractOutside: (event) => event.preventDefault() }}
     >
       <form onSubmit={handleSave} className="flex h-full min-h-0 w-full flex-col">
@@ -319,6 +319,7 @@ export default function ConfigPanel({ open, status, onClose, onSaved }: ConfigPa
             </div>
           ) : (
             <>
+              <Callout className="mb-3">{t('configurationLayersHint')}</Callout>
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
                 {sectionStatus(activeTab, cs, status, t).map((b) => (
                   <Badge key={b.key} variant={b.ok ? 'success' : 'warning'} className="text-xs">{b.label}</Badge>

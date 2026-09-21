@@ -10,21 +10,25 @@ import (
 
 var Version = "dev"
 
+// Option is the configuration schema. local:"true" keeps host-owned settings
+// out of distributed replacement; fields without a config key are local too.
 type Option struct {
 	// Explicit records flags actually supplied by the caller, including zero values.
 	Explicit       map[string]bool `no-flag:"true" config:"-"`
 	present        map[string]bool
 	Resolved       *Resolved `no-flag:"true" config:"-"`
+	Snapshot       *Snapshot `no-flag:"true" config:"-"`
+	Context        *Context  `no-flag:"true" config:"-"`
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	TrafficOptions `group:"Traffic Options" config:"traffic"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
-	NodeOptions    `group:"Node Options" config:"node"`
+	NodeOptions    `group:"Node Options" config:"node" local:"true"`
 	Extensions     Values    `no-flag:"true" config:"extensions"`
 	Sections       *Sections `no-flag:"true" config:"-"`
 	ReconOptions   `group:"Recon Options" config:"recon"`
-	OutputOptions  `group:"Output Options" config:"output"`
-	MiscOptions    `group:"Miscellaneous Options" config:"misc"`
+	OutputOptions  `group:"Output Options" config:"output" local:"true"`
+	MiscOptions    `group:"Miscellaneous Options" config:"misc" local:"true"`
 	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
 	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
 
@@ -52,7 +56,7 @@ type LLMOptions struct {
 	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
 	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
 	LLMProxy      string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
-	ActiveProfile string             `no-flag:"true" config:"active_profile" description:"Active named LLM profile"`
+	ActiveProfile string             `long:"profile" config:"active_profile" description:"Active named LLM profile"`
 	Providers     []LLMProviderEntry `no-flag:"true" config:"providers" description:"Configured LLM provider profiles"`
 	AI            bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
 }
@@ -96,8 +100,8 @@ type AgentOptions struct {
 	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
 	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
 	EvalRounds            string   `long:"eval-rounds" config:"eval_rounds" description:"How long goal evaluation may keep going: a number (hard ceiling) or plain language the evaluator follows, e.g. \"dig deep, up to ten rounds\" (empty uses the default ceiling)"`
-	ServerURL             string   `long:"server-url" config:"server_url" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
-	Transport             string   `long:"transport" config:"transport" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
+	ServerURL             string   `long:"server-url" config:"server_url" local:"true" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
+	Transport             string   `long:"transport" config:"transport" local:"true" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
 	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
 }
@@ -143,9 +147,9 @@ type NodeOptions struct {
 }
 
 type MiscOptions struct {
-	ConfigFile   string `short:"c" long:"config" description:"Path to config file (default: ./cyber.yaml, <binary_dir>/cyber.yaml)"`
-	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory for cache, arsenal, history (default: <binary_dir>/.cyber)"`
-	InitConfig   bool   `long:"init" description:"Generate default cyber.yaml and exit"`
+	ConfigFile   string `short:"c" long:"config" description:"Load only this config file (default: project over ~/.cyber/cyber.yaml)"`
+	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory (default: existing local/portable .cyber, then ~/.cyber)"`
+	InitConfig   bool   `long:"init" description:"Deprecated: use init --project --non-interactive"`
 	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
 	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
 	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`

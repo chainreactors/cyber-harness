@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	types "github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
@@ -16,10 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// cyber.yaml is wider than the shared proto schema: --init also emits local
-// sections and switches (misc, output, and the flat LLM shorthand). The settings page
-// rewrites the whole file, so those keys have to survive a read/write cycle
-// instead of being rejected as unknown fields or dropped by the rewrite.
+// cyber.yaml includes local fields outside the shared settings proto. Preserve
+// those fields when projecting settings for the Web editor.
 
 // protoKeyTree holds the keys the shared proto accepts, per message. A nil
 // subtree marks an opaque value (list, map or well-known Struct) copied whole.
@@ -140,81 +137,20 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	if err = validateConfig(value); err != nil {
 		return nil, err
 	}
-	cfg.NormalizeLLMConfig(value.Llm)
-	return value, nil
-}
-
-// projectRuntimeConfig renders the resolved flags config as the settings
-// payload. Startup flags and environment are the config truth, so a run with no
-// cyber.yaml on disk must still report what the agent actually uses instead of
-// an empty document.
-func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) { //nolint:unused // used by the full-tag web build
-	if option == nil {
-		return &types.DistributeConfig{}, nil
-	}
-	reconLimit := 0
-	if option.ReconLimit != nil {
-		reconLimit = *option.ReconLimit
-	}
-	keys := make([]string, 0, 2)
-	for _, raw := range []string{option.TavilyKey, option.SearchConfig.TavilyKeys} {
-		if raw = strings.TrimSpace(raw); raw != "" {
-			keys = append(keys, raw)
+	if cfg.HasSingleProviderFields(&option) {
+		fileOption, e := (&cfg.Snapshot{Document: document, Sources: map[string]string{}}).FileOptions(defaultSections())
+		if e != nil {
+			return nil, e
 		}
-	}
-	extensions, err := cfg.ValuesToProto(option.Extensions)
-	if err != nil {
-		return nil, err
-	}
-	value := &types.DistributeConfig{
-		Llm: runtimeLLMConfig(option),
-		Cyberhub: &types.CyberhubConfig{
-			Url: option.CyberhubURL, Key: option.CyberhubKey,
-			Mode: option.CyberhubMode, Proxy: option.Proxy, Mitm: option.Mitm,
-		},
-		Recon: &types.ReconConfig{
-			FofaKey: option.FofaKey, HunterApiKey: option.HunterAPIKey,
-			Proxy: option.ReconProxy, Limit: int32(reconLimit),
-		},
-		Scan:       &types.ScanConfig{Verify: option.ScanConfig.Verify},
-		Search:     &types.SearchConfig{TavilyKeys: strings.Join(keys, ",")},
-		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: proto.Int32(int32(option.Timeout)), Heartbeat: int32(option.Heartbeat), EvalCriteria: option.EvalCriteria, EvalModel: option.EvalModel, EvalRounds: option.EvalRounds, CaptureProviderFrames: option.CaptureProviderFrames},
-		Traffic:    &types.TrafficConfig{BodyStorage: option.BodyStorage, BodyMaxBytes: option.BodyMaxBytes, BodyRetentionBytes: option.BodyRetentionBytes},
-		Node:       &types.NodeConfig{Id: option.NodeID, Name: option.NodeName},
-		Extensions: extensions,
+		value.Llm = cfg.LLMFromOption(fileOption)
 	}
 	cfg.NormalizeLLMConfig(value.Llm)
 	return value, nil
 }
 
-// runtimeLLMConfig mirrors how the runtime picks the active provider: the flat
-// single-provider flags win over the profile list, so they are projected as the
-// leading profile instead of being dropped.
-func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig { //nolint:unused // used by projectRuntimeConfig in the full-tag web build
-	llm := &types.LLMConfig{}
-	flat := cfg.HasSingleProviderFields(option)
-	if flat {
-		active := cfg.ProviderConfig(option)
-		llm.Providers = append(llm.Providers, &types.LLMProviderConfig{
-			Provider: active.Provider, BaseUrl: active.BaseURL, ApiKey: active.APIKey,
-			Model: active.Model, Proxy: active.Proxy, Timeout: int32(active.Timeout),
-			MaxTokens: int32(active.MaxTokens), ContextWindow: int32(active.ContextWindow),
-		})
-	} else {
-		llm.ActiveProfile = option.ActiveProfile
-	}
-	for _, entry := range option.Providers {
-		timeout := entry.Timeout
-		if timeout <= 0 {
-			timeout = 120
-		}
-		llm.Providers = append(llm.Providers, &types.LLMProviderConfig{
-			Id: entry.ID, Name: entry.Name, Provider: entry.Provider, BaseUrl: entry.BaseURL,
-			ApiKey: entry.APIKey, Model: entry.Model, Proxy: entry.Proxy, Timeout: int32(timeout),
-			Images: entry.Images, MaxTokens: int32(entry.MaxTokens), ContextWindow: int32(entry.ContextWindow),
-		})
-	}
-	return llm
+// projectRuntimeConfig shares the harness projection with other hosts.
+func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
+	return cfg.DistributeFromOption(option)
 }
 
 // original is the file being replaced; local settings are carried over from it

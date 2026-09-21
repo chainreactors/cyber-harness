@@ -1,12 +1,10 @@
 export default {
+  configurationLayersHint: '保存只修改上述文件中编辑过的设置。项目配置优先于用户配置；启动参数和环境变量可能覆盖文件设置，个人凭据不会自动写入项目配置。',
   settings: '设置',
   llmConfigured: 'LLM 已配置',
   llmNotConfigured: 'LLM 未配置',
   configLoaded: '配置已加载',
-  // No settings file yet: the runtime is configured by startup flags, and a save
-  // writes one. "配置缺失" read as "nothing is configured", contradicting the
-  // ready LLM badge next to it.
-  configFromFlags: '来自启动参数',
+  configFromFlags: '尚未保存配置文件',
   configured: '已配置',
   notConfigured: '未配置',
   loading: '加载中',

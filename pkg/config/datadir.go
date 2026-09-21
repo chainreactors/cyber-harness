@@ -6,17 +6,21 @@ import (
 	"strings"
 )
 
-// ResolveDataDir computes a path without creating directories or changing globals.
-func ResolveDataDir(value string) string {
+// ResolveDataDir discovers storage without creating directories.
+func ResolveDataDir(value string) string { return resolveDataDir(value, nil) }
+func resolveDataDir(value string, context *Context) string {
+	c := context.defaults()
 	if strings.TrimSpace(value) == "" {
-		if executable, err := os.Executable(); err == nil {
-			value = filepath.Join(filepath.Dir(executable), ".cyber")
-		} else {
-			value = ".cyber"
+		value = filepath.Join(c.Home, ".cyber")
+		for _, candidate := range []string{filepath.Join(c.Directory, ".cyber"), filepath.Join(filepath.Dir(c.Executable), ".cyber")} {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				value = candidate
+				break
+			}
 		}
 	}
-	if absolute, err := filepath.Abs(value); err == nil {
-		return absolute
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(c.Directory, value)
 	}
-	return value
+	return filepath.Clean(value)
 }

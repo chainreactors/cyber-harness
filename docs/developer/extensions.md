@@ -40,6 +40,8 @@ Prompt 在一次 Run 开始时解析。运行中改变贡献不会追溯修改�
 
 只有构造配置的简单应用可以直接使用 Go 值。要把功能加入统一 CLI 和配置文件时，功能包提供 `Declare`，向宿主预先定义的 CLI、配置与连接测试贡献点提交声明。宿主解析后把确定的值传入构造函数；`Declare` 不负责启动服务。
 
+基础配置的字段归属统一定义在 `config.Option`：`local:"true"` 表示本地设置，适用于身份、传输、数据目录和输出；没有配置键的进程参数也留在本地。文件加载与远端替换共用合并、环境覆盖和校验逻辑，远端替换不再逐项复制本地字段。扩展配置仍以各自的 `Section` 声明为准，通过 `Resolved` 提供已校验的值。文件层状态仅用于发现、编辑与诊断，不参与远端配置替换，也不承载运行服务。
+
 Load 中的初始化使用 `scope.Init()`，持续后台工作使用 `scope.Lifetime()`。扩展若持有 goroutine、订阅或连接，还应实现 `Close(context.Context) error`：停止接收新工作，结束已有工作并释放资源。只贡献静态条目的 hello 扩展不需要空的 Close。
 
 关闭 deadline 到达而资源仍在工作时，返回 `extension.ErrCloseIncomplete` 或可识别的 context 错误，以便 Set 保留依赖并重试。完整的撤销顺序和失败回滚见[扩展装配](../architecture/composition.md)。

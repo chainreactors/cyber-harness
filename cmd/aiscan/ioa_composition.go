@@ -13,7 +13,6 @@ import (
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	flags "github.com/jessevdk/go-flags"
-	"gopkg.in/yaml.v3"
 	"sync"
 )
 
@@ -83,17 +82,6 @@ func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 			delete(option.Extensions, ioaclient.ConfigKey)
 		}
 	}
-}
-
-func defaultConfig() string {
-	defaults := defaultSections().Defaults()
-	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
-	if defaults[ioaclient.ConfigKey]["url"] == "" {
-		delete(defaults[ioaclient.ConfigKey], "url")
-	}
-	document := map[string]any{"extensions": defaults}
-	b, _ := yaml.Marshal(document)
-	return cfg.InitDefaultConfig() + "\n" + string(b)
 }
 
 // Legacy node identity is projected once at the configuration boundary.

@@ -149,7 +149,14 @@ func ValidateLLMConfig(config *types.LLMConfig) error {
 	if config == nil {
 		return nil
 	}
+	seen := map[string]bool{}
 	for index, profile := range config.Providers {
+		if profile != nil && profile.Id != "" {
+			if seen[profile.Id] {
+				return fmt.Errorf("duplicate LLM profile %q", profile.Id)
+			}
+			seen[profile.Id] = true
+		}
 		profile = configpkg.NormalizeLLMProvider(profile)
 		if profile == nil {
 			return fmt.Errorf("LLM profile #%d is empty", index+1)
@@ -176,6 +183,9 @@ func ValidateLLMConfig(config *types.LLMConfig) error {
 		if profile.Timeout < 0 {
 			return fmt.Errorf("LLM timeout must be zero or positive")
 		}
+	}
+	if config.ActiveProfile != "" && !seen[config.ActiveProfile] {
+		return fmt.Errorf("unknown LLM profile %q", config.ActiveProfile)
 	}
 	return nil
 }

@@ -73,3 +73,14 @@ stdio 的 Envelope 流与 CLI 的 Event JSONL 历史文件不同，不能互相�
 Web 宿主使用 `webext.New(webext.Config{Database: path, ...})`。数据库、Service 和 AgentPool 由 Extension
 创建并关闭；业务操作从 `Service()` 借用。HTTP 停止后关闭整个 Set，不能先关闭 Set 再继续使用路由快照。
 可运行的完整实现见 [ACP Server](../../examples/acp/server/main.go)。
+
+
+## 公共配置入口
+
+配置属于 cyber-harness，而非 aiscan 产品层。`pkg/config` 提供文件发现、分层合并、profile 选择、校验、最小模板及原子文件保存；`pkg/cli/configuration` 提供可接入宿主的 `init`、`config`、`doctor` 命令。
+
+CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, configuration.Host{...})`，并通过 `RegisterHelp` 将命令加入帮助。Host 只提供名称、I/O、配置 Sections 和可选的检查回调；公共层不加载 agent、扫描器或 Web。`cmd/agent` 是最小接入示例，`cmd/aiscan` 额外贡献扫描和协作连接检查。
+
+嵌入式宿主可直接调用 `config.ResolveRuntimeConfig`，通过 `Option.Context` 注入工作目录、用户目录、二进制路径和环境变量查询函数。`Context.Replacements` 只用于验证待保存的配置层，保留其他文件和运行时覆盖；不应把暂存文件当成新的 `-c`。构造和解析不会创建目录或启动资源。
+
+配置文件未知的基础字段会报错。未由当前宿主注册的扩展保留在文件中，并报告不可用，不加载对应代码。宿主注册扩展的字段仍严格校验。Web 编辑沿用现有配置协议，保存仅修改选定文件中的编辑值。

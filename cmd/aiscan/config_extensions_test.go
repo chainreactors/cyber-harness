@@ -58,7 +58,7 @@ traffic:
 // the proto the settings page speaks. Reading it must not fail and saving it
 // must not drop the sections the proto does not model.
 func TestConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
-	source := []byte(defaultConfig())
+	source := []byte(defaultConfig() + "\nmisc:\n  quiet: true\noutput:\n  preset: default\nllm:\n  model: fixture\n")
 	value, err := parseConfig(source)
 	if err != nil {
 		t.Fatalf("generated defaults rejected: %v", err)
@@ -206,4 +206,16 @@ func TestConfigSaveStaysReadableByTheFlagsLoader(t *testing.T) {
 	if provider.APIKey != "sk-test" || provider.BaseURL != "https://api.example.test/v1" || provider.Model != "gpt-4o" {
 		t.Fatalf("provider lost: %+v\n%s", provider, data)
 	}
+}
+
+// A full reference fixture for extension round-trip tests; init emits only explicit values.
+func defaultConfig() string {
+	defaults := defaultSections().Defaults()
+	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
+	if defaults[ioaclient.ConfigKey]["url"] == "" {
+		delete(defaults[ioaclient.ConfigKey], "url")
+	}
+	document := map[string]any{"extensions": defaults}
+	b, _ := yaml.Marshal(document)
+	return cfg.InitDefaultConfig() + "\n" + string(b)
 }

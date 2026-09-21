@@ -32,13 +32,17 @@ func finishRuntimeConfig(option, explicit *Option) error {
 		sections = NewSections()
 		option.Sections = sections
 	}
+	lookup := option.Context.defaults().LookupEnv
+	if err := seedProviderProfile(option, explicit); err != nil {
+		return err
+	}
 	var err error
-	option.Resolved, err = sections.ResolveValues(option.Extensions, explicit.Extensions, os.LookupEnv)
+	option.Resolved, err = sections.ResolveValues(option.Extensions, explicit.Extensions, lookup)
 	if err != nil {
 		return err
 	}
 	option.Extensions = option.Resolved.Values()
-	applyEnvironment(option, *explicit, os.LookupEnv)
+	applyEnvironment(option, *explicit, sourceLookup(option, lookup))
 	if err := normalizeProviderOptions(option); err != nil {
 		return err
 	}
@@ -46,7 +50,8 @@ func finishRuntimeConfig(option, explicit *Option) error {
 	if _, err := ResolveOutputPolicy(option); err != nil {
 		return err
 	}
-	option.DataDir = ResolveDataDir(option.DataDir)
+	option.DataDir = resolveDataDir(option.DataDir, option.Context)
+	finishSnapshot(option, explicit)
 	return nil
 }
 
@@ -71,7 +76,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if !explicit.hasExplicit("BaseURL") {
 		if v := firstEnv(lookup, "CYBER_BASE_URL"); v != "" {
 			option.BaseURL = v
-		} else if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") && !option.present["llm.base_url"] {
+		} else if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") {
 			option.BaseURL = firstEnv(lookup, "LLM_BASE_URL")
 		}
 	}
@@ -87,7 +92,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// (config file / Settings UI). Apply only when nothing else set one. Mirrors the
 	// model handling below so a hub-launched agent that inherits the hub's env still
 	// honors the Settings-saved base URL.
-	if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") && !option.present["llm.base_url"] {
+	if strings.TrimSpace(option.BaseURL) == "" && !explicit.hasExplicit("BaseURL") {
 		if v := providerBaseURLEnv(selectedProvider, lookup); v != "" {
 			option.BaseURL = v
 		}
@@ -99,7 +104,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if !explicit.hasExplicit("Model") {
 		if v := firstEnv(lookup, "CYBER_MODEL"); v != "" {
 			option.Model = v
-		} else if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") && !option.present["llm.model"] {
+		} else if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") {
 			option.Model = firstEnv(lookup, "LLM_MODEL")
 		}
 	}
@@ -108,7 +113,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// style gateways export ANTHROPIC_MODEL. Treat them as a fallback only: they
 	// must not silently override a model the user configured for cyber (config
 	// file / Settings UI or --model). Apply only when nothing else set a model.
-	if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") && !option.present["llm.model"] {
+	if strings.TrimSpace(option.Model) == "" && !explicit.hasExplicit("Model") {
 		if v := providerModelEnv(selectedProvider, lookup); v != "" {
 			option.Model = v
 		}
@@ -119,7 +124,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if !explicit.hasExplicit("APIKey") {
 		if v := firstEnv(lookup, "CYBER_API_KEY"); v != "" {
 			option.APIKey = v
-		} else if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") && !option.present["llm.api_key"] {
+		} else if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") {
 			option.APIKey = firstEnv(lookup, "LLM_API_KEY")
 		}
 	}
@@ -127,7 +132,7 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	// present for *other* tools. Treat them as a fallback only so they never override
 	// a key the user configured for cyber (config file / Settings UI). Apply only
 	// when nothing else set one — same rationale as base URL and model above.
-	if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") && !option.present["llm.api_key"] {
+	if strings.TrimSpace(option.APIKey) == "" && !explicit.hasExplicit("APIKey") {
 		if v := providerAPIKeyEnv(selectedProvider, lookup); v != "" {
 			option.APIKey = v
 		}
@@ -226,6 +231,9 @@ var uncoverCredentialEnvNames = []string{
 }
 
 func applyUncoverEnvironment(option *Option, lookup envLookup) {
+	// These values are derived from the environment on every resolution. Do not
+	// retain or mutate a previous runtime's credential map during replacement.
+	option.UncoverCredentials = nil
 	for _, name := range uncoverCredentialEnvNames {
 		if value := firstEnv(lookup, name); value != "" {
 			if option.UncoverCredentials == nil {

@@ -1,9 +1,10 @@
 export default {
+  configurationLayersHint: 'Saving changes only the edited settings in the file above. Project settings override user settings; startup arguments and environment variables may override file settings. Personal credentials are not automatically copied into project configuration.',
   settings: 'Settings',
   llmConfigured: 'LLM configured',
   llmNotConfigured: 'LLM not configured',
   configLoaded: 'Config Loaded',
-  configFromFlags: 'From Startup Flags',
+  configFromFlags: 'No Saved Configuration File',
   configured: 'Configured',
   notConfigured: 'Not configured',
   loading: 'Loading',

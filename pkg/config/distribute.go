@@ -64,6 +64,9 @@ func ActiveLLMProvider(llm *types.LLMConfig) *types.LLMProviderConfig {
 			return NormalizeLLMProvider(provider)
 		}
 	}
+	if llm.ActiveProfile != "" {
+		return nil
+	}
 	return NormalizeLLMProvider(llm.Providers[0])
 }
 
@@ -89,7 +92,7 @@ func NormalizeLLMConfig(llm *types.LLMConfig) {
 			}
 		}
 	}
-	if active := ActiveLLMProvider(llm); active != nil {
+	if active := ActiveLLMProvider(llm); active != nil && llm.ActiveProfile == "" {
 		llm.ActiveProfile = active.Id
 	}
 }

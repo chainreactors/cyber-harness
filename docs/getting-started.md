@@ -37,7 +37,19 @@ make
 
 ## 2. 配置模型
 
-在工作目录创建 `cyber.yaml`：
+配置机制由 cyber-harness 提供，aiscan 和通用 agent 共用。首次运行：
+
+```sh
+aiscan init
+```
+
+终端中会引导设置协议、端点、模型和凭据，默认写入 `~/.cyber/cyber.yaml`。也可以无交互生成：
+
+```sh
+aiscan init --non-interactive --provider openai --base-url https://api.deepseek.com/v1 --model deepseek-chat
+```
+
+已有文件不会被覆盖。项目需要不同设置时运行 `aiscan init --project`，当前目录配置优先于用户配置。也可手动编辑用户或项目的 `cyber.yaml`：
 
 ```yaml
 llm:

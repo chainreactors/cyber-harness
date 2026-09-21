@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,43 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestSectionLookupDoesNotSealDeclarations(t *testing.T) {
+	r := NewSections()
+	handle, err := r.Add(Section{Key: "temporary", New: func() any { return &fixtureOptions{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Has("temporary") || r.Has("missing") {
+		t.Fatal("incorrect declaration lookup")
+	}
+	if err := handle.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.Has("temporary") {
+		t.Fatal("lookup sealed the registry and prevented declaration rollback")
+	}
+	if _, err := r.Add(Section{Key: "replacement", New: func() any { return &fixtureOptions{} }}); err != nil {
+		t.Fatalf("lookup prevented subsequent declarations: %v", err)
+	}
+}
+
+func TestExtensionAliasesAcceptNullSections(t *testing.T) {
+	for _, document := range []map[string]any{
+		{"extensions": nil, "old_fixture": map[string]any{"count": 4}},
+		{"extensions": map[string]any{"fixture": map[string]any{"count": 4}}, "old_fixture": nil},
+	} {
+		r := fixtureSections(t)
+		values, err := r.Normalize(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := r.Decode("fixture", values["fixture"])
+		if err != nil || value.(*fixtureOptions).Count != 4 {
+			t.Fatalf("null section discarded populated alias/canonical section: %v, %v", value, err)
+		}
+	}
+}
 
 type fixtureOptions struct {
 	Name    string `json:"name"`

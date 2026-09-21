@@ -1,9 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
-	"path/filepath"
 	"reflect"
 
 	gkcfg "github.com/gookit/config/v2"
@@ -55,7 +56,7 @@ func decodeConfig(c *gkcfg.Config, v interface{}) error {
 			}
 		}
 		option.present = make(map[string]bool)
-		visitOptions(option, func(field reflect.StructField, value reflect.Value, path string) {
+		visitOptions(option, func(field reflect.StructField, value reflect.Value, path string, _ bool) {
 			if c.Exists(path) {
 				option.present[path] = true
 			}
@@ -75,42 +76,28 @@ func applyExplicitReconNumericOptions(c *gkcfg.Config, v interface{}) {
 	}
 }
 
-func findDefaultConfigFile() string {
-	// 1. 当前工作目录
-	if _, err := os.Stat(DefaultConfigName); err == nil {
-		return DefaultConfigName
-	}
-	// 2. 二进制所在目录
-	if exe, err := os.Executable(); err == nil {
-		p := filepath.Join(filepath.Dir(exe), DefaultConfigName)
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
 func LoadAndApplyConfig(option *Option) (string, error) {
-	configPath := option.ConfigFile
-	if configPath == "" {
-		configPath = findDefaultConfigFile()
-	}
-	if configPath == "" {
-		return "", nil
-	}
-	if _, err := os.Stat(configPath); err != nil {
-		if option.ConfigFile == "" && os.IsNotExist(err) {
-			return "", nil
+	snapshot, err := LoadSnapshot(option.Context, option.ConfigFile, option.Sections)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
-		return "", fmt.Errorf("config file %s: %w", configPath, err)
+		return option.ConfigFile, err
 	}
-
+	option.Snapshot = snapshot
+	data, err := yaml.Marshal(snapshot.RuntimeDocument(option.Sections))
+	if err != nil {
+		return "", err
+	}
 	loaded := Option{Sections: option.Sections}
-	if err := LoadConfig(configPath, &loaded); err != nil {
-		return configPath, fmt.Errorf("load config %s: %w", configPath, err)
+	if err := LoadConfigBytes(data, &loaded); err != nil {
+		return snapshot.Target, fmt.Errorf("load config %s: %w", snapshot.Target, err)
 	}
 	mergeOption(option, &loaded)
-	return configPath, nil
+	if len(snapshot.Layers) == 0 {
+		return "", nil
+	}
+	return snapshot.Target, nil
 }
 
 func InitDefaultConfig() string {

@@ -15,9 +15,10 @@ type Sources struct {
 // Resolved is a configuration snapshot, never a container of runtime services.
 // It belongs to one configuration evaluation and is not updated in place.
 type Resolved struct {
-	cli    Values
-	values Values
-	typed  map[string]any
+	cli     Values
+	values  Values
+	typed   map[string]any
+	sources map[string]string
 }
 
 func (r *Resolved) Values() Values {
@@ -60,7 +61,7 @@ func cloneFields(fields map[string]any) map[string]any {
 // Every declared section is validated, including sections omitted by the user.
 func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, bool)) (*Resolved, error) {
 	r.Seal()
-	result := &Resolved{cli: CloneValues(cli), values: Values{}, typed: map[string]any{}}
+	result := &Resolved{cli: CloneValues(cli), values: Values{}, typed: map[string]any{}, sources: map[string]string{}}
 	for _, input := range []Values{file, cli} {
 		for key := range input {
 			if _, ok := r.declarations[key]; !ok {
@@ -81,6 +82,24 @@ func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, 
 				return nil, fmt.Errorf("configuration %s: %w", key, err)
 			}
 		}
+		mark := func(fields map[string]any, source string) {
+			var walk func(map[string]any, string)
+			walk = func(values map[string]any, prefix string) {
+				for name, value := range values {
+					path := prefix + "." + name
+					if nested, ok := value.(map[string]any); ok {
+						walk(nested, path)
+					} else {
+						result.sources[path] = source
+					}
+				}
+			}
+			walk(fields, "extensions."+key)
+		}
+		mark(fallbacks, "protocol environment")
+		mark(file[key], "file")
+		mark(overrides, "environment")
+		mark(cli[key], "cli")
 		fields := cloneFields(fallbacks)
 		mergeFields(fields, cloneFields(file[key]))
 		mergeFields(fields, cloneFields(overrides))

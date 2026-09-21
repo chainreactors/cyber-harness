@@ -37,7 +37,7 @@ aiscan [全局参数] <subcommand> [子命令参数]
 ### 配置优先级
 
 ```
-CLI 参数 > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 编译时默认值
+CLI 参数 > Cyber/集成环境变量 > 项目配置 > 用户配置 > 协议环境变量 > 编译时默认值
 ```
 
 `CYBER_*`、FOFA、Hunter、Tavily 等明确属于 Cyber 的环境变量会覆盖配置文件。`OPENAI_*`、`ANTHROPIC_*` 只用于填补配置文件中的空值。
@@ -45,11 +45,17 @@ CLI 参数 > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 编�
 ### 配置文件
 
 ```bash
-aiscan --init          # 生成默认 cyber.yaml 到当前目录
+aiscan init           # 用户配置 ~/.cyber/cyber.yaml；终端中引导配置模型
+aiscan init --project # 当前目录的最小 cyber.yaml，不复制个人凭据
+aiscan config show --sources # 脱敏查看有效配置及来源
+aiscan config validate      # 离线校验
+aiscan doctor --online      # 可选连接检查
 aiscan -c /path/to/cyber.yaml scan -i 192.168.1.0/24   # 指定配置文件
 ```
 
-自动搜索路径：`./cyber.yaml` → `<二进制所在目录>/cyber.yaml`
+配置属于 **cyber-harness 公共能力**，`aiscan` 与通用 `agent` CLI 共用相同的 `init`、`config`、`doctor` 命令。完整规则见 [配置与初始化](configuration.md)。
+
+自动加载 `~/.cyber/cyber.yaml`，再叠加最近的项目 `cyber.yaml`；当前目录优先，向上查找止于最近 Git 根目录、用户目录或文件系统根。没有项目配置时兼容二进制旁的 `cyber.yaml`。显式 `-c` 只加载指定文件，不继承用户配置。
 
 ### 配置文件结构
 
@@ -225,7 +231,7 @@ misc:
 
 ### 多 LLM Profile 配置
 
-配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 的 `/provider` 只查看 Profile 配置；`/model` 只选择当前会话的模型，不修改 Profile、其他会话或已有子任务。Provider、端点和密钥通过配置文件或 Web 设置修改。
+配置文件可通过 `llm.providers` 保存多个 LLM profile，并用 `--profile` 或 `llm.active_profile` 明确选择当前项；未指定时使用列表第一项；显式指定不存在的 ID 会报错。CLI 的 `--model` 等参数仅覆盖对应字段，不丢失所选 profile 的端点和凭据。使用 `config profiles` 查看，使用 `config use <id>` 保存用户级选择，或加 `--project` 保存项目级选择。每个 entry 支持 `id`、`name`、`provider`、`base_url`、`api_key`、`model`、`proxy`、`timeout`、`max_tokens` 和 `context_window`。`model` 必填，保存配置或激活 Profile 时都会拒绝空模型。Web 设置页可以选择当前 profile，REPL 的 `/provider` 只查看 Profile 配置；`/model` 只选择当前会话的模型，不修改 Profile、其他会话或已有子任务。Provider、端点和密钥通过配置文件或 Web 设置修改。
 
 Web 设置页拉取模型列表时使用当前编辑 Profile 的已保存密钥。若端点不提供 `GET /models`（返回 404），页面会保留手动模型输入，不把它显示为连接故障。
 

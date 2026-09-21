@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/chainreactors/cyber/agent/provider"
@@ -16,8 +18,7 @@ func defaultProviderConfig() provider.ProviderConfig {
 	}
 }
 
-// HasSingleProviderFields reports whether the flat single-provider flags win
-// over the profile list, which is how the runtime resolves the active provider.
+// HasSingleProviderFields reports whether flat per-field overrides are present.
 func HasSingleProviderFields(option *Option) bool {
 	return option.Provider != "" || option.BaseURL != "" || option.APIKey != "" || option.Model != ""
 }
@@ -46,8 +47,7 @@ func entryToProviderConfig(entry LLMProviderEntry) provider.ProviderConfig {
 	return cfg
 }
 
-// activeProviderIndex resolves the primary provider profile by ActiveProfile
-// id; list position is meaningless, so an unset or unknown id selects index 0.
+// activeProviderIndex selects a validated profile; an unset selector uses the first entry.
 func activeProviderIndex(option *Option) int {
 	if option.ActiveProfile != "" {
 		for i, entry := range option.Providers {
@@ -60,46 +60,47 @@ func activeProviderIndex(option *Option) int {
 }
 
 func applyProviderLimits(providerConfig *provider.ProviderConfig, option *Option) {
-	if option.MaxTokens != 0 {
+	if option.MaxTokens != 0 || option.hasExplicit("MaxTokens") {
 		providerConfig.MaxTokens = option.MaxTokens
 	}
-	if option.ContextWindow != 0 {
+	if option.ContextWindow != 0 || option.hasExplicit("ContextWindow") {
 		providerConfig.ContextWindow = option.ContextWindow
 	}
 }
 
 func ProviderConfig(option *Option) provider.ProviderConfig {
-	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
-		cfg := entryToProviderConfig(option.Providers[activeProviderIndex(option)])
-		applyProviderLimits(&cfg, option)
-		return cfg
-	}
 	cfg := defaultProviderConfig()
-	if option.Provider != "" {
+	if len(option.Providers) > 0 {
+		cfg = entryToProviderConfig(option.Providers[activeProviderIndex(option)])
+	}
+
+	if option.Provider != "" || option.hasExplicit("Provider") {
 		cfg.Provider = provider.NormalizeProvider(option.Provider)
 	}
-	if option.BaseURL != "" {
+	if option.BaseURL != "" || option.hasExplicit("BaseURL") {
 		cfg.BaseURL = option.BaseURL
 		if option.Provider == "" {
 			cfg.Provider = provider.InferFromBaseURL(option.BaseURL)
 		}
 	}
-	if option.APIKey != "" {
+	if option.APIKey != "" || option.hasExplicit("APIKey") {
 		cfg.APIKey = option.APIKey
 	}
-	if option.Model != "" {
+	if option.Model != "" || option.hasExplicit("Model") {
 		cfg.Model = option.Model
 	}
-	if option.LLMProxy != "" {
+	if option.LLMProxy != "" || option.hasExplicit("LLMProxy") {
 		cfg.Proxy = option.LLMProxy
 	}
 	applyProviderLimits(&cfg, option)
-	cfg.Timeout = 120
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 120
+	}
 	return cfg
 }
 
 func FallbackProviderConfigs(option *Option) []provider.ProviderConfig {
-	if !HasSingleProviderFields(option) && len(option.Providers) > 0 {
+	if (!HasSingleProviderFields(option) || option.ActiveProfile != "") && len(option.Providers) > 0 {
 		active := activeProviderIndex(option)
 		var configs []provider.ProviderConfig
 		for i, entry := range option.Providers {
@@ -179,4 +180,60 @@ func providerConfigFromProto(profile *types.LLMProviderConfig) provider.Provider
 		result.Timeout = 120
 	}
 	return result
+}
+
+// Resolve the profile before environment fallback and per-field overrides.
+func seedProviderProfile(option, explicit *Option) error {
+	seen := map[string]bool{}
+	for i := range option.Providers {
+		p := &option.Providers[i]
+		if p.ID == "" {
+			p.ID = fmt.Sprintf("profile-%d", i+1)
+		}
+		if seen[p.ID] {
+			return fmt.Errorf("llm.providers: duplicate id %q", p.ID)
+		}
+		seen[p.ID] = true
+		if p.MaxTokens < 0 || p.ContextWindow < 0 || p.Timeout < 0 {
+			return fmt.Errorf("llm.providers.%s: limits must be nonnegative", p.ID)
+		}
+	}
+	if option.ActiveProfile != "" && !seen[option.ActiveProfile] {
+		return fmt.Errorf("unknown LLM profile %q", option.ActiveProfile)
+	}
+	if len(option.Providers) == 0 {
+		return nil
+	}
+	index := activeProviderIndex(option)
+	p := option.Providers[index]
+	if p.Provider == "" {
+		p.Provider = entryToProviderConfig(p).Provider
+	}
+	option.ActiveProfile = p.ID
+	values := map[string]any{"Provider": p.Provider, "BaseURL": p.BaseURL, "APIKey": p.APIKey, "Model": p.Model, "LLMProxy": p.Proxy, "MaxTokens": p.MaxTokens, "ContextWindow": p.ContextWindow}
+	for name, value := range values {
+		field := reflect.ValueOf(option).Elem().FieldByName(name)
+		schema, _ := reflect.TypeOf(option.LLMOptions).FieldByName(name)
+		path := "llm." + schema.Tag.Get("config")
+		profilePath := "llm.providers." + p.ID + "." + schema.Tag.Get("config")
+		profileWins := false
+		if option.Snapshot != nil {
+			rank := func(source string) int {
+				for i, layer := range option.Snapshot.Layers {
+					if layer.Path == source {
+						return i
+					}
+				}
+				return -1
+			}
+			profileWins = rank(option.Snapshot.Sources[profilePath]) > rank(option.Snapshot.Sources[path])
+		}
+		if !explicit.hasExplicit(name) && (field.IsZero() || profileWins) {
+			field.Set(reflect.ValueOf(value))
+			if option.Snapshot != nil {
+				option.Snapshot.Sources[path] = option.Snapshot.Sources[profilePath]
+			}
+		}
+	}
+	return nil
 }

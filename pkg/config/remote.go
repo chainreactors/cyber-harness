@@ -22,13 +22,13 @@ func ResolveDistributedRuntime(distributed *types.DistributeConfig, host *Option
 	if err := LoadConfigBytes(data, &loaded); err != nil {
 		return nil, err
 	}
-	option := explicit
-	option.MiscOptions, option.OutputOptions = host.MiscOptions, host.OutputOptions
-	mergeOption(&option, &loaded)
+	option := *host
+	// A distributed replacement has no local file layers. Do not share the host's
+	// mutable inspection state or use its file precedence to resolve remote values.
+	option.Snapshot = nil
+	mergeOptions(&option, &loaded, true)
 	if err := finishRuntimeConfig(&option, &explicit); err != nil {
 		return nil, err
 	}
-	option.NodeOptions = host.NodeOptions
-	option.ServerURL, option.Transport = host.ServerURL, host.Transport
 	return &option, nil
 }

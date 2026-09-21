@@ -66,6 +66,13 @@ func TestRuntimeDependencies(t *testing.T) {
 				t.Errorf("%s imports removed App package", relative)
 			}
 			if !strings.HasSuffix(path, "_test.go") {
+				if strings.HasPrefix(relative, "pkg/config/") || strings.HasPrefix(relative, "pkg/cli/configuration/") {
+					for _, forbidden := range []string{"pkg/exts/", "cmd/", "tools/"} {
+						if strings.HasPrefix(imported, module+forbidden) {
+							t.Errorf("%s imports product implementation %s instead of configuration declarations", relative, imported)
+						}
+					}
+				}
 				directory := filepath.ToSlash(filepath.Dir(relative))
 				if (directory == "agent" || directory == "agent/session") && strings.HasPrefix(imported, module+"agent/subagent") {
 					t.Errorf("%s depends on optional subagent capability", relative)

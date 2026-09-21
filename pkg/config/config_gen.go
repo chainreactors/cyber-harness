@@ -2,171 +2,58 @@ package config
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-const configFileHeader = `# cyber 配置文件
-#
-# 运行时: cyber 自动加载 ./cyber.yaml 或 <二进制所在目录>/cyber.yaml
-# 优先级: CLI > Cyber/集成环境变量 > 配置文件 > 协议环境变量 > 默认值
-# 生成:   cyber --init
-#
-# 仅填写需要的字段，留空或删除的字段不会覆盖其他来源的值
-#
-# LLM 配置支持两种格式:
-#   格式一 — 单 provider 简写:
-#     llm:
-#       provider: openai
-#       base_url: https://api.deepseek.com/v1
-#       api_key: sk-...
-#       model: deepseek-chat
-#
-#   格式二 — LLM profile 列表（字段名 providers，通过 active_profile 选择）:
-#     llm:
-#       active_profile: deepseek
-#       providers:
-#         - id: deepseek
-#           provider: openai
-#           base_url: https://api.deepseek.com/v1
-#           api_key: sk-...
-#           model: deepseek-chat
-#         - id: openai
-#           provider: openai
-#           api_key: sk-...
-#           model: gpt-4o
-#
-#   不设置 active_profile 时使用列表第一项。运行失败不会自动切换 provider。
-
+const configFileHeader = `# cyber-harness configuration; shared by Cyber-based applications.
+# CLI > CYBER_* > project cyber.yaml > ~/.cyber/cyber.yaml > protocol env > defaults.
+# Unspecified LLM values may come from OPENAI_* or ANTHROPIC_* environment variables.
+# Example (uncomment and choose a model supported by your endpoint):
+# llm:
+#   provider: openai
+#   base_url: https://api.example.com/v1
+#   model: your-model
+# Store personal credentials in user configuration or environment variables.
 `
 
-func generateDefaultConfig() string {
-	var b strings.Builder
-	b.WriteString(configFileHeader)
-	b.WriteString(generateFromStruct(reflect.TypeOf(Option{}), reflect.ValueOf(Option{}), 0))
-	b.WriteString("\n")
-	return b.String()
+// InitialConfig generates a minimal document from explicit values only.
+// It never reads files, environment variables, or host-specific defaults.
+func InitialConfig(option *Option) ([]byte, error) {
+	var input Option
+	if option != nil {
+		input = *option
+	}
+	option = &input
+	if err := Validate(option); err != nil {
+		return nil, err
+	}
+	doc := map[string]any{}
+	llm := map[string]any{}
+	for k, v := range map[string]string{"provider": option.Provider, "base_url": option.BaseURL, "model": option.Model, "api_key": option.APIKey, "proxy": option.LLMProxy} {
+		if v != "" {
+			llm[k] = v
+		}
+	}
+	if option.MaxTokens != 0 {
+		llm["max_tokens"] = option.MaxTokens
+	}
+	if option.ContextWindow != 0 {
+		llm["context_window"] = option.ContextWindow
+	}
+	if option.ActiveProfile != "" {
+		return nil, fmt.Errorf("init creates a minimal single-provider configuration; select existing profiles with config use")
+	}
+	if len(llm) > 0 {
+		doc["llm"] = llm
+	}
+	if len(doc) == 0 {
+		return []byte(configFileHeader), nil
+	}
+	data, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(configFileHeader), data...), nil
 }
-
-func generateFromStruct(t reflect.Type, v reflect.Value, indent int) string {
-	var b strings.Builder
-	prefix := strings.Repeat("  ", indent)
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		fieldVal := v.Field(i)
-		configTag := field.Tag.Get("config")
-		if configTag == "" || configTag == "-" || configTag == "extensions" {
-			continue
-		}
-
-		groupTag := field.Tag.Get("group")
-		descTag := field.Tag.Get("description")
-		defaultTag := field.Tag.Get("default")
-		if defaultTag == "" {
-			// go-flags rejects `default` on bool flags, so a pointer bool that
-			// resolves to true when unset spells its generated value here.
-			defaultTag = field.Tag.Get("init_default")
-		}
-		optionalTag := field.Tag.Get("config_optional") == "true"
-
-		fieldType := field.Type
-		if fieldType.Kind() == reflect.Pointer {
-			fieldType = fieldType.Elem()
-		}
-
-		switch {
-		case fieldType.Kind() == reflect.Struct && field.Anonymous:
-			if groupTag != "" {
-				b.WriteString(fmt.Sprintf("%s# %s\n", prefix, groupTag))
-			}
-			b.WriteString(fmt.Sprintf("%s%s:\n", prefix, configTag))
-			b.WriteString(generateFromStruct(fieldType, fieldVal, indent+1))
-			b.WriteString("\n")
-
-		case fieldType.Kind() == reflect.Struct && !field.Anonymous:
-			if descTag != "" {
-				b.WriteString(fmt.Sprintf("%s# %s\n", prefix, descTag))
-			}
-			b.WriteString(fmt.Sprintf("%s%s:\n", prefix, configTag))
-			b.WriteString(generateFromStruct(fieldType, fieldVal, indent+1))
-			b.WriteString("\n")
-
-		case fieldType.Kind() == reflect.Slice && fieldType.Elem().Kind() == reflect.Struct:
-			b.WriteString(generateSliceOfStructComment(prefix, configTag, descTag, fieldType.Elem()))
-
-		case fieldType.Kind() == reflect.Slice:
-			b.WriteString(generateSliceComment(prefix, configTag, descTag, fieldType))
-
-		default:
-			if descTag != "" {
-				b.WriteString(fmt.Sprintf("%s# %s\n", prefix, descTag))
-			}
-			val := formatValue(fieldType.Kind(), defaultTag)
-			if optionalTag {
-				b.WriteString(fmt.Sprintf("%s# %s: %s\n", prefix, configTag, val))
-			} else {
-				b.WriteString(fmt.Sprintf("%s%s: %s\n", prefix, configTag, val))
-			}
-		}
-	}
-	return b.String()
-}
-
-func generateSliceOfStructComment(prefix, configTag, descTag string, elemType reflect.Type) string {
-	var b strings.Builder
-	if descTag != "" {
-		b.WriteString(fmt.Sprintf("%s# %s\n", prefix, descTag))
-	}
-	b.WriteString(fmt.Sprintf("%s# %s:\n", prefix, configTag))
-	b.WriteString(fmt.Sprintf("%s#   - ", prefix))
-	first := true
-	for j := 0; j < elemType.NumField(); j++ {
-		f := elemType.Field(j)
-		ct := f.Tag.Get("config")
-		if ct == "" {
-			continue
-		}
-		dt := f.Tag.Get("default")
-		val := formatValue(f.Type.Kind(), dt)
-		if first {
-			b.WriteString(fmt.Sprintf("%s: %s\n", ct, val))
-			first = false
-		} else {
-			b.WriteString(fmt.Sprintf("%s#     %s: %s\n", prefix, ct, val))
-		}
-	}
-	return b.String()
-}
-
-func generateSliceComment(prefix, configTag, descTag string, t reflect.Type) string {
-	var b strings.Builder
-	if descTag != "" {
-		b.WriteString(fmt.Sprintf("%s# %s\n", prefix, descTag))
-	}
-	b.WriteString(fmt.Sprintf("%s# %s: []\n", prefix, configTag))
-	return b.String()
-}
-
-func formatValue(kind reflect.Kind, defaultVal string) string {
-	if defaultVal != "" {
-		switch kind {
-		case reflect.String:
-			return fmt.Sprintf("%q", defaultVal)
-		default:
-			return defaultVal
-		}
-	}
-	switch kind {
-	case reflect.Bool:
-		return "false"
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return "0"
-	case reflect.Float32, reflect.Float64:
-		return "0.0"
-	case reflect.String:
-		return `""`
-	default:
-		return `""`
-	}
-}
+func generateDefaultConfig() string { data, _ := InitialConfig(&Option{}); return string(data) }

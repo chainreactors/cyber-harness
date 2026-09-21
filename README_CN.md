@@ -43,7 +43,9 @@ Agent 由模型决定下一步工具调用；`scan` 由规则和扫描事件驱�
 
 ## 模型配置
 
-工作目录中的 `cyber.yaml`：
+运行 `aiscan init` 配置用户级模型（`~/.cyber/cyber.yaml`）；项目覆盖使用 `aiscan init --project`。这些是 cyber-harness 公共命令，通用 `agent` CLI 同样支持；重复初始化保留已有文件。详见[配置与初始化](docs/configuration.md)。
+
+`cyber.yaml` 示例：
 
 ```yaml
 llm:
