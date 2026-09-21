@@ -606,7 +606,7 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := hosttest.Commands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
-	tools := newTestTools(t, bash)
+	tools := newTestTools(t, bash, NewFinishTool())
 	t.Cleanup(bash.Close)
 
 	turnIndex := 0
@@ -675,7 +675,9 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 				}), nil
 			case 6:
 				assertToolResult(t, req, "c5", "RECOVERED")
-				return chatResponse(NewTextMessage("assistant", "Ctrl-C interrupt and recovery verified.")), nil
+				message := NewTextMessage("assistant", "Ctrl-C interrupt and recovery verified.")
+				message.ToolCalls = []ToolCall{{ID: "c6", Type: "function", Function: FunctionCall{Name: "finish", Arguments: "{}"}}}
+				return chatResponse(message), nil
 			default:
 				t.Fatalf("unexpected turn %d", turnIndex)
 				return nil, nil
@@ -694,6 +696,9 @@ func TestAgentTmuxCtrlCInterrupt(t *testing.T) {
 	if !strings.Contains(result.Output, "Ctrl-C interrupt") {
 		t.Fatalf("unexpected output: %q", result.Output)
 	}
+	if result.Stop != StopReasonTerminated || turnIndex != 6 {
+		t.Fatalf("scripted task stop = %q after %d turns", result.Stop, turnIndex)
+	}
 	t.Logf("Ctrl-C interrupt test passed in %d turns", turnIndex)
 }
 
@@ -710,7 +715,7 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	tmuxCmd := terminaltool.NewTmuxCommand(bash)
 	commandRegistry := hosttest.Commands(t, tmuxCmd)
 	bash.SetCommandRegistry(commandRegistry)
-	tools := newTestTools(t, bash)
+	tools := newTestTools(t, bash, NewFinishTool())
 	t.Cleanup(bash.Close)
 
 	turnIndex := 0
@@ -790,8 +795,9 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 					}},
 				}), nil
 			case 7:
-				return chatResponse(NewTextMessage("assistant",
-					"Python REPL interaction verified: 2^10=1024, string concat, clean exit.")), nil
+				message := NewTextMessage("assistant", "Python REPL interaction verified: 2^10=1024, string concat, clean exit.")
+				message.ToolCalls = []ToolCall{{ID: "p7", Type: "function", Function: FunctionCall{Name: "finish", Arguments: "{}"}}}
+				return chatResponse(message), nil
 			default:
 				t.Fatalf("unexpected turn %d", turnIndex)
 				return nil, nil
@@ -809,6 +815,9 @@ func TestAgentTmuxInteractiveProgram(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Python REPL") {
 		t.Fatalf("unexpected output: %q", result.Output)
+	}
+	if result.Stop != StopReasonTerminated || turnIndex != 7 {
+		t.Fatalf("scripted task stop = %q after %d turns", result.Stop, turnIndex)
 	}
 	t.Logf("Python REPL interaction test passed in %d turns", turnIndex)
 }
