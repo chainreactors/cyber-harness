@@ -177,7 +177,7 @@ func Validate(option *Option) error {
 			return fmt.Errorf("llm.providers.%s.model: required", entry.ID)
 		}
 	}
-	if _, err := option.TrafficOptions.Normalize(); err != nil {
+	if _, err := option.Normalize(); err != nil {
 		return err
 	}
 	if option.MaxTokens < 0 || option.ContextWindow < 0 || option.Timeout < 0 {

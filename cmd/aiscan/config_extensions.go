@@ -148,11 +148,6 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	return value, nil
 }
 
-// projectRuntimeConfig shares the harness projection with other hosts.
-func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) {
-	return cfg.DistributeFromOption(option)
-}
-
 // original is the file being replaced; local settings are carried over from it
 // because the proto projection cannot express them.
 func marshalConfig(config *types.DistributeConfig, original []byte) ([]byte, error) {

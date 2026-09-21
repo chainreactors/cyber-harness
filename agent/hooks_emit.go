@@ -83,15 +83,3 @@ func emitRunEnd(ctx context.Context, cfg Config, result *Result) {
 		Err:            result.Err,
 	})
 }
-
-func sessionEvent(cfg Config, reason string) hooks.SessionEvent {
-	return hooks.SessionEvent{
-		SessionID:        cfg.SessionID,
-		ParentID:         cfg.ParentSessionID,
-		ParentToolCallID: cfg.ParentToolCallID,
-		Delegation:       cfg.Delegation,
-		AgentName:        cfg.AgentName,
-		Model:            cfg.Model,
-		Reason:           reason,
-	}
-}

@@ -36,22 +36,6 @@ func readIOAMessages(t *testing.T, client *stdioClient, line string) []ioaMessag
 	}
 	return messages
 }
-func uniqueIOAMessage(t *testing.T, messages []ioaMessage, text string) ioaMessage {
-	t.Helper()
-	var found []ioaMessage
-	for _, m := range messages {
-		if m.Content.Text == text {
-			found = append(found, m)
-		}
-	}
-	if len(found) != 1 {
-		t.Fatalf("expected one %q message, got %d in %+v", text, len(found), messages)
-	}
-	if found[0].ID == "" || found[0].Sender == "" || found[0].SpaceID == "" {
-		t.Fatalf("missing IOA identity: %+v", found[0])
-	}
-	return found[0]
-}
 func assertIOAReply(t *testing.T, reply, parent ioaMessage) {
 	t.Helper()
 	if reply.SpaceID != parent.SpaceID || len(reply.Refs.Messages) != 1 || reply.Refs.Messages[0] != parent.ID || len(reply.Refs.Nodes) != 1 || reply.Refs.Nodes[0] != parent.Sender {

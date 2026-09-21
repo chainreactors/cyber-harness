@@ -50,7 +50,9 @@ type Extension struct {
 	requests map[*request]context.CancelFunc
 	drained  chan struct{}
 }
-type request struct{ active bool }
+
+// A nonzero size keeps simultaneous request pointers distinct as map keys.
+type request struct{ _ byte }
 
 func New(config Config) *Extension {
 	config.AllowedOrigins = append([]string(nil), config.AllowedOrigins...)

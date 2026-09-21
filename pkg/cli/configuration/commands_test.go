@@ -150,9 +150,9 @@ func TestCancelledInitDoesNotWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if handled, err := Run(ctx, []string{"init", "--non-interactive"}, host); !handled || err == nil {
-		t.Fatal("cancelled initialization was accepted")
+		t.Fatal("canceled initialization was accepted")
 	}
 	if _, err := os.Stat(host.Context.UserFile()); !os.IsNotExist(err) {
-		t.Fatal("cancelled initialization wrote a file")
+		t.Fatal("canceled initialization wrote a file")
 	}
 }

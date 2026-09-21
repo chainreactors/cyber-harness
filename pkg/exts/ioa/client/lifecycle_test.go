@@ -180,7 +180,7 @@ func TestRecordFailuresAreSynchronous(t *testing.T) {
 				if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/messages") {
 					n := sends.Add(1)
 					if (phase == "delegate" && n == 1) || (phase == "return" && n == 2) {
-						http.Error(w, "record unavailable", 503)
+						http.Error(w, "record unavailable", http.StatusServiceUnavailable)
 						return
 					}
 				}

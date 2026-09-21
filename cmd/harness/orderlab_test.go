@@ -283,23 +283,3 @@ func TestUserIOALongTaskRuntimeSmoke(t *testing.T) {
 	}
 	l.unchanged(t)
 }
-
-func readAudit(t *testing.T, path string) []map[string]any {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := []map[string]any{}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		if line == "" {
-			continue
-		}
-		var row map[string]any
-		if err = json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, row)
-	}
-	return out
-}

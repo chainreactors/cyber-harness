@@ -110,7 +110,10 @@ func TestWebCloseEndsIdleWebSockets(t *testing.T) {
 	defer server.Close()
 	var connections []*websocket.Conn
 	for _, path := range []string{webpkg.NodeWebSocketPath, webpkg.ApplicationWebSocketPath} {
-		conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+path, nil)
+		conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+path, nil)
+		if response != nil {
+			_ = response.Body.Close()
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

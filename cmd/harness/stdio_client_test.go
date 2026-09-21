@@ -186,12 +186,6 @@ func startStdioClient(t *testing.T, w *workspace, name, ioaURL, space string, mo
 	return p
 }
 
-func (p *stdioClient) eventSnapshot() []map[string]any {
-	p.eventMu.Lock()
-	defer p.eventMu.Unlock()
-	return append([]map[string]any(nil), p.events...)
-}
-
 func (p *stdioClient) request(t *testing.T, namespace, operation string, value any) map[string]any {
 	t.Helper()
 	p.seq++

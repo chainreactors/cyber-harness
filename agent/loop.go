@@ -787,16 +787,3 @@ func (b *messageBuilder) Message() *aop.Message {
 	}
 	return msg
 }
-
-// decodeToolArguments renders a tool call's arguments as a JSON value for
-// event payloads.
-func decodeToolArguments(call *aop.ToolCall) any {
-	if call == nil || call.Arguments == nil || len(call.Arguments.Data) == 0 {
-		return map[string]any{}
-	}
-	var m map[string]any
-	if err := json.Unmarshal(call.Arguments.Data, &m); err == nil {
-		return m
-	}
-	return string(call.Arguments.Data)
-}

@@ -241,7 +241,7 @@ func (r *Registry) Start(ctx context.Context, cfg agent.Config, request Request)
 	if request.Timeout > 0 {
 		var timeoutCancel context.CancelFunc
 		call, timeoutCancel = context.WithTimeout(call, request.Timeout)
-		stops = append(stops, timeoutCancel)
+		stops = append(stops, func() { timeoutCancel() })
 	}
 	if err := call.Err(); err != nil {
 		return nil, err

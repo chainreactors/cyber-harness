@@ -141,8 +141,8 @@ func TestUnavailableExtensionsArePreservedAndKnownFieldsValidated(t *testing.T) 
 	if o.Snapshot.Document["extensions"] == nil {
 		t.Fatal("unavailable section lost from file snapshot")
 	}
-	putConfig(t, path, "llm:\n  modle: misspelled\n")
-	if _, err := ResolveRuntimeConfig(&Option{Context: c}); err == nil || !strings.Contains(err.Error(), "llm.modle") {
+	putConfig(t, path, "llm:\n  unknown_field: invalid\n")
+	if _, err := ResolveRuntimeConfig(&Option{Context: c}); err == nil || !strings.Contains(err.Error(), "llm.unknown_field") {
 		t.Fatalf("missing field diagnostic: %v", err)
 	}
 }

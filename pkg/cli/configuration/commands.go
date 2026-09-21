@@ -249,7 +249,7 @@ func initialize(ctx context.Context, host Host, option *cfg.Option, options init
 			fmt.Fprintf(host.Err, "%s [%s]: ", label, current)
 			v, e := reader.ReadString('\n')
 			if e != nil {
-				return "", fmt.Errorf("initialization cancelled: %w", e)
+				return "", fmt.Errorf("initialization canceled: %w", e)
 			}
 			v = strings.TrimSpace(v)
 			if v == "" {
@@ -276,7 +276,7 @@ func initialize(ctx context.Context, host Host, option *cfg.Option, options init
 		secret, e := term.ReadPassword(int(input.Fd()))
 		fmt.Fprintln(host.Err)
 		if e != nil {
-			return fmt.Errorf("initialization cancelled")
+			return fmt.Errorf("initialization canceled")
 		}
 		if len(secret) > 0 {
 			option.APIKey = string(secret)
