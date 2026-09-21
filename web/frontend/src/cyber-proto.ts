@@ -43,6 +43,7 @@ export {
 } from './gen/types/command_pb.js'
 export {
   ConnectionCheckSchema,
+  AgentConfigSchema,
   DistributeConfigSchema,
   LLMProbeRequestSchema,
   LLMProbeResultSchema,

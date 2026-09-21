@@ -7,17 +7,18 @@ import (
 	"sync"
 	"time"
 
-	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	coretool "github.com/chainreactors/cyber/core/tool"
+
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 type Config struct {
+	// Tool optionally selects the host protocol facade over the owned Bash runtime.
+	Tool           func(*terminaltool.BashTool) coretool.Tool
 	Environment    map[string]string
 	Directory      string
 	Timeout        int
@@ -25,7 +26,8 @@ type Config struct {
 	MaximumTimeout time.Duration
 	// HiddenCommands are control-only registry commands omitted from the Bash
 	// description and shell aliases.
-	HiddenCommands []string
+	HiddenCommands     []string
+	StandaloneCommands []string
 }
 type Extension struct {
 	mu     sync.Mutex
@@ -45,7 +47,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return toolset.ErrUnavailable
+		return coretool.ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -57,7 +59,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	executor, err := extension.Use[commands.Executor](scope)
+	executor, err := extension.Use[coretool.CommandExecutor](scope)
 	if err != nil {
 		return err
 	}
@@ -75,13 +77,21 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	bash.SetEgressResolver(endpoint.Egress)
 	bash.EnableShellCommands(executor)
 	bash.HideCommands(m.config.HiddenCommands...)
+	bash.StandaloneCommands(m.config.StandaloneCommands...)
 
 	m.bash = bash
 
-	if err := extension.Add[tool.Tool](scope, bash); err != nil {
+	var tool coretool.Tool = bash
+	if m.config.Tool != nil {
+		tool = m.config.Tool(bash)
+	}
+	if err := extension.Add[coretool.Tool](scope, tool); err != nil {
 		return err
 	}
 	if err := extension.Provide[*terminaltool.BashTool](scope, bash); err != nil {
+		return err
+	}
+	if err := extension.Provide[*procbus.Manager](scope, bash.Manager()); err != nil {
 		return err
 	}
 	if err := extension.Provide[procbus.Sessions](scope, bash.Manager()); err != nil {

@@ -28,7 +28,7 @@ result, err := turn.Wait()
 
 ## 接入实际模型
 
-演示程序将启动 Provider 设为 Disabled，再通过 Runtime.SetProvider 注入本地实现。实际应用通常在 `base.Config.Provider` 中选择 `StartupRequired`，提供 `ProviderConfig` 的协议、端点、密钥和模型；删除演示 Provider 的注入，让基础扩展完成初始化。
+演示程序将启动 Provider 设为 Disabled，再通过 Runtime.SetProvider 注入本地实现。实际应用通常在 `harness.BaseConfig.Provider` 中选择 `StartupRequired`，提供 `ProviderConfig` 的协议、端点、密钥和模型；删除演示 Provider 的注入，让基础扩展完成初始化。
 
 也可以实现 `provider.Provider` 接入自己的后端；支持流式返回时再实现 `StreamingProvider`。框架上层使用统一的 AOP 消息，供应商的 wire format 留在适配器中。模型配置与重试语义见[上下文与知识](../architecture/context.md#provider-选择与容错)。
 
@@ -55,3 +55,32 @@ Wait 返回最终结果与错误，结果还包含 Stop、用量和消息。自�
 stdio 的 Envelope 流与 CLI 的 Event JSONL 历史文件不同，不能互相替代。Web 环境还把会话执行与配置、历史查询分开：实时执行走 AOP，管理查询使用 ConnectRPC。建立连接、创建会话、提交与取消的具体调用见[外部接入教程](../integration.md)，字段见 [API 参考](../api.md)。
 
 本地 subagent、IOA 和 Web Node 也有不同的状态归属。subagent 派生对话但可共享工具环境；IOA 在 Space 中交换消息；Web Node 提供远程执行位置。使用与部署见[Web 与协作](../user/web.md)，不能仅因它们都涉及多个 Agent 就使用同一种身份或恢复策略。
+
+## 借用已安装能力
+
+嵌入入口使用 `harness.New`，需要自定义顺序时使用 `harness.BaseExtensions` 配合具体功能 Extension。
+不要在宿主中直接调用 Session Resource、Provider 初始化或 BashTool 构造方法。
+
+加载后通过 `Runtime()` 运行会话，通过 `Providers()`、`Events()`、`Progress()`、`Processes()` 借用
+需要的能力。取得的对象由 Profile 拥有；宿主仅关闭自身订阅、连接和 Profile。Console 持久 REPL
+显式接收进程 Manager，不通过 Session 获取具体 BashTool。共享事件流的订阅和发布使用同一实例。
+
+
+需要 Session 协议时，在命名空间注册表和 Session 之后安装 `sessionext.NewProtocol()`；不要在宿主里
+调用 `Runtime.NamespaceBindings()` 再手工贡献。IOA 查询只安装 `ioaclient.New(config)`；需要协作时再安装
+`NewCollaboration`，展示通过 `NewConsole` 借用同一个已安装 Service。
+
+Web 宿主使用 `webext.New(webext.Config{Database: path, ...})`。数据库、Service 和 AgentPool 由 Extension
+创建并关闭；业务操作从 `Service()` 借用。HTTP 停止后关闭整个 Set，不能先关闭 Set 再继续使用路由快照。
+可运行的完整实现见 [ACP Server](../../examples/acp/server/main.go)。
+
+
+## 公共配置入口
+
+配置属于 cyber-harness，而非 aiscan 产品层。`pkg/config` 提供文件发现、分层合并、profile 选择、校验、最小模板及原子文件保存；`pkg/cli/configuration` 提供可接入宿主的 `init`、`config`、`doctor` 命令。
+
+CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, configuration.Host{...})`，并通过 `RegisterHelp` 将命令加入帮助。Host 只提供名称、I/O、配置 Sections 和可选的检查回调；公共层不加载 agent、扫描器或 Web。`cmd/agent` 是最小接入示例，`cmd/aiscan` 额外贡献扫描和协作连接检查。
+
+嵌入式宿主可直接调用 `config.ResolveRuntimeConfig`，通过 `Option.Context` 注入工作目录、用户目录、二进制路径和环境变量查询函数。`Context.Replacements` 只用于验证待保存的配置层，保留其他文件和运行时覆盖；不应把暂存文件当成新的 `-c`。构造和解析不会创建目录或启动资源。
+
+配置文件未知的基础字段会报错。未由当前宿主注册的扩展保留在文件中，并报告不可用，不加载对应代码。宿主注册扩展的字段仍严格校验。Web 编辑沿用现有配置协议，保存仅修改选定文件中的编辑值。

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -17,7 +16,7 @@ type Reader interface {
 	ListNodes(context.Context) ([]protocols.Node, error)
 }
 
-func query[T any](s *Service, ctx context.Context, call func(context.Context, *ioaclient.Client) (T, error)) (T, error) {
+func query[T any](s *Service, ctx context.Context, call func(context.Context, sdkClient) (T, error)) (T, error) {
 	var zero T
 	if s == nil {
 		return zero, fmt.Errorf("IOA client is unavailable")
@@ -42,25 +41,25 @@ func query[T any](s *Service, ctx context.Context, call func(context.Context, *i
 }
 
 func (s *Service) ListSpaces(ctx context.Context) ([]protocols.SpaceInfo, error) {
-	return query(s, ctx, func(ctx context.Context, client *ioaclient.Client) ([]protocols.SpaceInfo, error) {
+	return query(s, ctx, func(ctx context.Context, client sdkClient) ([]protocols.SpaceInfo, error) {
 		return client.ListSpaces(ctx)
 	})
 }
 
 func (s *Service) ResolveSpace(ctx context.Context, nameOrID string) (protocols.SpaceInfo, error) {
-	return query(s, ctx, func(ctx context.Context, client *ioaclient.Client) (protocols.SpaceInfo, error) {
+	return query(s, ctx, func(ctx context.Context, client sdkClient) (protocols.SpaceInfo, error) {
 		return client.ResolveSpace(ctx, nameOrID)
 	})
 }
 
 func (s *Service) ReadPublic(ctx context.Context, spaceID string, options protocols.ReadOptions) ([]protocols.Message, error) {
-	return query(s, ctx, func(ctx context.Context, client *ioaclient.Client) ([]protocols.Message, error) {
+	return query(s, ctx, func(ctx context.Context, client sdkClient) ([]protocols.Message, error) {
 		return client.ReadPublic(ctx, spaceID, options)
 	})
 }
 
 func (s *Service) ListNodes(ctx context.Context) ([]protocols.Node, error) {
-	return query(s, ctx, func(ctx context.Context, client *ioaclient.Client) ([]protocols.Node, error) {
+	return query(s, ctx, func(ctx context.Context, client sdkClient) ([]protocols.Node, error) {
 		return client.ListNodes(ctx)
 	})
 }

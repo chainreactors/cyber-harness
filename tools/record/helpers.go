@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 func normalizeDuration(seconds float64, required bool) (time.Duration, error) {
@@ -121,8 +121,8 @@ func newID() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
-func jsonResult(value any) (*tool.Result, error) {
-	return tool.TextResult(marshalJSON(value)), nil
+func jsonResult(value any) (*coretool.Result, error) {
+	return coretool.TextResult(marshalJSON(value)), nil
 }
 
 func marshalJSON(value any) string {

@@ -3,20 +3,12 @@ package engine
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
-	"github.com/chainreactors/cyber/core/telemetry"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
 	"github.com/chainreactors/utils/parsers"
 )
-
-// spray's runner construction mutates shared logger/option state inside the
-// upstream engine. A scan may schedule check, crawl and plugin capabilities in
-// parallel against the same engine, so keep one invocation active at a time
-// until its result stream is fully drained.
-var sprayExecutionMu sync.Mutex
 
 type SprayCheckOptions struct {
 	URLs          []string
@@ -48,7 +40,17 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	if eng == nil {
 		return nil, fmt.Errorf("spray engine is not available")
 	}
-	sprayExecutionMu.Lock()
+
+	release, err := AcquireSpray(ctx)
+	if err != nil {
+		return nil, err
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			release()
+		}
+	}()
 	runCtx, cancel := sprayInvocationContext(ctx, opts)
 	sprayCtx := spray.NewContext().
 		WithContext(runCtx).
@@ -56,7 +58,6 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 		WithStatsHandler(opts.OnStats)
 
 	var resultCh <-chan sdktypes.Result
-	var err error
 	if needsBruteMode(opts) {
 		resultCh, err = eng.Execute(sprayCtx, spray.NewBruteTasks(opts.URLs, crawlSeedWordlist(opts)))
 	} else {
@@ -64,42 +65,17 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	}
 	if err != nil {
 		cancel()
-		sprayExecutionMu.Unlock()
 		return nil, err
 	}
 
-	out := make(chan *parsers.SprayResult)
-	go func() {
-		defer telemetry.SDKGoRecover("spray")
-		defer sprayExecutionMu.Unlock()
-		defer cancel()
-		defer close(out)
-		for {
-			var result sdktypes.Result
-			var ok bool
-			select {
-			case result, ok = <-resultCh:
-				if !ok {
-					return
-				}
-			case <-runCtx.Done():
-				return
-			}
-			if result == nil || !result.Success() {
-				continue
-			}
-			sprayResult, ok := result.Data().(*parsers.SprayResult)
-			if !ok || sprayResult == nil {
-				continue
-			}
-			select {
-			case out <- sprayResult:
-			case <-runCtx.Done():
-				return
-			}
+	transferred = true
+	return forwardResults(runCtx, resultCh, func(result sdktypes.Result) (*parsers.SprayResult, bool) {
+		if result == nil || !result.Success() {
+			return nil, false
 		}
-	}()
-	return out, nil
+		value, ok := result.Data().(*parsers.SprayResult)
+		return value, ok && value != nil
+	}, func() { cancel(); release() }), nil
 }
 
 func sprayInvocationContext(parent context.Context, opts SprayCheckOptions) (context.Context, context.CancelFunc) {
@@ -181,4 +157,23 @@ func needsBruteMode(opts SprayCheckOptions) bool {
 // internally, but BruteTask.Validate still requires a non-empty wordlist.
 func crawlSeedWordlist(opts SprayCheckOptions) []string {
 	return []string{"/"}
+}
+
+// Spray's native parser and SDK runner both mutate upstream global options,
+// logging and resource providers. Their whole invocations share this gate.
+var sprayExecution = make(chan struct{}, 1)
+
+// AcquireSpray admits one native or SDK invocation. Cancellation may stop
+// waiting for admission; an admitted caller releases only after upstream drains.
+func AcquireSpray(ctx context.Context) (func(), error) {
+	select {
+	case sprayExecution <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		<-sprayExecution
+		return nil, err
+	}
+	return func() { <-sprayExecution }, nil
 }

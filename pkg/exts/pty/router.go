@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	procbus "github.com/chainreactors/cyber/agent/proc"
 	"github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
+	procbus "github.com/chainreactors/cyber/core/proc"
 	runtimeproc "github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/proto"
 )
@@ -68,7 +68,7 @@ func WithMonitorInterval(interval time.Duration) Option {
 	}
 }
 
-func NewRouter(mgr runtimeproc.SessionManager, opts ...Option) *Router {
+func newRouter(mgr runtimeproc.SessionManager, opts ...Option) *Router {
 	r := &Router{
 		mgr:             mgr,
 		openers:         make(map[string]runtimeproc.OpenFunc),
@@ -82,14 +82,6 @@ func NewRouter(mgr runtimeproc.SessionManager, opts ...Option) *Router {
 		opt(r)
 	}
 	return r
-}
-
-// NewRuntimeRouter wraps the utils/pty runtime with the canonical AOP PTY
-// protocol. Callers above this boundary only exchange ProtocolMessage values;
-// runtime opener and session details remain private to this package.
-func NewRuntimeRouter(mgr *runtimeproc.Manager, opts ...Option) *Router {
-	defaults := []Option{WithOpeners(runtimeproc.DefaultOpeners(mgr, runtimeproc.DefaultSessionTimeout, runtimeproc.DefaultEnv()))}
-	return NewRouter(mgr, append(defaults, opts...)...)
 }
 
 // Handler adapts the router to the AOP namespace contract. One handler serves

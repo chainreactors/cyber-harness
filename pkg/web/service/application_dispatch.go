@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/chainreactors/cyber/pkg/aopconn"
 	"strconv"
 	"sync"
 
@@ -10,7 +11,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	types "github.com/chainreactors/cyber/core/types"
-	web "github.com/chainreactors/cyber/pkg/web"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -19,11 +19,13 @@ type applicationPTYRoute struct {
 	unsubscribe func()
 }
 
-func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelope, registerNamespaces func(*aop.NamespaceMux) error) error {
-	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil || first == nil {
+func (s *Service) serveApplication(connection *aopconn.Connection, registerNamespaces func(*aop.NamespaceMux) error) error {
+	if s == nil || s.api == nil || s.api.Sessions == nil || connection == nil {
 		return fmt.Errorf("application AOP connection is unavailable")
 	}
 	ctx := connection.Context()
+	var workers sync.WaitGroup
+	defer func() { connection.Close(); workers.Wait() }()
 
 	var stateMu sync.Mutex
 	subscriptions := make(map[string]context.CancelFunc)
@@ -105,10 +107,18 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		if !ok {
 			return fmt.Errorf("unexpected application core message %T", message)
 		}
+		if value.GetAgentHello() != nil {
+			err := fmt.Errorf("AgentHello is only accepted by the node endpoint")
+			fail(envelope.GetId(), "WRONG_ENDPOINT", err)
+			connection.Close()
+			return nil
+		}
 		sessions := s.api.Sessions
 		switch payload := value.Message.(type) {
 		case *aop.ProtocolMessage_OpenSessionRequest:
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				response, err := sessions.OpenSession(ctx, envelope.Id, payload.OpenSessionRequest)
 				if err != nil {
 					fail(envelope.Id, "OPEN_SESSION_FAILED", err)
@@ -117,7 +127,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_OpenSessionResponse{OpenSessionResponse: response}})
 			}()
 		case *aop.ProtocolMessage_RunTurnRequest:
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				response, err := sessions.RunTurn(ctx, envelope.Id, payload.RunTurnRequest)
 				if err != nil {
 					fail(envelope.Id, "RUN_TURN_FAILED", err)
@@ -126,7 +138,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_RunTurnResponse{RunTurnResponse: response}})
 			}()
 		case *aop.ProtocolMessage_CancelTurnRequest:
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				response, err := sessions.CancelTurn(ctx, envelope.Id, payload.CancelTurnRequest)
 				if err != nil {
 					fail(envelope.Id, "CANCEL_TURN_FAILED", err)
@@ -135,7 +149,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CancelTurnResponse{CancelTurnResponse: response}})
 			}()
 		case *aop.ProtocolMessage_CloseSessionRequest:
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				response, err := sessions.CloseSession(ctx, envelope.Id, payload.CloseSessionRequest)
 				if err != nil {
 					fail(envelope.Id, "CLOSE_SESSION_FAILED", err)
@@ -144,7 +160,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 				_ = send(envelope.Id, "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_CloseSessionResponse{CloseSessionResponse: response}})
 			}()
 		case *aop.ProtocolMessage_ListEventsRequest:
+			workers.Add(1)
 			go func() {
+				defer workers.Done()
 				response, err := sessions.ListEvents(ctx, payload.ListEventsRequest)
 				if err != nil {
 					fail(envelope.Id, "LIST_EVENTS_FAILED", err)
@@ -155,7 +173,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		case *aop.ProtocolMessage_WatchEventsRequest:
 			subscriptionCtx, cancel := context.WithCancel(ctx)
 			setSubscription(envelope.Id, cancel)
+			workers.Add(1)
 			go func(subscriptionID string) {
+				defer workers.Done()
 				defer cancelSubscription(subscriptionID)
 				err := sessions.WatchEvents(subscriptionCtx, payload.WatchEventsRequest, func(delivery *aop.EventDelivery) error {
 					if delivery.GetEvent() == nil {
@@ -187,7 +207,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("unsupported Cyber command message"))
 			return nil
 		}
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			operationID, err := s.ExecuteSessionCommand(request.SessionId, request.Line)
 			if err != nil {
 				fail(envelope.Id, "COMMAND_FAILED", err)
@@ -208,7 +230,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 			fail(envelope.Id, "UNSUPPORTED_MESSAGE", fmt.Errorf("only file upload is supported by the application endpoint"))
 			return nil
 		}
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			result, err := s.Upload(ctx, request.SessionId, request.Filename, request.Data)
 			if err != nil {
 				fail(envelope.Id, "FILE_UPLOAD_FAILED", err)
@@ -231,7 +255,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		}
 		subscriptionCtx, cancel := context.WithCancel(ctx)
 		setSubscription(envelope.Id, cancel)
+		workers.Add(1)
 		go func(subscriptionID string) {
+			defer workers.Done()
 			defer cancelSubscription(subscriptionID)
 			err := s.api.Scans.WatchScanEvents(request, subscriptionCtx, func(event *types.ScanEvent) error {
 				if event == nil {
@@ -272,7 +298,9 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 			stateMu.Lock()
 			ptyRoutes[streamID] = applicationPTYRoute{nodeID: nodeID, unsubscribe: unsubscribe}
 			stateMu.Unlock()
+			workers.Add(1)
 			go func(streamID string, values <-chan *ptypb.ProtocolMessage) {
+				defer workers.Done()
 				for {
 					select {
 					case next, ok := <-values:
@@ -337,5 +365,5 @@ func (s *Service) serveApplication(connection *web.Connection, first *aop.Envelo
 		}
 		return nil
 	}
-	return connection.Run(first, dispatch)
+	return connection.Run(dispatch)
 }

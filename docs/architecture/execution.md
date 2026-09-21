@@ -66,4 +66,4 @@ AOP 的前台工具执行等入口使用前台执行契约，不能把上面的 
 
 浏览器、扫描器、录屏和外部工具安装各自拥有运行资源，通过扩展贡献工具或命令。它们共享执行和观察路径，但不会因为注册到同一个框架就获得相同的运行环境。发行版和平台决定实际可用能力，使用层面的选择见[工具与环境](../user/tools.md)。
 
-实现：[bash 路由与后台通知](../../tools/terminal/bash.go)、[终端扩展](../../pkg/exts/terminal/extension.go)、[命令注册表](../../pkg/commands)、[代理扩展](../../pkg/exts/proxy/extension.go)。验证入口：[命令执行测试](../../tools/terminal/bash_test.go)、[工作单元测试](../../tools/terminal/process_test.go)。
+实现：[bash 路由与后台通知](../../tools/terminal/bash.go)、[终端扩展](../../pkg/exts/terminal/extension.go)、[命令注册表](../../core/tool)、[代理扩展](../../pkg/exts/proxy/extension.go)。验证入口：[命令执行测试](../../tools/terminal/bash_test.go)、[工作单元测试](../../tools/terminal/process_test.go)。

@@ -3,13 +3,12 @@ package search
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	searchtools "github.com/chainreactors/cyber/tools/search"
+	"strings"
+	"time"
 )
 
 const connectionTimeout = 20 * time.Second

@@ -7,8 +7,8 @@ import (
 
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func TestProcessHooksFollowActualCompletion(t *testing.T) {
@@ -20,7 +20,7 @@ func TestProcessHooksFollowActualCompletion(t *testing.T) {
 			close(release)
 		}
 	}()
-	commandRegistry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: "wait_for_test", Run: func(ctx context.Context, _ *commands.Execution) (any, error) {
+	commandRegistry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: "wait_for_test", Run: func(ctx context.Context, _ *coretool.Execution) (any, error) {
 		select {
 		case <-release:
 			return nil, nil
@@ -67,7 +67,7 @@ func TestProcessHooksFollowActualCompletion(t *testing.T) {
 		t.Fatalf("after-exit: %+v", after)
 	}
 	bash.Close()
-	if _, err := bash.Start(t.Context(), "wait_for_test", BashExecOptions{}); !errors.Is(err, commands.ErrUnavailable) {
+	if _, err := bash.Start(t.Context(), "wait_for_test", BashExecOptions{}); !errors.Is(err, coretool.ErrUnavailable) {
 		t.Fatalf("start after Close: %v", err)
 	}
 }

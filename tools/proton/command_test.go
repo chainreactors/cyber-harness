@@ -3,17 +3,16 @@ package proton_test
 import (
 	"context"
 	"encoding/json"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	protoncmd "github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/tools/resources"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	protoncmd "github.com/chainreactors/cyber/tools/proton"
-	"github.com/chainreactors/cyber/tools/resources"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 // ---------------------------------------------------------------------------
@@ -41,7 +40,7 @@ func run(t *testing.T, bash *terminaltool.BashTool, cmd string) string {
 	if err != nil {
 		t.Fatalf("execute %q: %v", cmd, err)
 	}
-	return tool.ResultText(res)
+	return coretool.ResultText(res)
 }
 
 func writeFile(t *testing.T, dir, name, content string) string {

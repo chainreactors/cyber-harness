@@ -21,13 +21,13 @@ func TestServiceReturnsCommandDeclarationsWithoutOwningARegistry(t *testing.T) {
 	if err := service.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(service.Commands()) == 0 {
+	if len(service.Service.Commands()) == 0 {
 		t.Fatal("started service did not expose command declarations")
 	}
 	if err := service.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(service.Commands()) != 0 {
+	if len(service.Service.Commands()) != 0 {
 		t.Fatal("closed service retained command declarations")
 	}
 	if calls.Load() != 0 {
@@ -35,13 +35,19 @@ func TestServiceReturnsCommandDeclarationsWithoutOwningARegistry(t *testing.T) {
 	}
 }
 
-func TestServiceWithoutURLIsDormant(t *testing.T) {
+func TestServiceWithoutURLUsesMemory(t *testing.T) {
 	m := New(Config{RegisterCommands: true}, nil)
 	if err := m.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.Commands()) != 0 {
-		t.Fatal("dormant service exposed commands without a client")
+	if len(m.Service.Commands()) == 0 {
+		t.Fatal("memory service did not expose commands")
+	}
+	if err := m.Service.WaitReady(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Service.Status().Bound || m.Service.ReceiveSpace() == "" {
+		t.Fatal("memory service is not ready")
 	}
 	if err := m.Close(t.Context()); err != nil {
 		t.Fatal(err)

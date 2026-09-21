@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/proxyclient"
 	"github.com/chainreactors/proxyclient/extra/clash"
 	goflags "github.com/jessevdk/go-flags"
 )
 
-type CommandExecutor func(ctx context.Context, tokens []string, execution *commands.Execution) (any, error)
+type CommandExecutor func(ctx context.Context, tokens []string, execution *coretool.Execution) (any, error)
 
 type Command struct {
 	state       *State
@@ -55,7 +55,7 @@ Auto mode options:
   --strategy,-s adaptive      Load balance strategy (adaptive, url-test, round-robin, random)`
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("proxy", &err)
 	args := execution.Args
 	if len(args) == 0 {
@@ -122,7 +122,7 @@ func parseFlags(f interface{}, args []string) ([]string, error) {
 // passthrough
 // ---------------------------------------------------------------------------
 
-func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string, execution *commands.Execution) (any, error) {
+func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs []string, execution *coretool.Execution) (any, error) {
 	if len(cmdArgs) == 0 {
 		return nil, fmt.Errorf("usage: proxy <proxy-url> <command> [args...]\nexample: proxy socks5://127.0.0.1:1080 gogo -i 10.0.0.1 -p top2")
 	}

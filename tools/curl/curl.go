@@ -7,7 +7,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/toolargs"
 )
 
@@ -109,7 +109,7 @@ func (c *Command) QuickReference() string {
 // Run parses the curl-shaped argument vector and performs one exchange. The
 // proxy and CA that route/trust the MITM hub arrive in execution.Env (the
 // builtin runs in-process and does not inherit them from os.Environ).
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("curl", &err)
 
 	req, err := Parse(execution.Args)
@@ -125,5 +125,5 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	if workDir == "" {
 		workDir = operation.WorkDirFromContext(ctx, c.WorkDir)
 	}
-	return nil, c.do(ctx, req, commands.ResolveExecutionEgress(execution, c.Proxy), workDir, execution.Stdout, execution.Stderr)
+	return nil, c.do(ctx, req, coretool.ResolveExecutionEgress(execution, c.Proxy), workDir, execution.Stdout, execution.Stderr)
 }

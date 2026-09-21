@@ -3,15 +3,14 @@ package terminal
 import (
 	"bytes"
 	"context"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/utils/proc"
 	"io"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
-
-	procbus "github.com/chainreactors/cyber/agent/proc"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/utils/proc"
 )
 
 type testOutputWriter struct{ bytes.Buffer }
@@ -22,12 +21,12 @@ func (w *testOutputWriter) Captured() string  { return w.String() }
 var Output = &testOutputWriter{}
 
 type testTmuxCommand struct {
-	command commands.Command
+	command coretool.Command
 	manager *procbus.Manager
 }
 
 func (c *testTmuxCommand) Execute(ctx context.Context, args []string) error {
-	_, err := c.command.Run(ctx, &commands.Execution{Args: args, Stdout: Output, Stderr: Output})
+	_, err := c.command.Run(ctx, &coretool.Execution{Args: args, Stdout: Output, Stderr: Output})
 	return err
 }
 
@@ -122,7 +121,7 @@ func TestTmuxListSessionsHidesBuiltins(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 10, nil)
 	t.Cleanup(bash.Close)
 	tmux := NewTmuxCommand(bash)
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: "tmux", Usage: tmux.Usage, Run: tmux.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: "tmux", Usage: tmux.Usage, Run: tmux.Run}))
 	bash.SetCommandRegistry(registry)
 
 	var out bytes.Buffer

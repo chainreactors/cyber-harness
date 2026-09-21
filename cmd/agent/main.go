@@ -15,8 +15,9 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/cli/configuration"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	flags "github.com/jessevdk/go-flags"
@@ -67,6 +68,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultErr error) {
+	if handled, err := configuration.Run(ctx, args, configuration.Host{Name: "agent", Out: stdout, Err: stderr}); handled {
+		return err
+	}
 	parsed, option, err := parseOptions(args, stderr)
 	if err != nil {
 		return err
@@ -75,8 +79,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		fmt.Fprintf(stdout, "agent v%s\n", cfg.Version)
 		return nil
 	}
+	option.Context = &cfg.Context{Directory: parsed.WorkDir}
 	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
 		return err
+	}
+	if option.Snapshot != nil {
+		for _, message := range option.Snapshot.Diagnostics {
+			fmt.Fprintln(stderr, message)
+		}
 	}
 	if parsed.JSON {
 		option.OutputFormat = "json"
@@ -136,6 +146,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) {
 	var parsed options
 	parser := flags.NewParser(&parsed, flags.Default&^flags.PrintErrors)
+	configuration.RegisterHelp(parser)
+	parser.SubcommandsOptional = true
 	parser.Name = "agent"
 	parser.Usage = "[OPTIONS]"
 	rest, err := parser.ParseArgs(args)
@@ -160,5 +172,7 @@ func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) 
 			Verbose: parsed.Verbose, Quiet: parsed.Quiet, NoColor: parsed.NoColor, Version: parsed.Version,
 		},
 	}
+	cfg.CaptureExplicitFlags(&option, parser)
+	option.MarkExplicit("transport")
 	return parsed, option, nil
 }

@@ -13,12 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
+	"github.com/chainreactors/cyber/pkg/cli/configuration"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
-	"github.com/chainreactors/cyber/pkg/runner"
+	"github.com/chainreactors/cyber/pkg/output"
+
 	goflags "github.com/jessevdk/go-flags"
 )
 
@@ -74,6 +75,18 @@ type parsedCLI struct {
 }
 
 func cyber() {
+	if handled, err := configuration.Run(context.Background(), os.Args[1:], configuration.Host{Name: "aiscan", Sections: defaultSections(), Checks: configChecks}); handled {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 1 {
+		var cli cliOptions
+		printHelp(newCLIParser(&cli, goflags.Default&^goflags.PrintErrors))
+		return
+	}
 	parsed, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
@@ -84,14 +97,6 @@ func cyber() {
 	explicitOption := option
 	if option.Version {
 		fmt.Printf("aiscan v%s\n", cfg.Version)
-		return
-	}
-	if option.InitConfig {
-		if err := os.WriteFile(cfg.DefaultConfigName, []byte(defaultConfig()), 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
-			os.Exit(1)
-		}
-		fmt.Fprintf(os.Stdout, "Config file generated: %s\n", cfg.DefaultConfigName)
 		return
 	}
 	if option.ViewFile != "" {
@@ -109,7 +114,7 @@ func cyber() {
 		os.Exit(1)
 	}
 
-	cfgPath, err := runner.ResolveRuntimeConfig(&option)
+	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
@@ -121,8 +126,10 @@ func cyber() {
 	if cfgPath != "" && option.Debug {
 		fmt.Fprintf(os.Stderr, "loaded config: %s\n", cfgPath)
 	}
-	if cfgPath != "" {
-		option.ConfigFile = cfgPath
+	if option.Snapshot != nil {
+		for _, message := range option.Snapshot.Diagnostics {
+			fmt.Fprintln(os.Stderr, message)
+		}
 	}
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: os.Stderr, Color: !option.NoColor})
 
@@ -131,7 +138,7 @@ func cyber() {
 		cancel context.CancelFunc
 	)
 	switch {
-	case parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent:
+	case parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent || option.Timeout == 0:
 		ctx, cancel = context.WithCancel(context.Background())
 	default:
 		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(option.Timeout)*time.Second)
@@ -149,7 +156,7 @@ func cyber() {
 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
-		err := runAgentTransport(ctx, newCyberProfileFromRequest, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
+		err := runAgentTransport(ctx, newAIScanProfile, &option, logger, os.Stdin, os.Stdout, sigHandler.SetStopFunc)
 		if err != nil {
 			logger.Errorf("agent failed: %s", err)
 			os.Exit(1)
@@ -160,7 +167,7 @@ func cyber() {
 			os.Exit(1)
 		}
 	case cfg.RunModeScanner:
-		if err := runner.RunDirectScannerMode(ctx, newCyberProfileFromRequest, &option, parsed.ScannerArgs, logger); err != nil {
+		if err := runDirectScannerMode(ctx, newAIScanProfile, &option, parsed.ScannerArgs, logger); err != nil {
 			logger.Errorf("scanner command failed: %s", err)
 			os.Exit(1)
 		}
@@ -196,13 +203,14 @@ func parseCLI(args []string) (parsedCLI, error) {
 
 	mode := selectedMode(parser)
 	option := buildOption(&cli, parser)
+	cfg.CaptureExplicitFlags(&option, parser)
 	action := cli.registry.Selected()
 	option.Extensions = cli.registry.Values()
 	finalizeOptions(&option, action)
-	if cli.Timeout > 0 {
+	if flag := parser.Group.FindOptionByLongName("timeout"); flag != nil && flag.IsSet() {
 		option.Timeout = cli.Timeout
 	}
-	if option.Timeout <= 0 {
+	if option.Timeout == 0 && !option.Explicit["timeout"] {
 		// Commands that own their options through the extension registry (the IOA
 		// queries, for one) never receive AgentOptions, so nothing else supplies
 		// this default. A zero deadline would cancel the context before the
@@ -257,11 +265,15 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	option := cfg.Option{MiscOptions: cli.MiscOptions}
 	finalizeOptions(&option, nil)
 	mergeManualScannerOptions(&option, manual)
+	cfg.CaptureExplicitFlags(&option, parser)
+	for flag := range manual.Explicit {
+		option.MarkExplicit(flag)
+	}
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
 	option.Timeout = cli.Timeout
-	if option.Timeout <= 0 {
+	if option.Timeout == 0 && !option.Explicit["timeout"] {
 		option.Timeout = 3600
 	}
 
@@ -310,6 +322,7 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	option.OutputFormat = cfg.ResolveString(manual.OutputFormat, option.OutputFormat)
 	option.Observe = cfg.ResolveString(manual.Observe, option.Observe)
 	option.JSON = option.JSON || manual.JSON
+	option.ActiveProfile = cfg.ResolveString(manual.ActiveProfile, option.ActiveProfile)
 	option.Provider = cfg.ResolveString(manual.Provider, option.Provider)
 	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
 	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
@@ -373,6 +386,7 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 
 func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	parser := goflags.NewParser(cli, options)
+	configuration.RegisterHelp(parser)
 	for _, name := range scannerext.Names() {
 		if _, err := parser.AddCommand(name, scannerext.Description(name), "", &struct{}{}); err != nil {
 			panic(err)
@@ -389,6 +403,9 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 aiscan - AI-assisted security scanner
 
 Commands:
+  init           Initialize user configuration (--project for this directory)
+  config         Inspect, validate and manage configuration
+  doctor         Check configuration and dependencies
   scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
   agent          Run the natural-language agent
   web            Start the web UI server (includes embedded agent server)
@@ -479,6 +496,7 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--prompt", "-p"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Prompt = v }},
 	{names: []string{"--task-file"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TaskFile = v }},
 	{names: []string{"--skill", "-s"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Skills = append(o.Skills, v) }},
+	{names: []string{"--profile"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ActiveProfile = v }},
 	{names: []string{"--provider"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Provider = v }},
 	{names: []string{"--base-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.BaseURL = v }},
 	{names: []string{"--api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.APIKey = v }},
@@ -611,6 +629,7 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 				break
 			}
 			matched = true
+			option.MarkExplicit(f.names[0])
 			if f.arity == 0 {
 				if hasValue {
 					f.apply(option, value)

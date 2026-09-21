@@ -2,7 +2,7 @@ package record
 
 import (
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/tools/record"
 	"strconv"
 	"strings"

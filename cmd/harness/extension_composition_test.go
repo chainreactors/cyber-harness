@@ -4,6 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/cli"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,13 +17,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/hooks"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/cli"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/pkg/web"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -35,8 +34,8 @@ type compositionFeature struct {
 	options      compositionOptions
 	path         string
 	hooks        *hooks.Registry
-	tools        *toolset.Registry
-	commands     *commands.Registry
+	tools        *coretool.ToolRegistry
+	commands     *coretool.CommandRegistry
 	file         *os.File
 	subscription *hooks.Subscription
 	observed     string
@@ -44,10 +43,10 @@ type compositionFeature struct {
 
 func (e *compositionFeature) Name() string        { return "fixture" }
 func (e *compositionFeature) Description() string { return "Fixture with explicit dependencies" }
-func (e *compositionFeature) Definition() *tool.Definition {
-	return tool.Def(e.Name(), e.Description(), struct{}{})
+func (e *compositionFeature) Definition() *coretool.Definition {
+	return coretool.Def(e.Name(), e.Description(), struct{}{})
 }
-func (e *compositionFeature) Execute(ctx context.Context, _ string) (*tool.Result, error) {
+func (e *compositionFeature) Execute(ctx context.Context, _ string) (*coretool.Result, error) {
 	text := fmt.Sprintf("%s:%d", e.options.Text, e.options.Count)
 	if _, err := e.file.WriteString(text); err != nil {
 		return nil, err
@@ -55,7 +54,7 @@ func (e *compositionFeature) Execute(ctx context.Context, _ string) (*tool.Resul
 	if _, err := compositionHook.Emit(ctx, e.hooks, text); err != nil {
 		return nil, err
 	}
-	return tool.TextResult(text), nil
+	return coretool.TextResult(text), nil
 }
 func (e *compositionFeature) Load(scope *extension.Scope) error {
 	if err := scope.Init().Err(); err != nil {
@@ -67,12 +66,12 @@ func (e *compositionFeature) Load(scope *extension.Scope) error {
 	}
 	e.file = file
 	e.subscription = compositionHook.On(e.hooks, "fixture", func(_ context.Context, text string) (struct{}, error) { e.observed = text; return struct{}{}, nil })
-	if err := extension.Add[tool.Tool](scope, e); err != nil {
+	if err := extension.Add[coretool.Tool](scope, e); err != nil {
 		return err
 	}
-	return extension.Add(scope, commands.Command{Name: "fixture", Run: func(ctx context.Context, _ *commands.Execution) (any, error) {
+	return extension.Add(scope, coretool.Command{Name: "fixture", Run: func(ctx context.Context, _ *coretool.Execution) (any, error) {
 		result, err := e.tools.ExecuteTool(ctx, "fixture", "{}")
-		return tool.ResultText(result), err
+		return coretool.ResultText(result), err
 	}})
 }
 func (e *compositionFeature) Close(ctx context.Context) error {
@@ -118,8 +117,8 @@ func TestExtensionCompositionWithoutCentralFeatureChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	hookRegistry := hooks.New()
-	tools := toolset.NewRegistry()
-	commandRegistry := commands.NewRegistry()
+	tools := coretool.NewToolRegistry()
+	commandRegistry := coretool.NewCommandRegistry()
 	feature := &compositionFeature{options: *options, path: filepath.Join(t.TempDir(), "owned.txt"), hooks: hookRegistry, tools: tools, commands: commandRegistry}
 	set, err := extension.New(extension.Provided[*hooks.Registry](hookRegistry), tools, commandRegistry, feature)
 	if err != nil {
@@ -131,7 +130,7 @@ func TestExtensionCompositionWithoutCentralFeatureChanges(t *testing.T) {
 		}
 	})
 	handler, err := web.NewHandler(compositionAuth{}, nil, web.Route{Pattern: "GET /fixture", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		result, err := commandRegistry.Execute(r.Context(), "fixture", &commands.Execution{})
+		result, err := commandRegistry.Execute(r.Context(), "fixture", &coretool.Execution{})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return

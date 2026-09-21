@@ -6,16 +6,15 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
 func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
-	commands := commands.NewRegistry()
-	tools := toolset.NewRegistry()
+	commands := coretool.NewCommandRegistry()
+	tools := coretool.NewToolRegistry()
 	instance := New(Config{Directory: t.TempDir(), Timeout: 5})
 	set, err := extension.New(
 		hosttest.Capabilities(),
@@ -44,21 +43,21 @@ func TestExtensionOwnsTerminalRegistrationAndShellBinding(t *testing.T) {
 }
 
 func TestExtensionHidesControlCommandsAndLetsAHostOwnTmux(t *testing.T) {
-	commandRegistry := commands.NewRegistry()
-	tools := toolset.NewRegistry()
+	commandRegistry := coretool.NewCommandRegistry()
+	tools := coretool.NewToolRegistry()
 	control := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Add(scope, commands.Command{
+		return extension.Add(scope, coretool.Command{
 			Name: "proxy",
-			Run:  func(context.Context, *commands.Execution) (any, error) { return "control", nil },
+			Run:  func(context.Context, *coretool.Execution) (any, error) { return "control", nil },
 		})
 	}}
 	// tmux is an ordinary contributed command now, so a host that wants its own
 	// session policy contributes one instead of handing this extension a
 	// callback. Nothing here has to know the name is special.
 	custom := extension.Func{LoadFunc: func(scope *extension.Scope) error {
-		return extension.Add(scope, commands.Command{
+		return extension.Add(scope, coretool.Command{
 			Name: "tmux",
-			Run:  func(context.Context, *commands.Execution) (any, error) { return "profile", nil },
+			Run:  func(context.Context, *coretool.Execution) (any, error) { return "profile", nil },
 		})
 	}}
 	instance := New(Config{
@@ -94,7 +93,7 @@ func TestExtensionHidesControlCommandsAndLetsAHostOwnTmux(t *testing.T) {
 	if strings.Contains(description, "proxy") || !strings.Contains(description, "tmux") {
 		t.Fatalf("bash description did not apply visibility policy: %q", description)
 	}
-	result, err := commandRegistry.Execute(t.Context(), "tmux", &commands.Execution{})
+	result, err := commandRegistry.Execute(t.Context(), "tmux", &coretool.Execution{})
 	if err != nil || result != "profile" {
 		t.Fatalf("profile tmux result = %#v, err=%v", result, err)
 	}
@@ -103,7 +102,7 @@ func TestExtensionHidesControlCommandsAndLetsAHostOwnTmux(t *testing.T) {
 	}
 }
 
-func hasTool(registry tool.Executor, name string) bool {
+func hasTool(registry coretool.Executor, name string) bool {
 	for _, definition := range registry.ToolDefinitions() {
 		if definition.Name == name {
 			return true

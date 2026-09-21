@@ -56,7 +56,7 @@ func TestRouterHandlesCanonicalAOPMessages(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	messages := make(chan *ptypb.ProtocolMessage, 8)
-	handler := NewRouter(manager).Handler()
+	handler := newRouter(manager).Handler()
 
 	dispatch(t, handler, ctx, &ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
 		StreamId: "stream-1", SessionId: "session-1", Cols: 120, Rows: 40,
@@ -92,7 +92,7 @@ func TestRouterListAndDetachUseAOPResponses(t *testing.T) {
 	manager := &recordingManager{info: runtimeproc.Info{ID: "session-1", State: runtimeproc.StateRunning}}
 	messages := make(chan *ptypb.ProtocolMessage, 4)
 	send := collect(messages)
-	handler := NewRouter(manager).Handler()
+	handler := newRouter(manager).Handler()
 
 	dispatch(t, handler, context.Background(), ptypb.NewList("stream-1", "node-1"), send)
 	sessions := readMessage(t, messages).GetSessions()
@@ -120,7 +120,7 @@ func TestConnectionHandlersAndMonitorsAreIndependent(t *testing.T) {
 	defer dropConnection()
 	surviving := make(chan *ptypb.ProtocolMessage, 4)
 	dropped := make(chan *ptypb.ProtocolMessage, 4)
-	first, second := NewRouter(manager).Handler(), NewRouter(manager).Handler()
+	first, second := newRouter(manager).Handler(), newRouter(manager).Handler()
 	dispatch(t, first, dropping, attached(), collect(dropped))
 	dispatch(t, second, context.Background(), attached(), collect(surviving))
 	if len(manager.monitors) != 2 {

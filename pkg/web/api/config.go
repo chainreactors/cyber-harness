@@ -3,11 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"strings"
 
 	agentprovider "github.com/chainreactors/cyber/agent/provider"
-	configpkg "github.com/chainreactors/cyber/core/config"
 	types "github.com/chainreactors/cyber/core/types"
+	configpkg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API
@@ -148,7 +149,14 @@ func ValidateLLMConfig(config *types.LLMConfig) error {
 	if config == nil {
 		return nil
 	}
+	seen := map[string]bool{}
 	for index, profile := range config.Providers {
+		if profile != nil && profile.Id != "" {
+			if seen[profile.Id] {
+				return fmt.Errorf("duplicate LLM profile %q", profile.Id)
+			}
+			seen[profile.Id] = true
+		}
 		profile = configpkg.NormalizeLLMProvider(profile)
 		if profile == nil {
 			return fmt.Errorf("LLM profile #%d is empty", index+1)
@@ -175,6 +183,9 @@ func ValidateLLMConfig(config *types.LLMConfig) error {
 		if profile.Timeout < 0 {
 			return fmt.Errorf("LLM timeout must be zero or positive")
 		}
+	}
+	if config.ActiveProfile != "" && !seen[config.ActiveProfile] {
+		return fmt.Errorf("unknown LLM profile %q", config.ActiveProfile)
 	}
 	return nil
 }
@@ -209,6 +220,10 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
 	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
-	view.Agent = &types.AgentConfig{Tools: append([]string(nil), config.GetAgent().GetTools()...), Timeout: config.GetAgent().GetTimeout()}
+	view.Agent = proto.CloneOf(config.GetAgent())
+	view.Traffic = proto.CloneOf(config.GetTraffic())
+	if config.Cyberhub != nil {
+		view.Cyberhub.Mitm = config.Cyberhub.Mitm
+	}
 	return view
 }

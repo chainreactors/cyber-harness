@@ -9,9 +9,8 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // agentEndpoint is the sole event ingress/egress point for a node connection.
@@ -32,9 +31,9 @@ type connectionConfig struct {
 	// JSONFrames switches the wire codec from binary protobuf to standard
 	// ProtoJSON text frames (used by hubs that speak JSON, e.g. Cairn).
 	JSONFrames bool
-	Executor   tool.Executor
+	Executor   coretool.Executor
 	// Registry supplies the Bash pseudo-command projection to Cyber agent nodes.
-	Registry commands.Executor
+	Registry coretool.CommandExecutor
 	// Agent owns connection-side events.
 	Agent         agentEndpoint
 	Progress      *eventbus.Bus[*toolpb.Progress]

@@ -20,9 +20,9 @@ import (
 	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/pkg/output"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	"github.com/chainreactors/fingers/common"
@@ -61,11 +61,14 @@ func TestScanRunsWithOnlySprayStage(t *testing.T) {
 	sprayEng, _ := spray.NewEngine(nil)
 	cmd := New(&engine.Set{Spray: sprayEng})
 	var stdout bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"}, Stdout: &stdout, Stderr: &stdout})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"-i", "http://127.0.0.1:1", "--mode", "quick", "--timeout", "1"}, Stdout: &stdout, Stderr: &stdout})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	out := stdout.String()
+	if out != output.StripANSI(out) {
+		t.Fatalf("command output contains ANSI escapes: %q", out)
+	}
 	if !strings.Contains(output.StripANSI(out), "[summary] completed") {
 		t.Fatalf("output missing summary: %q", out)
 	}
@@ -214,7 +217,7 @@ func TestScanUsageContainsOnlyCanonicalFlags(t *testing.T) {
 func TestScanRejectsRemovedAIFlag(t *testing.T) {
 	cmd := New(&engine.Set{})
 	var stdout bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{
 		"-i", "http://127.0.0.1",
 		"--ai",
 		"--no-color",
@@ -865,9 +868,9 @@ func TestFocusFingerprintIsDerivedAsHighPriority(t *testing.T) {
 		events = append(events, event)
 	})
 
-	var got *output.Loot
+	var got *parsers.Loot
 	for _, event := range events {
-		if event.Kind == eventLoot && event.Loot != nil && event.Loot.Kind == output.LootFingerprint {
+		if event.Kind == eventLoot && event.Loot != nil && event.Loot.Kind == parsers.LootFingerprint {
 			got = event.Loot
 			break
 		}
@@ -1689,7 +1692,7 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
 		CallID: "scan-call-1", SessionID: "scan-session", TurnID: "scan-turn", Emitter: "scan",
 	})
-	cmd.emitStructuredData(ctx, &output.ScanResult{
+	cmd.emitStructuredData(ctx, &scanResult{
 		GOGO: []*parsers.GOGOResult{{Ip: "127.0.0.1", Port: "8080", Protocol: "http"}},
 		Spray: []*parsers.SprayResult{{
 			UrlString: "http://127.0.0.1:8080/", Status: 200,
@@ -1729,13 +1732,13 @@ func TestEmitStructuredDataPublishesNativeArtifactAndLoot(t *testing.T) {
 		Target: "http://127.0.0.1:5000", TemplateID: "test-rce", Severity: "critical", Matched: true,
 		Request: "GET / HTTP/1.1", Response: "HTTP/1.1 200 OK",
 	}
-	cmd.emitStructuredData(ctx, &output.ScanResult{
-		Artifacts: []output.ArtifactResult{{
+	cmd.emitStructuredData(ctx, &scanResult{
+		Artifacts: []artifactResult{{
 			ResultID: "result-1", Tool: "neutron", Kind: toolpb.ArtifactKindVuln,
 			Target: record.Target, Data: record,
 		}},
-		Loots: []output.Loot{{
-			Kind: output.LootVuln, Target: record.Target, Priority: "critical",
+		Loots: []parsers.Loot{{
+			Kind: parsers.LootVuln, Target: record.Target, Priority: "critical",
 			Tags: []string{"rce"}, Data: map[string]any{
 				"result_id": "result-1", "artifact_tool": "neutron", "verification_status": "confirmed",
 			},

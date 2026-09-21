@@ -1,9 +1,10 @@
 package main
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/types"
-	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
 	"reflect"
@@ -11,11 +12,53 @@ import (
 	"testing"
 )
 
+func TestRuntimeSettingsSurviveViewAndFileRoundTrip(t *testing.T) {
+	source := []byte(`agent:
+  timeout: 0
+  heartbeat: 7
+  eval_criteria: finish
+  eval_model: judge
+  eval_rounds: "3"
+  capture_provider_frames: true
+cyberhub:
+  mitm: false
+traffic:
+  body_storage: disk
+  body_max_bytes: 123
+  body_retention_bytes: 456
+`)
+	value, err := parseConfig(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := managementapi.ConfigView(value, "", true)
+	if !proto.Equal(view.Agent, value.Agent) || !proto.Equal(view.Traffic, value.Traffic) || view.Cyberhub.Mitm == nil || *view.Cyberhub.Mitm {
+		t.Fatalf("settings missing in view: %v", view)
+	}
+	// The settings page submits these same values from its view.
+	updated := &types.DistributeConfig{Agent: view.Agent, Traffic: view.Traffic, Cyberhub: &types.CyberhubConfig{Mitm: view.Cyberhub.Mitm}}
+	data, err := marshalConfig(updated, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := parseConfig(data)
+	if err != nil || !proto.Equal(value, roundTrip) {
+		t.Fatalf("round trip=%v, error=%v\n%s", roundTrip, err, data)
+	}
+	var option cfg.Option
+	if err := cfg.LoadConfigBytes(data, &option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Timeout != 0 || option.Heartbeat != 7 || option.EvalCriteria != "finish" || option.EvalModel != "judge" || option.EvalRounds != "3" || !option.CaptureProviderFrames || option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" || option.BodyMaxBytes != 123 || option.BodyRetentionBytes != 456 {
+		t.Fatal("saved settings were not restored by the runtime loader")
+	}
+}
+
 // The generated cyber.yaml is written to the flags schema, which is wider than
 // the proto the settings page speaks. Reading it must not fail and saving it
 // must not drop the sections the proto does not model.
 func TestConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
-	source := []byte(defaultConfig())
+	source := []byte(defaultConfig() + "\nmisc:\n  quiet: true\noutput:\n  preset: default\nllm:\n  model: fixture\n")
 	value, err := parseConfig(source)
 	if err != nil {
 		t.Fatalf("generated defaults rejected: %v", err)
@@ -35,7 +78,7 @@ func TestConfigKeepsSettingsTheSharedProtoDoesNotModel(t *testing.T) {
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("settings lost on save:\nbefore %#v\nafter  %#v", before, after)
 	}
-	for _, key := range []string{"misc", "output", "traffic", "llm"} {
+	for _, key := range []string{"misc", "output", "llm"} {
 		if after[key] == nil {
 			t.Fatalf("section %q missing from the saved file", key)
 		}
@@ -65,7 +108,7 @@ func TestGeneratedDefaultsKeepSameOriginDerivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	option := &cfg.Option{AgentOptions: cfg.AgentOptions{ServerURL: "http://web.test"}, Extensions: values}
-	value, err := client.ReadOptions(option)
+	value, err := ioaclient.ReadOptions(option)
 	if err != nil || value.URL != "http://web.test/ioa" {
 		t.Fatalf("generated defaults disabled embedded IOA: %+v, %v", value, err)
 	}
@@ -77,7 +120,7 @@ func TestConfigUsesCanonicalExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fields := cfg.ValuesFromProto(value.Extensions)[client.ConfigKey]
+	fields := cfg.ValuesFromProto(value.Extensions)[ioaclient.ConfigKey]
 	if fields["url"] != "" || fields["space"] != "" {
 		t.Fatalf("zero presence lost: %#v", fields)
 	}
@@ -113,18 +156,18 @@ func TestConfigMasksAndRestoresURLCredentials(t *testing.T) {
 			t.Fatalf("view leaked %q", secret)
 		}
 	}
-	ioa := view.GetExtensions()[client.ConfigKey]
+	ioa := view.GetExtensions()[ioaclient.ConfigKey]
 	if ioa == nil || len(ioa.GetConfiguredSecrets()) != 1 || ioa.GetConfiguredSecrets()[0] != "token" {
 		t.Fatal("missing extension secret indicator")
 	}
-	incoming := cfg.Values{client.ConfigKey: {"url": ioa.GetValues().GetFields()["url"].GetStringValue()}}
+	incoming := cfg.Values{ioaclient.ConfigKey: {"url": ioa.GetValues().GetFields()["url"].GetStringValue()}}
 	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
-	if incoming[client.ConfigKey]["url"] != "https://credential@example.test/ioa" {
+	if incoming[ioaclient.ConfigKey]["url"] != "https://credential@example.test/ioa" {
 		t.Fatal("masked URL erased credential")
 	}
-	incoming[client.ConfigKey]["url"] = "https://different.test/ioa"
+	incoming[ioaclient.ConfigKey]["url"] = "https://different.test/ioa"
 	preserveURLCredentials(incoming, cfg.ValuesFromProto(value.Extensions))
-	if strings.Contains(incoming[client.ConfigKey]["url"].(string), "credential") {
+	if strings.Contains(incoming[ioaclient.ConfigKey]["url"].(string), "credential") {
 		t.Fatal("credential copied to different host")
 	}
 }
@@ -163,4 +206,16 @@ func TestConfigSaveStaysReadableByTheFlagsLoader(t *testing.T) {
 	if provider.APIKey != "sk-test" || provider.BaseURL != "https://api.example.test/v1" || provider.Model != "gpt-4o" {
 		t.Fatalf("provider lost: %+v\n%s", provider, data)
 	}
+}
+
+// A full reference fixture for extension round-trip tests; init emits only explicit values.
+func defaultConfig() string {
+	defaults := defaultSections().Defaults()
+	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
+	if defaults[ioaclient.ConfigKey]["url"] == "" {
+		delete(defaults[ioaclient.ConfigKey], "url")
+	}
+	document := map[string]any{"extensions": defaults}
+	b, _ := yaml.Marshal(document)
+	return cfg.InitDefaultConfig() + "\n" + string(b)
 }

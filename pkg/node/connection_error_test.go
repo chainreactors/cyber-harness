@@ -15,7 +15,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/gorilla/websocket"
 )
 
@@ -96,6 +96,7 @@ type warningChannelLogger struct {
 	warnings chan string
 }
 
+func (*warningChannelLogger) SetOutput(io.Writer)       {}
 func (*warningChannelLogger) Debugf(string, ...any)     {}
 func (*warningChannelLogger) Infof(string, ...any)      {}
 func (*warningChannelLogger) Errorf(string, ...any)     {}
@@ -121,7 +122,7 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 	go func() {
 		errCh <- connectGenerated(ctx, connectionConfig{
 			ServerURL: server.URL,
-			Registry:  commands.NewRegistry(),
+			Registry:  coretool.NewCommandRegistry(),
 			Logger:    logger,
 		})
 	}()
@@ -164,7 +165,7 @@ func TestDialProtoWebSocketPreservesHandshakeStatus(t *testing.T) {
 func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		new(rejectingEnvelopeStream),
 	)
@@ -179,7 +180,7 @@ func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: commands.NewRegistry(), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint()},
 		telemetry.NopLogger(),
 		&rejectingEnvelopeStream{replyTo: "another-request"},
 	)

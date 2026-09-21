@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/output"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 )
@@ -41,6 +41,11 @@ func scanStatusToDB(value types.ScanStatus) string {
 }
 
 func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*types.Scan, error) {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
+		return nil, fmt.Errorf("web service is closing")
+	}
+	defer s.work.Done()
 	target, err := ValidateTarget(target)
 	if err != nil {
 		return nil, err
@@ -72,11 +77,13 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		return nil, fmt.Errorf("store create: %w", err)
 	}
 
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(workCtx)
 	s.mu.Lock()
 	s.cancels[scan.Id] = cancel
 	s.mu.Unlock()
+	s.work.Add(1)
 	go func() { //nolint:gosec // G118: background scan intentionally outlives the request
+		defer s.work.Done()
 		defer cancel()
 		s.runScan(runCtx, scan.Id)
 	}()

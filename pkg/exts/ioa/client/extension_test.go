@@ -7,14 +7,20 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/core/hooks"
+	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 )
 
 func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
-	adapter := New(service.Config{}, Dependencies{})
+	adapter := New(service.Config{})
+	hosttest.Load(t, t.Context(), extension.Provided(telemetry.NopLogger()), adapter)
 	svc := adapter.Service()
+	if svc == nil {
+		t.Fatal("missing installed service")
+	}
 	if _, ok := any(svc).(interface{ Close(context.Context) error }); ok {
 		t.Fatal("IOA service exposes Close")
 	}
@@ -26,10 +32,10 @@ func TestServiceHandleDoesNotExposeLifecycle(t *testing.T) {
 func TestExtensionPublishesCommandsBeforeRegistryActivation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
-	registry := commands.NewRegistry()
-	ioa := New(service.Config{URL: server.URL, RegisterCommands: true}, Dependencies{})
+	registry := coretool.NewCommandRegistry()
+	ioa := New(service.Config{URL: server.URL, RegisterCommands: true})
 	set, err := extension.New(
-		hosttest.Capabilities(),
+		extension.Provided(telemetry.NopLogger()), extension.Provided(hooks.New()),
 		registry,
 		ioa,
 	)

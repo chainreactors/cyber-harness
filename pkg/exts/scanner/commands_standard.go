@@ -3,12 +3,12 @@
 package scanner
 
 import (
+	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func manifestScannerCommands(*app.State, *engine.Set, telemetry.Logger, string) ([]commands.Command, error) {
-	return nil, nil
+func manifestScannerCommands(aop.EventPublisher, *engine.Set, telemetry.Logger, string) []coretool.Command {
+	return nil
 }

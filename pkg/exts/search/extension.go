@@ -9,15 +9,15 @@ import (
 
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	app "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+
 	searchtools "github.com/chainreactors/cyber/tools/search"
 )
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
-	config Config
+	config        Config
+	executionOnly bool
 }
 
 type Config struct {
@@ -25,6 +25,9 @@ type Config struct {
 }
 
 func New(config Config) *Extension { return &Extension{config: config} }
+
+// NewExecution uses the configured non-model search backend only.
+func NewExecution(config Config) *Extension { return &Extension{config: config, executionOnly: true} }
 
 func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {
@@ -34,9 +37,12 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
-	application, err := extension.Use[*app.State](scope)
-	if err != nil {
-		return err
+	var application *provider.State
+	if !e.executionOnly {
+		application, err = extension.Use[*provider.State](scope)
+		if err != nil {
+			return err
+		}
 	}
 	proxy, proxyCA := endpoint.ProxyURL(), endpoint.CAPath()
 	tavily := searchtools.NewTavilySearch(e.config.TavilyKeys)
@@ -44,18 +50,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		tavily.SetProxy(proxy)
 	}
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
-	fetchCommand := commands.Command{
+	fetchCommand := coretool.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/fetch.md",
 		Run:             fetch.Run,
 	}
 
 	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
-	entries := []commands.Command{fetchCommand}
+	entries := []coretool.Command{fetchCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
 	}
-	if err := extension.Add[tool.Tool](scope, searchTool); err != nil {
+	if err := extension.Add[coretool.Tool](scope, searchTool); err != nil {
 		return err
 	}
 	if err := extension.Add(scope, entries...); err != nil {
@@ -67,8 +73,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 // providerWebSearch adapts the configured model's own web search, when it has
 // one, to the search tool's signature. It lives here because it is search
 // behavior, not composition.
-func providerWebSearch(application *app.State) func(context.Context, string, int) (string, error) {
-	model, _ := application.ProviderState()
+func providerWebSearch(application *provider.State) func(context.Context, string, int) (string, error) {
+	if application == nil {
+		return nil
+	}
+	model, _ := application.Current()
 	searcher, ok := model.(provider.WebSearchProvider)
 	if !ok {
 		return nil

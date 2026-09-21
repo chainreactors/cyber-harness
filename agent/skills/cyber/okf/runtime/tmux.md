@@ -1,7 +1,7 @@
 ---
 type: Tool Playbook
 title: tmux
-description: PTY session manager built into cyber. Bash commands stay foreground by default and move to background only when the agent sets wait.
+description: PTY session manager built into cyber. Commands can release their foreground wait on a wait deadline or an interrupting Inbox message.
 tags: [runtime, session]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
@@ -9,7 +9,7 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 
 # tmux - Session Manager
 
-tmux is the PTY session manager built into cyber. All `bash` commands run inside tmux sessions. Commands stay in the foreground by default. The agent explicitly sets `wait: N` when a still-running command should move to background after N seconds.
+tmux is the PTY session manager built into cyber. All `bash` commands run inside tmux sessions. Commands stay in the foreground by default. The agent sets `wait: N` to release that wait after N seconds; an interrupting Inbox message can also release it while the same command keeps running.
 
 ## Commands
 
@@ -56,7 +56,7 @@ When a `bash` call sets `wait: N` and the command is still running after N secon
 2. A **monitor goroutine** starts, pushing incremental output to the agent inbox every 10 seconds as `<session_output>` messages.
 3. When the session completes, a `<session_completion>` message is pushed to inbox with exit code and last 20 lines.
 
-With `wait: 0` or an omitted `wait`, the command remains foreground until completion. `timeout` is independent: omitted uses 600 seconds, a positive value cancels after that total runtime, and `timeout: 0` means unlimited.
+With `wait: 0` or an omitted `wait`, the command remains foreground until completion unless an interrupting Inbox message arrives. That message releases the foreground wait: the same tmux session continues in the background and reports completion through Inbox. `timeout` is independent: omitted uses 600 seconds, a positive value cancels after that total runtime, and `timeout: 0` means unlimited.
 
 This means for long-running commands:
 - **You do not need to poll** with `tmux capture-pane`. Output arrives automatically via inbox.

@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/toolset"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 func TestExtensionOwnsRecordTool(t *testing.T) {
-	registry := toolset.NewRegistry()
+	registry := coretool.NewToolRegistry()
 	instance, err := New(t.TempDir(), filepath.Join(t.TempDir(), "record"), 3)
 	if err != nil {
 		t.Fatal(err)

@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/chainreactors/cyber/core/extension"
 
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
@@ -133,19 +136,13 @@ func (s *nodeState) convergeOnToolResult(taskID string, ev *aop.Event) {
 	s.finishTask(taskID, res)
 }
 
-// convergeOnTurnEnd closes a chat task when the ROOT agent session ends.
-// A canceled run still carries the ctx error ("context canceled") — only
-// non-canceled stops surface it as a task error.
-func (s *nodeState) convergeOnTurnEnd(taskID string, ev *aop.Event) {
-	if taskID == "" {
-		return
+// convergeOnTurnEnd releases the waiter after the Runtime terminal was forwarded.
+// Its error is already in that event; returning it again would synthesize a
+// second Web terminal for the same turn.
+func (s *nodeState) convergeOnTurnEnd(taskID string, _ *aop.Event) {
+	if taskID != "" {
+		s.finishTask(taskID, taskResult{})
 	}
-	d := ev.GetTurnEnded()
-	res := taskResult{}
-	if d.StopReason != "canceled" && d.Error != nil {
-		res.Err = d.Error.Message
-	}
-	s.finishTask(taskID, res)
 }
 
 func (s *nodeState) closeAllTasks() {
@@ -230,6 +227,9 @@ type SessionLookup interface {
 // registered over the application WebSocket — including the hub's own embedded
 // agent, which connects over loopback like any other node.
 type AgentPool struct {
+	closing        bool
+	streams        map[*nodeStream]struct{}
+	streamDone     chan struct{}
 	mu             sync.RWMutex
 	agents         map[string]*remoteAgent
 	hub            *Hub
@@ -646,4 +646,65 @@ func aopToolResultText(content []*aop.Content) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// nodeStream includes connections still waiting for their first hello.
+type nodeStream struct {
+	cancel context.CancelFunc
+	stream aop.EnvelopeStream
+}
+
+func (p *AgentPool) admitStream(parent context.Context, stream aop.EnvelopeStream) (context.Context, func(), error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closing {
+		return nil, nil, fmt.Errorf("agent pool is closing")
+	}
+	ctx, cancel := context.WithCancel(parent)
+	entry := &nodeStream{cancel: cancel, stream: stream}
+	if p.streams == nil {
+		p.streams = make(map[*nodeStream]struct{})
+	}
+	p.streams[entry] = struct{}{}
+	return ctx, func() {
+		cancel()
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		delete(p.streams, entry)
+		if p.closing && len(p.streams) == 0 && p.streamDone != nil {
+			close(p.streamDone)
+			p.streamDone = nil
+		}
+	}, nil
+}
+func (p *AgentPool) Close(ctx context.Context) error {
+	p.mu.Lock()
+	p.closing = true
+	var streams []*nodeStream
+	for stream := range p.streams {
+		streams = append(streams, stream)
+	}
+	if len(streams) > 0 && p.streamDone == nil {
+		p.streamDone = make(chan struct{})
+	}
+	done := p.streamDone
+	p.mu.Unlock()
+	for _, stream := range streams {
+		stream.cancel()
+		switch closer := stream.stream.(type) {
+		case interface{ Close() error }:
+			_ = closer.Close()
+		case interface{ Close() }:
+			closer.Close()
+		}
+	}
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+	}
 }

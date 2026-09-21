@@ -6,20 +6,20 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 type testCommandBatch struct {
-	commands []commands.Command
+	commands []coretool.Command
 }
 
-func commandBatch(cmds ...commands.Command) testCommandBatch {
+func commandBatch(cmds ...coretool.Command) testCommandBatch {
 	return testCommandBatch{commands: cmds}
 }
 
-func loadTestRegistry(t *testing.T, batches ...testCommandBatch) (*commands.Registry, *extension.Set) {
+func loadTestRegistry(t *testing.T, batches ...testCommandBatch) (*coretool.CommandRegistry, *extension.Set) {
 	t.Helper()
-	registry := commands.NewRegistry()
+	registry := coretool.NewCommandRegistry()
 	entries := []extension.Extension{extension.Provided[*hooks.Registry](hooks.New()), registry}
 	for _, batch := range batches {
 		batch := batch

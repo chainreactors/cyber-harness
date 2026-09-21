@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils"
@@ -26,8 +25,8 @@ type collector struct {
 	stats        *statsCollector
 	gogoResults  []*parsers.GOGOResult
 	sprayResults []sprayObservation
-	artifacts    []output.ArtifactResult
-	loots        []output.Loot
+	artifacts    []artifactResult
+	loots        []parsers.Loot
 	errors       []string
 	trace        []string
 	seenWeb      map[string]struct{}
@@ -133,7 +132,7 @@ func (c *collector) recordLootEvent(event event) {
 		c.artifacts = append(c.artifacts, *event.Artifact)
 	}
 	switch loot.Kind {
-	case output.LootFingerprint:
+	case parsers.LootFingerprint:
 		fingers := loot.Tags
 		for _, name := range parsers.NormalizeNames(fingers) {
 			key := strings.ToLower(loot.Target) + "|" + strings.ToLower(name)

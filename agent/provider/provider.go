@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/chainreactors/cyber/core/config"
 )
 
 type Provider interface {
@@ -44,25 +42,6 @@ type ProviderConfig struct {
 	ContextWindow int    `yaml:"context_window,omitempty" config:"context_window"`
 }
 
-const (
-	ProviderOpenAI    = config.ProviderOpenAI
-	ProviderAnthropic = config.ProviderAnthropic
-)
-
-func NormalizeProvider(name string) string {
-	return config.NormalizeProvider(name)
-}
-
-// protocolOf maps a provider name — a wire protocol or a known
-// OpenAI-compatible vendor — to the protocol spoken on the wire.
-func protocolOf(name string) string {
-	return config.ProtocolOf(name)
-}
-
-func IsSupportedProvider(name string) bool {
-	return config.IsSupportedProvider(name)
-}
-
 func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	resolved := *cfg
 	if resolved.MaxTokens < 0 {
@@ -76,12 +55,12 @@ func Resolve(cfg *ProviderConfig) (*ProviderConfig, error) {
 	if providerName == "" {
 		providerName = InferFromBaseURL(resolved.BaseURL)
 	}
-	protocol := protocolOf(providerName)
+	protocol := ProtocolOf(providerName)
 	if protocol == "" {
 		return nil, fmt.Errorf("unsupported provider %q: use openai/anthropic, a known OpenAI-compatible vendor (deepseek, moonshot, qwen, glm, groq, xai, mistral, openrouter, together, siliconflow, ollama), or provider=openai with a custom base_url", providerName)
 	}
 	if strings.TrimSpace(resolved.BaseURL) == "" {
-		resolved.BaseURL = config.ProviderBaseURL(providerName)
+		resolved.BaseURL = ProviderBaseURL(providerName)
 	}
 	resolved.Provider = providerName
 
@@ -122,7 +101,7 @@ func inferImageSupport(provider, model string) bool {
 		return false
 	}
 
-	switch protocolOf(p) {
+	switch ProtocolOf(p) {
 	case "anthropic":
 		return true
 	}
@@ -130,20 +109,8 @@ func inferImageSupport(provider, model string) bool {
 	return false
 }
 
-// InferFromBaseURL guesses the wire protocol from the base URL when --provider
-// is not set. The official Anthropic endpoint is unambiguous, so it is detected
-// directly. Everything else — including custom third-party gateways — speaks the
-// OpenAI protocol in the common case, so "openai" stays the default. The
-// protocol genuinely cannot be sniffed for an arbitrary gateway (a gateway may
-// serve, e.g., glm models over the Anthropic protocol), so a wrong guess is
-// caught later as an actionable 404 from the provider (see hint404), not a
-// silent failure.
-func InferFromBaseURL(baseURL string) string {
-	return config.InferProviderFromBaseURL(baseURL)
-}
-
 func NewProviderFromResolved(cfg *ProviderConfig) (Provider, error) {
-	switch protocolOf(cfg.Provider) {
+	switch ProtocolOf(cfg.Provider) {
 	case ProviderAnthropic:
 		return NewAnthropicProvider(cfg)
 	case ProviderOpenAI:

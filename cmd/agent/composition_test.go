@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	"testing"
 )
 
 // The minimal build resolves the same capabilities by type that the full one

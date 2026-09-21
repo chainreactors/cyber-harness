@@ -1,7 +1,7 @@
 //go:build full && integration
 
 //	Run with: CYBER_INTEGRATION=1 FOFA_KEY=... \
-//	  go test -tags 'full integration' ./tools/... -run TestIntegration -v
+//	  go test -tags 'full integration' ./pkg/exts/scanner -run TestIntegration -v
 package scanner
 
 import (
@@ -14,19 +14,15 @@ import (
 	"time"
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/tools/katana"
-	passivecmd "github.com/chainreactors/cyber/tools/passive"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 )
 
-func passiveExecString(t *testing.T, cmd *passivecmd.Command, ctx context.Context, args []string) string {
+func passiveExecString(t *testing.T, registry *coretool.CommandRegistry, ctx context.Context, args []string) string {
 	t.Helper()
 	var output bytes.Buffer
-	if _, err := cmd.Run(ctx, &commands.Execution{Args: args, Stdout: &output, Stderr: &output}); err != nil {
-		t.Fatalf("Execute(%v) error = %v", args, err)
+	if _, err := registry.Run(ctx, append([]string{"passive"}, args...), &coretool.Execution{Stdout: &output, Stderr: &output}); err != nil {
+		t.Fatal(err)
 	}
 	return output.String()
 }
@@ -39,12 +35,7 @@ func TestIntegrationPassiveFofa(t *testing.T) {
 	if key == "" {
 		t.Skip("FOFA_KEY required")
 	}
-	set := &engine.Set{}
-	set.SetupUncover(engine.ReconOptions{FofaKey: key, Limit: 5}, telemetry.NopLogger())
-	if set.Uncover == nil {
-		t.Fatal("expected Uncover engine to be initialized")
-	}
-	cmd := passivecmd.New(set.Uncover)
+	cmd := installScanner(t, t.TempDir(), Config{Recon: engine.ReconOptions{FofaKey: key, Limit: 5}}).commands
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	out := passiveExecString(t, cmd, ctx, []string{"-s", "fofa", `domain="anthropic.com"`})
@@ -70,16 +61,7 @@ func TestIntegrationPassiveHunter(t *testing.T) {
 	if apikey == "" {
 		t.Skip("HUNTER_API_KEY required")
 	}
-	set := &engine.Set{}
-	set.SetupUncover(engine.ReconOptions{
-		HunterAPIKey: apikey,
-		IngressProxy: os.Getenv("RECON_PROXY"),
-		Limit:        3,
-	}, telemetry.NopLogger())
-	if set.Uncover == nil {
-		t.Fatal("expected Uncover engine to be initialized")
-	}
-	cmd := passivecmd.New(set.Uncover)
+	cmd := installScanner(t, t.TempDir(), Config{Recon: engine.ReconOptions{HunterAPIKey: apikey, IngressProxy: os.Getenv("RECON_PROXY"), Limit: 3}}).commands
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	out := passiveExecString(t, cmd, ctx, []string{"-s", "hunter", `domain.suffix="anthropic.com"`})
@@ -103,9 +85,9 @@ func TestFullScannerPublicIntegration(t *testing.T) {
 		t.Skip("set CYBER_INTEGRATION=1 to run public network regression tests")
 	}
 
-	bus := coreevents.New()
-	recorder := newFunctionalRecorder(bus)
-	registry := registerTestScanners(t, &engine.Set{}, t.TempDir(), bus, telemetry.NopLogger(), katana.NewCommand(telemetry.NopLogger(), "", bus))
+	installed := installScanner(t, t.TempDir(), Config{})
+	recorder := newFunctionalRecorder(installed.events)
+	registry := installed.commands
 
 	runFunctionalCases(t, registry, recorder, []functionalCase{{
 		Name: "katana/redhaze-depth-one", Tool: "katana",

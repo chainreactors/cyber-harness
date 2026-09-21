@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/chainreactors/cyber/core/output"
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/utils/parsers"
 )
@@ -27,8 +26,8 @@ type event struct {
 	Source   string
 	Raw      string
 	Target   target
-	Loot     *output.Loot
-	Artifact *output.ArtifactResult
+	Loot     *parsers.Loot
+	Artifact *artifactResult
 	Error    errorEvent
 	Stats    sdktypes.Stats
 }
@@ -40,11 +39,11 @@ func targetEvent(source, raw string, target target) event {
 	return event{Kind: eventTarget, Source: source, Raw: raw, Target: target}
 }
 
-func lootEvent(source string, loot output.Loot) event {
+func lootEvent(source string, loot parsers.Loot) event {
 	return event{Kind: eventLoot, Source: source, Loot: &loot}
 }
 
-func bindLoot(loot output.Loot, resultID, tool string) output.Loot {
+func bindLoot(loot parsers.Loot, resultID, tool string) parsers.Loot {
 	if loot.Data == nil {
 		loot.Data = make(map[string]any)
 	}
@@ -53,7 +52,7 @@ func bindLoot(loot output.Loot, resultID, tool string) output.Loot {
 	return loot
 }
 
-func artifactLootEvent(source string, loot output.Loot, artifact output.ArtifactResult) event {
+func artifactLootEvent(source string, loot parsers.Loot, artifact artifactResult) event {
 	return event{Kind: eventLoot, Source: source, Loot: &loot, Artifact: &artifact}
 }
 
@@ -180,13 +179,13 @@ func reportableSprayResultForCapability(result *parsers.SprayResult, capability 
 
 // --- Loot constructors ---
 
-func fingerprintLoot(target string, fingers []string, focus bool) output.Loot {
+func fingerprintLoot(target string, fingers []string, focus bool) parsers.Loot {
 	pri := string(priorityLow)
 	if focus {
 		pri = string(priorityHigh)
 	}
-	return output.Loot{
-		Kind:        output.LootFingerprint,
+	return parsers.Loot{
+		Kind:        parsers.LootFingerprint,
 		Target:      target,
 		Priority:    pri,
 		Description: strings.Join(fingers, ", "),
@@ -199,13 +198,13 @@ func fingerprintLoot(target string, fingers []string, focus bool) output.Loot {
 	}
 }
 
-func weakpassLoot(result *parsers.ZombieResult) output.Loot {
+func weakpassLoot(result *parsers.ZombieResult) parsers.Loot {
 	desc := result.Service
 	if result.Username != "" || result.Password != "" {
 		desc += " " + result.Username + "/" + result.Password
 	}
-	return output.Loot{
-		Kind:        output.LootWeakpass,
+	return parsers.Loot{
+		Kind:        parsers.LootWeakpass,
 		Target:      result.Address(),
 		Priority:    string(priorityHigh),
 		Description: desc,
@@ -219,7 +218,7 @@ func weakpassLoot(result *parsers.ZombieResult) output.Loot {
 	}
 }
 
-func vulnLoot(result *sdktypes.TemplateResult) output.Loot {
+func vulnLoot(result *sdktypes.TemplateResult) parsers.Loot {
 	pri := string(priorityHigh)
 	switch result.Severity {
 	case "critical":
@@ -235,8 +234,8 @@ func vulnLoot(result *sdktypes.TemplateResult) output.Loot {
 	if result.TemplateName != "" {
 		desc += " — " + result.TemplateName
 	}
-	return output.Loot{
-		Kind:        output.LootVuln,
+	return parsers.Loot{
+		Kind:        parsers.LootVuln,
 		Target:      result.Target,
 		Priority:    pri,
 		Description: desc,

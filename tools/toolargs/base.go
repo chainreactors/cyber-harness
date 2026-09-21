@@ -46,7 +46,7 @@ func ArtifactResultID(tool, kind, target string, data any) string {
 }
 
 func (b *Base) EmitArtifactResultCtx(ctx context.Context, resultID, tool, kind, target string, data any) {
-	if b.Events == nil || data == nil {
+	if b.Events == nil || data == nil || ctx.Err() != nil {
 		return
 	}
 	raw, err := json.Marshal(data)

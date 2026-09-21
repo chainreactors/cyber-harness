@@ -9,6 +9,7 @@ import (
 )
 
 type Logger interface {
+	SetOutput(io.Writer)
 	Debugf(format string, args ...any)
 	Infof(format string, args ...any)
 	Warnf(format string, args ...any)
@@ -24,6 +25,7 @@ type LogConfig struct {
 }
 
 type logsLogger struct {
+	mu   sync.RWMutex
 	base *logs.Logger
 }
 
@@ -42,7 +44,7 @@ func NewLogger(cfg LogConfig) Logger {
 	}
 	base.SetFormatter(logFormatter(cfg.Color))
 	base.SetColor(false)
-	return logsLogger{base: base}
+	return &logsLogger{base: base}
 }
 
 const logMark = "●"
@@ -75,7 +77,9 @@ func darkGray(s string) string {
 
 func GlobalLogger(cfg LogConfig) Logger {
 	logger := NewLogger(cfg)
-	if adapter, ok := logger.(logsLogger); ok {
+	// Scanner SDKs mutate the global logger during initialization. Keep those
+	// settings separate so they cannot silence application diagnostics.
+	if adapter, ok := NewLogger(cfg).(*logsLogger); ok {
 		logs.Log = adapter.base
 	}
 	return logger
@@ -115,7 +119,7 @@ func SuppressGlobalNonErrors() func() {
 func ActivateDebug(logger Logger) func() {
 	oldGlobal := logs.Log
 	target := oldGlobal
-	if adapter, ok := logger.(logsLogger); ok && adapter.base != nil {
+	if adapter, ok := logger.(*logsLogger); ok && adapter.base != nil {
 		target = adapter.base
 	}
 	if target == nil {
@@ -139,7 +143,7 @@ func ActivateDebug(logger Logger) func() {
 }
 
 func NopLogger() Logger {
-	return nopLogger{}
+	return NewLogger(LogConfig{Output: io.Discard})
 }
 
 func ErrorOnlyLogger(logger Logger) Logger {
@@ -149,17 +153,11 @@ func ErrorOnlyLogger(logger Logger) Logger {
 	return errorOnlyLogger{base: logger}
 }
 
-type nopLogger struct{}
-
-func (nopLogger) Debugf(string, ...any)     {}
-func (nopLogger) Infof(string, ...any)      {}
-func (nopLogger) Warnf(string, ...any)      {}
-func (nopLogger) Errorf(string, ...any)     {}
-func (nopLogger) Importantf(string, ...any) {}
-
 type errorOnlyLogger struct {
 	base Logger
 }
+
+func (l errorOnlyLogger) SetOutput(output io.Writer) { l.base.SetOutput(output) }
 
 func (errorOnlyLogger) Debugf(string, ...any) {}
 func (errorOnlyLogger) Infof(string, ...any)  {}
@@ -169,22 +167,42 @@ func (l errorOnlyLogger) Errorf(format string, args ...any) {
 }
 func (errorOnlyLogger) Importantf(string, ...any) {}
 
-func (l logsLogger) Debugf(format string, args ...any) {
+func (l *logsLogger) Debugf(format string, args ...any) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	l.base.Debugf(format, args...)
 }
 
-func (l logsLogger) Infof(format string, args ...any) {
+func (l *logsLogger) Infof(format string, args ...any) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	l.base.Infof(format, args...)
 }
 
-func (l logsLogger) Warnf(format string, args ...any) {
+func (l *logsLogger) Warnf(format string, args ...any) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	l.base.Warnf(format, args...)
 }
 
-func (l logsLogger) Errorf(format string, args ...any) {
+func (l *logsLogger) Errorf(format string, args ...any) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	l.base.Errorf(format, args...)
 }
 
-func (l logsLogger) Importantf(format string, args ...any) {
+func (l *logsLogger) Importantf(format string, args ...any) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	l.base.Importantf(format, args...)
+}
+
+// SetOutput changes only the destination; level and formatting stay with this logger.
+func (l *logsLogger) SetOutput(output io.Writer) {
+	if output == nil {
+		output = io.Discard
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.base.SetOutput(output)
 }

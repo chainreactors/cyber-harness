@@ -34,9 +34,15 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	if err := extension.Provide[*files.Files](scope, e.resource.Files); err != nil {
+		return err
+	}
 	return extension.Add(scope, tools...)
 }
 
 func (e *Extension) Close(ctx context.Context) error {
+	if e.resource == nil {
+		return nil
+	}
 	return e.resource.Close(ctx)
 }

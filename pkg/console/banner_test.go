@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	outputpkg "github.com/chainreactors/cyber/core/output"
+	outputpkg "github.com/chainreactors/cyber/pkg/output"
 )
 
 // assertUniformWidth checks every line of a rendered box has the same visible
@@ -133,9 +133,8 @@ func TestRenderBoxTableClipsWideIntermediateColumns(t *testing.T) {
 }
 
 func TestProviderModelDoesNotDependOnCommands(t *testing.T) {
-	runtime, _ := newConsoleRuntime(t, nil)
+	runtime, _ := newConsoleRuntime(t, nil, agent.ProviderConfig{Provider: "anthropic", Model: "claude-test"})
 	r := &AgentConsole{runtime: runtime}
-	r.runtime.SetProvider(nil, agent.ProviderConfig{Provider: "anthropic", Model: "claude-test"})
 	provider, model := r.providerModel()
 	if provider != "anthropic" || model != "claude-test" {
 		t.Fatalf("providerModel = %q/%q, want anthropic/claude-test", provider, model)

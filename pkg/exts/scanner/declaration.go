@@ -6,16 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/chainreactors/cyber/core/resource"
+	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	"github.com/chainreactors/sdk/pkg/cyberhub"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/resource"
-	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/sdk/pkg/cyberhub"
 )
 
 const connectionTimeout = 20 * time.Second

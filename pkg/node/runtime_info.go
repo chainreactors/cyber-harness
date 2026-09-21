@@ -1,22 +1,17 @@
 package node
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"runtime"
 	"strings"
 
-	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
-	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -70,7 +65,7 @@ func commandSpecs(runtime *session.Runtime, specs []*types.CommandSpec) []*types
 
 // RegistryCommandSpecs projects the Bash-internal command registry without
 // adding chat runtime or skill commands. Tool-only nodes use these specs too.
-func RegistryCommandSpecs(registry commands.Executor, store *skills.Store) []*types.CommandSpec {
+func RegistryCommandSpecs(registry coretool.CommandExecutor, store *skills.Store) []*types.CommandSpec {
 	if registry == nil {
 		return nil
 	}
@@ -142,42 +137,18 @@ func commandDescription(store *skills.Store, location string) string {
 }
 
 // AgentStatus reports Agent provider/model health; the Profile adds its status.
-func AgentStatus(app *apppkg.State) *aop.AgentStatus {
+func AgentStatus(state *provider.State) *aop.AgentStatus {
 	status := new(aop.AgentStatus)
-	if app != nil {
-		_, providerConfig := app.ProviderState()
+	if state != nil {
+		_, providerConfig := state.Current()
 		status.Provider = providerConfig.Provider
 		status.Model = providerConfig.Model
-		health := app.ProviderHealth()
+		health := state.Health()
 		if health.State == provider.HealthFailed || (health.State == provider.HealthNotConfigured && health.Error != "") {
 			status.ConfigError = statusOneLine(health.Error, 240)
 		}
 	}
 	return status
-}
-
-// ReloadConfig hot-swaps the LLM provider from a pushed protobuf config.
-func ReloadConfig(distribute *types.DistributeConfig, runtime *session.Runtime, option *cfg.Option, logger telemetry.Logger) (agent.Provider, string, error) {
-	if runtime == nil {
-		return nil, "", fmt.Errorf("agent runtime is not configured")
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	if distribute == nil {
-		return nil, "", fmt.Errorf("remote config is required")
-	}
-	providerConfig := apppkg.ProviderConfigFromProto(distribute.GetLlm())
-	provider, resolved, err := runtime.ReloadResolvedProvider(providerConfig)
-	if err != nil {
-		return nil, "", err
-	}
-	model := resolved.Model
-	if option != nil {
-		apppkg.ApplyResolvedProviderOptions(option, resolved)
-	}
-	logger.Importantf("config reloaded: provider=%s model=%s", provider.Name(), model)
-	return provider, model, nil
 }
 
 func statusOneLine(value string, limit int) string {

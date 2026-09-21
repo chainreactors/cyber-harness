@@ -15,7 +15,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	scanengine "github.com/chainreactors/cyber/tools/scan/engine"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/neutron/templates"
@@ -115,7 +115,7 @@ func (c *Command) QuickReference() string {
     neutron -l targets.txt -s high,critical -j`
 }
 
-func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("neutron", &err)
 	args := execution.Args
 	args = c.resolveRelativePaths(args)
@@ -161,7 +161,7 @@ func (c *Command) Run(ctx context.Context, execution *commands.Execution) (_ any
 	// before loading -t templates: the SDK binds each request transport at
 	// compile time, so a zero-proxy loader would let an explicit template dial
 	// the target directly even though the command itself has a proxy configured.
-	proxyURL := commands.ResolveExecutionEgress(execution, c.Proxy).ProxyURL
+	proxyURL := coretool.ResolveExecutionEgress(execution, c.Proxy).ProxyURL
 	loadedTemplates, err := loadNeutronTemplatePaths(flags.Templates, proxyURL)
 	if err != nil {
 		return nil, err

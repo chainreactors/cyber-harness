@@ -115,24 +115,16 @@ func (s *Service) TaskSession(taskID string) (string, bool) {
 	return sid, ok
 }
 
-func (s *Service) registerSessionTask(taskID, sessionID, nodeID string) {
+func (s *Service) registerSessionTask(taskID, sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskSessions[taskID] = sessionID
-	if nodeID != "" {
-		s.taskNodeIDs[taskID] = nodeID
-	}
-	delete(s.taskCanceled, taskID)
 }
 
-func (s *Service) finishSessionTask(taskID string) bool {
+func (s *Service) finishSessionTask(taskID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	canceled := s.taskCanceled[taskID]
 	delete(s.taskSessions, taskID)
-	delete(s.taskNodeIDs, taskID)
-	delete(s.taskCanceled, taskID)
-	return canceled
 }
 
 func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) error {
@@ -175,15 +167,8 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, turnID string) erro
 	case <-timer.C:
 		return managementapi.Errorf(managementapi.CodeUnavailable, "node timed out while canceling turn")
 	}
-	s.mu.Lock()
-	if s.taskSessions[turnID] == sessionID {
-		s.taskCanceled[turnID] = true
-	}
-	s.mu.Unlock()
-	s.BroadcastAOPEvent(sessionID, &aop.Event{
-		SessionId: sessionID, TurnId: turnID, Emitter: "cyber.web",
-		Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "canceled"}},
-	})
+	// Acceptance only requests cancellation. Runtime publishes the terminal
+	// after execution drains, including its final usage and error details.
 	return nil
 }
 

@@ -20,7 +20,7 @@ flowchart TD
 
 `agent/` 提供模型循环和会话机制，`core/` 提供资源、hooks、操作关联和事件等基础设施。业务实现多位于 `tools/`，对应扩展在 `pkg/exts/` 中将实现接入资源与生命周期。
 
-`pkg/base` 返回有序的基础扩展；`pkg/harness` 在此之上提供工具宿主和会话 Agent 的通用组合；`pkg/aiscan` 再加入扫描器、代理和其他产品能力；`cmd/aiscan` 解析配置并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
+`pkg/harness.BaseExtensions` 返回有序的默认扩展，`harness.New` 在此之上提供工具宿主和会话 Agent 的通用组合；`cmd/aiscan` 负责解析配置、加入扫描器和代理等产品能力，并选择运行入口。最小 `cmd/agent` 使用同一基础组合，但不安装安全扫描、IOA 和 Web。应用功能由明确的组合决定。
 
 ## 装配与生命周期
 
@@ -58,4 +58,51 @@ Go 宿主直接持有组合和 Session Runtime。跨进程宿主通过 AOP 发�
 
 ## 源码阅读
 
-从 [base.New](../pkg/base/base.go)、[aiscan 的能力选择](../pkg/aiscan/extensions.go)和 [Profile](../pkg/aiscan/profile.go)可以读到完整装配顺序。随后沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进所调用的工具。各专题末尾提供对应实现与测试入口。
+从 [harness.BaseExtensions](../pkg/harness/base.go)、[aiscan 的能力选择](../cmd/aiscan/extensions.go)和 [Profile](../cmd/aiscan/profile.go)可以读到完整装配顺序。随后沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进所调用的工具。各专题末尾提供对应实现与测试入口。
+
+## 代码组织与依赖边界
+
+`core` 承担资源生命周期、执行与事件机制，不依赖 `agent`、`pkg` 或 `tools`。命令和模型工具在 `core/tool` 中分别由 `CommandRegistry`、`ToolRegistry` 管理，保留不同的执行接口与资源所有权；`core/proc` 提供进程会话管理和事件桥接。`core/tool/hooks` 使用 AOP 载荷表达执行边界，避免反向依赖工具注册表。
+
+`pkg/config` 和 `pkg/output` 分别负责应用配置和输出。`pkg/harness` 提供默认组装；具体产品的配置转换、能力选择和运行模式位于 `cmd/aiscan`。需要控制扩展顺序的宿主使用 `harness.BaseExtensions` 和 `extension.New`；`harness.New` 提供固定顺序的默认组合。
+
+扫描命令自行保证命令输出不含颜色控制符，`core/tool` 不按业务命令名改写参数。扫描收集器的结果类型归 `tools/scan` 私有，Loot 直接使用 `parsers.Loot`；`core/events/jsonl` 提供共享事件文件读取与校验，`pkg/output` 负责渲染和格式化。Provider 规则和状态归 `agent/provider`，外部配置转换归 `pkg/config`。
+
+IOA client/server 的 CLI 声明与 Session、IOA client 的 Console 贡献和各自扩展放在同一包，以文件划分职责。`NewConsole` 仍是独立安装入口，合包不改变可选性或加载顺序。IOA client 和 server 保持独立，避免客户端引入服务端依赖。
+
+宿主契约 `pkg/profile`、启动声明 `pkg/cli` 和展示契约 `pkg/console/api` 保持独立。Profile 通过 Providers、Events、Progress、Processes 借出明确的能力，只有 Active 时可访问；不提供 App 聚合容器或通用资源查找。测试辅助位于 `internal/testutil/hosttest` 与 `internal/testutil/apptest`，后者使用真实功能 Extension。
+
+## 唯一安装入口
+
+产品、宿主、示例和集成测试通过 `pkg/exts` 安装功能。`harness.New` 只组合现有 Extension，
+不重复初始化工具、Provider 或 Session。底层构造与资源方法服务于对应 Extension 和包内单元测试。
+`Declare` 声明配置，`NewConsole` 贡献展示；它们借用同一个已安装实例，不再创建业务资源。
+
+Session 只接收自身参数和实际使用的能力：Provider 状态、事件流、日志、Hooks、工具与命令执行器、
+Skills、PromptResolver、Shell 和 History。它不依赖应用配置、宿主、Extension Scope 或具体工具包。
+外部 Option 在装配侧通过 Session Extension 的 `ConfigFromOption` 转换。没有 Shell 或 History 时对应
+操作明确不可用；默认文件 History 由 Session Extension 安装，Resource 不自行选择实现。
+
+Provider Extension 拥有 Provider 状态及本地创建的客户端；Terminal Extension 拥有 BashTool 和进程
+Manager；Session Extension 拥有 Session Resource。事件流、Progress、Logger 和 Hooks 由基础组合
+各创建一份并共享。消费者排空之后才关闭依赖，Session 不关闭借用对象。Web 的能力借用始终位于
+Profile 租约内，退休实例在最后一个使用者释放后关闭。
+
+依赖及安装边界由 `go test ./internal/architecture` 检查，包括平台与构建标签下的源码。
+
+
+IOA client 的 `New` 唯一拥有连接，`NewCollaboration` 借用同一 Service 安装 Agent hooks、Skills 与消息订阅，
+`NewConsole` 借用 Service 贡献展示。CLI 查询与配置连接检查只加载连接 Extension，不创建 Agent，
+也不直接启动底层 Resource。协作消费者排空后才关闭连接。
+
+Web Extension 根据配置创建数据库、Service、AgentPool 与路由；初始及重载 Profile 的构建策略由产品传入。
+宿主只持有 Extension Set、HTTP Server、监听器及静态资源。关闭时停止准入、取消并排空连接和请求、
+关闭后台任务与 Profile，最后关闭数据库；排空超时保留依赖供重试。ACP 示例使用相同安装路径，
+整个 HTTP 服务期间 Set 保持存活。
+
+Session 的协议由 `sessionext.NewProtocol()` 贡献，宿主只通过 Namespace Registry 绑定连接。
+PTY Router 和 IOA Browser Handler 是扩展内部实现，不提供独立安装入口。
+
+架构检查覆盖内置功能的构造、Resource 创建和协议贡献引用，包括匿名 Extension 中的调用及函数别名。
+只有资源所有者可以安装对应功能；另一个 Extension、示例或集成测试都不能绕过它。
+底层包单元测试可直接构造被测实现；装配测试通过真实 Extension，不能维护第二套命令列表。

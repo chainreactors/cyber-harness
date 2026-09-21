@@ -2,13 +2,12 @@ package console
 
 import (
 	"fmt"
+	outputpkg "github.com/chainreactors/cyber/pkg/output"
+	"github.com/chainreactors/tui/console"
+	"github.com/chainreactors/tui/readline/inputrc"
 	"sort"
 	"strings"
 	"time"
-
-	outputpkg "github.com/chainreactors/cyber/core/output"
-	"github.com/chainreactors/tui/console"
-	"github.com/chainreactors/tui/readline/inputrc"
 )
 
 func configureAgentReadline(c *console.Console) {

@@ -10,6 +10,24 @@ Session 保留对话和运行状态，使下一次输入可以继续使用历史
 
 宿主协议的 Turn 是外部提交与取消的单位，内部模型轮次是循环计数。启用 Goal Evaluation 时，一次任务可能执行多次 Run。统计或接入时不要把三者的计数混用。
 
+配置级变更整体替换 Profile。终端 `/model` 仅修改当前 Session 下一次 Run 的模型；已运行任务和已有子任务保留各自快照，清空、压缩与恢复当前会话继续沿用该模型。`/provider` 只查看配置，终端不再原地修改全局 Provider。
+
+取消受理不代表执行已经退出。正常取消的 `TurnEnded` 由 Runtime 在执行结束后发布，携带最终 usage 和错误；Web 只在派发失败、断连或自身停止等待时提供兜底终态。
+
+Scanner 将 verify/sniper 注册到 subagent 扩展唯一的 `Subagent` Point，通过注入的 Worker 按名称同步执行，独立 CLI 不需要创建 Runtime Session。调用来自 Agent 或 Session 命令时继承当前模型快照，否则使用 Profile 配置。它与普通 subagent 共用 `Config.ForTask`，隔离历史、Inbox、调度器和事件计数；scan 返回前等待子任务退出，调用取消或所属 Profile 关闭会取消子任务。AOP 中的子任务 Session/Turn 事件仅用于委派追踪，不注册对话队列、IOA 接收器或后台续跑。
+
+## Subagent 委派
+
+subagent 是可选扩展，不属于 Agent 配置或 Session 内建工具。`subagentext.New()` 拥有唯一的
+`resource.Point[subagent.Subagent]`；`NewTools()` 借用该 Point 和 Session Runtime 安装统一工具。
+注册名 `name` 可选：省略执行匿名任务，具名执行注册的 Prepare。`label` 标识本次运行的可读名称，
+`session_id` 用于唯一定位与取消。`catalog` 列出当前定义，`list` 列出运行实例。
+
+具名定义可以在运行时增加与撤销。租约覆盖准备、执行和收尾，撤销取消关联任务并等待排空，
+之后才允许同名注册。Session 仅提供通用附属会话、单任务模式与关闭完成回调；
+subagent 在最终记录之后发送完成通知、释放父 inbox producer。完整职责与调用约定见
+[Subagent 扩展](../../pkg/exts/subagent/README.md)。
+
 ## 标准循环
 
 1. 检查 Provider 和执行上下文，解析本次 Run 的 system prompt，再执行 `BeforeRun` hook。
@@ -41,9 +59,9 @@ Session 保留对话和运行状态，使下一次输入可以继续使用历史
 
 ## 子 Agent 的派生
 
-本地子 Agent 也通过这套循环执行。派生时沿用父配置中的 Provider、工具等能力，但拥有自己的对话与 Inbox。`sync` 在当前调用中等待；`async` 从新对话开始，`fork` 则截取父对话的完整消息边界作为起点。Agent 类型可以补充指令、模型等配置。
+`agent/session` 的子代理工具由现有 Session 扩展安装，直接使用 `OpenSession → RunSession → CloseSession`。Session 拥有 Inbox、取消、生命周期事件和最终记录；工具没有独立的运行表或关闭流程。本地子 Agent 也通过这套循环执行。派生时沿用父配置中的 Provider、工具等能力，但拥有自己的对话与 Inbox。`sync` 在当前调用中等待；`async` 从新对话开始，`fork` 则截取父对话的完整消息边界作为起点。Agent 类型可以补充指令、模型等配置。
 
-异步子任务向父 Inbox 注册 producer，完成时投递结果并释放 producer。父循环由此知道仍有工作可能返回，而不是只根据当前模型有没有输出判断结束。子任务的进程内配置继承不提供文件、网络或浏览器隔离；它和跨进程 IOA 消息投递也属于不同生命周期。操作方式见[子 Agent](../user/web.md#子-agent)。
+异步子任务向父 Inbox 注册 producer。关闭 Session 时先完成 IOA 最终记录，再向父 Inbox 投递一次结果并释放 producer。父 Session 关闭会取消并等待子 Session；单次工具调用返回不会取消后台子任务。父循环由此知道仍有工作可能返回，而不是只根据当前模型有没有输出判断结束。子任务的进程内配置继承不提供文件、网络或浏览器隔离；它和跨进程 IOA 消息投递也属于不同生命周期。操作方式见[子 Agent](../user/web.md#子-agent)。
 
 ## 停止条件
 
@@ -79,4 +97,4 @@ flowchart LR
 
 用 `-o` 记录事件，再检查消息、工具调用、结果、状态与结束原因。长时间不结束时先检查后台命令、subagent、周期任务；反复同一错误时区分模型请求重试与模型主动重试工具。上下文与重试策略见 [下一层机制](context.md)。
 
-实现：[循环](../../agent/loop.go)、[Inbox](../../agent/inbox/inbox.go)、[调度器](../../agent/loop_scheduler.go)、[评估器](../../agent/evaluator/loop.go)。对应测试：[循环](../../agent/loop_test.go)、[工具调用](../../pkg/toolset/tool_call_test.go)、[Inbox](../../agent/inbox/inbox_test.go)、[评估反馈](../../agent/evaluator/loop_test.go)。
+实现：[循环](../../agent/loop.go)、[Inbox](../../agent/inbox/inbox.go)、[调度器](../../agent/loop_scheduler.go)、[评估器](../../agent/evaluator/loop.go)。对应测试：[循环](../../agent/loop_test.go)、[工具调用](../../core/tool/tool_call_test.go)、[Inbox](../../agent/inbox/inbox_test.go)、[评估反馈](../../agent/evaluator/loop_test.go)。

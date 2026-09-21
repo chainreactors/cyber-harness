@@ -14,10 +14,10 @@ import (
 
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 	goflags "github.com/jessevdk/go-flags"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -64,7 +64,7 @@ Examples:
   mitm analyze --host example.com`
 }
 
-func (c *MitmCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *MitmCommand) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("mitm", &err)
 	args := execution.Args
 	if len(args) == 0 {
@@ -108,7 +108,7 @@ func (c *MitmCommand) Run(ctx context.Context, execution *commands.Execution) (_
 	return nil, nil
 }
 
-func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execution *commands.Execution) (any, error) {
+func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execution *coretool.Execution) (any, error) {
 	if c.execCommand == nil {
 		return nil, fmt.Errorf("mitm: command executor not available")
 	}

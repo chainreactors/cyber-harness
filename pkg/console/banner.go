@@ -2,14 +2,13 @@ package console
 
 import (
 	"fmt"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	outputpkg "github.com/chainreactors/cyber/pkg/output"
+	runewidth "github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 	"io"
 	"os"
 	"strings"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	outputpkg "github.com/chainreactors/cyber/core/output"
-	runewidth "github.com/mattn/go-runewidth"
-	"golang.org/x/term"
 )
 
 // renderBanner prints a compact welcome block to stderr: title/version,

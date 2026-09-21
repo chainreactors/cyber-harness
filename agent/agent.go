@@ -8,8 +8,6 @@ import (
 	"github.com/chainreactors/cyber/agent/inbox"
 	providerpkg "github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -42,6 +40,12 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	if err != nil {
 		return nil, err
 	}
+	return a.run(ctx, userMsg, opts...)
+}
+
+// run also accepts already queued input, used when a child must publish its
+// receiver only after the initial task is in its inbox.
+func (a *Agent) run(ctx context.Context, userMsg *aop.Message, opts ...RunOption) (*Result, error) {
 	runCtx, cancel, err := a.startRun(ctx)
 	if err != nil {
 		return nil, err
@@ -49,7 +53,7 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.configSnapshot()
+	cfg := a.ConfigSnapshot()
 	cfg = cfg.init()
 	for _, opt := range opts {
 		if opt != nil {
@@ -73,9 +77,11 @@ func (a *Agent) Run(ctx context.Context, input *aop.Message, opts ...RunOption) 
 	if cfg.Inbox == nil {
 		cfg.Inbox = inbox.NewBuffered(SubInboxCapacity)
 	}
-	msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
-	if err := cfg.Inbox.Push(msg); err != nil {
-		return nil, fmt.Errorf("push prompt: %w", err)
+	if userMsg != nil {
+		msg := inbox.FromAOPMessage(userMsg, inbox.OriginUser)
+		if err := cfg.Inbox.Push(msg); err != nil {
+			return nil, fmt.Errorf("push prompt: %w", err)
+		}
 	}
 
 	result, runErr := cfg.Loop.Run(runCtx, cfg)
@@ -87,18 +93,6 @@ func (a *Agent) SessionID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg.SessionID
-}
-
-func (a *Agent) beginSession() {
-	cfg := a.configSnapshot()
-	cfg.emitter.sessionStart(cfg.Model)
-	emitSessionStart(context.Background(), cfg)
-}
-
-func (a *Agent) endSession(reason string) {
-	cfg := a.configSnapshot()
-	cfg.emitter.sessionEnd(reason)
-	emitSessionEnd(context.Background(), cfg, reason)
 }
 
 // Continue resumes the agent without a new prompt (e.g. after tool results).
@@ -114,7 +108,7 @@ func (a *Agent) Continue(ctx context.Context, opts ...RunOption) (*Result, error
 	defer cancel()
 	defer a.finishRun()
 
-	cfg := a.configSnapshot()
+	cfg := a.ConfigSnapshot()
 	cfg = cfg.init()
 	for _, opt := range opts {
 		if opt != nil {
@@ -193,77 +187,12 @@ func (a *Agent) ContextWindow() int {
 	return ModelContextWindow(a.Cfg.Model)
 }
 
-func (a *Agent) SetLogger(logger telemetry.Logger) {
-	if a == nil {
-		return
-	}
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
-	a.mu.Lock()
-	a.Cfg.Logger = logger
-	if a.Cfg.LoopScheduler != nil {
-		a.Cfg.LoopScheduler.SetLogger(logger)
-	}
-	tools := a.Cfg.Tools
-	a.mu.Unlock()
-	if sl, ok := tools.(interface{ SetLogger(telemetry.Logger) }); ok {
-		sl.SetLogger(logger)
-	}
-}
-
-// configSnapshot copies Cfg under the lock so a concurrent SetProvider can't
+// ConfigSnapshot copies Cfg under the lock so a concurrent SetProvider can't
 // tear the read a run takes at its start.
-func (a *Agent) configSnapshot() Config {
+func (a *Agent) ConfigSnapshot() Config {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.Cfg
-}
-
-// Derive creates a new Agent with the same infrastructure (provider, tools,
-// model, logger) but clean state. Use for spawning independent agent tasks.
-func (a *Agent) Derive() *Agent {
-	cfg := a.configSnapshot()
-	return deriveNamedFromConfig(cfg, cfg.AgentName, "", nil)
-}
-
-// DeriveNamed creates an isolated child agent and gives its AOP stream a
-// distinct actor name while preserving the current session as its parent.
-func (a *Agent) DeriveNamed(name string) *Agent {
-	return a.deriveNamed(name, "", nil)
-}
-
-func (a *Agent) deriveNamed(name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
-	return deriveNamedFromConfig(a.configSnapshot(), name, parentToolCallID, detail)
-}
-
-func deriveNamedFromConfig(cfg Config, name, parentToolCallID string, detail *types.DelegationDetail) *Agent {
-	return NewAgent(Config{
-		Loop:     cfg.Loop,
-		Provider: cfg.Provider,
-		Tools:    cfg.Tools,
-		Model:    cfg.Model,
-		// Children inherit either the explicit prompt or its run-scoped resolver,
-		// along with the environment, tool, and skill context it renders.
-		SystemPrompt:          cfg.SystemPrompt,
-		SystemPromptFn:        cfg.SystemPromptFn,
-		PromptResolver:        cfg.PromptResolver,
-		MaxTokens:             cfg.MaxTokens,
-		ContextWindow:         cfg.ContextWindow,
-		Logger:                cfg.Logger,
-		MaxRetries:            cfg.MaxRetries,
-		MaxParallelTools:      cfg.MaxParallelTools,
-		Stream:                cfg.Stream,
-		Temperature:           cfg.Temperature,
-		CacheRetention:        cfg.CacheRetention,
-		CaptureProviderFrames: cfg.CaptureProviderFrames,
-		Bus:                   cfg.Bus,
-		Hooks:                 cfg.Hooks,
-		AgentName:             name,
-		ParentSessionID:       cfg.SessionID,
-		ParentToolCallID:      parentToolCallID,
-		Delegation:            detail,
-	})
 }
 
 // EmitStatus emits an AOP status event on the agent's session. Used by

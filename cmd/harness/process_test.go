@@ -178,10 +178,11 @@ func buildExecutable(t *testing.T) string {
 }
 
 type workspace struct {
-	dir    string
-	config string
-	db     string
-	starts int
+	dir            string
+	config         string
+	db             string
+	starts         int
+	processTimeout time.Duration
 }
 
 func newWorkspace(t *testing.T) *workspace {
@@ -328,7 +329,11 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 	w.starts++
 	p := &testProcess{done: make(chan struct{}), logPath: filepath.Join(w.dir, fmt.Sprintf("process-%02d.log", w.starts))}
 	output := newLog(t, p.logPath)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	lifetime := w.processTimeout
+	if lifetime == 0 {
+		lifetime = 3 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
 	p.cmd = exec.CommandContext(ctx, executablePath,
 		"--config", w.config, "--data-dir", filepath.Join(w.dir, "data"), "--no-color",
 		"web", "--addr", "127.0.0.1:0",

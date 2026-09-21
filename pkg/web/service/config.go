@@ -73,6 +73,10 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 	if err := managementapi.ValidateLLMConfig(config.GetLlm()); err != nil {
 		return nil, managementapi.NewError(managementapi.CodeInvalidArgument, err)
 	}
+	_, _, current, err := s.configStore.GetDistributeConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
 	prepared, err := s.configStore.PrepareDistributeConfig(ctx, config)
 	if err != nil {
 		return nil, err
@@ -89,6 +93,9 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 	if err := managementapi.ValidateLLMConfig(prepared.Config.GetLlm()); err != nil {
 		return nil, managementapi.NewError(managementapi.CodeInvalidArgument, err)
 	}
+	if proto.Equal(current, prepared.Config) {
+		return s.api.Config.View(ctx)
+	}
 	// Candidate cleanup has its own budget: the request may already be canceled.
 	// An unfinished candidate remains owned here for Close or the next Save.
 	defer func() {
@@ -103,7 +110,7 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		next, err = s.buildProfile(ctx, prepared)
 		if next != nil {
 			s.appMu.Lock()
-			_, owned := s.profiles[next]
+			owned := next == s.profile
 			s.appMu.Unlock()
 			if owned {
 				return nil, errors.Join(err, fmt.Errorf("profile builder returned an already owned profile"))
@@ -118,8 +125,8 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		if next == nil {
 			return nil, fmt.Errorf("reload cyber runtime returned no app")
 		}
-		if _, err := next.State(); err != nil {
-			return nil, fmt.Errorf("config candidate is not ready: %w", err)
+		if !next.Active() {
+			return nil, fmt.Errorf("config candidate is not ready: profile is not active")
 		}
 	}
 	if err := s.configStore.CommitDistributeConfig(ctx, prepared); err != nil {

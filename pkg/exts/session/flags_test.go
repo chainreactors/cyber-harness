@@ -2,11 +2,10 @@ package session
 
 import (
 	"bytes"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	flags "github.com/jessevdk/go-flags"
 	"strings"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
-	flags "github.com/jessevdk/go-flags"
 )
 
 func TestFlagsAreInertTypedAndComposable(t *testing.T) {

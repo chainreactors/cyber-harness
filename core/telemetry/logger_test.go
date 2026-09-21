@@ -3,6 +3,7 @@ package telemetry
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/chainreactors/logs"
@@ -47,6 +48,20 @@ func TestSuppressGlobalNonErrorsKeepsOnlyErrors(t *testing.T) {
 	}
 }
 
+func TestGlobalSDKSettingsCannotSilenceApplicationLogger(t *testing.T) {
+	oldGlobal := logs.Log
+	defer func() { logs.Log = oldGlobal }()
+	var buf bytes.Buffer
+	logger := GlobalLogger(LogConfig{Output: &buf})
+	logs.Log.SetQuiet(true)
+	logs.Log.SetLevel(logs.ErrorLevel)
+	logs.Log.Warnf("SDK warning")
+	logger.Warnf("application delivery failed")
+	if got := buf.String(); got != "● application delivery failed\n" {
+		t.Fatalf("application diagnostics lost to SDK settings: %q", got)
+	}
+}
+
 func TestErrorOnlyLoggerSuppressesNonErrors(t *testing.T) {
 	var buf bytes.Buffer
 	logger := ErrorOnlyLogger(NewLogger(LogConfig{Output: &buf}))
@@ -76,5 +91,42 @@ func TestLoggerColorStylesOnlyMarker(t *testing.T) {
 	}
 	if strings.Contains(got, "\x1b[0;32m● ready") {
 		t.Fatalf("entire line appears colored: %q", got)
+	}
+}
+
+func TestLoggerOutputCanChangeWithoutReplacingLogger(t *testing.T) {
+	var first, second bytes.Buffer
+	logger := NewLogger(LogConfig{Debug: true, Output: &first})
+	consumer := logger
+	consumer.Debugf("before")
+	logger.SetOutput(&second)
+	consumer.Debugf("after")
+	logger.SetOutput(nil)
+	consumer.Debugf("discarded")
+	if first.String() != "● before\n" || second.String() != "● after\n" {
+		t.Fatalf("destinations: first=%q second=%q", first.String(), second.String())
+	}
+}
+
+func TestLoggerOutputChangeDuringLogging(t *testing.T) {
+	var first, second bytes.Buffer
+	logger := NewLogger(LogConfig{Output: &first})
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		for range 100 {
+			logger.SetOutput(&second)
+			logger.SetOutput(&first)
+		}
+	})
+	for range 4 {
+		workers.Go(func() {
+			for range 100 {
+				logger.Warnf("record")
+			}
+		})
+	}
+	workers.Wait()
+	if got := strings.Count(first.String()+second.String(), "● record\n"); got != 400 {
+		t.Fatalf("lost or interleaved log records: %d", got)
 	}
 }

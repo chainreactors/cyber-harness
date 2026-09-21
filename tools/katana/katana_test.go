@@ -5,7 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	browserutil "github.com/chainreactors/cyber/tools/headless"
 	"github.com/projectdiscovery/gologger"
+	"github.com/projectdiscovery/katana/pkg/navigation"
+	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
+	katanatypes "github.com/projectdiscovery/katana/pkg/types"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,12 +22,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	browserutil "github.com/chainreactors/cyber/tools/headless"
-	"github.com/projectdiscovery/katana/pkg/navigation"
-	katanaoutput "github.com/projectdiscovery/katana/pkg/output"
-	katanatypes "github.com/projectdiscovery/katana/pkg/types"
 )
 
 func TestConfigureBrowserOptionsPriority(t *testing.T) {
@@ -156,7 +155,7 @@ func TestRunHonorsContextCancellation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		var output bytes.Buffer
-		_, err := New().Run(ctx, &commands.Execution{
+		_, err := New().Run(ctx, &coretool.Execution{
 			Args:   []string{"-u", srv.URL, "-d", "1", "-timeout", "30"},
 			Stdout: &output,
 			Stderr: &output,
@@ -280,7 +279,7 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 	var output bytes.Buffer
 	command := New()
 	command.WorkDir = t.TempDir()
-	_, err = command.Run(ctx, &commands.Execution{
+	_, err = command.Run(ctx, &coretool.Execution{
 		Args:   []string{"-u", srv.URL, "-hl", "-d", "2", "-timeout", "15", "-ct", "45s", "-j"},
 		Stdout: &output,
 		Stderr: &output,

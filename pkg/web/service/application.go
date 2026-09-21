@@ -2,84 +2,40 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync"
-	"time"
-
+	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/extension"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
+	"github.com/chainreactors/cyber/pkg/aopconn"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	web "github.com/chainreactors/cyber/pkg/web"
+	"log/slog"
 )
 
 func (s *Service) aiAvailable() bool {
-	app, release := s.acquireApp()
-	defer release()
-	if app == nil {
+	providers := s.providers()
+	if providers == nil {
 		return false
 	}
-	provider, _ := app.ProviderState()
-	return provider != nil
+	active, _ := providers.Current()
+	return active != nil
 }
-
-func (s *Service) acquireApp() (*apppkg.State, func()) {
-	p, release := s.acquireProfile()
-	if p == nil {
-		return nil, release
-	}
-	app, err := p.State()
-	if err != nil {
-		release()
-		return nil, func() {}
-	}
-	return app, release
-}
-
-func (s *Service) acquireProfile() (profile.Profile, func()) {
-	if s == nil {
-		return nil, func() {}
-	}
+func (s *Service) providers() *provider.State {
 	s.appMu.Lock()
-	p := s.profile
-	if p == nil {
-		s.appMu.Unlock()
-		return nil, func() {}
+	defer s.appMu.Unlock()
+	if s.closing || s.workContext.Err() != nil || s.profile == nil {
+		return nil
 	}
-	s.profiles[p]++
-	s.appMu.Unlock()
-	return p, s.releaseProfile(p)
+	providers, _ := s.profile.Providers()
+	return providers
 }
 
-// releaseProfile returns the one-shot release for a borrowed profile.
-func (s *Service) releaseProfile(p profile.Profile) func() {
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.appMu.Lock()
-			s.profiles[p]--
-			retired := p != s.profile && s.profiles[p] == 0
-			s.applicationChangedLocked()
-			s.appMu.Unlock()
-			if retired {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				// Incomplete cleanup stays in profiles for Service.Close.
-				_ = s.closeApplication(ctx, p)
-			}
-		})
-	}
-}
-
-// swapProfile transfers ownership only after validation. Retirement errors are
-// retained by Service; they do not undo publication of a new profile.
+// swapProfile runs under configGate. Stop admission before cancellation; wait
+// without appMu so accepted work can finish its own cleanup.
 func (s *Service) swapProfile(next profile.Profile) error {
 	if s == nil || next == nil {
 		return fmt.Errorf("service and profile are required")
 	}
-	if _, err := next.State(); err != nil {
-		return err
+	if !next.Active() {
+		return fmt.Errorf("profile is not active")
 	}
 	s.appMu.Lock()
 	if s.closing {
@@ -91,52 +47,18 @@ func (s *Service) swapProfile(next profile.Profile) error {
 		s.appMu.Unlock()
 		return nil
 	}
-	if _, owned := s.profiles[next]; owned {
-		s.appMu.Unlock()
-		return fmt.Errorf("profile is already retiring")
-	}
-	s.profile = next
-	s.profiles[next] = 0
-	s.applicationChangedLocked()
+	s.stopWork()
 	s.appMu.Unlock()
+	s.work.Wait()
 	if prev != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = s.closeApplication(ctx, prev)
-	}
-	return nil
-}
-
-func (s *Service) applicationChangedLocked() {
-	close(s.appChanged)
-	s.appChanged = make(chan struct{})
-}
-
-func (s *Service) closeApplication(ctx context.Context, p profile.Profile) error {
-	select {
-	case s.profileClose <- struct{}{}:
-		defer func() { <-s.profileClose }()
-	case <-ctx.Done():
-		return errors.Join(extension.ErrCloseIncomplete, ctx.Err())
+		if err := prev.Close(context.Background()); err != nil {
+			slog.Error("close previous profile", "error", err)
+		}
 	}
 	s.appMu.Lock()
-	refs, owned := s.profiles[p]
-	ready := owned && p != s.profile && refs == 0
+	s.profile = next
+	s.workContext, s.stopWork = context.WithCancel(context.Background())
 	s.appMu.Unlock()
-	if !ready {
-		return nil
-	}
-	err := p.Close(ctx)
-	s.appMu.Lock()
-	if !errors.Is(err, extension.ErrCloseIncomplete) {
-		delete(s.profiles, p)
-		s.appError = errors.Join(s.appError, err)
-	}
-	s.applicationChangedLocked()
-	s.appMu.Unlock()
-	if errors.Is(err, extension.ErrCloseIncomplete) {
-		return err
-	}
 	return nil
 }
 
@@ -146,32 +68,23 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 	if s == nil || s.api == nil || stream == nil {
 		return fmt.Errorf("application AOP stream is unavailable")
 	}
-	first, err := stream.Recv()
-	if err != nil {
-		return err
+	workCtx, admitted := s.beginWork()
+	if !admitted {
+		return fmt.Errorf("web service is switching or closing")
 	}
-	connection, err := web.NewConnection(ctx, stream)
+	defer s.work.Done()
+	connection, err := aopconn.NewConnection(workCtx, stream)
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
-
-	if message, unwrapErr := aop.Unwrap(first); unwrapErr == nil {
-		if core, ok := message.(*aop.ProtocolMessage); ok && core.GetAgentHello() != nil {
-			protocolErr, wrapErr := aop.Wrap(generateID(), first.GetId(), &aop.ProtocolMessage{Message: &aop.ProtocolMessage_ProtocolError{ProtocolError: &aop.ProtocolError{
-				Code: "WRONG_ENDPOINT", Message: "AgentHello is only accepted by the node endpoint",
-			}}})
-			if wrapErr == nil {
-				_ = connection.Send(protocolErr)
-			}
-			return fmt.Errorf("AgentHello sent to application endpoint")
-		}
-	}
-
-	p, release := s.acquireProfile()
-	defer release()
+	stopRequest := context.AfterFunc(ctx, connection.Close)
+	defer stopRequest()
+	s.appMu.Lock()
+	p := s.profile
+	s.appMu.Unlock()
 	if p == nil {
-		return s.serveApplication(connection, first, nil)
+		return s.serveApplication(connection, nil)
 	}
-	return s.serveApplication(connection, first, p.RegisterNamespaces)
+	return s.serveApplication(connection, p.RegisterNamespaces)
 }

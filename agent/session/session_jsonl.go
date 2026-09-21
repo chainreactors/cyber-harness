@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	eventjsonl "github.com/chainreactors/cyber/core/events/jsonl"
+
 	aop "github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/output"
 	types "github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/proto"
 )
@@ -35,7 +36,7 @@ func ReadHistory(path string) (*History, error) {
 	streams := make(map[string]*resumeStream)
 	seenEventIDs := make(map[string]struct{})
 	order := 0
-	err := output.ScanJSONL(path, func(event *aop.Event) error {
+	err := eventjsonl.ScanJSONL(path, func(event *aop.Event) error {
 		if event.Id == "" {
 			return fmt.Errorf("event in %s has no id", path)
 		}

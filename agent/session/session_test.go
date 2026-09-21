@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,18 +13,20 @@ import (
 	"testing"
 	"time"
 
+	coreevents "github.com/chainreactors/cyber/core/events"
+
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
-	"github.com/chainreactors/cyber/pkg/apptest"
-	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	terminaltools "github.com/chainreactors/cyber/pkg/exts/terminal"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/pkg/toolset"
+
 	looptool "github.com/chainreactors/cyber/tools/loop"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"google.golang.org/protobuf/proto"
@@ -459,13 +460,14 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}`))
 	}))
 	defer srv.Close()
-	if _, _, err := rt.app.ReloadProvider(context.Background(), agent.ProviderConfig{
+	if _, _, err := rt.providers.Reload(context.Background(), agent.ProviderConfig{
 		Provider: "openai", Model: "gpt-test", BaseURL: srv.URL + "/v1", APIKey: "test",
 		ContextWindow: 128000, MaxTokens: 8192, Timeout: 45,
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	rt.agentConfig.Model = "gpt-test"
+	rt.agentConfig.MaxTokens, rt.agentConfig.ContextWindow = 8192, 128000
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-status", AgentName: "node-test"})
 	if err != nil {
@@ -654,11 +656,11 @@ func countSessionTurnLifecycle(mu *sync.Mutex, events *[]*aop.Event, sessionID s
 	return starts, ends
 }
 
-func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Provider) *Runtime {
+func newBareRuntime(t *testing.T, values []coretool.Command, provider agent.Provider) *Runtime {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	reg := commands.NewRegistry()
-	tools := toolset.NewRegistry()
+	reg := coretool.NewCommandRegistry()
+	tools := coretool.NewToolRegistry()
 	terminal := terminaltools.New(terminaltools.Config{Directory: t.TempDir(), Timeout: 5})
 	var bash *terminaltool.BashTool
 	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
@@ -677,12 +679,12 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 	if err := terminalSet.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	application := apptest.NewState(t, nil, nil)
+	application := apptest.NewFixture(t, nil, nil)
 	rt := &Runtime{
-		history: JSONLHistory{}, primarySessionID: "main-repl", app: testEnvironment(application), ctx: ctx, cancel: cancel,
-		commandRegistry: reg, tools: tools, bash: bash,
+		history: JSONLHistory{}, primarySessionID: "main-repl", providers: application.Providers, events: application.Stream, Logger: application.Logger, ctx: ctx, cancel: cancel,
+		commandRegistry: reg, tools: tools, shell: bash,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
-		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
+		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application.Stream, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
 		closeDone:   make(chan struct{}), loaded: true,
 	}
 	commandValues, commandIndex, err := commandDeclarations(nil)
@@ -698,7 +700,7 @@ func newBareRuntime(t *testing.T, values []commands.Command, provider agent.Prov
 }
 
 func TestRuntimeSessionDirectLoopUsesSessionScheduler(t *testing.T) {
-	rt := newBareRuntime(t, []commands.Command{looptool.NewCommand()}, nil)
+	rt := newBareRuntime(t, []coretool.Command{looptool.NewCommand()}, nil)
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "chat-1"})
 	if err != nil {

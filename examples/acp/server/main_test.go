@@ -14,7 +14,6 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
-	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -33,17 +32,12 @@ type wsPeer struct {
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	store, err := webservice.NewSQLiteStore(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { store.Close() })
-	service, _, handler, err := newHeadlessHandler(store, "test-token")
+	set, handler, err := newHeadlessHandler(t.Context(), filepath.Join(t.TempDir(), "test.db"), "test-token")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := service.Close(context.Background()); err != nil {
+		if err := set.Close(context.Background()); err != nil {
 			t.Error(err)
 		}
 	})
@@ -195,8 +189,25 @@ func scriptedAgent(t *testing.T, baseURL, nodeID string, ready chan<- struct{}) 
 	agent.send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentHello{
 		AgentHello: &aop.AgentHello{NodeId: nodeID, Name: "scripted", Capabilities: []string{"tool"}},
 	}})
+	defer agent.conn.Close()
 	for {
-		envelope, message := agent.recv()
+		_, data, err := agent.conn.ReadMessage()
+		if err != nil {
+			if t.Context().Err() == nil {
+				t.Errorf("agent read: %v", err)
+			}
+			return
+		}
+		envelope := new(aop.Envelope)
+		if err := protobuf.Unmarshal(data, envelope); err != nil {
+			t.Error(err)
+			return
+		}
+		message, err := aop.Unwrap(envelope)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 		core, ok := message.(*aop.ProtocolMessage)
 		if !ok {
 			continue
@@ -240,6 +251,7 @@ type watched struct {
 
 func browserWatcher(t *testing.T, baseURL, sessionID string, got chan<- watched) {
 	watcher := dialPeer(t, baseURL)
+	defer watcher.conn.Close()
 	watchID := watcher.send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_WatchEventsRequest{
 		WatchEventsRequest: &aop.WatchEventsRequest{SessionId: sessionID},
 	}})

@@ -1,5 +1,5 @@
 [submodule "templates"]
-	path = templates
+	path = tools/templates
 	url = https://github.com/chainreactors/templates.git
 [submodule "web/frontend/cyber-ui"]
 	path = web/frontend/cyber-ui

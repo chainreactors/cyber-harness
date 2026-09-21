@@ -77,6 +77,7 @@ When producing a scan report, follow the format and verification semantics in `c
 
 - `wait: 0` (default): stay in the foreground until completion.
 - `wait: N`: move a still-running command to background after N seconds and return its session id. This is not a failure or cancellation.
+- An interrupting Inbox message also releases a foreground wait. The same tmux session continues and sends completion through Inbox. Use `inbox_wait` to await messages; do not use shell sleep or poll history to wait for peers.
 - omitted `timeout`: use the 600s safety timeout. `timeout: N` cancels the command after N total seconds, including background time. `timeout: 0` disables the command timeout.
 
 Background completion is delivered through the inbox automatically. Incremental output is best-effort; completion delivery is retained with higher priority.
@@ -123,4 +124,4 @@ Non-findings without impact chain: fingerprints, CORS/security headers, GraphQL 
 3. Non-interactive output only. No progress bars or unbounded streaming.
 4. Conservative threads/timeouts for localhost or fragile services.
 5. Use `scan --verify=high` when the user asks to validate risky findings.
-6. Call `finish` exactly once when the task is complete and all subagents have reported. Do not call it while subagents are running.
+6. Produce your final answer when the task is complete and all subagents have reported. Do not end the turn while subagents are running.

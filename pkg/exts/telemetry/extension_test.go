@@ -3,15 +3,14 @@ package telemetry_test
 import (
 	"context"
 	"errors"
+	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
+	eventjsonl "github.com/chainreactors/cyber/core/events/jsonl"
+	"github.com/chainreactors/cyber/core/extension"
+	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	"os"
 	"path/filepath"
 	"testing"
-
-	aop "github.com/chainreactors/cyber/aop"
-	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/output"
-	telemetry "github.com/chainreactors/cyber/pkg/exts/telemetry"
 )
 
 func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
@@ -38,7 +37,7 @@ func TestOutputIsInertThenDrainsCanonicalEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	events.Publish(&aop.Event{Id: "late", Payload: &aop.Event_Status{Status: &aop.Status{State: "late"}}})
-	recorded, err := output.ReadJSONL(path)
+	recorded, err := eventjsonl.ReadJSONL(path)
 	if err != nil || len(recorded) != 4 {
 		t.Fatalf("events=%d err=%v", len(recorded), err)
 	}
@@ -94,7 +93,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if err := writer.Flush(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	recorded, err := output.ReadJSONL(path)
+	recorded, err := eventjsonl.ReadJSONL(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestOutputFlushMakesAdmittedEventsVisibleAndKeepsAdmission(t *testing.T) {
 	if err := set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	recorded, err = output.ReadJSONL(path)
+	recorded, err = eventjsonl.ReadJSONL(path)
 	if err != nil || len(recorded) != 2 || recorded[1].GetId() != "second" {
 		t.Fatalf("closed output: %v %v", recorded, err)
 	}

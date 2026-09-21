@@ -1,7 +1,7 @@
 package scan
 
 import (
-	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/pkg/output"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -50,15 +50,15 @@ func formatEventLine(event event, color bool) string {
 		loot := event.Loot
 		var label string
 		switch loot.Kind {
-		case output.LootFingerprint:
+		case parsers.LootFingerprint:
 			focus, _ := loot.Data["focus"].(bool)
 			if !focus {
 				return ""
 			}
 			label = "fingerprint"
-		case output.LootWeakpass:
+		case parsers.LootWeakpass:
 			label = "risk"
-		case output.LootVuln:
+		case parsers.LootVuln:
 			label = "vuln"
 		default:
 			label = loot.Kind

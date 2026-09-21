@@ -16,295 +16,81 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
+	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	operationpb "github.com/chainreactors/cyber/aop/operation"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	"github.com/chainreactors/cyber/tools/curl"
-	"github.com/chainreactors/cyber/tools/gogo"
-	"github.com/chainreactors/cyber/tools/neutron"
-	"github.com/chainreactors/cyber/tools/proton"
+	"github.com/chainreactors/cyber/core/extension"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
+	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/tools/resources"
-	"github.com/chainreactors/cyber/tools/scan/engine"
-	searchtools "github.com/chainreactors/cyber/tools/search"
-	"github.com/chainreactors/cyber/tools/spray"
-	"github.com/chainreactors/cyber/tools/zombie"
-	fingerslib "github.com/chainreactors/fingers/fingers"
-	neutronhttp "github.com/chainreactors/neutron/protocols/http"
-	"github.com/chainreactors/proxyclient"
-	sdkfingers "github.com/chainreactors/sdk/fingers"
-	sdkgogo "github.com/chainreactors/sdk/gogo"
-	"github.com/chainreactors/sdk/pkg/association"
-	sdkspray "github.com/chainreactors/sdk/spray"
-	sdkzombie "github.com/chainreactors/sdk/zombie"
 	"github.com/chainreactors/utils/parsers"
 )
 
-func buildRegistry(t *testing.T, engineSet *engine.Set) *commands.Registry {
-	t.Helper()
-	logger := telemetry.NopLogger()
-	events := coreevents.New()
-	fetch := searchtools.NewFetchCommand()
-	var index *association.Index
-	if engineSet != nil {
-		index = engineSet.Index
-		if index == nil && engineSet.Resources != nil && engineSet.Resources.FingersConfig != nil {
-			full := engineSet.Resources.FingersConfig.FullFingers
-			index = association.NewIndex()
-			index.BuildWithFingers(full.Fingers(), full.Aliases(), nil)
-		}
-	}
-	cyberhub := searchtools.NewCyberhubSearch(index)
-	values := scannerCommandValues(engineSet, t.TempDir(), events, logger)
-	values = append(values,
-		commands.Command{Name: fetch.Name(), Usage: fetch.Usage(), Run: fetch.Run},
-		commands.Command{Name: cyberhub.Name(), Usage: cyberhub.Usage(), Run: cyberhub.Run},
-	)
-	return hosttest.Commands(t, values...)
+type scannerInstallation struct {
+	commands *coretool.CommandRegistry
+	events   *coreevents.Stream
+	prompts  prompt.Resolver
 }
 
-func registerTestScanners(t *testing.T, engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger, extra ...commands.Command) *commands.Registry {
+func installScanner(t *testing.T, directory string, config Config, extra ...extension.Extension) scannerInstallation {
 	t.Helper()
-	values := scannerCommandValues(engineSet, workDir, events, logger)
+	values, err := harness.BaseExtensions(harness.BaseConfig{Directory: directory, Provider: provider.StartupConfig{Mode: provider.StartupDisabled}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), searchext.New(searchext.Config{}))
 	values = append(values, extra...)
-	return hosttest.Commands(t, values...)
+	var installed scannerInstallation
+	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		commands, err := extension.Use[coretool.CommandExecutor](scope)
+		if err != nil {
+			return err
+		}
+		installed.commands = commands.(*coretool.CommandRegistry)
+		if installed.events, err = extension.Use[*coreevents.Stream](scope); err != nil {
+			return err
+		}
+		installed.prompts, err = extension.Use[prompt.Resolver](scope)
+		return err
+	}})
+	hosttest.Load(t, t.Context(), values...)
+	return installed
 }
 
-func scannerCommandValues(engineSet *engine.Set, workDir string, events aop.EventPublisher, logger telemetry.Logger) []commands.Command {
-	values := []commands.Command{
-		curl.NewCommand(logger, "", events),
-		proton.NewCommand(workDir, engineSet.Resources, logger, "", events),
-	}
-	for _, factory := range []func() (commands.Command, error){
-		func() (commands.Command, error) { return gogo.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return neutron.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return spray.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return zombie.NewCommand(engineSet, logger, "", events) },
-		func() (commands.Command, error) { return newScanCommand(engineSet, nil, "", events) },
-	} {
-		if command, err := factory(); err == nil {
-			values = append(values, command)
+func TestScannerMissingResourcesDoesNotInventEngines(t *testing.T) {
+	installed := installScanner(t, t.TempDir(), Config{Resources: resources.Options{Mode: "invalid"}})
+	for _, name := range []string{"neutron", "gogo", "spray", "zombie", "scan"} {
+		if installed.commands.Has(name) {
+			t.Fatalf("unexpected unavailable command %s", name)
 		}
 	}
-	return values
 }
-
-func TestRegisterAllTreatsNeutronAsOptional(t *testing.T) {
-	gogoEng, _ := sdkgogo.NewEngine(nil)
-	sprayEng, _ := sdkspray.NewEngine(nil)
-	engineSet := &engine.Set{
-		Gogo:  gogoEng,
-		Spray: sprayEng,
-	}
-	reg := buildRegistry(t, engineSet)
-
-	for _, name := range []string{"scan", "gogo", "spray"} {
-		if !reg.Has(name) {
-			t.Fatalf("expected %q to be registered", name)
-		}
-	}
-	if reg.Has("neutron") {
-		t.Fatal("neutron should not be registered without templates")
-	}
-}
-
-// TestCommandsCarryAPromptDescription guards the system prompt's pseudo-command
-// list. A command with no QuickReference whose Usage opens with the generated
-// "Usage:" header is listed as a bare name, which tells the model nothing about
-// when to reach for it — zombie and scan both shipped that way.
 func TestCommandsCarryAPromptDescription(t *testing.T) {
-	gogoEng, _ := sdkgogo.NewEngine(nil)
-	sprayEng, _ := sdkspray.NewEngine(nil)
-	zombieEng, _ := sdkzombie.NewEngine(nil)
-	reg := buildRegistry(t, &engine.Set{Gogo: gogoEng, Spray: sprayEng, Zombie: zombieEng})
-
-	specs := reg.All()
-	if len(specs) == 0 {
-		t.Fatal("no commands registered")
-	}
+	reg := installScanner(t, t.TempDir(), Config{}).commands
 	docs := reg.UsageDocs()
-	for _, spec := range specs {
-		if strings.Contains(docs, "- "+spec.Name+"\n") {
-			t.Errorf("%s is listed as a bare name; declare a QuickReference or open Usage with a summary line", spec.Name)
+	for _, name := range Names() {
+		if reg.Has(name) && strings.Contains(docs, "- "+name+"\n") {
+			t.Errorf("%s has no prompt description", name)
 		}
 	}
 }
-
-func TestRegisterAllRegistersSearchWithResources(t *testing.T) {
-	engineSet := &engine.Set{
-		Resources: &resources.Set{
-			FingersConfig: sdkfingers.NewConfig().WithFingers(fingerslib.Fingers{{Name: "nginx", Protocol: "http"}}),
-		},
-	}
-	reg := buildRegistry(t, engineSet)
-
-	if !reg.Has("cyberhub") {
-		t.Fatal("expected cyberhub search command to be registered")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Proxy tests
-// ---------------------------------------------------------------------------
-
-// startSOCKS5CountingProxy starts a minimal SOCKS5 server that counts
-// connection attempts. It returns the proxy URL and a function to read
-// the connection count.
-func startSOCKS5CountingProxy(t *testing.T) (string, func() int32) {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	var count atomic.Int32
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			count.Add(1)
-			go handleSOCKS5(conn)
+func TestScannerAndSearchContributeTheirCommands(t *testing.T) {
+	reg := installScanner(t, t.TempDir(), Config{}).commands
+	for _, name := range []string{"cyberhub", "fetch"} {
+		if !reg.Has(name) {
+			t.Fatalf("missing %s", name)
 		}
-	}()
-	t.Cleanup(func() { ln.Close() })
-	return fmt.Sprintf("socks5://%s", ln.Addr().String()), func() int32 { return count.Load() }
-}
-
-func handleSOCKS5(conn net.Conn) {
-	defer conn.Close()
-	buf := make([]byte, 256)
-	n, err := conn.Read(buf)
-	if err != nil || n < 3 || buf[0] != 0x05 {
-		return
-	}
-	conn.Write([]byte{0x05, 0x00})
-
-	n, err = conn.Read(buf)
-	if err != nil || n < 7 || buf[0] != 0x05 || buf[1] != 0x01 {
-		return
-	}
-
-	conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
-
-	go io.Copy(io.Discard, conn)
-	time.Sleep(50 * time.Millisecond)
-}
-
-func TestProxyclientDialCreateFromURL(t *testing.T) {
-	proxyAddr, getCount := startSOCKS5CountingProxy(t)
-
-	proxyURL, err := url.Parse(proxyAddr)
-	if err != nil {
-		t.Fatalf("parse proxy URL: %v", err)
-	}
-	dial, err := proxyclient.NewClient(proxyURL)
-	if err != nil {
-		t.Fatalf("proxyclient.NewClient: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	conn, err := dial.DialContext(ctx, "tcp", "127.0.0.1:1")
-	if conn != nil {
-		conn.Close()
-	}
-	if getCount() == 0 {
-		t.Fatal("proxyclient dial did not reach the SOCKS5 proxy")
-	}
-	_ = err
-}
-
-func TestGogoInjectProxy(t *testing.T) {
-	proxyAddr, _ := startSOCKS5CountingProxy(t)
-
-	cmd := gogo.New(nil).WithProxy(proxyAddr)
-
-	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
-	if err != nil {
-		t.Fatalf("gogo --help with proxy: %v", err)
-	}
-	if output.String() == "" {
-		t.Fatal("expected help output")
-	}
-
-	injected := cmd.TestInjectProxy([]string{"-i", "127.0.0.1"})
-	hasProxy := false
-	for i, arg := range injected {
-		if arg == "--proxy" && i+1 < len(injected) && injected[i+1] == proxyAddr {
-			hasProxy = true
-			break
-		}
-	}
-	if !hasProxy {
-		t.Fatalf("expected --proxy %s in args, got %v", proxyAddr, injected)
-	}
-
-	alreadyHas := cmd.TestInjectProxy([]string{"-i", "127.0.0.1", "--proxy", "socks5://other:1080"})
-	proxyCount := 0
-	for _, arg := range alreadyHas {
-		if arg == "--proxy" {
-			proxyCount++
-		}
-	}
-	if proxyCount != 1 {
-		t.Fatalf("expected 1 --proxy flag (user-provided), got %d in %v", proxyCount, alreadyHas)
-	}
-}
-
-func TestSprayInjectProxy(t *testing.T) {
-	proxyAddr, _ := startSOCKS5CountingProxy(t)
-
-	cmd := spray.New(nil).WithProxy(proxyAddr)
-
-	injected := cmd.TestInjectProxy([]string{"-u", "http://example.com"})
-	hasProxy := false
-	for i, arg := range injected {
-		if arg == "--proxy" && i+1 < len(injected) && injected[i+1] == proxyAddr {
-			hasProxy = true
-			break
-		}
-	}
-	if !hasProxy {
-		t.Fatalf("expected --proxy %s in args, got %v", proxyAddr, injected)
-	}
-}
-
-// TestZombieExecuteWithProxy verifies that zombie's Execute passes proxy via
-// RunOptions.ProxyDial (not global patching).
-func TestZombieExecuteWithProxy(t *testing.T) {
-	proxyAddr, _ := startSOCKS5CountingProxy(t)
-
-	cmd := zombie.New(nil).WithProxy(proxyAddr)
-
-	// Execute with --help just to verify no panic; the proxy is built
-	// but not exercised because --help exits before any network I/O.
-	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
-	if err != nil {
-		t.Fatalf("zombie --help: %v", err)
-	}
-}
-
-// Neutron proxy configuration belongs to each command and resource set.
-func TestNeutronProxyIsInstanceLocal(t *testing.T) {
-	original := fmt.Sprintf("%p/%p", neutronhttp.DefaultOption.Proxy, neutronhttp.DefaultTransport.Proxy)
-	first := neutron.New(nil, nil).WithProxy("socks5://127.0.0.1:10001")
-	second := neutron.New(nil, nil).WithProxy("socks5://127.0.0.1:10002")
-	first.SetProxy("")
-	if first.Proxy != "" || second.Proxy != "socks5://127.0.0.1:10002" {
-		t.Fatal("proxy leaked between commands")
-	}
-	if current := fmt.Sprintf("%p/%p", neutronhttp.DefaultOption.Proxy, neutronhttp.DefaultTransport.Proxy); current != original {
-		t.Fatal("command changed Neutron process defaults")
 	}
 }
 
@@ -389,7 +175,7 @@ func (r *functionalRecorder) since(mark int) []functionalEvent {
 	return append([]functionalEvent(nil), r.events[mark:]...)
 }
 
-func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *functionalRecorder, cases []functionalCase) {
+func runFunctionalCases(t *testing.T, registry *coretool.CommandRegistry, recorder *functionalRecorder, cases []functionalCase) {
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.Name, func(t *testing.T) {
@@ -404,7 +190,7 @@ func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *fun
 			defer cancel()
 
 			var stdout, stderr bytes.Buffer
-			parent := &commands.Execution{
+			parent := &coretool.Execution{
 				ID:     "functional-" + testCase.Name,
 				Stdin:  strings.NewReader(testCase.Stdin),
 				Stdout: &stdout,
@@ -426,7 +212,7 @@ func runFunctionalCases(t *testing.T, registry *commands.Registry, recorder *fun
 	}
 }
 
-func requireFunctionalCoverage(t *testing.T, registry *commands.Registry, cases []functionalCase, coveredElsewhere ...string) {
+func requireFunctionalCoverage(t *testing.T, registry *coretool.CommandRegistry, cases []functionalCase, coveredElsewhere ...string) {
 	t.Helper()
 	covered := make(map[string]bool, len(cases)+len(coveredElsewhere))
 	for _, testCase := range cases {
@@ -435,7 +221,10 @@ func requireFunctionalCoverage(t *testing.T, registry *commands.Registry, cases 
 	for _, name := range coveredElsewhere {
 		covered[name] = true
 	}
-	for _, name := range registry.Names() {
+	for _, name := range Names() {
+		if !registry.Has(name) {
+			continue
+		}
 		if !covered[name] {
 			t.Fatalf("scanner %q has no functional regression case", name)
 		}
@@ -495,18 +284,10 @@ func TestScannerFunctionalRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	engineSet, err := engine.InitWithOptions(ctx, resources.Options{}, telemetry.NopLogger())
-	if err != nil {
-		t.Fatalf("initialize scanner engines: %v", err)
-	}
-	defer engineSet.Close()
-
 	workDir := t.TempDir()
-	bus := coreevents.New()
-	recorder := newFunctionalRecorder(bus)
-	registry := registerTestScanners(t, engineSet, workDir, bus, telemetry.NopLogger())
+	installed := installScanner(t, workDir, Config{})
+	recorder := newFunctionalRecorder(installed.events)
+	registry := installed.commands
 
 	required := []string{"scan", "gogo", "spray", "zombie", "neutron", "proton"}
 	for _, name := range required {

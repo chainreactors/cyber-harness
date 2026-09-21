@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,13 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainreactors/cyber/agent/inbox"
-	"github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/types"
+
+	agenthooks "github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/core/hooks"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -70,10 +70,10 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			}))
 			defer server.Close()
 			received := make(chan inbox.Message, 4)
-			adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true}, Dependencies{
-				Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil },
-			})
-			set, err := extension.New(hosttest.Capabilities(), promptext.New(), adapter)
+			connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "receiver", Space: "test", AutoRegister: true})
+			adapter := NewCollaboration(CollaborationOptions{})
+			registry := hooks.New()
+			set, err := extension.New(extension.Provided[*hooks.Registry](registry), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, adapter)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +114,10 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 				}
 			}
 			waitSubscription(1)
-			send(adapter.resource.Client().NodeID(), "self")
+			if _, err := agenthooks.SessionStart.Emit(ctx, registry, agenthooks.SessionEvent{SessionID: "main", Primary: true, Deliver: func(_ context.Context, message inbox.Message) error { received <- message; return nil }}); err != nil {
+				t.Fatal(err)
+			}
+			send(adapter.service.Client().NodeID(), "self")
 			send("peer", "first")
 			receive("first")
 			close(drop)
@@ -127,86 +130,148 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 		})
 	}
 }
-func TestClientDrainsEventsEmittedByDependentClose(t *testing.T) {
+
+func TestClientRecordsDuringDependentClose(t *testing.T) {
 	store := ioaserver.NewMemoryStore()
 	defer store.Close()
-	server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "test-key")))
+	server := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "key")))
 	defer server.Close()
-	stream := events.New()
-	adapter := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test-key@", 1), NodeName: "publisher", Space: "test", AutoRegister: true}, Dependencies{})
-	agent := extension.Func{CloseFunc: func(context.Context) error {
-		start := &aop.Event{SessionId: "child", Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentSessionId: "parent", ParentToolCallId: "spawn"}}}
-		setDelegation(t, start)
-		stream.Publish(start)
-		stream.Publish(&aop.Event{SessionId: "child", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{StopReason: "completed"}}})
-		return nil
-	}}
-	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter, agent)
+	reg := hooks.New()
+	connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true, Space: DefaultSpace})
+	e := NewCollaboration(CollaborationOptions{})
+	ev := agenthooks.SessionEvent{SessionID: "child", ParentID: "parent", ParentToolCallID: "call", AgentName: "worker", Input: "task", Delegation: &types.DelegationDetail{Task: "task"}}
+	dependent := extension.Func{
+		LoadFunc: func(scope *extension.Scope) error {
+			_, err := agenthooks.SessionStart.Emit(scope.Init(), reg, ev)
+			return err
+		},
+		CloseFunc: func(ctx context.Context) error {
+			ev.Output = "finished during close"
+			ev.Stop = agenthooks.StopReasonCanceled
+			_, err := agenthooks.SessionEnd.Emit(ctx, reg, ev)
+			return err
+		},
+	}
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e, dependent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := set.Load(t.Context()); err != nil {
+	if err = set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := set.Close(t.Context()); err != nil {
+	space := e.Service().ReceiveSpace()
+	if err = set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.GetMessages(adapter.Service().ReceiveSpace(), "", 10)
-	if err != nil {
-		t.Fatal(err)
+	messages, err := store.GetMessages(space, "", 10)
+	if err != nil || len(messages) != 2 || messages[1].Refs.Messages[0] != messages[0].ID {
+		t.Fatalf("undrained: %v %v", messages, err)
 	}
-	if len(messages) != 2 || messages[1].Refs.Messages[0] != messages[0].ID {
-		t.Fatalf("handoffs were not drained: %#v", messages)
+}
+
+func TestRecordFailuresAreSynchronous(t *testing.T) {
+	for _, phase := range []string{"delegate", "return"} {
+		t.Run(phase, func(t *testing.T) {
+			store := ioaserver.NewMemoryStore()
+			defer store.Close()
+			handler := ioaserver.NewHTTPHandler(ioaserver.NewService(store, "key"))
+			var sends atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/messages") {
+					n := sends.Add(1)
+					if (phase == "delegate" && n == 1) || (phase == "return" && n == 2) {
+						http.Error(w, "record unavailable", http.StatusServiceUnavailable)
+						return
+					}
+				}
+				handler.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			reg := hooks.New()
+			connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true, Space: DefaultSpace})
+			e := NewCollaboration(CollaborationOptions{})
+			set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = set.Load(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			defer set.Close(context.Background())
+			ev := agenthooks.SessionEvent{SessionID: "child", Delegation: &types.DelegationDetail{Task: "task"}}
+			_, startErr := agenthooks.SessionStart.Emit(t.Context(), reg, ev)
+			if (phase == "delegate") != (startErr != nil) {
+				t.Fatalf("start: %v", startErr)
+			}
+			ev.Output = "result"
+			ev.Stop = agenthooks.StopReasonCompleted
+			_, endErr := agenthooks.SessionEnd.Emit(t.Context(), reg, ev)
+			if (phase == "return") != (endErr != nil) {
+				t.Fatalf("end: %v", endErr)
+			}
+			e.mu.Lock()
+			routes := len(e.routes)
+			e.mu.Unlock()
+			if routes != 0 {
+				t.Fatal("failed record retained route")
+			}
+			if sends.Load() != map[string]int32{"delegate": 1, "return": 2}[phase] {
+				t.Fatal("record silently retried")
+			}
+		})
 	}
 }
 
 func TestClientCloseTimeoutRetainsResourceForRetry(t *testing.T) {
-	entered := make(chan struct{})
+	store := ioaserver.NewMemoryStore()
+	defer store.Close()
+	handler := ioaserver.NewHTTPHandler(ioaserver.NewService(store, "key"))
+	entered, release := make(chan struct{}), make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/messages") {
-			_, _ = io.Copy(io.Discard, r.Body)
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/messages") {
 			close(entered)
-			<-r.Context().Done()
-			return
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"space-1"}`)
+		handler.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	stream := events.New()
-	adapter := New(service.Config{URL: server.URL, NodeID: "node-1", Space: "test"}, Dependencies{})
-	set, err := extension.New(extension.Provided[*events.Stream](stream), promptext.New(), adapter)
+	reg := hooks.New()
+	connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://key@", 1), AutoRegister: true, Space: DefaultSpace})
+	e := NewCollaboration(CollaborationOptions{})
+	set, err := extension.New(extension.Provided[*hooks.Registry](reg), promptext.New(), extension.Provided(telemetry.NopLogger()), connection, e)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := set.Load(t.Context()); err != nil {
+	if err = set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	start := &aop.Event{SessionId: "child", Payload: &aop.Event_SessionStarted{SessionStarted: &aop.SessionStarted{ParentToolCallId: "spawn"}}}
-	setDelegation(t, start)
-	stream.Publish(start)
+	finished := make(chan error, 1)
+	go func() {
+		_, err := agenthooks.SessionStart.Emit(t.Context(), reg, agenthooks.SessionEvent{SessionID: "child", Delegation: &types.DelegationDetail{Task: "task"}})
+		finished <- err
+	}()
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("send did not start")
+		t.Fatal("record did not start")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	deadline, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	if err := set.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
-		t.Fatalf("close = %v", err)
+	if err = set.Close(deadline); !errors.Is(err, extension.ErrCloseIncomplete) {
+		t.Fatalf("close: %v", err)
 	}
-	if err := adapter.Service().WaitReady(t.Context()); err != nil {
-		t.Fatalf("resource was released prematurely: %v", err)
+	if err = e.Service().WaitReady(t.Context()); err != nil {
+		t.Fatalf("resource released before hook drained: %v", err)
 	}
-	// Cancellation can be reported as an ordinary completed-output error.
-	if err := set.Close(t.Context()); errors.Is(err, extension.ErrCloseIncomplete) {
-		t.Fatalf("retry did not drain: %v", err)
+	close(release)
+	if err = <-finished; err != nil {
+		t.Fatal(err)
 	}
-}
-
-func setDelegation(t *testing.T, event *aop.Event) {
-	t.Helper()
-	if err := types.SetDelegation(event, &types.DelegationDetail{Task: "test", AgentName: "worker", RunMode: types.DelegationRunForeground}); err != nil {
+	if err = set.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 }

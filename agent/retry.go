@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -161,6 +162,44 @@ func computeRetryDelay(attempt int, jitterFrac float64) time.Duration {
 	return delay
 }
 
+// Only model work receives this short-lived cancellation scope. Tools and the
+// task lifetime keep their original context, so interruption cannot kill work.
+func requestWithInboxInterrupt(ctx context.Context, cfg Config, em *aopEmitter, messages []*aop.Message, tools []*aop.ToolDefinition, turn int) (*assistantTurn, *aop.TokenUsage, error) {
+	if cfg.Inbox == nil {
+		return requestWithRetry(ctx, cfg, em, messages, tools, turn)
+	}
+	signal := cfg.Inbox.InterruptSignal()
+	select {
+	case <-signal:
+		return nil, nil, inbox.ErrInterrupted
+	default:
+	}
+	requestCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-signal:
+			cancel(inbox.ErrInterrupted)
+		case <-finished:
+		case <-requestCtx.Done():
+		}
+	}()
+	assistant, usage, err := requestWithRetry(requestCtx, cfg, em, messages, tools, turn)
+	if ctx.Err() != nil {
+		return nil, usage, ctx.Err()
+	}
+	// Check the signal as well as the context: delivery can race a completed
+	// response before the cancellation goroutine runs.
+	select {
+	case <-signal:
+		return nil, usage, inbox.ErrInterrupted
+	default:
+	}
+	return assistant, usage, err
+}
+
 func requestWithRetry(ctx context.Context, cfg Config, em *aopEmitter, messages []*aop.Message, tools []*aop.ToolDefinition, turn int) (*assistantTurn, *aop.TokenUsage, error) {
 	var lastErr error
 	maxAttempts := cfg.MaxRetries + 1
@@ -189,7 +228,7 @@ func requestWithRetry(ctx context.Context, cfg Config, em *aopEmitter, messages 
 		lastErr = err
 
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			return nil, usage, ctxErr
 		}
 
 		if provider.IsImageUnsupportedError(err) {
@@ -300,13 +339,13 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, usage, ctx.Err()
 		case event, ok := <-events:
 			if !ok {
 				goto streamDone
 			}
 			if event.Err != nil {
-				return nil, nil, fmt.Errorf("LLM stream failed at turn %d: %w", turn, event.Err)
+				return nil, usage, fmt.Errorf("LLM stream failed at turn %d: %w", turn, event.Err)
 			}
 			if event.Usage != nil {
 				usage = event.Usage
@@ -334,6 +373,9 @@ func streamAssistantMessageWithUsage(ctx context.Context, p StreamingProvider, r
 		}
 	}
 streamDone:
+	if err := ctx.Err(); err != nil {
+		return nil, usage, err
+	}
 
 	msg := builder.Message()
 	msg.Id = messageID

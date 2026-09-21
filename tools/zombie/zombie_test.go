@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
@@ -18,7 +18,7 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
 	var output bytes.Buffer
-	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "● zombie debug enabled") {
@@ -29,7 +29,7 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 func TestExecuteRejectsInvalidCallScopedProxy(t *testing.T) {
 	cmd := New(nil).WithProxy("http://startup.example:8080")
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{
+	_, err := cmd.Run(context.Background(), &coretool.Execution{
 		Args:   []string{"--help"},
 		Env:    []string{"ALL_PROXY=not-a-proxy"},
 		Stdout: &output,

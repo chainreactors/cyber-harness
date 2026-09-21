@@ -14,7 +14,7 @@
 
 ## 复用命令能力
 
-当功能本来就是一个带参数的命令，贡献 `commands.Command` 可以复用现有 CLI 知识。Agent 通过 bash 工具调用它，终端路由把已注册命令交给进程内实现，其余命令交给宿主 shell。
+当功能本来就是一个带参数的命令，贡献 `tool.Command` 可以复用现有 CLI 知识。Agent 通过 bash 工具调用它，终端路由把已注册命令交给进程内实现，其余命令交给宿主 shell。
 
 这种接入适合扫描器、查询和格式校验。它不需要额外生成同名可执行文件，也不必为每个 flag 再定义一个模型工具。若应用需要专门的结构化交互，再增加 Tool 表面，并让两种入口调用同一业务实现。
 
@@ -40,6 +40,8 @@ Prompt 在一次 Run 开始时解析。运行中改变贡献不会追溯修改�
 
 只有构造配置的简单应用可以直接使用 Go 值。要把功能加入统一 CLI 和配置文件时，功能包提供 `Declare`，向宿主预先定义的 CLI、配置与连接测试贡献点提交声明。宿主解析后把确定的值传入构造函数；`Declare` 不负责启动服务。
 
+基础配置的字段归属统一定义在 `config.Option`：`local:"true"` 表示本地设置，适用于身份、传输、数据目录和输出；没有配置键的进程参数也留在本地。文件加载与远端替换共用合并、环境覆盖和校验逻辑，远端替换不再逐项复制本地字段。扩展配置仍以各自的 `Section` 声明为准，通过 `Resolved` 提供已校验的值。文件层状态仅用于发现、编辑与诊断，不参与远端配置替换，也不承载运行服务。
+
 Load 中的初始化使用 `scope.Init()`，持续后台工作使用 `scope.Lifetime()`。扩展若持有 goroutine、订阅或连接，还应实现 `Close(context.Context) error`：停止接收新工作，结束已有工作并释放资源。只贡献静态条目的 hello 扩展不需要空的 Close。
 
 关闭 deadline 到达而资源仍在工作时，返回 `extension.ErrCloseIncomplete` 或可识别的 context 错误，以便 Set 保留依赖并重试。完整的撤销顺序和失败回滚见[扩展装配](../architecture/composition.md)。
@@ -50,7 +52,7 @@ Load 中的初始化使用 `scope.Init()`，持续后台工作使用 `scope.Life
 
 ```sh
 go run ./examples/custom
-go test ./core/resource ./core/extension ./core/registry ./pkg/toolset
+go test ./core/resource ./core/extension ./core/registry ./core/tool
 ```
 
 支持 CGO 与 race detector 的平台可进一步执行 `go test -race ./core/resource ./core/extension ./core/registry`。当扩展已能独立工作，下一步是在[宿主中打开会话](hosting.md)，让模型使用它。

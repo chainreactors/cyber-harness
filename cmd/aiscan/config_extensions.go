@@ -2,25 +2,21 @@ package main
 
 import (
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
+	"net/url"
+
 	types "github.com/chainreactors/cyber/core/types"
-	app "github.com/chainreactors/cyber/pkg/app"
-	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
-	"net/url"
-	"strings"
 )
 
-// cyber.yaml is wider than the shared proto schema: --init also emits local
-// sections and switches (misc, output, traffic, the flat LLM
-// shorthand, the agent evaluation settings, cyberhub.mitm). The settings page
-// rewrites the whole file, so those keys have to survive a read/write cycle
-// instead of being rejected as unknown fields or dropped by the rewrite.
+// cyber.yaml includes local fields outside the shared settings proto. Preserve
+// those fields when projecting settings for the Web editor.
 
 // protoKeyTree holds the keys the shared proto accepts, per message. A nil
 // subtree marks an opaque value (list, map or well-known Struct) copied whole.
@@ -93,7 +89,7 @@ func ownConfig(data []byte) (map[string]any, error) {
 		return nil, err
 	}
 	if _, legacy := document["ioa"]; legacy {
-		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", ioaclient.ConfigKey)
 	}
 	_, own := splitDocument(document, configurationProtoKeys)
 	for _, alias := range defaultSections().Aliases() {
@@ -123,7 +119,7 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 		return nil, err
 	}
 	if _, legacy := document["ioa"]; legacy {
-		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", client.ConfigKey)
+		return nil, fmt.Errorf("configuration ioa was removed; use extensions.%s", ioaclient.ConfigKey)
 	}
 	projection, _ := splitDocument(document, configurationProtoKeys)
 	value, err := cfg.LoadDistributeConfigDocument(projection)
@@ -141,80 +137,15 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	if err = validateConfig(value); err != nil {
 		return nil, err
 	}
-	cfg.NormalizeLLMConfig(value.Llm)
-	return value, nil
-}
-
-// projectRuntimeConfig renders the resolved flags config as the settings
-// payload. Startup flags and environment are the config truth, so a run with no
-// cyber.yaml on disk must still report what the agent actually uses instead of
-// an empty document.
-func projectRuntimeConfig(option *cfg.Option) (*types.DistributeConfig, error) { //nolint:unused // used by the full-tag web build
-	if option == nil {
-		return &types.DistributeConfig{}, nil
-	}
-	reconLimit := 0
-	if option.ReconLimit != nil {
-		reconLimit = *option.ReconLimit
-	}
-	keys := make([]string, 0, 2)
-	for _, raw := range []string{option.TavilyKey, option.SearchConfig.TavilyKeys} {
-		if raw = strings.TrimSpace(raw); raw != "" {
-			keys = append(keys, raw)
+	if cfg.HasSingleProviderFields(&option) {
+		fileOption, e := (&cfg.Snapshot{Document: document, Sources: map[string]string{}}).FileOptions(defaultSections())
+		if e != nil {
+			return nil, e
 		}
-	}
-	extensions, err := cfg.ValuesToProto(option.Extensions)
-	if err != nil {
-		return nil, err
-	}
-	value := &types.DistributeConfig{
-		Llm: runtimeLLMConfig(option),
-		Cyberhub: &types.CyberhubConfig{
-			Url: option.CyberhubURL, Key: option.CyberhubKey,
-			Mode: option.CyberhubMode, Proxy: option.Proxy,
-		},
-		Recon: &types.ReconConfig{
-			FofaKey: option.FofaKey, HunterApiKey: option.HunterAPIKey,
-			Proxy: option.ReconProxy, Limit: int32(reconLimit),
-		},
-		Scan:       &types.ScanConfig{Verify: option.ScanConfig.Verify},
-		Search:     &types.SearchConfig{TavilyKeys: strings.Join(keys, ",")},
-		Agent:      &types.AgentConfig{Tools: append([]string(nil), option.Tools...), Timeout: int32(option.Timeout)},
-		Node:       &types.NodeConfig{Id: option.NodeID, Name: option.NodeName},
-		Extensions: extensions,
+		value.Llm = cfg.LLMFromOption(fileOption)
 	}
 	cfg.NormalizeLLMConfig(value.Llm)
 	return value, nil
-}
-
-// runtimeLLMConfig mirrors how the runtime picks the active provider: the flat
-// single-provider flags win over the profile list, so they are projected as the
-// leading profile instead of being dropped.
-func runtimeLLMConfig(option *cfg.Option) *types.LLMConfig { //nolint:unused // used by projectRuntimeConfig in the full-tag web build
-	llm := &types.LLMConfig{}
-	flat := app.HasSingleProviderFields(option)
-	if flat {
-		active := app.ProviderConfig(option)
-		llm.Providers = append(llm.Providers, &types.LLMProviderConfig{
-			Provider: active.Provider, BaseUrl: active.BaseURL, ApiKey: active.APIKey,
-			Model: active.Model, Proxy: active.Proxy, Timeout: int32(active.Timeout),
-			MaxTokens: int32(active.MaxTokens), ContextWindow: int32(active.ContextWindow),
-		})
-	} else {
-		llm.ActiveProfile = option.ActiveProfile
-	}
-	for _, entry := range option.Providers {
-		timeout := entry.Timeout
-		if timeout <= 0 {
-			timeout = 120
-		}
-		llm.Providers = append(llm.Providers, &types.LLMProviderConfig{
-			Id: entry.ID, Name: entry.Name, Provider: entry.Provider, BaseUrl: entry.BaseURL,
-			ApiKey: entry.APIKey, Model: entry.Model, Proxy: entry.Proxy, Timeout: int32(timeout),
-			Images: entry.Images, MaxTokens: int32(entry.MaxTokens), ContextWindow: int32(entry.ContextWindow),
-		})
-	}
-	return llm
 }
 
 // original is the file being replaced; local settings are carried over from it
@@ -261,8 +192,8 @@ func dropNullValues(section map[string]any) {
 func configAPI() managementapi.ConfigOptions {
 	sections := defaultSections()
 	return managementapi.ConfigOptions{Sections: sections, Project: func(config *types.DistributeConfig, view *types.ConfigView) {
-		client.RedactView(view)
-		if ext := view.Extensions[server.ConfigKey]; ext != nil && ext.Values != nil {
+		ioaclient.RedactView(view)
+		if ext := view.Extensions[ioaserver.ConfigKey]; ext != nil && ext.Values != nil {
 			value := ext.Values.Fields["url"].GetStringValue()
 			if u, err := url.Parse(value); err == nil {
 				u.User = nil
@@ -274,7 +205,7 @@ func configAPI() managementapi.ConfigOptions {
 
 // Restoring a masked URL keeps saved credentials only for the same endpoint.
 func preserveURLCredentials(incoming, current cfg.Values) {
-	for _, key := range []string{client.ConfigKey, server.ConfigKey} {
+	for _, key := range []string{ioaclient.ConfigKey, ioaserver.ConfigKey} {
 		fields := incoming[key]
 		if fields == nil {
 			continue

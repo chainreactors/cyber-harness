@@ -13,12 +13,12 @@ import (
 
 // Stable system-message codes mirrored by the frontend i18n catalog.
 const (
-	SysNoRunningTask     = "no_running_task"
-	SysPaused            = "paused"
-	SysFileUploaded      = "file_uploaded"
-	SysNoAgentsConnected = "no_agents_connected"
-	SysAgentsList        = "agents_list"
-	SysAgentNotConnected = "agent_not_connected"
+	SysNoRunningTask       = "no_running_task"
+	SysPaused              = "paused"
+	SysFileUploaded        = "file_uploaded"
+	SysNoAgentsConnected   = "no_agents_connected"
+	SysAgentsList          = "agents_list"
+	SysAgentNotConnected   = "agent_not_connected"
 	SysSessionContextReset = "session_context_reset"
 	SysHelp                = "help"
 )
@@ -157,6 +157,11 @@ func (s *Service) sessionAgent(sessionID string) *remoteAgent {
 }
 
 func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
+		return
+	}
+	defer s.work.Done()
 	agent := s.sessionAgent(sessionID)
 	if agent == nil {
 		s.broadcastSystemMessage(sessionID, SysAgentNotConnected,
@@ -171,7 +176,7 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 	request.TurnId = taskID
 	request.SessionId = sessionID
 	s.resetTurnTerminal(sessionID, taskID)
-	s.registerSessionTask(taskID, sessionID, agent.NodeID())
+	s.registerSessionTask(taskID, sessionID)
 	resultCh, err := s.agents.DispatchRun(agent.NodeID(), request)
 	if err != nil {
 		s.finishSessionTask(taskID)
@@ -179,12 +184,20 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 		return
 	}
 
+	s.work.Add(1)
 	go func() {
-		res, ok := <-resultCh
-		canceled := s.finishSessionTask(taskID)
-		if canceled {
+		defer s.work.Done()
+		var res taskResult
+		var ok bool
+		select {
+		case res, ok = <-resultCh:
+		case <-workCtx.Done():
+			_ = s.agents.CancelTask(agent.NodeID(), taskID, sessionID)
+			s.finishSessionTask(taskID)
+			s.broadcastHubTurnEnded(sessionID, taskID, "canceled", workCtx.Err().Error())
 			return
 		}
+		s.finishSessionTask(taskID)
 		if !ok {
 			s.broadcastHubTurnEnded(sessionID, taskID, "agent_disconnected", "agent disconnected")
 			return
@@ -196,6 +209,11 @@ func (s *Service) StartAgentTurn(sessionID string, request *aop.RunTurnRequest) 
 }
 
 func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) {
+	workCtx, admitted := s.beginWork()
+	if !admitted {
+		return "", fmt.Errorf("web service is closing")
+	}
+	defer s.work.Done()
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return "", fmt.Errorf("command line is required")
@@ -211,7 +229,8 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		switch verb {
 		case "help", "agents":
 			operationID := generateID()
-			go s.runHubCommand(sessionID, verb, args)
+			s.work.Add(1)
+			go func() { defer s.work.Done(); s.runHubCommand(sessionID, verb, args) }()
 			return operationID, nil
 		case "clear":
 			return "", fmt.Errorf("clear requires ResetSession")
@@ -230,16 +249,27 @@ func (s *Service) ExecuteSessionCommand(sessionID, line string) (string, error) 
 		return "", fmt.Errorf("agent is not connected")
 	}
 	taskID := generateID()
-	s.registerSessionTask(taskID, sessionID, agent.NodeID())
+	s.registerSessionTask(taskID, sessionID)
 	resultCh, err := s.agents.DispatchCommand(agent.NodeID(), taskID, &types.CommandRequest{SessionId: sessionID, Line: line})
 	if err != nil {
 		s.finishSessionTask(taskID)
 		return "", err
 	}
+	s.work.Add(1)
 	go func() {
-		res, ok := <-resultCh
-		canceled := s.finishSessionTask(taskID)
-		if !ok || canceled {
+		defer s.work.Done()
+		var res taskResult
+		var ok bool
+		select {
+		case res, ok = <-resultCh:
+		case <-workCtx.Done():
+			_ = s.agents.CancelTask(agent.NodeID(), taskID, sessionID)
+			s.finishSessionTask(taskID)
+			s.broadcastHubError(sessionID, "command_failed", workCtx.Err().Error(), nil)
+			return
+		}
+		s.finishSessionTask(taskID)
+		if !ok {
 			return
 		}
 		if res.Err != "" {

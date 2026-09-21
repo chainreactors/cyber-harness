@@ -3,23 +3,22 @@ package provider
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/extension"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"testing"
+	"github.com/chainreactors/cyber/core/telemetry"
 )
 
 func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
 	var second provider.State
 	second.Set(nil, provider.ProviderConfig{Model: "other"})
-	application := &apppkg.State{}
-	resource := New(provider.StartupConfig{Mode: provider.StartupOptional, Config: provider.ProviderConfig{Provider: "unsupported"}}, nil)
-	if application.Providers.Health().Error != "" {
+	resource := New(provider.StartupConfig{Mode: provider.StartupOptional, Config: provider.ProviderConfig{Provider: "unsupported"}})
+	if resource.state != nil {
 		t.Fatal("constructor initialized provider")
 	}
-	first := &application.Providers
 	failure := errors.New("later extension failed")
-	set, err := extension.New(extension.Provided[*apppkg.State](application), resource,
+	set, err := extension.New(extension.Provided[telemetry.Logger](telemetry.NopLogger()), resource,
 		extension.Func{LoadFunc: func(*extension.Scope) error { return failure }})
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +26,7 @@ func TestProviderRollbackKeepsOtherProfileState(t *testing.T) {
 	if err := set.Load(t.Context()); !errors.Is(err, failure) {
 		t.Fatalf("load: %v", err)
 	}
+	first := resource.state
 	if p, c := first.Current(); p != nil || c.Provider != "" || first.Health().Error != "" {
 		t.Fatal("rollback retained provider state")
 	}

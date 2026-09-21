@@ -3,10 +3,9 @@
 package main
 
 import (
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"reflect"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 )
 
 func TestParseCLIReconCommandsAndFlags(t *testing.T) {

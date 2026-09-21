@@ -2,68 +2,35 @@ package session
 
 import (
 	"context"
-	"errors"
+	"testing"
+
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/core/extension"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
 )
 
-// Legacy integration scenarios exercise both resources through a test fixture.
-// Production profiles install separate Agent and Session nodes.
-type Extension struct {
-	resource *Resource
-	loop     *loopext.Extension
-	sessions bool
+// newUnitResource supplies explicit dependencies for package-internal resource tests.
+// Product and integration callers install the real Session Extension.
+func newUnitResource(t *testing.T, f *apptest.Fixture, c Config) (*Resource, error) {
+	t.Helper()
+	if f == nil {
+		f = apptest.NewFixture(t, nil, nil)
+	}
+	if f.Hooks == nil {
+		apptest.Load(t, t.Context(), f)
+	}
+	c.Providers, c.Events, c.Logger = f.Providers, f.Stream, f.Logger
+	c.Hooks, c.Tools, c.CommandRegistry, c.Skills, c.Shell = f.Hooks, f.Tools, f.Commands, f.Skills, f.Shell
+	if c.History == nil {
+		c.History = JSONLHistory{}
+	}
+	if c.Loop == nil {
+		c.Loop = agent.NoLoop()
+	}
+	return NewResource(c)
 }
 
-func New(c Config) (*Extension, error) {
-	sessions := c.State != nil
-	var loop *loopext.Extension
-	if c.Loop != nil || !sessions {
-		loop = loopext.New(c.Loop)
-		c.Loop = loop.Loop()
-	}
-	resource, err := NewResource(c)
-	if err != nil {
-		return nil, err
-	}
-	return &Extension{resource: resource, loop: loop, sessions: sessions}, nil
-}
-func (e *Extension) Runtime() *Runtime { return e.resource.Runtime() }
-func (e *Extension) Load(s *extension.Scope) error {
-	if e.loop != nil {
-		if err := e.loop.Load(s); err != nil {
-			return err
-		}
-	}
-	if e.sessions {
-		return e.resource.Start(s.Init(), s.Lifetime())
-	}
-	return nil
-}
-func (e *Extension) Close(ctx context.Context) error {
-	var err error
-	if e.loop != nil {
-		err = e.loop.Close(ctx)
-	}
-	if e.sessions {
-		err = errors.Join(err, e.resource.Close(ctx))
-	}
-	return err
-}
-func (r *Runtime) Run(ctx context.Context, c agent.Config) (*agent.Result, error) {
-	if r.config.Loop == nil {
-		return nil, ErrUnavailable
-	}
-	result, err := r.config.Loop.Run(ctx, c)
-	if errors.Is(err, loopext.ErrUnavailable) {
-		err = errors.Join(err, ErrUnavailable)
-	}
-	return result, err
-}
+// Load only bridges the unit under test to the existing cleanup fixture.
+func (r *Resource) Load(scope *extension.Scope) error { return r.Start(scope.Init(), scope.Lifetime()) }
 
-func testEnvironment(value any) *apppkg.State {
-	application, _ := value.(*apppkg.State)
-	return application
-}
+var _ interface{ Close(context.Context) error } = (*Resource)(nil)

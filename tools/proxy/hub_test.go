@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"io"
 	"net"
 	"net/http"
@@ -18,8 +19,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 // newTestHub starts a hub (capture or relay) with an isolated CA dir and returns
@@ -68,7 +67,7 @@ func runMitm(t *testing.T, store *FlowStore, hub *ProxyHub, args ...string) stri
 	t.Helper()
 	cmd := NewMitmCommand(store, hub)
 	var out bytes.Buffer
-	exec := &commands.Execution{Args: args, Stdout: &out, Stderr: &out}
+	exec := &coretool.Execution{Args: args, Stdout: &out, Stderr: &out}
 	if _, err := cmd.Run(context.Background(), exec); err != nil {
 		t.Fatalf("mitm %v: %v", args, err)
 	}

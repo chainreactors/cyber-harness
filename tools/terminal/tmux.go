@@ -7,15 +7,17 @@ import (
 	"strings"
 	"time"
 
-	procbus "github.com/chainreactors/cyber/agent/proc"
+	"github.com/chainreactors/cyber/agent/inbox"
+	procbus "github.com/chainreactors/cyber/core/proc"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/utils/proc"
 )
 
 type tmuxCommand struct {
+	bash    *BashTool
 	manager *procbus.Manager
-	start   func(context.Context, string, BashExecOptions) (*commands.Execution, error)
+	start   func(context.Context, string, BashExecOptions) (*coretool.Execution, error)
 }
 
 const tmuxUsage = `tmux - PTY session manager
@@ -39,16 +41,16 @@ const tmuxUsage = `tmux - PTY session manager
   wait-for -t <id> [--timeout duration]
       Block until session completes.`
 
-func NewTmuxCommand(bash *BashTool) commands.Command {
-	runner := &tmuxCommand{manager: bash.Manager(), start: bash.Start}
-	return commands.Command{
+func NewTmuxCommand(bash *BashTool) coretool.Command {
+	runner := &tmuxCommand{bash: bash, manager: bash.Manager(), start: bash.Start}
+	return coretool.Command{
 		Name: "tmux", Usage: tmuxUsage,
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
 		Run:             runner.run,
 	}
 }
 
-func (t *tmuxCommand) run(ctx context.Context, execution *commands.Execution) (any, error) {
+func (t *tmuxCommand) run(ctx context.Context, execution *coretool.Execution) (any, error) {
 	args := execution.Args
 	var result string
 	var err error
@@ -83,10 +85,11 @@ func (t *tmuxCommand) run(ctx context.Context, execution *commands.Execution) (a
 
 func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
 	cmdLine := strings.Join(args, " ")
-	info, err := t.createSession(ctx, cmdLine, "", proc.DefaultTimeout, true)
+	execution, err := t.createSession(ctx, cmdLine, "", proc.DefaultTimeout, true)
 	if err != nil {
 		return "", err
 	}
+	info, _ := execution.Session()
 	return fmt.Sprintf("%s: 1 windows (created %s) [detached]\nUse `tmux capture-pane -t %s` to check new output.",
 		info.ID, info.StartedAt.Format("Mon Jan 2 15:04:05 2006"), info.ID), nil
 }
@@ -130,14 +133,18 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		timeout = d
 	}
 
-	info, err := t.createSession(ctx, cmdLine, name, timeout, detached)
+	execution, err := t.createSession(ctx, cmdLine, name, timeout, detached)
 	if err != nil {
 		return "", err
 	}
 
+	info, _ := execution.Session()
 	if detached {
 		return fmt.Sprintf("%s: 1 windows (created %s) [detached]\nUse `tmux capture-pane -t %s` to check new output.",
 			info.ID, info.StartedAt.Format("Mon Jan 2 15:04:05 2006"), info.ID), nil
+	}
+	if ib := inbox.FromContext(ctx); ib != nil {
+		return coretool.ResultText(t.bash.waitOrBackground(execution, ctx, ib, 0)), nil
 	}
 
 	result, err := t.manager.Wait(ctx, info.ID, timeout)
@@ -155,16 +162,17 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 // tool call that created it, so it hands its lifetime to the process manager;
 // a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
-func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (proc.Info, error) {
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (*coretool.Execution, error) {
 	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
 	if err != nil {
-		return proc.Info{}, err
+		return nil, err
 	}
 	if detached {
 		execution.DetachParent()
+		info, _ := execution.Session()
+		t.bash.startMonitor(info, inbox.FromContext(ctx))
 	}
-	info, _ := t.manager.Get(execution.ID)
-	return info, nil
+	return execution, nil
 }
 
 // ls / list-sessions
@@ -335,6 +343,33 @@ func (t *tmuxCommand) cmdWaitFor(ctx context.Context, args []string) (string, er
 		}
 	}
 
+	if ib := inbox.FromContext(ctx); ib != nil {
+		if _, ok := t.manager.Get(id); !ok {
+			return "", fmt.Errorf("tmux session %s not found", id)
+		}
+		var expired <-chan time.Time
+		if timeout > 0 {
+			timer := time.NewTimer(timeout)
+			defer timer.Stop()
+			expired = timer.C
+		}
+		select {
+		case <-t.manager.Done(id):
+		case <-ib.InterruptSignal():
+			info, ok := t.manager.Get(id)
+			if !ok {
+				return "", fmt.Errorf("tmux session %s not found", id)
+			}
+			if info.State == proc.StateRunning {
+				t.bash.startMonitor(info, ib)
+				return fmt.Sprintf("%s: still running in tmux; foreground wait interrupted. Completion will arrive through Inbox.", id), nil
+			}
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-expired:
+			return fmt.Sprintf("%s: wait timed out; inspect with tmux capture-pane", id), nil
+		}
+	}
 	info, err := t.manager.Wait(ctx, id, timeout)
 	if err != nil {
 		return "", err

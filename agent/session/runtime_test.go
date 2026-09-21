@@ -3,10 +3,6 @@ package session
 import (
 	"context"
 	"errors"
-	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/apptest"
-	"github.com/chainreactors/cyber/pkg/hosttest"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,15 +12,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/core/extension"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	coreoutput "github.com/chainreactors/cyber/core/output"
+	coreoutput "github.com/chainreactors/cyber/core/events/jsonl"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	telemetryext "github.com/chainreactors/cyber/pkg/exts/telemetry"
 	"github.com/chainreactors/utils/proc"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -41,7 +42,7 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	runtime.agentConfig.Loop = owner.Runtime()
+	runtime.agentConfig.Loop = owner.Loop()
 	session, err := runtime.EnsureSession(SessionOptions{ID: "panic"})
 	if err != nil {
 		t.Fatal(err)
@@ -72,90 +73,6 @@ func TestLoopPanicCompletesRunAndLeavesSessionDrainable(t *testing.T) {
 	}
 }
 
-func TestOneExtensionDrainsSessionsAndDirectLoopCalls(t *testing.T) {
-	application := apptest.NewState(t, nil, nil)
-	application.SetProvider(&runtimeSemanticProvider{}, agent.ProviderConfig{Model: "test-model"})
-	started, canceled := make(chan struct{}, 2), make(chan struct{}, 2)
-	release := make(chan struct{})
-	var once sync.Once
-	owner, err := New(Config{State: testEnvironment(application), Option: &cfg.Option{}, Loop: lifecycleLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
-		started <- struct{}{}
-		<-ctx.Done()
-		canceled <- struct{}{}
-		<-release
-		return nil, ctx.Err()
-	})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries := apptest.Entries(t, application)
-	var dependencyClosed atomic.Bool
-	entries = append(entries, extension.Func{CloseFunc: func(context.Context) error {
-		dependencyClosed.Store(true)
-		return nil
-	}}, owner)
-	set := hosttest.Set(t, entries...)
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
-	init, cancelInit := context.WithCancel(t.Context())
-	if err := set.Load(init); err != nil {
-		t.Fatal(err)
-	}
-	cancelInit()
-	runtime := owner.Runtime()
-	runtime.agentConfig.Provider = &runtimeSemanticProvider{}
-	session, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "owned"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := session.Run(t.Context(), RunInput{Message: agent.TextInput("generic harness test")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	direct := make(chan error, 1)
-	go func() { _, err := runtime.Run(t.Context(), agent.Config{SessionID: "direct"}); direct <- err }()
-	for range 2 {
-		select {
-		case <-started:
-		case <-time.After(time.Second):
-			t.Fatal("execution did not start")
-		}
-	}
-	deadline, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
-	defer cancel()
-	if err := set.Close(deadline); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("close: %v", err)
-	}
-	for range 2 {
-		select {
-		case <-canceled:
-		case <-time.After(time.Second):
-			t.Fatal("execution was not canceled")
-		}
-	}
-	if dependencyClosed.Load() {
-		t.Fatal("dependency released before drain")
-	}
-	if _, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "late"}); err == nil {
-		t.Fatal("session admitted during close")
-	}
-	if _, err := runtime.Run(t.Context(), agent.Config{}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("loop admitted during close: %v", err)
-	}
-	once.Do(func() { close(release) })
-	if _, err := run.Wait(); !errors.Is(err, context.Canceled) {
-		t.Fatalf("session result: %v", err)
-	}
-	if err := <-direct; !errors.Is(err, context.Canceled) {
-		t.Fatalf("direct result: %v", err)
-	}
-	if err := set.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if !dependencyClosed.Load() {
-		t.Fatal("dependency not released after drain")
-	}
-}
-
 func (f lifecycleLoop) Run(ctx context.Context, config agent.Config) (*agent.Result, error) {
 	return f(ctx, config)
 }
@@ -175,7 +92,7 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.agentConfig.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Loop()
 	var ended atomic.Int32
 	sub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		if event.SessionId == "closing" && event.GetSessionEnded() != nil {
@@ -334,7 +251,7 @@ func TestResourceCloseCancelsAllExternallyParentedSessionsBeforeWaiting(t *testi
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
-	runtime.agentConfig.Loop = managed.Runtime()
+	runtime.agentConfig.Loop = managed.Loop()
 	var runs []*Run
 	for _, id := range []string{"first", "second"} {
 		session, err := runtime.OpenSession(context.Background(), SessionOptions{ID: id})
@@ -386,13 +303,13 @@ type lifecycleOutput struct {
 	kinds []string
 }
 
-func loadTestApplication(t *testing.T, application *apppkg.State) *extension.Set {
+func loadTestApplication(t *testing.T, application *apptest.Fixture) *extension.Set {
 	return apptest.Load(t, t.Context(), application)
 }
 
 func TestNewRuntimeIsInertUntilLoad(t *testing.T) {
-	a := apptest.NewState(t, nil, nil)
-	rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	a := apptest.NewFixture(t, nil, nil)
+	rt, err := newUnitResource(t, a, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +359,7 @@ func (o *lifecycleOutput) snapshot() []string {
 }
 
 func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
-	app := apptest.NewState(t, telemetry.NopLogger(), nil)
+	app := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 	// The terminal owns the tool and publishes it; nothing parks it on the
 	// application for others to read, so the test borrows it too.
 	var bash *terminaltool.BashTool
@@ -460,7 +377,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = appSet.Close(context.Background()) })
 	output := new(lifecycleOutput)
-	rt, err := New(Config{State: testEnvironment(app), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+	rt, err := newUnitResource(t, app, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,7 +424,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 	}
 
 	_ = rtSet.Close(context.Background())
-	app.Publish(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Role: "user"}}})
+	app.Stream.Publish(&aop.Event{Payload: &aop.Event_Message{Message: &aop.Message{Role: "user"}}})
 	if got := output.snapshot(); len(got) != len(seen) {
 		t.Fatalf("closed Runtime still receives State events: before=%v after=%v", seen, got)
 	}
@@ -617,7 +534,7 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	}
 	large := strings.Repeat("x", 4<<20)
 	oldID := root.ID()
-	runtime.app.Publish(&aop.Event{
+	runtime.events.Publish(&aop.Event{
 		SessionId: root.ID(), TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
 	})
@@ -859,14 +776,14 @@ func assertRotationEvents(t *testing.T, events []*aop.Event, oldID, newID, reaso
 	}
 }
 
-func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apppkg.State, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntime(t *testing.T, option *cfg.Option, llm *persistenceProvider) (*apptest.Fixture, *Runtime, *telemetryext.Extension) {
 	return newPersistenceRuntimeWithMode(t, option, llm, false)
 }
 
-func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apppkg.State, *Runtime, *telemetryext.Extension) {
+func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persistenceProvider, interactive bool) (*apptest.Fixture, *Runtime, *telemetryext.Extension) {
 	t.Helper()
 	stream := coreevents.New()
-	appResource := apptest.NewState(t, telemetry.NopLogger(), stream)
+	appResource := apptest.NewFixture(t, telemetry.NopLogger(), stream)
 	app := appResource
 	var entries []extension.Extension
 	var output *telemetryext.Extension
@@ -888,12 +805,12 @@ func newPersistenceRuntimeWithMode(t *testing.T, option *cfg.Option, llm *persis
 	if err := appSet.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	app.SetProvider(llm, agent.ProviderConfig{Provider: llm.Name(), Model: "test-model", MaxTokens: 128, ContextWindow: 128000})
+	app.Providers.Set(llm, agent.ProviderConfig{Provider: llm.Name(), Model: "test-model", MaxTokens: 128, ContextWindow: 128000})
 	primary := "task"
 	if interactive {
 		primary = "main-repl"
 	}
-	runtimeResource, err := New(Config{State: testEnvironment(app), Option: option, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
+	runtimeResource, err := newUnitResource(t, app, Config{Resume: option.Resume, SelectedSkills: option.Skills, Heartbeat: time.Duration(option.Heartbeat) * time.Minute, CaptureProviderFrames: option.CaptureProviderFrames, Logger: telemetry.NopLogger(), PrimarySessionID: primary, Loop: agent.StandardLoop{}, PromptResolver: defaultPromptResolver(t)})
 	if err != nil {
 		_ = appSet.Close(context.Background())
 		t.Fatal(err)
@@ -990,7 +907,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := apptest.NewState(t, nil, bus)
+	a := apptest.NewFixture(t, nil, bus)
 	applicationEntries := apptest.Entries(t, a)
 	aSet := hosttest.Set(t, append(applicationEntries, output)...)
 	if err := aSet.Load(t.Context()); err != nil {
@@ -999,15 +916,15 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
-	unsubscribe := a.ObserveEvents(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := a.Stream.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
 	}))
 	defer unsubscribe.Cancel()
-	var runtimes []*Extension
+	var runtimes []*Resource
 	for range 2 {
-		rt, err := New(Config{State: testEnvironment(a), Option: &cfg.Option{}, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
+		rt, err := newUnitResource(t, a, Config{Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1035,7 +952,7 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 		t.Fatal("session runtime closed application output")
 	}
 	last := &aop.Event{SessionId: "shared", Id: "after-runtimes"}
-	a.Publish(last)
+	a.Stream.Publish(last)
 	mu.Lock()
 	defer mu.Unlock()
 	var sequence uint64
@@ -1052,50 +969,93 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	}
 }
 
-func TestProviderSwapKeepsInFlightSnapshotAndUpdatesExistingSession(t *testing.T) {
-	old := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
-	var release sync.Once
-	defer release.Do(func() { close(old.release) })
+func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
+	old := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, old)
-	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "provider-swap"})
+	_, original := rt.providers.Current()
+	original.Provider, original.APIKey = "openai", "test"
+	rt.providers.Set(old, original)
+	started, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var calls int
+	rt.agentConfig.Loop = taskLoop(func(ctx context.Context, config agent.Config) (*agent.Result, error) {
+		config.Inbox.Drain()
+		calls++
+		if calls == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return &agent.Result{Output: config.Model, Stop: agent.StopReasonCompleted}, nil
+	})
+	session, err := rt.OpenSession(t.Context(), SessionOptions{ID: "model-change"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := session.Run(context.Background(), RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	sibling, err := rt.OpenSession(t.Context(), SessionOptions{ID: "sibling"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-old.started:
-	case <-time.After(time.Second):
-		t.Fatal("inert provider did not start")
-	}
-	next := &runtimeSemanticProvider{}
-	rt.SetProvider(next, agent.ProviderConfig{Model: "new", MaxTokens: 1024, ContextWindow: 8192})
-	release.Do(func() { close(old.release) })
-	if _, err := run.Wait(); err != nil {
-		t.Fatal(err)
-	}
-	if next.callCount() != 0 {
-		t.Fatal("in-flight run switched provider")
-	}
-	run, err = session.Run(context.Background(), RunInput{Content: []*aop.Content{aop.Text("again")}})
+	childConfig := rt.agentConfig.WithModel("child-model")
+	child, err := rt.OpenSession(t.Context(), SessionOptions{ID: "child", ParentSessionID: session.ID(), Config: &childConfig})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run.Wait(); err != nil {
+	run, err := session.Run(t.Context(), RunInput{Content: []*aop.Content{aop.Text("hello")}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	provider, config := rt.app.ProviderState()
-	if next.callCount() != 1 || provider != next || config.Model != "new" {
-		t.Fatal("provider change did not reach State and existing session")
+	<-started
+	if err := session.SetModel("next-model"); err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	result, err := run.Wait()
+	if err != nil || result.Output != original.Model {
+		t.Fatalf("in-flight snapshot=%v, error=%v", result, err)
+	}
+	run, err = session.Run(t.Context(), RunInput{Content: []*aop.Content{aop.Text("again")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = run.Wait()
+	if err != nil || result.Output != "next-model" {
+		t.Fatalf("next run=%v, error=%v", result, err)
+	}
+	p, config := rt.providers.Current()
+	fresh, err := rt.OpenSession(t.Context(), SessionOptions{ID: "fresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p != old || config.Model != original.Model || sibling.Model() != original.Model || fresh.Model() != original.Model || child.Model() != "child-model" {
+		t.Fatal("session model change escaped into Profile or other sessions")
+	}
+	if err := session.SetModel(""); err == nil || session.Model() != "next-model" {
+		t.Fatal("invalid model changed the session")
+	}
+	invalid := original
+	invalid.Provider = "unsupported"
+	rt.providers.Set(old, invalid)
+	if err := session.SetModel("failed-model"); err == nil || session.Model() != "next-model" {
+		t.Fatal("failed client construction changed the session")
+	}
+	rt.providers.Set(old, original)
+	if _, err := session.Command(t.Context(), "/clear"); err != nil {
+		t.Fatal(err)
+	}
+	if session.Model() != "next-model" {
+		t.Fatal("session rotation lost its model")
+	}
+	if err := rt.CloseSession(t.Context(), session.ID(), SessionCloseCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetModel("late-model"); err == nil {
+		t.Fatal("closed session accepted a model change")
 	}
 }
 
-func newLoopExtension(loop agent.Loop) *Extension {
-	value, err := New(Config{Loop: loop})
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
+func newLoopExtension(loop agent.Loop) *loopext.Extension { return loopext.New(loop) }

@@ -2,27 +2,19 @@ package scan
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/prompt"
-	"github.com/chainreactors/cyber/core/output"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type indexedLoot struct {
 	index int
-	loot  output.Loot
+	loot  parsers.Loot
 }
 
-func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill func(string) string, coll *collector, level priority, logger telemetry.Logger) {
-	if readSkill == nil {
-		return
-	}
-	skillPrompt := readSkill("verify")
-	if skillPrompt == "" {
-		logger.Debugf("verify pass: skill content not available, skipping")
+func runVerifyPass(ctx context.Context, worker Worker, coll *collector, level priority, logger telemetry.Logger) {
+	if worker == nil {
 		return
 	}
 
@@ -41,7 +33,7 @@ func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill func(stri
 		if ctx.Err() != nil {
 			break
 		}
-		result := runVerifyAgent(ctx, parent, skillPrompt, c.loot, logger)
+		result := runWorker(ctx, worker, "verify", c.loot, logger)
 		if result != nil {
 			coll.mu.Lock()
 			annotateLoot(&coll.loots[c.index], result.Status)
@@ -51,13 +43,8 @@ func runVerifyPass(ctx context.Context, parent *agent.Agent, readSkill func(stri
 	}
 }
 
-func runSniperPass(ctx context.Context, parent *agent.Agent, readSkill func(string) string, coll *collector, logger telemetry.Logger) {
-	if readSkill == nil {
-		return
-	}
-	skillPrompt := readSkill("sniper")
-	if skillPrompt == "" {
-		logger.Debugf("sniper pass: skill content not available, skipping")
+func runSniperPass(ctx context.Context, worker Worker, coll *collector, logger telemetry.Logger) {
+	if worker == nil {
 		return
 	}
 
@@ -76,7 +63,7 @@ func runSniperPass(ctx context.Context, parent *agent.Agent, readSkill func(stri
 		if ctx.Err() != nil {
 			break
 		}
-		result := runSniperAgent(ctx, parent, skillPrompt, c.loot, logger)
+		result := runWorker(ctx, worker, "sniper", c.loot, logger)
 		if result != nil {
 			coll.mu.Lock()
 			annotateLoot(&coll.loots[c.index], result.Status)
@@ -90,88 +77,20 @@ type verifyResult struct {
 	Status string
 }
 
-func runVerifyAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot output.Loot, logger telemetry.Logger) *verifyResult {
-	sub := parent.Derive()
-	sub.Cfg = sub.Cfg.WithSystemPromptFunc(workerPrompt(VerifySystemTarget, skillPrompt, logger)).WithStream(false)
-	request, err := resolveWorkerPrompt(ctx, sub.Cfg.PromptResolver, prompt.Context{
-		Target: VerifyRequestTarget,
-		Agent: prompt.AgentContext{
-			Name: sub.Cfg.AgentName, Model: sub.Cfg.Model, Instructions: skillPrompt,
-		},
-		Payload: WorkerPromptPayload{Loot: loot},
-	}, logger)
+func runWorker(ctx context.Context, worker Worker, name string, loot parsers.Loot, logger telemetry.Logger) *verifyResult {
+	output, err := worker(ctx, name, loot)
 	if err != nil {
-		logger.Debugf("verify prompt error: %s", err)
+		logger.Warnf("%s agent error: %s", name, err)
 		return nil
 	}
-
-	r, err := sub.Run(ctx, agent.TextInput(request))
-	if err != nil {
-		logger.Debugf("verify agent error: %s", err)
-		return nil
-	}
-	status := parseVerifyStatus(r.Output)
+	status := parseVerifyStatus(output)
 	if status == "" {
 		return nil
 	}
 	return &verifyResult{Status: status}
 }
 
-func runSniperAgent(ctx context.Context, parent *agent.Agent, skillPrompt string, loot output.Loot, logger telemetry.Logger) *verifyResult {
-	sub := parent.Derive()
-	sub.Cfg = sub.Cfg.WithSystemPromptFunc(workerPrompt(SniperSystemTarget, skillPrompt, logger)).WithStream(false)
-	request, err := resolveWorkerPrompt(ctx, sub.Cfg.PromptResolver, prompt.Context{
-		Target: SniperRequestTarget,
-		Agent: prompt.AgentContext{
-			Name: sub.Cfg.AgentName, Model: sub.Cfg.Model, Instructions: skillPrompt,
-		},
-		Payload: WorkerPromptPayload{Loot: loot},
-	}, logger)
-	if err != nil {
-		logger.Debugf("sniper prompt error: %s", err)
-		return nil
-	}
-
-	r, err := sub.Run(ctx, agent.TextInput(request))
-	if err != nil {
-		logger.Debugf("sniper agent error: %s", err)
-		return nil
-	}
-	status := parseVerifyStatus(r.Output)
-	if status == "" {
-		return nil
-	}
-	return &verifyResult{Status: status}
-}
-
-func workerPrompt(target prompt.Target, instructions string, logger telemetry.Logger) agent.SystemPromptFunc {
-	return func(ctx context.Context, config *agent.Config) (string, error) {
-		if config == nil || config.PromptResolver == nil {
-			return "", fmt.Errorf("scanner prompt resolver is unavailable")
-		}
-		input := prompt.Context{Target: target, Agent: prompt.AgentContext{Instructions: instructions}}
-		input.Agent.Name, input.Agent.Model = config.AgentName, config.Model
-		return resolveWorkerPrompt(ctx, config.PromptResolver, input, logger)
-	}
-}
-
-func resolveWorkerPrompt(ctx context.Context, resolver prompt.Resolver, input prompt.Context, logger telemetry.Logger) (string, error) {
-	if resolver == nil {
-		return "", fmt.Errorf("scanner prompt resolver is unavailable")
-	}
-	result := resolver.Build(ctx, input)
-	if logger != nil {
-		for _, diagnostic := range result.Diagnostics {
-			logger.Warnf("prompt contribution=%q section=%q: %s", diagnostic.Contribution, diagnostic.Section, diagnostic.Message)
-		}
-	}
-	if strings.TrimSpace(result.Prompt) == "" {
-		return "", fmt.Errorf("scanner prompt target %q is unavailable", input.Target)
-	}
-	return result.Prompt, nil
-}
-
-func filterLootsByPriority(loots []output.Loot, min priority) []indexedLoot {
+func filterLootsByPriority(loots []parsers.Loot, min priority) []indexedLoot {
 	var out []indexedLoot
 	for i, l := range loots {
 		if priority(l.Priority).atLeast(min) {
@@ -181,10 +100,10 @@ func filterLootsByPriority(loots []output.Loot, min priority) []indexedLoot {
 	return out
 }
 
-func filterFingerprintLoots(loots []output.Loot) []indexedLoot {
+func filterFingerprintLoots(loots []parsers.Loot) []indexedLoot {
 	var out []indexedLoot
 	for i, l := range loots {
-		if l.Kind == output.LootFingerprint {
+		if l.Kind == parsers.LootFingerprint {
 			focus, _ := l.Data["focus"].(bool)
 			if focus {
 				out = append(out, indexedLoot{index: i, loot: l})
@@ -194,7 +113,7 @@ func filterFingerprintLoots(loots []output.Loot) []indexedLoot {
 	return out
 }
 
-func annotateLoot(loot *output.Loot, status string) {
+func annotateLoot(loot *parsers.Loot, status string) {
 	if loot.Data == nil {
 		loot.Data = make(map[string]any)
 	}

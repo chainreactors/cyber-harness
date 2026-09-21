@@ -3,14 +3,18 @@ package ioa
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
+	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
+	goflags "github.com/jessevdk/go-flags"
 )
 
 // spaceBinding holds the current space ID shared across all IOA commands.
@@ -31,6 +35,19 @@ func (b *spaceBinding) set(id string) {
 	b.spaceID = id
 }
 
+// Serialize switching the receive subscription and publishing the command binding.
+func (b *spaceBinding) change(ctx context.Context, id string, before func(context.Context, string) error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if before != nil {
+		if err := before(ctx, id); err != nil {
+			return err
+		}
+	}
+	b.spaceID = id
+	return nil
+}
+
 func (b *spaceBinding) initialize(id string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -39,13 +56,13 @@ func (b *spaceBinding) initialize(id string) {
 	}
 }
 
-func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []commands.Command {
+func NewCommands(client protocols.ClientAPI, nodeName string, meta map[string]any) []coretool.Command {
 	root := &rootCommand{client: client, binding: &spaceBinding{}, nodeName: nodeName, meta: meta}
 	return root.commands()
 }
 
-func (root *rootCommand) commands() []commands.Command {
-	return []commands.Command{
+func (root *rootCommand) commands() []coretool.Command {
+	return []coretool.Command{
 		{
 			Name: "ioa", Usage: root.Usage(),
 			DescriptionPath: "cyber://skills/ioa/SKILL.md",
@@ -58,27 +75,32 @@ func (root *rootCommand) commands() []commands.Command {
 // to the ioa instance's client CLI (go-flags based) with the bound space
 // injected; space keeps cyber's current-space binding semantics.
 type rootCommand struct {
-	client   protocols.ClientAPI
-	binding  *spaceBinding
-	nodeName string
-	meta     map[string]any
+	beforeSpace func(context.Context, string) error
+	client      protocols.ClientAPI
+	binding     *spaceBinding
+	nodeName    string
+	meta        map[string]any
 }
 
 func (c *rootCommand) Usage() string {
-	return `ioa - IOA shared-space collaboration
+	return `ioa - shared history and direct agent messages
 
-Subcommands:
-  ioa space <name> <description> [--tag t]      Join or create a space (sets it as current)
-  ioa space list|nodes|topics                   Inspect spaces and current-space members
-  ioa send --content <json> [--ref-nodes ids] [--ref-messages ids] [--content-type t]
-  ioa send <protocol> [flags]                   Typed protocol send (checkpoint, handoff, ...)
-  ioa read [--all] [--limit N] [--after id] [--message id] [--direction d] [--listen]
+  ioa send <session> "message"                  Send to a Session ID or unique name
+  ioa send <session> "message" --ref-messages ID  Reply to a recorded message
+  ioa send <session> "message" --interrupt      Redirect current work; commands keep running
+  ioa read --all [--after ID] [--limit N]        Recover prior context
+  ioa space <name> <description>                Switch the shared space
 
-The current space is injected as --space on send/read.
-Reference: cyber://skills/ioa/SKILL.md`
+The configured space is already joined. New messages arrive automatically.
+Call the inbox_wait tool to wait; no polling or extra listener is needed.
+Names are local to a node; use --ref-nodes ID to address another node.
+Send returns a saved message ID, not a delivery receipt.
+
+Advanced: send --content JSON; send <protocol> --help; read --help;
+space list|nodes|topics. Reference: cyber://skills/ioa/SKILL.md`
 }
 
-func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_ any, err error) {
+func (c *rootCommand) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("ioa", &err)
 	args := execution.Args
 	if len(args) == 0 {
@@ -98,7 +120,7 @@ func (c *rootCommand) Run(ctx context.Context, execution *commands.Execution) (_
 
 // dispatchCLI runs send/read through the ioa instance's client CLI with the
 // current space injected as --space.
-func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execution, args []string) error {
+func (c *rootCommand) dispatchCLI(ctx context.Context, execution *coretool.Execution, args []string) error {
 	spaceID := c.binding.get()
 	if spaceID == "" {
 		return fmt.Errorf("no space joined. Use ioa space <name> <description> first")
@@ -106,22 +128,70 @@ func (c *rootCommand) dispatchCLI(ctx context.Context, execution *commands.Execu
 	if err := ensureNode(ctx, c.client, c.nodeName, c.meta); err != nil {
 		return err
 	}
+	target := ""
+	var delivery struct {
+		Target    string `long:"target-session" description:"Session ID or unique name (also accepted as first positional argument)"`
+		Interrupt bool   `long:"interrupt" description:"Redirect current work without canceling the task or running commands"`
+	}
 	opts := &ioaclient.CommandOptions{}
 	parser := ioaclient.NewCommandParser(opts)
+	send := parser.Find("send")
+	if _, err := send.AddGroup("Session delivery", "", &delivery); err != nil {
+		return err
+	}
+	// Normalize the short form for the SDK. Two positional values mean a peer
+	// and text; otherwise preserve registered protocol commands.
+	if args[0] == "send" && len(args) > 1 && !strings.HasPrefix(args[1], "-") {
+		plain := len(args) > 2 && !strings.HasPrefix(args[2], "-")
+		if plain || send.Find(args[1]) == nil {
+			target = args[1]
+			if strings.TrimSpace(target) == "" {
+				return fmt.Errorf("recipient cannot be empty: ioa send <session> \"message\"")
+			}
+			if plain {
+				body, _ := json.Marshal(map[string]string{"text": args[2]})
+				args = append([]string{"send", "--content", string(body)}, args[3:]...)
+			} else {
+				if len(args) == 2 {
+					return fmt.Errorf("message required: ioa send %s \"message\"", target)
+				}
+				args = append([]string{"send"}, args[2:]...)
+			}
+		}
+	}
+
 	full := append([]string{args[0], "--space", spaceID}, args[1:]...)
 	remaining, err := parser.ParseArgs(full)
 	if err != nil {
+		var flagErr *goflags.Error
+		if errors.As(err, &flagErr) && flagErr.Type == goflags.ErrHelp {
+			_, err = fmt.Fprint(execution.Stdout, flagErr.Message)
+			return err
+		}
 		return fmt.Errorf("ioa %s: %w", args[0], err)
+	}
+	if target != "" && delivery.Target != "" {
+		return fmt.Errorf("specify one recipient: ioa send <session> \"message\"")
+	}
+	if args[0] == "send" && delivery.Target == "" && send.FindOptionByLongName("target-session").IsSet() {
+		return fmt.Errorf("recipient cannot be empty: ioa send <session> \"message\"")
+	}
+	if target == "" {
+		target = delivery.Target
 	}
 	if len(remaining) > 0 {
 		return fmt.Errorf("ioa %s: unknown subcommand or argument %q", args[0], remaining[0])
 	}
-	return ioaclient.Dispatch(ctx, c.client, c.nodeName, opts, parser.Active, execution.Stdout)
+	client := c.client
+	if args[0] == "send" {
+		client = sessionSender{ClientAPI: c.client, source: operation.InvocationFromContext(ctx).SessionID, target: target, interrupt: delivery.Interrupt}
+	}
+	return ioaclient.Dispatch(ctx, client, c.nodeName, opts, parser.Active, execution.Stdout)
 }
 
 // runSpace handles join (ioa CLI positional syntax) plus cyber's
 // binding-aware extras (list/nodes/topics).
-func (c *rootCommand) runSpace(ctx context.Context, execution *commands.Execution, args []string) error {
+func (c *rootCommand) runSpace(ctx context.Context, execution *coretool.Execution, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "list", "ls":
@@ -146,7 +216,9 @@ func (c *rootCommand) runSpace(ctx context.Context, execution *commands.Executio
 	if err != nil {
 		return err
 	}
-	c.binding.set(info.ID)
+	if err := c.binding.change(ctx, info.ID, c.beforeSpace); err != nil {
+		return err
+	}
 	return writeJSON(execution.Stdout, struct {
 		protocols.SpaceInfo
 		StartMessages []protocols.Message `json:"start_messages"`
@@ -236,4 +308,40 @@ func writeJSON(writer io.Writer, v any) error {
 	}
 	_, err = writer.Write(data)
 	return err
+}
+
+// sessionSender adds execution provenance to all SDK send protocols.
+type sessionSender struct {
+	protocols.ClientAPI
+	source, target string
+	interrupt      bool
+}
+
+func (c sessionSender) Send(ctx context.Context, space string, body protocols.SendMessage) (protocols.Message, error) {
+	meta := make(map[string]any, len(body.Meta)+2)
+	for k, v := range body.Meta {
+		meta[k] = v
+	}
+	delete(meta, "source_session_id")
+	delete(meta, "target_session_id")
+	if c.interrupt {
+		meta["interrupt"] = true
+	}
+	if c.source != "" {
+		meta["source_session_id"] = c.source
+	}
+	if c.target != "" {
+		meta["target_session_id"] = c.target
+		if body.Refs == nil {
+			body.Refs = &protocols.Ref{}
+		} else {
+			refs := *body.Refs
+			body.Refs = &refs
+		}
+		if len(body.Refs.Nodes) == 0 {
+			body.Refs.Nodes = []string{c.NodeID()}
+		}
+	}
+	body.Meta = meta
+	return c.ClientAPI.Send(ctx, space, body)
 }

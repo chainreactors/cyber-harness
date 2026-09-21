@@ -3,71 +3,190 @@
 package main
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// A run configured by startup flags has no cyber.yaml on disk, but that is the
-// configuration the process is actually using. The settings page must show it,
-// and the first save must materialize those values instead of writing the blank
-// secrets the form sends back.
-func TestWebConfigStoreProjectsRuntimeFlagsWithoutConfigFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	option := &cfg.Option{
-		LLMOptions:     cfg.LLMOptions{Provider: "openai", BaseURL: "http://127.0.0.1:9/v1", APIKey: "flag-key", Model: "flag-model"},
-		ScannerOptions: cfg.ScannerOptions{CyberhubURL: "http://cyberhub.test", CyberhubKey: "hub-key"},
-		ReconOptions:   cfg.ReconOptions{FofaKey: "fofa-key"},
+func TestWebLayeredExtensionSavePreservesOwnership(t *testing.T) {
+	root := t.TempDir()
+	environment := &cfg.Context{
+		Directory: filepath.Join(root, "project"), Home: filepath.Join(root, "user"),
+		Executable: filepath.Join(root, "bin", "app"),
+		LookupEnv:  func(string) (string, bool) { return "", false },
 	}
-	store := &webConfigStore{explicit: path, runtime: option}
+	userPath := environment.UserFile()
+	projectPath := filepath.Join(environment.Directory, cfg.DefaultConfigName)
+	userData := []byte("extensions:\n  ioa.client:\n    url: http://ioa.test\n    token: inherited-secret\n    space: user-space\n")
+	projectData := []byte("extensions:\n  ioa.client:\n    space: original-project\n  other-host:\n    credential: keep-private\n    rules: [one, two]\n")
+	for path, data := range map[string][]byte{userPath: userData, projectPath: projectData} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &webConfigStore{runtime: &cfg.Option{Context: environment}}
+	var saved []byte
+	for i := 0; i < 2; i++ {
+		_, _, current, err := store.GetDistributeConfig(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := cfg.ValuesFromProto(current.Extensions)
+		if values["ioa.client"]["token"] != "inherited-secret" {
+			t.Fatal("file layers did not preserve extension precedence and secrets")
+		}
+		if _, exists := values["other-host"]; exists {
+			t.Fatal("unavailable extension entered runtime projection")
+		}
+		delete(values["ioa.client"], "token") // The editor submits the redacted view.
+		values["ioa.client"]["space"] = "project-space"
+		current.Extensions, err = cfg.ValuesToProto(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, err := store.PrepareDistributeConfig(t.Context(), current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer store.DiscardDistributeConfig(prepared)
+		if err := store.CommitDistributeConfig(t.Context(), prepared); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(projectPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "inherited-secret") || strings.Contains(string(data), "http://ioa.test") {
+			t.Fatal("extension save materialized inherited settings")
+		}
+		var document map[string]any
+		if err := yaml.Unmarshal(data, &document); err != nil {
+			t.Fatal(err)
+		}
+		extensions := document["extensions"].(map[string]any)
+		if extensions["other-host"].(map[string]any)["credential"] != "keep-private" {
+			t.Fatal("extension save lost unavailable settings")
+		}
+		if i > 0 && string(data) != string(saved) {
+			t.Fatal("repeated extension save changed the file")
+		}
+		saved = data
+	}
+	unchanged, err := os.ReadFile(userPath)
+	if err != nil || string(unchanged) != string(userData) {
+		t.Fatal("project save changed user configuration", err)
+	}
+	option := &cfg.Option{Context: environment, Sections: defaultSections(), Explicit: map[string]bool{}}
+	if _, err := cfg.ResolveRuntimeConfig(option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Extensions["ioa.client"]["space"] != "project-space" || option.Extensions["ioa.client"]["token"] != "inherited-secret" {
+		t.Fatal("restart lost edited extension configuration")
+	}
+}
 
+// Runtime credentials must never be materialized by a settings save.
+func TestWebConfigStoreDoesNotPersistRuntimeCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyber.yaml")
+	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, ScannerOptions: cfg.ScannerOptions{CyberhubKey: "hub-secret"}}
+	store := &webConfigStore{explicit: path, runtime: option}
 	_, loaded, current, err := store.GetDistributeConfig(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded {
-		t.Fatal("store reported a loaded config for a flags-only run")
+	if loaded || len(current.GetLlm().GetProviders()) != 0 {
+		t.Fatal("editable view mixed in runtime overrides")
 	}
-	active := cfg.ActiveLLMProvider(current.GetLlm())
-	if active == nil || active.GetModel() != "flag-model" || active.GetApiKey() != "flag-key" {
-		t.Fatalf("projected active provider = %+v", active)
-	}
-
-	// Exactly what the settings page posts back after loading the projection:
-	// non-secret fields as shown, secrets blank.
-	incoming := &types.DistributeConfig{
-		Llm: &types.LLMConfig{
-			ActiveProfile: active.GetId(),
-			Providers: []*types.LLMProviderConfig{{
-				Id: active.GetId(), Provider: active.GetProvider(),
-				BaseUrl: active.GetBaseUrl(), Model: active.GetModel(),
-			}},
-		},
-		Cyberhub: &types.CyberhubConfig{Url: "http://cyberhub.test"},
-	}
+	incoming := &types.DistributeConfig{Llm: &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "saved", Provider: "openai", Model: "saved-model"}}}}
 	prepared, err := store.PrepareDistributeConfig(t.Context(), incoming)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.DiscardDistributeConfig(prepared)
-	if got := cfg.ActiveLLMProvider(prepared.Config.GetLlm()).GetApiKey(); got != "flag-key" {
-		t.Fatalf("first save dropped the running API key: %q", got)
+	if err := store.CommitDistributeConfig(t.Context(), prepared); err != nil {
+		t.Fatal(err)
 	}
-	if got := prepared.Config.GetCyberhub().GetKey(); got != "hub-key" {
-		t.Fatalf("first save dropped the running cyberhub key: %q", got)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "flag-secret") || strings.Contains(string(data), "hub-secret") {
+		t.Fatal("runtime secrets leaked into settings")
+	}
+	_, loaded, current, err = store.GetDistributeConfig(t.Context())
+	if err != nil || !loaded || cfg.ActiveLLMProvider(current.Llm).Model != "saved-model" {
+		t.Fatal("save was not persisted", err)
+	}
+}
+
+func TestNewProfileDoesNotInheritSecretByPosition(t *testing.T) {
+	old := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "original", ApiKey: "original-secret"}}}
+	next := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "new-profile", Provider: "openai", Model: "new-model"}}}
+	preserveLLMProfileSecrets(next, old)
+	if next.Providers[0].ApiKey != "" {
+		t.Fatal("new profile inherited another profile's credentials")
+	}
+}
+
+func TestWebLayeredSaveDoesNotCopyInheritedCredentials(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "project")
+	user := filepath.Join(root, "user")
+	_ = os.MkdirAll(project, 0700)
+	_ = os.MkdirAll(filepath.Join(user, ".cyber"), 0700)
+	userFile := filepath.Join(user, ".cyber", "cyber.yaml")
+	projectFile := filepath.Join(project, "cyber.yaml")
+	original := []byte("llm:\n  active_profile: work\n  providers:\n    - id: work\n      provider: openai\n      model: original\n      api_key: inherited-secret\n      base_url: https://example.test/v1\n")
+	_ = os.WriteFile(userFile, original, 0600)
+	_ = os.WriteFile(projectFile, []byte("agent:\n  timeout: 99\n"), 0600)
+	environment := &cfg.Context{Directory: project, Home: user, Executable: filepath.Join(root, "bin", "app"), LookupEnv: func(string) (string, bool) { return "", false }}
+	option := &cfg.Option{Context: environment, Explicit: map[string]bool{}, Sections: defaultSections()}
+	if _, err := cfg.ResolveRuntimeConfig(option); err != nil {
+		t.Fatal(err)
+	}
+	store := &webConfigStore{runtime: option}
+	path, _, current, err := store.GetDistributeConfig(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != projectFile {
+		t.Fatalf("target: %s", path)
+	}
+	current.Llm.Providers[0].Model = "edited"
+	current.Llm.Providers[0].ApiKey = ""
+	prepared, err := store.PrepareDistributeConfig(t.Context(), current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DiscardDistributeConfig(prepared)
+	if prepared.Config.Llm.Providers[0].ApiKey != "inherited-secret" {
+		t.Fatal("candidate lost inherited key")
 	}
 	if err := store.CommitDistributeConfig(t.Context(), prepared); err != nil {
 		t.Fatal(err)
 	}
-	_, loaded, committed, err := store.GetDistributeConfig(t.Context())
-	if err != nil {
+	data, _ := os.ReadFile(projectFile)
+	if strings.Contains(string(data), "inherited-secret") || strings.Contains(string(data), "example.test") {
+		t.Fatal("inherited values were materialized")
+	}
+	userAfter, _ := os.ReadFile(userFile)
+	if string(original) != string(userAfter) {
+		t.Fatal("user file was changed")
+	}
+	next := &cfg.Option{Context: environment, Explicit: map[string]bool{}, Sections: defaultSections()}
+	if _, err := cfg.ResolveRuntimeConfig(next); err != nil {
 		t.Fatal(err)
 	}
-	if !loaded || cfg.ActiveLLMProvider(committed.GetLlm()).GetModel() != "flag-model" {
-		t.Fatalf("committed flags config = %+v", committed)
+	if next.Model != "edited" || next.APIKey != "inherited-secret" || next.Timeout != 99 {
+		t.Fatal("restart did not reproduce effective configuration")
 	}
 }
 

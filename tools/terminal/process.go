@@ -8,15 +8,15 @@ import (
 
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
-	"github.com/chainreactors/cyber/pkg/commands"
 	"github.com/chainreactors/utils/proc"
 )
 
 // Start is the real managed-process boundary. Its completion notification is
 // emitted on actual process exit, even when the Bash tool has already returned
 // a background status to its caller.
-func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*commands.Execution, error) {
+func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,7 +84,7 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	t.processMu.Lock()
 	if t.processClosed {
 		t.processMu.Unlock()
-		return nil, completeStartFailure(commands.ErrUnavailable)
+		return nil, completeStartFailure(coretool.ErrUnavailable)
 	}
 	t.processWG.Add(1)
 	execution, err := t.start(processCtx, command, options)
@@ -123,7 +123,7 @@ func withEgressEnvironment(overrides map[string]string, proxyURL, caPath string)
 	for key, value := range overrides {
 		result[key] = value
 	}
-	for _, item := range commands.EgressEnvironment(proxyURL, caPath) {
+	for _, item := range coretool.EgressEnvironment(proxyURL, caPath) {
 		if key, value, ok := strings.Cut(item, "="); ok {
 			result[key] = value
 		}
@@ -131,7 +131,7 @@ func withEgressEnvironment(overrides map[string]string, proxyURL, caPath string)
 	return result
 }
 
-func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *commands.Execution, event toolhooks.ProcessEvent, startedAt time.Time) {
+func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *coretool.Execution, event toolhooks.ProcessEvent, startedAt time.Time) {
 	defer t.processWG.Done()
 	waitErr := execution.Wait(context.WithoutCancel(ctx))
 	cause := context.Cause(ctx)
@@ -152,7 +152,7 @@ func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *comm
 
 // executionSession takes a stable copy; hook observers must not retain a
 // manager-owned mutable value.
-func executionSession(execution *commands.Execution) *proc.Info {
+func executionSession(execution *coretool.Execution) *proc.Info {
 	if info, ok := execution.Session(); ok {
 		return &info
 	}

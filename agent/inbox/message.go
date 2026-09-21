@@ -36,6 +36,7 @@ type Message struct {
 	Message     *aop.Message
 	Origin      Origin
 	Priority    Priority
+	Interrupt   bool // Request the current consumer to yield after this message is admitted.
 	Attachments []Attachment
 	Meta        map[string]any
 	CreatedAt   time.Time

@@ -26,7 +26,7 @@ extension.Func{LoadFunc: func(scope *extension.Scope) error {
 
 ## 组合根与宿主
 
-示例先用 `base.New` 建立基础能力，传入绝对工作目录，并关闭启动时的 Provider 初始化。它随后追加工具扩展和一个最终消费者；消费者用 `Use[tool.Executor]` 借到执行接口。最后，宿主创建 Set、Load、调用工具并 Close。
+示例先用 `harness.BaseExtensions` 建立基础能力，传入绝对工作目录，并关闭启动时的 Provider 初始化。它随后追加工具扩展和一个最终消费者；消费者用 `Use[tool.Executor]` 借到执行接口。最后，宿主创建 Set、Load、调用工具并 Close。
 
 这个顺序也是资源依赖顺序。工具注册表必须先存在，工具才能加入；宿主必须等 Load 完全成功后才能使用借出的接口。示例把 Close 放在 Load 之前注册的 defer 中，因此部分初始化失败也有清理入口，关闭错误会与业务错误一起返回。
 
@@ -46,11 +46,11 @@ go run ./examples/session
 
 ## 构建自己的应用
 
-通用应用可以直接使用 `pkg/harness`：`harness.New` 总是安装 `base.Config`，把 `Session` 留空就是工具宿主，提供 `Session` 就会安装 `StandardLoop` 和会话运行时；`Loop` 可以替换为自己的循环，`Extensions` 可以加入场景专属工具或服务。这样可以在同一个 harness 包中组合工具型、对话型和领域型应用，同时由 `Harness.Load`、`Harness.Close` 统一管理生命周期。需要更细的生命周期控制时，仍可沿用示例的 `base.New → append → extension.New`。
+通用应用可以直接使用 `pkg/harness`：`harness.New` 总是安装 `harness.BaseConfig`，把 `Session` 留空就是工具宿主，提供 `Session` 就会安装 `StandardLoop` 和会话运行时；`Session.Loop` 可以替换为自己的循环，`Extensions` 可以加入场景专属工具或服务。这样可以在同一个 harness 包中组合工具型、对话型和领域型应用，同时由 `Harness.Load`、`Harness.Close` 统一管理生命周期。需要更细的生命周期控制时，仍可沿用示例的 `harness.BaseExtensions → append → extension.New`。
 
 ```go
 h, err := harness.New(harness.Config{
-    Base: base.Config{Directory: workDir, Provider: provider.StartupConfig{Mode: provider.StartupRequired}},
+    Base: harness.BaseConfig{Directory: workDir, Provider: provider.StartupConfig{Mode: provider.StartupRequired}},
     Extensions: []extension.Extension{myScannerExtension},
     Session: &agentsession.Config{Option: option},
 })
@@ -60,7 +60,7 @@ if err := h.Load(ctx); err != nil { return err }
 runtime, err := h.Runtime()
 ```
 
-如果需要 aiscan 的完整安全工具组合，使用 [pkg/aiscan](../pkg/aiscan)；它的 `New(Request)` 要求 `Option.Resolved` 已通过配置声明与解析建立，不能把空 Option 当作快捷配置传入。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
+aiscan 的完整安全工具组合由 [cmd/aiscan](../cmd/aiscan/profile.go) 内部构造，不再提供独立的公开发行版构造包。嵌入方可使用 [pkg/harness](../pkg/harness) 构造通用宿主，或从 `harness.BaseExtensions` 取得基础扩展后显式组合自己的能力；这不等价于完整 aiscan 发行版。产品入口先完成配置声明与解析，再构造运行时。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
 
 构建源码发行版时，`make agent` 生成最小本地 Agent，`make` 生成标准版，`make full` 生成包含前端的完整版。标签来自 [editions.env](../editions.env)，实际步骤来自 [Makefile](../Makefile)。full 需要前端工具链；standard 与 full 均使用 CGO_ENABLED=0。原生录屏需要 CGO 工具链，另见 [record](record.md)。
 

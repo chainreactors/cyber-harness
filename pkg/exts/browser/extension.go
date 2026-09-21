@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/tools/playwright"
 )
 
@@ -39,7 +39,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return commands.ErrUnavailable
+		return coretool.ErrUnavailable
 	}
 	if m.registered {
 		return nil
@@ -48,7 +48,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
-	if err := extension.Add(scope, commands.Command{
+	if err := extension.Add(scope, coretool.Command{
 		Name: command.Name(), Usage: command.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/easm/playwright.md",
 		Run:             command.Run,

@@ -5,9 +5,8 @@ package main
 import (
 	"context"
 	"fmt"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 func serveWeb(context.Context, *cfg.Option, *cfg.Option, webCommand, telemetry.Logger) error {

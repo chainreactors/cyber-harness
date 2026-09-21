@@ -6,8 +6,8 @@ TUI Extension 在 Load 时定义 `*console/api.Bindings` typed resource。Sessio
 
 ```text
 tui.Load                    -> Define[*console.Bindings]
-session/console.Load        -> Add session bindings
-ioa/client/console.Load     -> Add IOA bindings
+session.NewConsole().Load        -> Add session bindings
+ioa/client.NewConsole(...).Load     -> Add IOA bindings
 Profile.ConsoleBindings     -> Seal and publish snapshot
 ```
 

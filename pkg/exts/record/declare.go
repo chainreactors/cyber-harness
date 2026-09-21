@@ -3,8 +3,8 @@
 package record
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // Declare contributes the record configuration section. Its build tags match

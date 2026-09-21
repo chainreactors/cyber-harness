@@ -10,13 +10,18 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/chainreactors/cyber/agent/provider"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
+	procbus "github.com/chainreactors/cyber/core/proc"
+
 	"connectrpc.com/connect"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/extension"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
@@ -311,18 +316,13 @@ func TestForwardUncorrelatedEventForAgentOpenSession(t *testing.T) {
 
 type recordingProfile struct {
 	extensions         *extension.Set
-	app                *apppkg.State
+	app                *apptest.Fixture
 	registerNamespaces func(*aop.NamespaceMux) error
 }
 
 func (p *recordingProfile) Load(ctx context.Context) error  { return p.extensions.Load(ctx) }
 func (p *recordingProfile) Close(ctx context.Context) error { return p.extensions.Close(ctx) }
-func (p *recordingProfile) State() (*apppkg.State, error) {
-	if p == nil || p.extensions == nil || !p.extensions.Active() {
-		return nil, errors.New("recording profile is not active")
-	}
-	return p.app, nil
-}
+
 func (p *recordingProfile) Runtime() (*agentsession.Runtime, error) {
 	return nil, errors.New("recording profile has no runtime")
 }
@@ -338,9 +338,9 @@ func (p *recordingProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
 
 var _ profile.Profile = (*recordingProfile)(nil)
 
-func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.State, func() bool) {
+func newRecordingProfile(t *testing.T) (*recordingProfile, *provider.State, func() bool) {
 	t.Helper()
-	resource := apptest.NewState(t, nil, nil)
+	resource := apptest.NewFixture(t, nil, nil)
 	var closed atomic.Bool
 	extensions, err := extension.New(extension.Func{CloseFunc: func(context.Context) error {
 		closed.Store(true)
@@ -354,65 +354,67 @@ func newRecordingProfile(t *testing.T) (*recordingProfile, *apppkg.State, func()
 	if err := value.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	app, err := value.State()
+	app, err := value.Providers()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return value, app, closed.Load
 }
 
-func TestSwapAppDefersOldCloseUntilActiveLeaseReleases(t *testing.T) {
-	old, oldApp, oldClosed := newRecordingProfile(t)
+func TestSwapProfileCancelsAndDrainsOldWork(t *testing.T) {
+	old, _, oldClosed := newRecordingProfile(t)
 	next, _, _ := newRecordingProfile(t)
 	svc := NewService(ServiceConfig{Profile: old})
 	defer svc.Close(context.Background())
-
-	leased, release := svc.acquireApp()
-	if leased != oldApp {
-		t.Fatal("acquireApp() returned the wrong app")
+	ctx, ok := svc.beginWork()
+	if !ok {
+		t.Fatal("work rejected")
 	}
+	drained := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		if oldClosed() {
+			t.Error("profile closed before work drained")
+		}
+		if _, ok := svc.beginWork(); ok {
+			t.Error("admitted old work after cancellation")
+			svc.work.Done()
+		}
+		svc.work.Done()
+		close(drained)
+	}()
 	if err := svc.swapProfile(next); err != nil {
 		t.Fatal(err)
 	}
-	if oldClosed() {
-		t.Fatal("old app closed while a scan still held a lease")
-	}
-	release()
-	if !oldClosed() {
-		t.Fatal("old app remained open after the final lease released")
+	<-drained
+	if !oldClosed() || svc.profile != next {
+		t.Fatal("old profile not replaced")
 	}
 }
-
-func TestServiceCloseRetainsLeasedProfileAndRetries(t *testing.T) {
-	p, app, closed := newRecordingProfile(t)
+func TestServiceCloseCancelsWorkAndRetriesDrain(t *testing.T) {
+	p, _, closed := newRecordingProfile(t)
 	svc := NewService(ServiceConfig{Profile: p})
-	leased, release := svc.acquireApp()
-	defer release()
-	if leased != app {
-		t.Fatal("wrong shared app")
+	work, ok := svc.beginWork()
+	if !ok {
+		t.Fatal("work rejected")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := svc.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) || !errors.Is(err, context.Canceled) {
-		t.Fatalf("Close = %v", err)
+	if err := svc.Close(ctx); !errors.Is(err, extension.ErrCloseIncomplete) {
+		t.Fatalf("Close=%v", err)
 	}
-	if closed() {
-		t.Fatal("profile closed while leased")
+	if work.Err() == nil || closed() {
+		t.Fatal("close did not cancel before draining")
 	}
-	if next, done := svc.acquireApp(); next != nil {
-		done()
-		t.Fatal("service admitted work after closing")
+	if svc.providers() != nil {
+		t.Fatal("closed service exposed providers")
 	}
-	release()
-	release() // A request can only release its lease once.
+	svc.work.Done()
 	if err := svc.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !closed() {
-		t.Fatal("profile remained open after release")
-	}
-	if len(svc.profiles) != 0 {
-		t.Fatal("completed profiles remained owned")
+	if !closed() || svc.profile != nil {
+		t.Fatal("profile not closed")
 	}
 }
 
@@ -425,13 +427,13 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 	if err := svc.swapProfile(candidate); err == nil {
 		t.Fatal("closing service accepted a profile")
 	}
-	if _, err := candidate.State(); err != nil {
+	if _, err := candidate.Providers(); err != nil {
 		t.Fatalf("rejected candidate was closed by service: %v", err)
 	}
 	if closed() {
 		t.Fatal("service released a candidate it did not own")
 	}
-	if len(svc.profiles) != 0 {
+	if svc.profile != nil {
 		t.Fatal("service retained rejected candidate")
 	}
 }
@@ -439,3 +441,24 @@ func TestSwapProfileRejectsClosingServiceWithoutTakingOwnership(t *testing.T) {
 func (*recordingProfile) AgentStatus() *aop.AgentStatus { return &aop.AgentStatus{} }
 
 func (*recordingProfile) ConsoleBindings() *consoleapi.Bindings { return nil }
+
+func (p *recordingProfile) Active() bool {
+	return p != nil && p.extensions != nil && p.extensions.Active()
+}
+
+func (p *recordingProfile) Providers() (*provider.State, error) {
+	if !p.Active() {
+		return nil, errors.New("profile is not active")
+	}
+	return p.app.Providers, nil
+}
+
+func (p *recordingProfile) Events() (*events.Stream, error) {
+	if !p.Active() {
+		return nil, errors.New("profile is not active")
+	}
+	return p.app.Stream, nil
+}
+
+func (p *recordingProfile) Progress() (*eventbus.Bus[*toolpb.Progress], error) { return nil, nil }
+func (p *recordingProfile) Processes() (*procbus.Manager, error)               { return nil, nil }

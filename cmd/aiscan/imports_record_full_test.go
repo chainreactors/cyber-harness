@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 )
 
@@ -30,7 +30,7 @@ func TestRecordManifestTags(t *testing.T) {
 func TestRecordFullRunnerBuildsDefaultRecordTool(t *testing.T) {
 	option := &cfg.Option{}
 	option.DataDir = t.TempDir()
-	profile, err := newCyberProfileFromRequest(profilepkg.Request{
+	profile, err := newAIScanProfile(profilepkg.Request{
 		Option:       option,
 		ProviderMode: profilepkg.ProviderDisabled,
 		Session:      &agentsession.Config{},

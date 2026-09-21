@@ -18,7 +18,7 @@ flowchart LR
     B -.再关闭.-> A
 ```
 
-`base.New` 按顺序提供 hooks、events、commands、toolset、skills、prompt、egress、文件与终端、tmux、app 和 provider。基础组合不包括 Agent 循环与 Session。参考发行版再加入领域能力、观察器、协议与宿主；具体组成以 [base](../../pkg/base/base.go) 和 [aiscan profile](../../pkg/aiscan/profile.go) 为准。
+`harness.BaseExtensions` 按顺序提供 hooks、events、commands、toolset、skills、prompt、egress、文件与终端、tmux、app 和 provider。基础组合不包括 Agent 循环与 Session。参考发行版再加入领域能力、观察器、协议与宿主；具体组成以 [base](../../pkg/harness/base.go) 和 [aiscan profile](../../cmd/aiscan/profile.go) 为准。
 
 ## 贡献与借用
 
@@ -59,6 +59,6 @@ CLI flag、配置 section 和连接测试需要在解析配置前可见，因此
 
 ## 领域边界
 
-`core/resource` 负责类型关系和句柄生命周期，工具、命令、提示词等领域负责各自的冲突与执行规则。`pkg/exts` 连接业务资源与装配，`app.State` 不承担所有扩展的公共字段仓库。
+`core/resource` 负责类型关系和句柄生命周期，工具、命令、提示词等领域负责各自的冲突与执行规则。`pkg/exts` 连接业务资源与装配，共享状态分别归 Provider、事件流和日志引用所有，不设置 App 公共字段仓库。
 
 关闭与并发行为的验证入口是 [Extension 测试](../../core/extension)、[Resource 测试](../../core/resource)和[领域注册表测试](../../core/registry)。扫描流水线另外拥有任务 DAG；它的路由关系不参与 Extension 的加载排序。

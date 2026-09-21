@@ -1,7 +1,7 @@
 package client
 
 import (
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/ioa/client"
 	"net/url"
 	"os"
@@ -18,7 +18,7 @@ func TestClientOptionsAreExplicitAndIndependent(t *testing.T) {
 		{"absent", "", nil, ""},
 		{"same origin", "https://token@example.test/base", nil, "https://token@example.test/base/ioa"},
 		{"independent", "http://web.test", map[string]any{"url": "https://other@ioa.test"}, "https://other@ioa.test"},
-		{"explicit disable", "http://web.test", map[string]any{"url": ""}, ""},
+		{"explicit memory", "http://web.test", map[string]any{"url": ""}, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			option := &cfg.Option{AgentOptions: cfg.AgentOptions{ServerURL: test.web}, Extensions: cfg.Values{ConfigKey: test.fields}}
@@ -118,5 +118,12 @@ func TestExtensionBuildDefaultsYieldToExplicitEmptyValues(t *testing.T) {
 	value, err = ReadOptions(option)
 	if err != nil || value.URL != "" || value.Space != "" {
 		t.Fatalf("explicit zero lost: %+v, %v", value, err)
+	}
+}
+
+func TestEmptyEndpointSelectsMemoryExtension(t *testing.T) {
+	config, err := ConfigFromOption(nil)
+	if err != nil || config == nil || config.URL != "" || config.Space != "default" || !config.RegisterCommands {
+		t.Fatalf("config: %+v %v", config, err)
 	}
 }

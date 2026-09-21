@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"strings"
 	"testing"
-
-	"github.com/chainreactors/cyber/pkg/commands"
 )
 
 func runProxy(cmd *Command, args ...string) (string, error) {
 	var output bytes.Buffer
-	_, err := cmd.Run(context.Background(), &commands.Execution{Args: args, Stdout: &output, Stderr: &output})
+	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
 	return output.String(), err
 }
 
@@ -144,7 +143,7 @@ func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
 	base := state.dialPtr()
 
 	var duringExec = base
-	cmd.SetCommandExecutor(func(_ context.Context, tokens []string, execution *commands.Execution) (any, error) {
+	cmd.SetCommandExecutor(func(_ context.Context, tokens []string, execution *coretool.Execution) (any, error) {
 		duringExec = state.dialPtr()
 		fmt.Fprint(execution.Stdout, "executed: "+strings.Join(tokens, " "))
 		return nil, nil

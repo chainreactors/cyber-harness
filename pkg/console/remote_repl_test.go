@@ -2,25 +2,26 @@ package console
 
 import (
 	"context"
-	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	"strings"
 	"testing"
 	"time"
 
+	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+
 	"github.com/chainreactors/cyber/agent"
-	procbus "github.com/chainreactors/cyber/agent/proc"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/namespaces"
+	procbus "github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/utils/proc"
 )
@@ -89,9 +90,9 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	defer cancel()
 
 	option := &cfg.Option{REPLMode: "fast"}
-	application := apptest.NewState(t, telemetry.NopLogger(), nil)
+	application := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 
-	rt := sessionext.New(agentsession.Config{Option: option, Logger: telemetry.NopLogger(),
+	rt := sessionext.New(agentsession.Config{
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -101,12 +102,12 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	repl, err := StartPersistent(rt.Runtime(), option, testSessionBindings(t, rt.Runtime()))
+	repl, err := StartPersistent(rt.Runtime(), application.Shell.Manager(), option, testSessionBindings(t, rt.Runtime()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repl.Close()
-	mgr := bashManager(rt.Runtime().Bash())
+	mgr := application.Shell.Manager()
 	if mgr == nil {
 		t.Fatal("pty manager unavailable")
 	}
@@ -125,7 +126,7 @@ func TestConsoleOwnsPersistentMainREPLWithoutProvider(t *testing.T) {
 		t.Fatalf("unexpected resident repl: %+v", initial)
 	}
 
-	registry := loadPTYRegistry(t, ctx, rt.Runtime().Bash())
+	registry := loadPTYRegistry(t, ctx, application.Shell)
 	transport := newPTYTransport(t, ctx, registry, 64)
 	messages := transport.messages
 	transport.dispatch(&ptypb.ProtocolMessage{Message: &ptypb.ProtocolMessage_Attach{Attach: &ptypb.Attach{
@@ -213,9 +214,9 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	application := apptest.NewState(t, telemetry.NopLogger(), nil)
+	application := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 
-	rt := sessionext.New(agentsession.Config{Option: &cfg.Option{REPLMode: "fast"}, Logger: telemetry.NopLogger(),
+	rt := sessionext.New(agentsession.Config{
 		PrimarySessionID: MainREPLName,
 		Loop:             agent.StandardLoop{},
 	})
@@ -225,7 +226,7 @@ func TestEphemeralLocalREPLDoesNotCreateBufferedPTYConsole(t *testing.T) {
 	}
 	defer rtSet.Close(context.Background())
 
-	for _, info := range bashManager(rt.Runtime().Bash()).List() {
+	for _, info := range application.Shell.Manager().List() {
 		if info.Kind == "repl" && info.Name == MainREPLName {
 			t.Fatalf("ephemeral local REPL was routed through buffered PTY: %+v", info)
 		}

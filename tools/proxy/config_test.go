@@ -3,11 +3,10 @@ package proxy
 import (
 	"context"
 	"errors"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"os"
 	"path/filepath"
 	"testing"
-
-	cfg "github.com/chainreactors/cyber/core/config"
 )
 
 func TestHubConstructionIsInert(t *testing.T) {

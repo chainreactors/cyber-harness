@@ -3,7 +3,7 @@ package proton_test
 import (
 	"testing"
 
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	protoncmd "github.com/chainreactors/cyber/tools/proton"
 )
 

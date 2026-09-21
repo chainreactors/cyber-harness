@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	rlterm "github.com/chainreactors/tui/readline/terminal"
 )
@@ -17,7 +17,7 @@ import (
 // corrupt native scrollback. Persistent remote REPLs continue to use the PTY;
 // the ephemeral local console binds directly to the process terminal.
 func AttachLocalREPL(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, bindings *consoleapi.Bindings) error {
-	if !rt.Configured() {
+	if !rt.Active() {
 		return fmt.Errorf("local repl requires an agent runtime")
 	}
 	if ctx == nil {

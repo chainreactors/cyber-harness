@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/pkg/output"
 )
 
 // StreamWriter manages token-by-token content streaming with paragraph-level

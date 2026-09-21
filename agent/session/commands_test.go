@@ -5,14 +5,43 @@ import (
 	"strings"
 	"testing"
 
-	cfg "github.com/chainreactors/cyber/core/config"
+	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/core/types"
 )
+
+func TestDirectCommandInheritsCurrentAgentConfig(t *testing.T) {
+	rt := newBareRuntime(t, nil, nil)
+	var observed agent.Config
+	var found bool
+	var err error
+	rt.commands, rt.commandIndex, err = commandDeclarations([]Command{{
+		Spec: &types.CommandSpec{Name: "/inspect-config"},
+		Handler: func(ctx context.Context, _ *Session, _ []string) (*types.CommandResult, error) {
+			observed, found = agent.ToolAgentConfig(ctx)
+			return nil, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := rt.OpenSession(t.Context(), SessionOptions{ID: "selected-session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{}
+	s.state.agent.SetProvider(p, "selected-model")
+	if _, err := s.Command(t.Context(), "/inspect-config"); err != nil {
+		t.Fatal(err)
+	}
+	if !found || observed.Model != "selected-model" || observed.Provider != p || observed.SessionID != s.ID() {
+		t.Fatalf("command received stale config: model=%s session=%s present=%v", observed.Model, observed.SessionID, found)
+	}
+}
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
 	spec := &types.CommandSpec{Name: "/inspect", Aliases: []string{"/peek"}, Description: "Inspect this session"}
-	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}, Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
+	owner, err := newUnitResource(t, nil, Config{Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 		return commandText("/inspect", CommandPresentationPlain, s.ID()+":"+strings.Join(args, "|")).result, nil
 	}}}})
 	// Use the already-loaded minimal test host; no provider or transport starts.
@@ -59,7 +88,7 @@ func TestCommandDeclarationsRejectAmbiguousNames(t *testing.T) {
 		{{Spec: &types.CommandSpec{Name: "missing-slash"}, Handler: handler}},
 		{{Spec: &types.CommandSpec{Name: "/custom"}}},
 	} {
-		if _, err := New(Config{Commands: commands}); err == nil {
+		if _, err := newUnitResource(t, nil, Config{Commands: commands}); err == nil {
 			t.Fatalf("accepted invalid declarations: %v", commands)
 		}
 	}
@@ -91,7 +120,7 @@ func TestCommandFailureDoesNotStrandSessionQueue(t *testing.T) {
 }
 
 func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
-	owner, err := New(Config{})
+	owner, err := newUnitResource(t, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +138,7 @@ func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
 // session hands it to the next run.
 func TestEvalRoundsCommandSetsSessionPacing(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
-	owner, err := New(Config{State: testEnvironment(runtime.app), Option: &cfg.Option{}})
+	owner, err := newUnitResource(t, nil, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sort"
@@ -15,7 +16,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	types "github.com/chainreactors/cyber/core/types"
 )
@@ -36,7 +37,7 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 		return nil, err
 	}
 	if cfg.Tools == nil {
-		cfg.Tools = tool.EmptyExecutor()
+		cfg.Tools = coretool.EmptyExecutor()
 	}
 
 	transcript := newTranscript(cfg.Messages, 8)
@@ -121,11 +122,24 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 		}
 		cfg.Logger.Debugf("[turn %d] sending %d messages to LLM", turn, len(reqMessages))
 
-		assistant, usage, err := requestWithRetry(ctx, cfg, em, reqMessages, toolDefinitions, turn)
+		assistant, usage, err := requestWithInboxInterrupt(ctx, cfg, em, reqMessages, toolDefinitions, turn)
 		transcript.recordTurnUsage(turn, usage)
 		if err != nil {
 			if ctx.Err() != nil {
 				return end(nil, ctx.Err(), StopReasonCanceled)
+			}
+			if errors.Is(err, inbox.ErrInterrupted) {
+				transcript.completedTurns = turn
+				transcript.usageMessageCount = len(transcript.messages)
+				em.usage(usage, cfg.Model)
+				em.status("interrupted", nil)
+				if cfg.TokenBudget > 0 && transcript.totalUsage.GetTotalTokens() >= uint64(cfg.TokenBudget) {
+					return end(nil, fmt.Errorf("token budget exhausted after interruption"), StopReasonBudget)
+				}
+				if cfg.MaxTurns > 0 && turn >= cfg.MaxTurns {
+					return end(nil, nil, StopReasonStopped)
+				}
+				continue
 			}
 			if isContextOverflowError(err) && !overflowRecoveryAttempted {
 				compacted, compactErr := runAutoCompaction(ctx, cfg, em, transcript, "overflow", transcript.contextTokens)
@@ -464,6 +478,10 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 
 	sem := make(chan struct{}, cfg.MaxParallelTools)
 	var wg sync.WaitGroup
+	var interrupt <-chan struct{}
+	if cfg.Inbox != nil {
+		interrupt = cfg.Inbox.InterruptSignal()
+	}
 	for i := range slots {
 		if slots[i].rejectedReason != "" {
 			slots[i].startedAt = time.Now()
@@ -480,6 +498,15 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 			defer wg.Done()
 			defer func() { <-sem }()
 			slots[i].startedAt = time.Now()
+			select {
+			case <-interrupt:
+				slots[i].result = toolExecution{result: "Tool was not executed because an interrupting Inbox message arrived.", isError: true}
+				return
+			case <-ctx.Done():
+				slots[i].result = toolExecution{result: "Tool was not executed because the task was canceled.", isError: true}
+				return
+			default:
+			}
 			slots[i].result = runToolCallSafely(ctx, cfg, assistant.message, slots[i].tc, turn)
 		}()
 	}
@@ -526,7 +553,7 @@ type toolCallSlot struct {
 type toolExecution struct {
 	result     string
 	rawResult  string
-	fullResult *tool.Result
+	fullResult *coretool.Result
 	isError    bool
 	err        error
 	flow       ToolFlowDecision
@@ -553,7 +580,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 	toolCtx := operation.ContextWithInvocation(ctx, operation.Invocation{
 		CallID: tc.Id, SessionID: cfg.SessionID, TurnID: cfg.TurnID, Emitter: cfg.AgentName,
 	})
-	toolCtx = withToolAgentConfig(toolCtx, cfg)
+	toolCtx = ContextWithToolAgentConfig(toolCtx, cfg)
 	toolCtx = inbox.ContextWithInbox(toolCtx, cfg.Inbox)
 	execution := toolExecution{}
 	if execution.result == "" && !execution.isError {
@@ -563,9 +590,9 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 		}
 		toolResult, execErr := cfg.Tools.ExecuteTool(toolCtx, tc.Name, arguments)
 		if toolResult == nil {
-			toolResult = &tool.Result{}
+			toolResult = &coretool.Result{}
 		}
-		execution.result = tool.ResultText(toolResult)
+		execution.result = coretool.ResultText(toolResult)
 		execution.err = execErr
 		execution.isError = execErr != nil || toolResult.IsError
 		if execErr != nil {
@@ -575,7 +602,7 @@ func runToolCall(ctx context.Context, cfg Config, assistantMsg *aop.Message, tc 
 		if toolResult.Terminate {
 			execution.flow = ToolFlowTerminate
 		}
-		if tool.ResultHasMedia(toolResult) || toolResult.Terminate {
+		if coretool.ResultHasMedia(toolResult) || toolResult.Terminate {
 			execution.fullResult = toolResult
 		}
 	}
@@ -621,7 +648,7 @@ func (e toolExecution) toMessage(toolCallID string) *aop.Message {
 		IsError:   e.isError,
 		Terminate: e.flow == ToolFlowTerminate,
 	}
-	if e.fullResult != nil && tool.ResultHasImages(e.fullResult) {
+	if e.fullResult != nil && coretool.ResultHasImages(e.fullResult) {
 		for _, block := range e.fullResult.Output {
 			if text := block.GetText(); text != nil {
 				result.Output = append(result.Output, aop.Text(text.Text))
@@ -759,17 +786,4 @@ func (b *messageBuilder) Message() *aop.Message {
 		}
 	}
 	return msg
-}
-
-// decodeToolArguments renders a tool call's arguments as a JSON value for
-// event payloads.
-func decodeToolArguments(call *aop.ToolCall) any {
-	if call == nil || call.Arguments == nil || len(call.Arguments.Data) == 0 {
-		return map[string]any{}
-	}
-	var m map[string]any
-	if err := json.Unmarshal(call.Arguments.Data, &m); err == nil {
-		return m
-	}
-	return string(call.Arguments.Data)
 }

@@ -5,39 +5,36 @@ package provider
 
 import (
 	"context"
+
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
 )
 
 type Extension struct {
 	release func()
 	state   *provider.State
 	config  provider.StartupConfig
-	logger  telemetry.Logger
 }
 
-func New(config provider.StartupConfig, logger telemetry.Logger) *Extension {
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
+func New(config provider.StartupConfig) *Extension {
 	config.Fallbacks = append([]provider.ProviderConfig(nil), config.Fallbacks...)
-	return &Extension{config: config, logger: logger}
+	return &Extension{config: config}
 }
 
-// Load initializes the provider state the application owns. The state lives on
-// App rather than here because the console and the session runtime read it
-// directly; this extension only drives its startup and shutdown.
+// Load owns and publishes the provider state for this installation.
 func (e *Extension) Load(scope *extension.Scope) error {
-	application, err := extension.Use[*apppkg.State](scope)
+	e.state = &provider.State{}
+	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
 		return err
 	}
-	e.state = &application.Providers
-	release, err := provider.Initialize(scope.Init(), e.state, e.config, e.logger)
+	release, err := provider.Initialize(scope.Init(), e.state, e.config, logger)
 	e.release = release
-	return err
+	if err != nil {
+		return err
+	}
+	return extension.Provide[*provider.State](scope, e.state)
 }
 func (e *Extension) Close(context.Context) error {
 	if e.release != nil {

@@ -4,16 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strconv"
-	"strings"
-
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/fingers/alias"
 	fingerslib "github.com/chainreactors/fingers/fingers"
 	"github.com/chainreactors/neutron/templates"
 	"github.com/chainreactors/sdk/pkg/association"
 	goflags "github.com/jessevdk/go-flags"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -98,7 +97,7 @@ Examples:
 func (c *CyberhubSearch) Name() string  { return "cyberhub" }
 func (c *CyberhubSearch) Usage() string { return cyberhubUsage() }
 
-func (c *CyberhubSearch) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *CyberhubSearch) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	args := execution.Args
 	if c.index == nil {
 		return nil, fmt.Errorf("cyberhub: not available — cyberhub resources not loaded. Configure via --cyberhub-url and --cyberhub-key flags, env (CYBER_CYBERHUB_URL, CYBER_CYBERHUB_KEY), or config file (cyberhub.url, cyberhub.key). Do not retry until configured")

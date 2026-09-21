@@ -17,7 +17,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
 // run is a small harness: parse args, execute against a real server, capture
@@ -31,9 +31,9 @@ func run(t *testing.T, args []string, env, workDir string) (stdout, stderr strin
 	}
 	var out, errb strings.Builder
 	c := New()
-	var egress commands.Egress
+	var egress coretool.Egress
 	if env != "" {
-		egress = commands.ResolveEgress([]string{env}, c.Proxy)
+		egress = coretool.ResolveEgress([]string{env}, c.Proxy)
 	}
 	err = c.do(context.Background(), req, egress, workDir, &out, &errb)
 	return out.String(), errb.String(), err
@@ -74,7 +74,7 @@ func TestResponseEmitsSprayArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr strings.Builder
-	if err := New().WithEvents(bus).do(context.Background(), req, commands.Egress{}, "", &stdout, &stderr); err != nil {
+	if err := New().WithEvents(bus).do(context.Background(), req, coretool.Egress{}, "", &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	if artifact == nil {

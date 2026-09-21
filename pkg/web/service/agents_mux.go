@@ -5,12 +5,11 @@ import (
 	"fmt"
 
 	aop "github.com/chainreactors/cyber/aop"
-	execpb "github.com/chainreactors/cyber/aop/exec"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	"github.com/chainreactors/cyber/core/output"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/pkg/output"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	protobuf "google.golang.org/protobuf/proto"
 )
@@ -52,16 +51,6 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 			return err
 		}
 		p.handleAgentFileMessage(agent, envelope, value)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	if err := mux.Register(&execpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, err := namespaceMessage[*execpb.ProtocolMessage](message)
-		if err != nil {
-			return err
-		}
-		p.handleAgentExecMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -196,16 +185,6 @@ func (p *AgentPool) handleAgentFileMessage(agent *remoteAgent, envelope *aop.Env
 	if result := value.GetResult(); result != nil {
 		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{File: protobuf.CloneOf(result)})
 	}
-}
-
-func (p *AgentPool) handleAgentExecMessage(agent *remoteAgent, envelope *aop.Envelope, value *execpb.ProtocolMessage) {
-	if agent == nil || envelope == nil || value == nil {
-		return
-	}
-	if result := value.GetResult(); result != nil {
-		p.finishAgentTask(agent, envelope.ReplyTo, taskResult{})
-	}
-	// Output is intentionally streaming-only and does not complete the task.
 }
 
 func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *types.ReloadProtocolMessage) {

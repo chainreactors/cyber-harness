@@ -4,9 +4,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
 	"github.com/chainreactors/cyber/core/telemetry"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	flags "github.com/jessevdk/go-flags"
 	"io"
 	"reflect"

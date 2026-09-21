@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainreactors/cyber/core/output"
+	"github.com/chainreactors/cyber/pkg/output"
 	"github.com/chainreactors/cyber/tools/scan/pipeline"
 	"github.com/chainreactors/utils/parsers"
 )

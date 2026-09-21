@@ -83,27 +83,3 @@ func emitRunEnd(ctx context.Context, cfg Config, result *Result) {
 		Err:            result.Err,
 	})
 }
-
-func emitSessionStart(ctx context.Context, cfg Config) {
-	if !hooks.SessionStart.Has(cfg.Hooks) {
-		return
-	}
-	_, _ = hooks.SessionStart.Emit(ctx, cfg.Hooks, sessionEvent(cfg, ""))
-}
-
-func emitSessionEnd(ctx context.Context, cfg Config, reason string) {
-	if !hooks.SessionEnd.Has(cfg.Hooks) {
-		return
-	}
-	_, _ = hooks.SessionEnd.Emit(ctx, cfg.Hooks, sessionEvent(cfg, reason))
-}
-
-func sessionEvent(cfg Config, reason string) hooks.SessionEvent {
-	return hooks.SessionEvent{
-		SessionID: cfg.SessionID,
-		ParentID:  cfg.ParentSessionID,
-		AgentName: cfg.AgentName,
-		Model:     cfg.Model,
-		Reason:    reason,
-	}
-}

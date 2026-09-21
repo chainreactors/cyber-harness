@@ -11,10 +11,8 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/base"
+	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/harness"
 )
 
@@ -53,13 +51,21 @@ func run(ctx context.Context) (resultErr error) {
 		return err
 	}
 	h, err := harness.New(harness.Config{
-		Base: base.Config{
+		Base: harness.BaseConfig{
 			Directory: directory, SkillExclude: []string{"cyber"},
 			Provider: provider.StartupConfig{Mode: provider.StartupDisabled},
 		},
 		Session: &agentsession.Config{
-			Option: &cfg.Option{}, Logger: telemetry.NopLogger(), PrimarySessionID: "main",
+			PrimarySessionID: "main",
 		},
+		Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error {
+			providers, err := extension.Use[*provider.State](scope)
+			if err != nil {
+				return err
+			}
+			providers.Set(demoProvider{}, provider.ProviderConfig{Model: "demo"})
+			return nil
+		}}},
 	})
 	if err != nil {
 		return err
@@ -73,7 +79,6 @@ func run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	runtime.SetProvider(demoProvider{}, provider.ProviderConfig{Model: "demo"})
 	sub := runtime.Observe(events.ObserverFunc(func(event *aop.Event) {
 		if ended := event.GetTurnEnded(); ended != nil {
 			fmt.Printf("Turn ended: %s\n", ended.StopReason)

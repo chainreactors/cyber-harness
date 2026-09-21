@@ -3,9 +3,9 @@ package scan
 import (
 	"context"
 
-	"github.com/chainreactors/cyber/agent"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/utils/parsers"
 )
 
 type invocationProxyKey struct{}
@@ -29,9 +29,10 @@ func (c *Command) proxyForContext(ctx context.Context) string {
 
 type Option func(*Command)
 
-func WithParent(a *agent.Agent) Option {
-	return func(c *Command) { c.parent = a }
-}
+// Worker delegates scanner-owned input without exposing agent or session state.
+type Worker func(context.Context, string, parsers.Loot) (string, error)
+
+func WithWorker(worker Worker) Option { return func(c *Command) { c.worker = worker } }
 
 func WithProxy(proxy string) Option {
 	return func(c *Command) { c.Proxy = proxy }
@@ -49,6 +50,5 @@ func WithDeepBrowserFunc(fn func(context.Context, string) (string, error)) Optio
 	return func(c *Command) { c.deepBrowser = fn }
 }
 
-func WithSkillReader(read func(string) string) Option {
-	return func(c *Command) { c.readSkill = read }
-}
+// WithExecutionOnly rejects modes requiring inference rather than silently ignoring them.
+func WithExecutionOnly() Option { return func(c *Command) { c.executionOnly = true } }

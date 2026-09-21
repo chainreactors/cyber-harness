@@ -3,7 +3,7 @@
 package proxy
 
 import (
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 
 	// Register extra proxy protocols so proxyclient.NewClient can handle them.
 	_ "github.com/chainreactors/proxyclient/extra/anytls"
@@ -16,7 +16,7 @@ import (
 // NewCommands constructs the native proxy command group without publishing it.
 // Profiles that apply an authorization policy can wrap the returned command
 // before the group becomes visible.
-func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) []commands.Command {
+func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) []coretool.Command {
 	state, store := (*State)(nil), (*FlowStore)(nil)
 	if hub != nil {
 		state, store = hub.state, hub.store
@@ -26,7 +26,7 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 	cmd := New(state)
 	cmd.SetHub(hub)
 	cmd.SetCommandExecutor(execute)
-	proxyCommand := commands.Command{
+	proxyCommand := coretool.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/proxy.md",
 		Run:             cmd.Run,
@@ -34,10 +34,10 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 
 	mitmCmd := NewMitmCommand(store, hub)
 	mitmCmd.SetCommandExecutor(execute)
-	mitmCommand := commands.Command{
+	mitmCommand := coretool.Command{
 		Name: mitmCmd.Name(), Usage: mitmCmd.Usage(),
 		DescriptionPath: "cyber://skills/cyber/okf/runtime/mitm.md",
 		Run:             mitmCmd.Run,
 	}
-	return []commands.Command{proxyCommand, mitmCommand}
+	return []coretool.Command{proxyCommand, mitmCommand}
 }

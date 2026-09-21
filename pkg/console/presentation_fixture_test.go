@@ -5,7 +5,7 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/console/api"
-	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
+	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
 	"testing"
 )
@@ -14,7 +14,7 @@ import (
 func testSessionBindings(t *testing.T, runtime *agentsession.Runtime) *api.Bindings {
 	t.Helper()
 	tui := tuiext.New()
-	contribution := sessionconsole.New()
+	contribution := sessionext.NewConsole()
 	var registry *api.Registry
 	borrow := extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		var err error

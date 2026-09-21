@@ -1,10 +1,9 @@
 package agent
 
 import (
-	"testing"
-
 	coretool "github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/hosttest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	"testing"
 )
 
 func newTestTools(t testing.TB, tools ...coretool.Tool) coretool.Executor {

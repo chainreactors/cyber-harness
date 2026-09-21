@@ -9,9 +9,9 @@ status: stable
 # ioa finding — Publishing Vulnerability Discoveries
 
 When a scan produces a vulnerability worth acting on, publish it to the current
-IOA space as a `checkpoint` message. IOA persists the message, any node can
-watch the stream with `ioa read --listen`, and the checkpoint status forms a
-review trail.
+IOA space as a `checkpoint` message. IOA persists it as a review trail.
+Connected agents receive new messages automatically; use `inbox_wait` to wait
+or `ioa read` to recover earlier findings.
 
 Requires an IOA-bound session (a space already selected via
 [ioa space](ioa-space.md) or configured by the runner). If `ioa send` reports

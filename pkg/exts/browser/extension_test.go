@@ -4,14 +4,13 @@ package browser
 
 import (
 	"context"
+	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	"testing"
-
-	"github.com/chainreactors/cyber/pkg/commands"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func TestModuleOwnsBrowserRegistration(t *testing.T) {
-	registry := commands.NewRegistry()
+	registry := coretool.NewCommandRegistry()
 	instance, err := New(t.TempDir(), "default")
 	if err != nil {
 		t.Fatal(err)

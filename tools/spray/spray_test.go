@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	spraypkg "github.com/chainreactors/spray/pkg"
 	"github.com/chainreactors/utils/parsers"
@@ -151,7 +151,7 @@ func TestExecuteInstallsResourceProviderBeforePrint(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	_, err = New(engine).Run(context.Background(), &commands.Execution{Args: []string{"--print"}, Stdout: &output, Stderr: &output})
+	_, err = New(engine).Run(context.Background(), &coretool.Execution{Args: []string{"--print"}, Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -165,7 +165,7 @@ func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
 	cmd := New(nil).WithLogger(telemetry.NewLogger(telemetry.LogConfig{Output: &logs}))
 
 	var output bytes.Buffer
-	if _, err := cmd.Run(context.Background(), &commands.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
+	if _, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--debug", "--help"}, Stdout: &output, Stderr: &output}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if got := logs.String(); !strings.Contains(got, "● spray debug enabled") {

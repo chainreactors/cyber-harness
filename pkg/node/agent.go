@@ -3,19 +3,18 @@ package node
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/telemetry"
 	types "github.com/chainreactors/cyber/core/types"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 )
@@ -24,6 +23,8 @@ func RunWebSocket(ctx context.Context, newProfile func(profile.Request) (profile
 	return runRemoteAgent(ctx, newProfile, option, logger)
 }
 
+// Reload prepares a complete candidate. The serving loop owns the current
+// profile and closes it before activating the candidate; no sessions migrate.
 func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
 	if err := resolveRemoteAgentURLs(option); err != nil {
 		return err
@@ -32,113 +33,148 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 	if err != nil {
 		return err
 	}
-
 	if newProfile == nil {
 		return fmt.Errorf("profile constructor is required")
 	}
-	p, err := newProfile(profile.Request{
-		Option: option, ProviderMode: profile.ProviderOptional, Logger: logger,
-		Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}},
-	})
-	if err != nil {
-		return err
+	if logger == nil {
+		logger = telemetry.NopLogger()
 	}
-	if p == nil {
-		return fmt.Errorf("profile constructor returned nil")
-	}
-	if err := p.Load(ctx); err != nil {
-		_ = p.Close(context.Background())
-		return err
-	}
-	defer p.Close(context.Background())
-	application, err := p.State()
-	if err != nil {
-		return err
-	}
-	_, providerConfig := application.ProviderState()
-	apppkg.ApplyResolvedProviderOptions(option, providerConfig)
-	rt, err := p.Runtime()
-	if err != nil {
-		return err
-	}
-	repl, err := console.StartPersistent(rt, option, p.ConsoleBindings())
-	if err != nil {
-		return err
-	}
-	defer repl.Close()
-
-	chatHandler := &chatAgentHandler{
-		rt:     rt,
-		app:    application,
-		option: option,
-		logger: logger,
-		ready:  make(chan struct{}),
-		status: p.AgentStatus,
-	}
-
-	connectionDone := make(chan struct{})
-	go func() {
-		defer close(connectionDone)
-		dialURL, _ := SplitAccessKey(option.ServerURL)
-		logger.Debugf("websocket transport connection to %s", dialURL)
-
-		connection := connectionConfig{
-			ServerURL:          option.ServerURL,
-			Name:               rt.NodeName(),
-			Registry:           rt.CommandRegistry(),
-			Executor:           rt.Tools(),
-			Agent:              rt,
-			Progress:           application.Progress,
-			Hooks:              rt.Hooks(),
-			Logger:             logger,
-			Chat:               chatHandler,
-			NodeID:             nodeID,
-			Runtime:            DefaultRuntimeInfo(),
-			Status:             p.AgentStatus,
-			Menu:               func() []*types.CommandSpec { return CommandSpecs(rt) },
-			RegisterNamespaces: p.RegisterNamespaces,
+	build := func(options *cfg.Option) (profile.Profile, error) {
+		p, err := newProfile(profile.Request{Option: options, ProviderMode: profile.ProviderOptional, Logger: logger, Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}}})
+		if err == nil && p == nil {
+			err = fmt.Errorf("profile constructor returned nil")
 		}
-		_ = connect(ctx, connection)
-	}()
-
-	if provider, _ := application.ProviderState(); provider == nil {
-		select {
-		case <-chatHandler.ready:
-		case <-ctx.Done():
-			<-connectionDone
-			return nil
+		if err == nil {
+			err = p.Load(ctx)
 		}
+		if err == nil {
+			_, err = p.Runtime()
+		}
+		if err == nil {
+			_, err = p.Processes()
+		}
+		if err != nil {
+			if p != nil {
+				_ = p.Close(context.Background())
+			}
+			return nil, err
+		}
+		return p, nil
 	}
-	if provider, _ := application.ProviderState(); provider == nil {
-		logger.Warnf("no LLM provider configured; remote REPL and PTY are available, autonomous agent loop is disabled")
-		<-ctx.Done()
-		<-connectionDone
-		return nil
-	}
-
-	task, err := webAgentTask(option)
+	current, err := build(option)
 	if err != nil {
 		return err
 	}
-	if task == "" {
-		logger.Infof("remote transport connected; remote REPL and PTY are available")
-		<-ctx.Done()
-		<-connectionDone
-		return nil
+	defer func() { _ = current.Close(context.Background()) }()
+	currentOption := option
+	var applied *types.DistributeConfig
+	started := false
+	for {
+		var candidate profile.Profile
+		var candidateOption *cfg.Option
+		var candidateConfig *types.DistributeConfig
+		err := func() error {
+			connectionCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			rt, err := current.Runtime()
+			if err != nil {
+				return err
+			}
+			processes, err := current.Processes()
+			if err != nil {
+				return err
+			}
+			repl, err := console.StartPersistent(rt, processes, currentOption, current.ConsoleBindings())
+			if err != nil {
+				return err
+			}
+			defer repl.Close()
+			progress, err := current.Progress()
+			if err != nil {
+				return err
+			}
+			chat := &chatAgentHandler{}
+			chat.reload = func(distributed *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
+				if applied != nil && proto.Equal(applied, distributed) {
+					return reloadStatus(current)
+				}
+				nextOption, err := cfg.ResolveDistributedRuntime(distributed, option)
+				var next profile.Profile
+				if err == nil {
+					next, err = build(nextOption)
+				}
+				if err != nil {
+					return &types.ReloadResult{Error: err.Error()}, nil
+				}
+				result, status := reloadStatus(next)
+				if status.GetConfigError() != "" {
+					result.Ok = false
+					result.Error = status.ConfigError
+				}
+				if !result.Ok {
+					_ = next.Close(context.Background())
+					return result, nil
+				}
+				candidate, candidateOption, candidateConfig = next, nextOption, proto.CloneOf(distributed)
+				return result, status
+			}
+			chat.commit = func() {
+				if candidate != nil {
+					cancel()
+				}
+			}
+			if !started {
+				providers, err := current.Providers()
+				if err != nil {
+					return err
+				}
+				if active, _ := providers.Current(); active != nil {
+					task, err := webAgentTask(option)
+					if err != nil {
+						return err
+					}
+					started = true
+					if task != "" {
+						if _, err := rt.EnsureSession(agentsession.SessionOptions{ID: "startup"}); err != nil {
+							return err
+						}
+						if _, err := rt.RunSession(connectionCtx, "startup", agentsession.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}}); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return connect(connectionCtx, connectionConfig{
+				ServerURL: option.ServerURL, Name: rt.NodeName(), Registry: rt.CommandRegistry(), Executor: rt.Tools(), Agent: rt,
+				Progress: progress, Hooks: rt.Hooks(), Logger: logger, Chat: chat, NodeID: nodeID, Runtime: DefaultRuntimeInfo(),
+				Status: current.AgentStatus, Menu: func() []*types.CommandSpec { return CommandSpecs(rt) }, RegisterNamespaces: current.RegisterNamespaces,
+			})
+		}()
+		if candidate == nil {
+			return err
+		}
+		if err := current.Close(context.Background()); err != nil {
+			logger.Warnf("close previous profile: %v", err)
+		}
+		current, currentOption, applied = candidate, candidateOption, candidateConfig
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		logger.Infof("configuration activated; previous profile and connections closed")
 	}
+}
 
-	_, err = rt.EnsureSession(agentsession.SessionOptions{ID: "startup"})
+func reloadStatus(p profile.Profile) (*types.ReloadResult, *aop.AgentStatus) {
+	providers, err := p.Providers()
 	if err != nil {
-		return err
+		return &types.ReloadResult{Error: err.Error()}, nil
 	}
-	run, err := rt.RunSession(ctx, "startup", agentsession.RunInput{TurnID: "startup", Content: []*aop.Content{aop.Text(task)}})
-	if err == nil {
-		_, err = run.Wait()
+	active, resolved := providers.Current()
+	result := &types.ReloadResult{Ok: true, Model: resolved.Model}
+	if active != nil {
+		result.Provider = active.Name()
 	}
-	_ = rt.CloseSession(context.Background(), "startup", agentsession.SessionCloseCompleted)
-
-	<-connectionDone
-	return err
+	return result, p.AgentStatus()
 }
 
 func resolveRemoteAgentURLs(option *cfg.Option) error {
@@ -157,13 +193,8 @@ func resolveRemoteAgentURLs(option *cfg.Option) error {
 // ---------------------------------------------------------------------------
 
 type chatAgentHandler struct {
-	rt        *agentsession.Runtime
-	app       *apppkg.State
-	option    *cfg.Option
-	logger    telemetry.Logger
-	ready     chan struct{}
-	readyOnce sync.Once
-	status    func() *aop.AgentStatus
+	reload func(*types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus)
+	commit func()
 }
 
 func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, error) {
@@ -186,22 +217,10 @@ func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, er
 }
 
 func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
-	defer h.readyOnce.Do(func() {
-		if h.ready != nil {
-			close(h.ready)
-		}
-	})
-	provider, model, err := ReloadConfig(config, h.rt, h.option, h.logger)
-	result := &types.ReloadResult{Ok: err == nil, Model: model}
-	if err != nil {
-		result.Error = err.Error()
-		return result, nil
+	if h.reload == nil {
+		return &types.ReloadResult{Error: "profile reload is unavailable"}, nil
 	}
-	result.Provider = provider.Name()
-	if h.status != nil {
-		return result, h.status()
-	}
-	return result, AgentStatus(h.app)
+	return h.reload(config)
 }
 
 // ---------------------------------------------------------------------------

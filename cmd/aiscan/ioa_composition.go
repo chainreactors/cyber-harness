@@ -2,19 +2,17 @@ package main
 
 import (
 	"context"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/resource"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
-	client "github.com/chainreactors/cyber/pkg/exts/ioa/client"
-	clientcli "github.com/chainreactors/cyber/pkg/exts/ioa/client/cli"
-	server "github.com/chainreactors/cyber/pkg/exts/ioa/server"
-	servercli "github.com/chainreactors/cyber/pkg/exts/ioa/server/cli"
+	cfg "github.com/chainreactors/cyber/pkg/config"
+	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
+
 	recordext "github.com/chainreactors/cyber/pkg/exts/record"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
 	flags "github.com/jessevdk/go-flags"
-	"gopkg.in/yaml.v3"
 	"sync"
 )
 
@@ -45,11 +43,11 @@ func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cf
 			panic(err)
 		}
 	}
-	mustDeclare(client.Declare(resources, func(registry *hostcli.Registry) error {
-		return clientcli.Register(registry, runIOAClientCommand)
+	mustDeclare(ioaclient.Declare(resources, func(registry *hostcli.Registry) error {
+		return ioaclient.RegisterCLI(registry, runIOAClientCommand)
 	}))
-	mustDeclare(server.Declare(resources, func(registry *hostcli.Registry) error {
-		return servercli.Register(registry, func(ctx context.Context, option server.Options, env hostcli.Environment) error {
+	mustDeclare(ioaserver.Declare(resources, func(registry *hostcli.Registry) error {
+		return ioaserver.RegisterCLI(registry, func(ctx context.Context, option ioaserver.Options, env hostcli.Environment) error {
 			return runIOAServe(ctx, option, env.Logger)
 		})
 	}))
@@ -71,35 +69,24 @@ func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 	serving := action != nil && action.Persistent
 	option.Sections = defaultSections()
 	if serving {
-		if fields := option.Extensions[client.ConfigKey]; fields != nil {
-			if option.Extensions[server.ConfigKey] == nil {
-				option.Extensions[server.ConfigKey] = map[string]any{}
+		if fields := option.Extensions[ioaclient.ConfigKey]; fields != nil {
+			if option.Extensions[ioaserver.ConfigKey] == nil {
+				option.Extensions[ioaserver.ConfigKey] = map[string]any{}
 			}
 			for _, name := range []string{"url", "token"} {
 				value, present := fields[name]
-				if _, set := option.Extensions[server.ConfigKey][name]; present && !set {
-					option.Extensions[server.ConfigKey][name] = value
+				if _, set := option.Extensions[ioaserver.ConfigKey][name]; present && !set {
+					option.Extensions[ioaserver.ConfigKey][name] = value
 				}
 			}
-			delete(option.Extensions, client.ConfigKey)
+			delete(option.Extensions, ioaclient.ConfigKey)
 		}
 	}
 }
 
-func defaultConfig() string {
-	defaults := defaultSections().Defaults()
-	// Omission keeps same-origin URL derivation; an explicit empty URL disables it.
-	if defaults[client.ConfigKey]["url"] == "" {
-		delete(defaults[client.ConfigKey], "url")
-	}
-	document := map[string]any{"extensions": defaults}
-	b, _ := yaml.Marshal(document)
-	return cfg.InitDefaultConfig() + "\n" + string(b)
-}
-
 // Legacy node identity is projected once at the configuration boundary.
 func applyIdentity(option *cfg.Option) error {
-	value, err := client.ReadOptions(option)
+	value, err := ioaclient.ReadOptions(option)
 	if err != nil {
 		return err
 	}

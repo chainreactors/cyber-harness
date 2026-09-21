@@ -12,14 +12,17 @@ import (
 	"fmt"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	"github.com/chainreactors/cyber/core/eventbus"
+	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
-	"github.com/chainreactors/cyber/core/tool"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/base"
-	"github.com/chainreactors/cyber/pkg/commands"
+	"github.com/chainreactors/cyber/core/proc"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -30,54 +33,67 @@ import (
 // optional session consumes them. Session enables the Agent runtime; its Loop
 // defaults to StandardLoop when Session.Loop is nil.
 type Config struct {
-	Base       base.Config
+	Base       BaseConfig
 	Extensions []extension.Extension
 	Session    *agentsession.Config
-	Loop       agent.Loop
 }
 
 // Harness owns the assembled extension graph and the capabilities it
 // publishes. Constructing a Harness does not start resources; call Load
 // before using any accessor and Close it even when Load fails.
 type Harness struct {
-	set      *extension.Set
-	app      *apppkg.State
-	runtime  *agentsession.Runtime
-	tools    tool.Executor
-	commands commands.Executor
-	bash     *terminaltool.BashTool
+	set       *extension.Set
+	providers *provider.State
+	events    *events.Stream
+	progress  *eventbus.Bus[*toolpb.Progress]
+	processes *proc.Manager
+	runtime   *agentsession.Runtime
+	tools     coretool.Executor
+	commands  coretool.CommandExecutor
+	bash      *terminaltool.BashTool
 }
 
 // New builds a harness without loading it.
 func New(config Config) (*Harness, error) {
-	entries, err := base.New(config.Base)
+	entries, err := BaseExtensions(config.Base)
 	if err != nil {
 		return nil, err
+	}
+	if config.Session != nil {
+		entries = append(entries, subagentext.New())
 	}
 	entries = append(entries, config.Extensions...)
 
 	h := &Harness{}
 	if config.Session != nil {
 		session := *config.Session
-		if config.Loop != nil {
-			session.Loop = config.Loop
-		} else if session.Loop == nil {
+		if session.Loop == nil {
 			session.Loop = agent.StandardLoop{}
 		}
-		entries = append(entries, loopext.New(session.Loop), sessionext.New(session))
+		entries = append(entries, loopext.New(session.Loop), sessionext.New(session), subagentext.NewTools())
 	}
 	// The final consumer reads the capabilities assembled by the graph. This
 	// keeps ownership in the extensions while giving an embedded host a small,
 	// stable surface to run against.
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 		var err error
-		if h.app, err = extension.Use[*apppkg.State](scope); err != nil {
+		if h.providers, err = extension.Use[*provider.State](scope); err != nil {
 			return err
 		}
-		if h.tools, err = extension.Use[tool.Executor](scope); err != nil {
+		if h.events, err = extension.Use[*events.Stream](scope); err != nil {
 			return err
 		}
-		if h.commands, err = extension.Use[commands.Executor](scope); err != nil {
+		if h.progress, err = extension.Use[*eventbus.Bus[*toolpb.Progress]](scope); err != nil {
+			return err
+		}
+		if h.processes, err = extension.Use[*proc.Manager](scope); err != nil {
+			return err
+		}
+
+		if h.tools, err = extension.Use[coretool.Executor](scope); err != nil {
+			return err
+		}
+		if h.commands, err = extension.Use[coretool.CommandExecutor](scope); err != nil {
 			return err
 		}
 		if h.bash, err = extension.Use[*terminaltool.BashTool](scope); err != nil {
@@ -117,14 +133,6 @@ func (h *Harness) Close(ctx context.Context) error {
 // Active reports whether the graph is loaded and accepting work.
 func (h *Harness) Active() bool { return h != nil && h.set != nil && h.set.Active() }
 
-// State returns the shared application state after Load.
-func (h *Harness) State() (*apppkg.State, error) {
-	if !h.Active() || h.app == nil {
-		return nil, fmt.Errorf("harness is not active")
-	}
-	return h.app, nil
-}
-
 // Runtime returns the session runtime for a conversational harness.
 func (h *Harness) Runtime() (*agentsession.Runtime, error) {
 	if !h.Active() || h.runtime == nil {
@@ -134,7 +142,7 @@ func (h *Harness) Runtime() (*agentsession.Runtime, error) {
 }
 
 // Tools returns the shared tool executor after Load.
-func (h *Harness) Tools() (tool.Executor, error) {
+func (h *Harness) Tools() (coretool.Executor, error) {
 	if !h.Active() || h.tools == nil {
 		return nil, fmt.Errorf("harness is not active")
 	}
@@ -142,7 +150,7 @@ func (h *Harness) Tools() (tool.Executor, error) {
 }
 
 // Commands returns the shared command executor after Load.
-func (h *Harness) Commands() (commands.Executor, error) {
+func (h *Harness) Commands() (coretool.CommandExecutor, error) {
 	if !h.Active() || h.commands == nil {
 		return nil, fmt.Errorf("harness is not active")
 	}
@@ -155,4 +163,36 @@ func (h *Harness) Bash() (*terminaltool.BashTool, error) {
 		return nil, fmt.Errorf("harness is not active")
 	}
 	return h.bash, nil
+}
+
+// Providers borrows a capability from the active installation.
+func (h *Harness) Providers() (*provider.State, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.providers, nil
+}
+
+// Events borrows a capability from the active installation.
+func (h *Harness) Events() (*events.Stream, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.events, nil
+}
+
+// Progress borrows a capability from the active installation.
+func (h *Harness) Progress() (*eventbus.Bus[*toolpb.Progress], error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.progress, nil
+}
+
+// Processes borrows a capability from the active installation.
+func (h *Harness) Processes() (*proc.Manager, error) {
+	if !h.Active() {
+		return nil, fmt.Errorf("harness is not active")
+	}
+	return h.processes, nil
 }

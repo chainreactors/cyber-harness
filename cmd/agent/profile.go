@@ -8,17 +8,16 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	base "github.com/chainreactors/cyber/pkg/base"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	sessionext "github.com/chainreactors/cyber/pkg/exts/session"
-	sessionconsole "github.com/chainreactors/cyber/pkg/exts/session/console"
+	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	tuiext "github.com/chainreactors/cyber/pkg/exts/tui"
+	harness "github.com/chainreactors/cyber/pkg/harness"
 )
 
 type agentProfile struct {
@@ -28,22 +27,22 @@ type agentProfile struct {
 }
 
 func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string, bashTimeout int) (*agentProfile, error) {
-	sessionConfig := agentsession.Config{
-		NodeName: cfg.ResolveNodeName(option.NodeName),
-		Option:   &option, Logger: logger, PrimarySessionID: "main", Loop: agent.StandardLoop{},
-	}
+	sessionConfig := sessionext.ConfigFromOption(&option, agentsession.Config{
+		NodeName:         cfg.ResolveNodeName(option.NodeName),
+		PrimarySessionID: "main", Loop: agent.StandardLoop{},
+	})
 	loop := loopext.New(sessionConfig.Loop)
 
 	// This build routes nothing, so it publishes the disabled endpoint and
 	// links no proxy at all.
-	values, err := base.New(base.Config{
+	values, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory:    workDir,
 		SkillPaths:   agentSkillPaths(option.Skills),
 		SkillExclude: []string{"cyber"},
 		Terminal:     terminalext.Config{Timeout: bashTimeout},
 		Provider: provider.StartupConfig{
-			Mode: provider.StartupRequired, Config: apppkg.ProviderConfig(&option),
-			Fallbacks: apppkg.FallbackProviderConfigs(&option),
+			Mode: provider.StartupRequired, Config: cfg.ProviderConfig(&option),
+			Fallbacks: cfg.FallbackProviderConfigs(&option),
 		},
 		Logger: logger,
 	})
@@ -54,9 +53,9 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	p := &agentProfile{}
 	values = append(values,
 		loop,
-		sessionext.New(sessionConfig),
+		subagentext.New(), sessionext.New(sessionConfig), subagentext.NewTools(),
 		tuiext.New(),
-		sessionconsole.New(),
+		sessionext.NewConsole(),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			var err error
 			if p.runtime, err = extension.Use[*agentsession.Runtime](scope); err != nil {

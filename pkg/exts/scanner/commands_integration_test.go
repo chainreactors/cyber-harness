@@ -3,7 +3,6 @@
 package scanner
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,13 +10,6 @@ import (
 	"time"
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	coreevents "github.com/chainreactors/cyber/core/events"
-	"github.com/chainreactors/cyber/core/telemetry"
-	_ "github.com/chainreactors/cyber/tools/gogo"
-	_ "github.com/chainreactors/cyber/tools/neutron"
-	"github.com/chainreactors/cyber/tools/resources"
-	"github.com/chainreactors/cyber/tools/scan/engine"
-	_ "github.com/chainreactors/cyber/tools/spray"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -26,17 +18,10 @@ func TestScannerPublicIntegration(t *testing.T) {
 		t.Skip("set CYBER_INTEGRATION=1 to run public network regression tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	engineSet, err := engine.InitWithOptions(ctx, resources.Options{}, telemetry.NopLogger())
-	if err != nil {
-		t.Fatalf("initialize scanner engines: %v", err)
-	}
-	defer engineSet.Close()
+	installed := installScanner(t, t.TempDir(), Config{})
+	recorder := newFunctionalRecorder(installed.events)
+	registry := installed.commands
 
-	bus := coreevents.New()
-	recorder := newFunctionalRecorder(bus)
-	registry := registerTestScanners(t, engineSet, t.TempDir(), bus, telemetry.NopLogger())
 	templateFile := filepath.Join(t.TempDir(), "redhaze-marker.yaml")
 	writeTestFile(t, templateFile, `id: redhaze-public-marker
 info:

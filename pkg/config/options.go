@@ -1,0 +1,280 @@
+package config
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"runtime"
+	"strings"
+)
+
+var Version = "dev"
+
+// Option is the configuration schema. local:"true" keeps host-owned settings
+// out of distributed replacement; fields without a config key are local too.
+type Option struct {
+	// Explicit records flags actually supplied by the caller, including zero values.
+	Explicit       map[string]bool `no-flag:"true" config:"-"`
+	present        map[string]bool
+	Resolved       *Resolved `no-flag:"true" config:"-"`
+	Snapshot       *Snapshot `no-flag:"true" config:"-"`
+	Context        *Context  `no-flag:"true" config:"-"`
+	LLMOptions     `group:"LLM Options" config:"llm"`
+	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
+	TrafficOptions `group:"Traffic Options" config:"traffic"`
+	AgentOptions   `group:"Agent Options" config:"agent"`
+	NodeOptions    `group:"Node Options" config:"node" local:"true"`
+	Extensions     Values    `no-flag:"true" config:"extensions"`
+	Sections       *Sections `no-flag:"true" config:"-"`
+	ReconOptions   `group:"Recon Options" config:"recon"`
+	OutputOptions  `group:"Output Options" config:"output" local:"true"`
+	MiscOptions    `group:"Miscellaneous Options" config:"misc" local:"true"`
+	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
+	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
+
+	// Runtime-only environment settings. Business packages receive these values
+	// after ResolveRuntimeConfig instead of reading the process environment.
+	RenderMode         string            `no-flag:"true"`
+	REPLMode           string            `no-flag:"true"`
+	PlaywrightSession  string            `no-flag:"true"`
+	UncoverCredentials map[string]string `no-flag:"true"`
+}
+
+type ScanConfigOptions struct {
+	Verify string `config:"verify"`
+}
+
+type SearchConfigOptions struct {
+	TavilyKeys string `config:"tavily_keys" description:"Tavily API keys (comma-separated; empty falls back to DuckDuckGo)"`
+}
+
+type LLMOptions struct {
+	Provider      string             `long:"provider" config:"provider" description:"LLM protocol: openai (OpenAI-compatible, default) or anthropic"`
+	BaseURL       string             `long:"base-url" config:"base_url" description:"LLM API base URL (leave empty to use provider default)"`
+	APIKey        string             `long:"api-key" config:"api_key" description:"LLM API key (or env: OPENAI_API_KEY, ANTHROPIC_API_KEY, CYBER_API_KEY)"`
+	Model         string             `long:"model" config:"model" description:"LLM model name"`
+	MaxTokens     int                `long:"max-tokens" config:"max_tokens" description:"Maximum output tokens per LLM response"`
+	ContextWindow int                `long:"context-window" config:"context_window" description:"Explicit model context window in tokens"`
+	LLMProxy      string             `long:"llm-proxy" config:"proxy" description:"Proxy for LLM API requests"`
+	ActiveProfile string             `long:"profile" config:"active_profile" description:"Active named LLM profile"`
+	Providers     []LLMProviderEntry `no-flag:"true" config:"providers" description:"Configured LLM provider profiles"`
+	AI            bool               `long:"ai" description:"Analyze direct scanner output with an LLM"`
+}
+
+type LLMProviderEntry struct {
+	ID            string `config:"id" yaml:"id,omitempty"`
+	Name          string `config:"name" yaml:"name,omitempty"`
+	Provider      string `config:"provider" yaml:"provider"`
+	BaseURL       string `config:"base_url" yaml:"base_url"`
+	APIKey        string `config:"api_key" yaml:"api_key"`
+	Model         string `config:"model" yaml:"model"`
+	Proxy         string `config:"proxy" yaml:"proxy"`
+	Timeout       int    `config:"timeout" yaml:"timeout"`
+	Images        *bool  `config:"images" yaml:"images,omitempty"`
+	MaxTokens     int    `config:"max_tokens" yaml:"max_tokens,omitempty"`
+	ContextWindow int    `config:"context_window" yaml:"context_window,omitempty"`
+}
+
+type ScannerOptions struct {
+	CyberhubURL  string `long:"cyberhub-url" config:"url" description:"Cyberhub server URL for loading fingers/templates"`
+	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
+	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
+	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
+	Mitm         *bool  `long:"mitm" config:"mitm" init_default:"true" config_optional:"true" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
+}
+
+type TrafficOptions struct {
+	BodyStorage        string `long:"mitm-body-storage" config:"body_storage" description:"Local traffic body storage: none (bounded previews, default) or disk"`
+	BodyMaxBytes       int64  `long:"mitm-body-max-bytes" config:"body_max_bytes" description:"Maximum saved bytes per body (0 = 8 MiB)"`
+	BodyRetentionBytes int64  `long:"mitm-body-retention-bytes" config:"body_retention_bytes" description:"Retained body byte budget (0 = 2 GiB)"`
+}
+
+type AgentOptions struct {
+	Prompt                string   `short:"p" long:"prompt" description:"Natural language task or existing file path for the agent"`
+	Inputs                []string `short:"i" long:"input" description:"Target input: IP, URL, IP:port, or CIDR. Can specify multiple"`
+	Skills                []string `short:"s" long:"skill" description:"Skill to apply (name or file path). Can specify multiple"`
+	Tools                 []string `short:"t" long:"tools" config:"tools" description:"Optional tool groups to enable. Arsenal is always loaded"`
+	TaskFile              string   `long:"task-file" description:"File containing task description"`
+	Heartbeat             int      `long:"heartbeat" config:"heartbeat" description:"Heartbeat interval in minutes: periodically wake the agent to review context (0 disables)" default:"0"`
+	Timeout               int      `long:"timeout" config:"timeout" description:"Overall timeout in seconds" default:"3600"`
+	EvalCriteria          string   `short:"e" long:"eval" config:"eval_criteria" description:"Goal evaluation criteria — an independent LLM evaluates whether the task was achieved"`
+	EvalModel             string   `long:"eval-model" config:"eval_model" description:"Model for goal evaluation (defaults to main model)"`
+	EvalRounds            string   `long:"eval-rounds" config:"eval_rounds" description:"How long goal evaluation may keep going: a number (hard ceiling) or plain language the evaluator follows, e.g. \"dig deep, up to ten rounds\" (empty uses the default ceiling)"`
+	ServerURL             string   `long:"server-url" config:"server_url" local:"true" description:"Cyber Web server URL for AOP, remote REPL and PTY access"`
+	Transport             string   `long:"transport" config:"transport" local:"true" description:"Agent transport: auto, local, web, or stdio" default:"auto"`
+	Resume                string   `short:"r" long:"resume" description:"Resume agent context from an AOP JSONL session file"`
+	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
+}
+
+type AgentTransport string
+
+const (
+	AgentTransportAuto  AgentTransport = "auto"
+	AgentTransportLocal AgentTransport = "local"
+	AgentTransportWeb   AgentTransport = "web"
+	AgentTransportStdio AgentTransport = "stdio"
+)
+
+func ResolveAgentTransport(opt *Option) (AgentTransport, error) {
+	value := AgentTransport(strings.ToLower(strings.TrimSpace(opt.Transport)))
+	if value == "" {
+		value = AgentTransportAuto
+	}
+	switch value {
+	case AgentTransportAuto:
+		if strings.TrimSpace(opt.ServerURL) != "" {
+			if err := ResolveAgentServerURLs(opt); err != nil {
+				return "", err
+			}
+			return AgentTransportWeb, nil
+		}
+		return AgentTransportLocal, nil
+	case AgentTransportLocal, AgentTransportStdio:
+		return value, nil
+	case AgentTransportWeb:
+		if err := ResolveAgentServerURLs(opt); err != nil {
+			return "", err
+		}
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported agent transport %q: use auto, local, web, or stdio", opt.Transport)
+	}
+}
+
+type NodeOptions struct {
+	NodeID   string `long:"node-id" config:"id" description:"Existing node ID"`
+	NodeName string `long:"node-name" config:"name" description:"Node name"`
+}
+
+type MiscOptions struct {
+	ConfigFile   string `short:"c" long:"config" description:"Load only this config file (default: project over ~/.cyber/cyber.yaml)"`
+	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory (default: existing local/portable .cyber, then ~/.cyber)"`
+	InitConfig   bool   `long:"init" description:"Deprecated: use init --project --non-interactive"`
+	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
+	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
+	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
+	OutputFile   string `short:"o" long:"output" description:"Write the canonical AOP event stream to a new JSONL file"`
+	OutputFormat string `long:"output-format" description:"One-shot agent output format: text, json, stream-json" default:"text"`
+	JSON         bool   `long:"json" description:"Alias for one-shot agent --output-format=json"`
+	Observe      string `long:"observe" description:"Comma-separated observations: tools,commands,processes,files,http"`
+	Debug        bool   `long:"debug" config:"debug" description:"Enable debug logging"`
+	Verbose      []bool `short:"v" long:"verbose" description:"Increase verbosity (-v thinking and tool previews, -vv full tool results)"`
+	Quiet        bool   `short:"q" long:"quiet" config:"quiet" description:"Quiet mode — only show final result"`
+	NoColor      bool   `long:"no-color" config:"no_color" description:"Disable ANSI colors in scanner output"`
+	Version      bool   `long:"version" description:"Print version and exit"`
+}
+
+type RunMode string
+
+const (
+	RunModeAgent     RunMode = "agent"
+	RunModeScanner   RunMode = "scanner"
+	RunModeNoCommand RunMode = ""
+)
+
+func HasAgentOneShotInput(opt *Option) bool {
+	if strings.TrimSpace(opt.Prompt) != "" || opt.TaskFile != "" || len(opt.Inputs) > 0 {
+		return true
+	}
+	return !StdinIsTerminal()
+}
+
+func StdinIsTerminal() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+func ResolveTask(opt *Option) (string, error) {
+	prompt, err := ResolvePrompt(opt.Prompt)
+	if err != nil {
+		return "", err
+	}
+	if prompt != "" {
+		if len(opt.Inputs) > 0 {
+			return fmt.Sprintf("%s\n\nTargets:\n%s", prompt, FormatInputs(opt.Inputs)), nil
+		}
+		return prompt, nil
+	}
+
+	if opt.TaskFile != "" {
+		data, err := os.ReadFile(opt.TaskFile)
+		if err != nil {
+			return "", fmt.Errorf("read task file: %w", err)
+		}
+		task := strings.TrimSpace(string(data))
+		if len(opt.Inputs) > 0 {
+			return fmt.Sprintf("%s\n\nTargets:\n%s", task, FormatInputs(opt.Inputs)), nil
+		}
+		return task, nil
+	}
+
+	if !StdinIsTerminal() {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("read stdin: %w", err)
+		}
+		task := strings.TrimSpace(string(data))
+		if task != "" {
+			if len(opt.Inputs) > 0 {
+				return fmt.Sprintf("%s\n\nTargets:\n%s", task, FormatInputs(opt.Inputs)), nil
+			}
+			return task, nil
+		}
+	}
+
+	if len(opt.Inputs) > 0 {
+		return fmt.Sprintf("Scan the provided targets using scan and summarize results.\n\nTargets:\n%s", FormatInputs(opt.Inputs)), nil
+	}
+
+	return "", fmt.Errorf("no prompt specified: use -p, --prompt, --task-file, or pipe via stdin")
+}
+
+// ResolvePrompt treats a non-empty prompt as a file path when it names an
+// existing regular file. Values that do not name a file remain natural
+// language prompts.
+func ResolvePrompt(value string) (string, error) {
+	prompt := strings.TrimSpace(value)
+	if prompt == "" {
+		return "", nil
+	}
+
+	info, err := os.Stat(prompt)
+	if os.IsNotExist(err) {
+		return prompt, nil
+	}
+	if err != nil {
+		// Natural-language prompts frequently contain punctuation that is not
+		// legal in a Windows filename (for example `host:port`). An invalid
+		// filename is evidence that this is text, not a prompt-file request.
+		if runtime.GOOS == "windows" && strings.ContainsAny(prompt, `<>:"|?*`) {
+			return prompt, nil
+		}
+		return "", fmt.Errorf("stat prompt file %s: %w", prompt, err)
+	}
+	if !info.Mode().IsRegular() {
+		return prompt, nil
+	}
+
+	data, err := os.ReadFile(prompt)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %s: %w", prompt, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func FormatInputs(inputs []string) string {
+	var sb strings.Builder
+	for _, input := range inputs {
+		input = strings.TrimSpace(input)
+		if input == "" {
+			continue
+		}
+		sb.WriteString("- ")
+		sb.WriteString(input)
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}

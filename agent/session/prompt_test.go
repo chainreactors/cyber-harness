@@ -7,13 +7,12 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	agentprompt "github.com/chainreactors/cyber/agent/prompt"
-	cfg "github.com/chainreactors/cyber/core/config"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
-	apppkg "github.com/chainreactors/cyber/pkg/app"
-	"github.com/chainreactors/cyber/pkg/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/apptest"
+	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
-	"github.com/chainreactors/cyber/pkg/hosttest"
 )
 
 func defaultPromptResolver(t *testing.T) agentprompt.Resolver {
@@ -36,7 +35,7 @@ func (r fixedPromptResolver) Build(context.Context, agentprompt.Context) agentpr
 func TestResolveSystemPromptUsesConfigResolver(t *testing.T) {
 	rt := &Runtime{
 		agentConfig: agent.Config{PromptResolver: fixedPromptResolver("runtime")},
-		logger:      telemetry.NopLogger(),
+		Logger:      telemetry.NopLogger(),
 	}
 	result, err := rt.resolveSystemPrompt(t.Context(), nil)
 	if err != nil || result != "runtime" {
@@ -60,17 +59,17 @@ func TestRuntimePreloadsBaseSkillOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			option := &cfg.Option{}
 			option.Skills = tc.skills
-			application := apptest.NewState(t, telemetry.NopLogger(), nil)
+			application := apptest.NewFixture(t, telemetry.NopLogger(), nil)
 			resolver := defaultPromptResolver(t)
 
 			applicationSet := loadTestApplication(t, application)
 			defer applicationSet.Close(context.Background())
-			rt, err := New(Config{BaseSkills: []string{"cyber"}, State: testEnvironment(application), Option: option, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
+			rt, err := newUnitResource(t, application, Config{BaseSkills: []string{"cyber"}, SelectedSkills: option.Skills, Logger: telemetry.NopLogger(), Loop: agent.StandardLoop{}, PromptResolver: resolver})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			rtSet := hosttest.Set(t, extension.Provided[*apppkg.State](application), rt)
+			rtSet := hosttest.Set(t, extension.Provided[*apptest.Fixture](application), rt)
 			if err := rtSet.Load(t.Context()); err != nil {
 				t.Fatal(err)
 			}

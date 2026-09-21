@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
+
 	service "github.com/chainreactors/cyber/tools/ioa/server"
 	"github.com/chainreactors/ioa/protocols"
-	"net/http"
 )
 
-func BrowserHandler(ctx context.Context, server *service.Server, authenticate func(*http.Request) bool, enabled bool) (http.Handler, error) {
+func browserHandler(ctx context.Context, server *service.Server, authenticate func(*http.Request) bool, enabled bool) (http.Handler, error) {
 	identity, err := server.RegisterIdentity(ctx, protocols.AuthRegister{Name: "cyber.web", Description: "Cyber Web console", AccessKey: server.AccessKey(), Meta: map[string]any{"role": "web"}})
 	if err != nil {
 		return nil, fmt.Errorf("register IOA web identity: %w", err)

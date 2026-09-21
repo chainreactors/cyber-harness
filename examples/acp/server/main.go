@@ -4,9 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	webext "github.com/chainreactors/cyber/pkg/exts/web"
 	"net"
 	"net/http"
 	"os"
@@ -14,40 +14,30 @@ import (
 	"syscall"
 	"time"
 
+	webext "github.com/chainreactors/cyber/pkg/exts/web"
+
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/pkg/web"
-	webservice "github.com/chainreactors/cyber/pkg/web/service"
 )
 
 // newHeadlessHandler wires the RPC + AOP WebSocket surfaces without any UI:
 // static is nil, so only Connect RPC, the two AOP WebSockets, and /health
 // are served.
-func newHeadlessHandler(store *webservice.SQLiteStore, token string) (*webservice.Service, *webservice.AgentPool, http.Handler, error) {
-	service := webservice.NewService(webservice.ServiceConfig{Store: store, AccessKey: token})
-	pool := webservice.NewAgentPool(service.Hub(), store)
-	service.SetAgentPool(pool)
-	routes := webext.New(service)
-	routeSet, err := extension.New(routes)
+func newHeadlessHandler(ctx context.Context, database, token string) (*extension.Set, http.Handler, error) {
+	webExtension := webext.New(webext.Config{Database: database, AccessKey: token})
+	set, err := extension.New(webExtension)
 	if err != nil {
-		_ = service.Close(context.Background())
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	if err := routeSet.Load(context.Background()); err != nil {
-		_ = service.Close(context.Background())
-		return nil, nil, nil, err
+	if err := set.Load(ctx); err != nil {
+		return nil, nil, errors.Join(err, set.Close(context.Background()))
 	}
-	handler, err := web.NewHandler(service.Auth(), nil, routes.Routes()...)
-	closeErr := routeSet.Close(context.Background())
+	handler, err := web.NewHandler(webExtension.Service().Auth(), nil, webExtension.Routes()...)
 	if err != nil {
-		_ = service.Close(context.Background())
-		return nil, nil, nil, err
+		return nil, nil, errors.Join(err, set.Close(context.Background()))
 	}
-	if closeErr != nil {
-		_ = service.Close(context.Background())
-		return nil, nil, nil, closeErr
-	}
-	return service, pool, handler, nil
+	return set, handler, nil
 }
 
 // acp server: Cyber headless control plane — no UI and no hidden local
@@ -73,27 +63,21 @@ func main() {
 		token = fmt.Sprintf("acp-%d", time.Now().UnixNano())
 	}
 
-	store, err := webservice.NewSQLiteStore(dbPath)
+	set, handler, err := newHeadlessHandler(ctx, dbPath, token)
 	if err != nil {
-		logger.Errorf("open database: %v", err)
-		os.Exit(1)
-	}
-	defer store.Close()
-	service, _, handler, err := newHeadlessHandler(store, token)
-	if err != nil {
-		logger.Errorf("create handler: %v", err)
+		logger.Errorf("create server: %v", err)
 		return
 	}
 	defer func() {
-		if err := service.Close(context.Background()); err != nil {
-			logger.Errorf("close service: %v", err)
+		if err := set.Close(context.Background()); err != nil {
+			logger.Errorf("close server: %v", err)
 		}
 	}()
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Errorf("listen on %s: %v", addr, err)
-		os.Exit(1)
+		return
 	}
 	defer listener.Close()
 	listenAddr := listener.Addr().String()
@@ -111,6 +95,6 @@ func main() {
 
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		logger.Errorf("serve: %v", err)
-		os.Exit(1)
+		return
 	}
 }

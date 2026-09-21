@@ -1321,7 +1321,7 @@ func TestChatTaskConvergesOnTurnEnd(t *testing.T) {
 	}
 }
 
-func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
+func TestChatTaskTurnEndErrorIsNotRepublishedByWaiter(t *testing.T) {
 	pool := NewAgentPool(NewHub(), nil)
 	pool.SetSessionLookup(&sessionProbe{sid: "sess-1"})
 	remote, ch := newChatTaskRemote()
@@ -1338,8 +1338,8 @@ func TestChatTaskTurnEndErrorPopulatesErr(t *testing.T) {
 		}},
 	}))
 	res := readResult(t, ch)
-	if res.Err != "boom" {
-		t.Fatalf("err = %q, want %q", res.Err, "boom")
+	if res.Err != "" {
+		t.Fatalf("waiter would synthesize a second terminal: %q", res.Err)
 	}
 }
 

@@ -13,10 +13,17 @@ import (
 	"time"
 )
 
-func TestLiveLLMParentDelegatesIOASiblings(t *testing.T) {
+func TestLiveLLMParentDelegatesIOASiblings(t *testing.T)       { runLiveSiblings(t, false) }
+func TestLiveLLMParentDelegatesIOASiblingsMemory(t *testing.T) { runLiveSiblings(t, true) }
+
+func runLiveSiblings(t *testing.T, memory bool) {
 	cfg := liveLLMRequest(t)
 	w := newWorkspace(t)
-	server := w.start(t)
+	endpoint := ""
+	if !memory {
+		server := w.start(t)
+		endpoint = "http://harness-local-access@" + strings.TrimPrefix(server.url, "http://") + "/ioa"
+	}
 	var seed [4]byte
 	if _, err := rand.Read(seed[:]); err != nil {
 		t.Fatal(err)
@@ -24,19 +31,15 @@ func TestLiveLLMParentDelegatesIOASiblings(t *testing.T) {
 	nonce := hex.EncodeToString(seed[:])
 	space := "harness-siblings-" + nonce
 	gate := newSubagentGateway(t, w.dir, space, nonce)
-	endpoint := "http://harness-local-access@" + strings.TrimPrefix(server.url, "http://") + "/ioa"
 	p := startStdioClient(t, w, "parent", endpoint, space, stdioAgentMode{providerURL: gate.server.URL, model: cfg["model"].(string)})
 	// Subtasks are given to the parent as user instructions. Only the real
 	// parent's subagent tool may create them; the harness sends one root turn.
-	common := `Use only bash to invoke IOA. Complete by returning a final text response without tool calls. The current work space is already joined; do not switch spaces. Use exactly these command forms:
-ioa read --all --limit 20
-ioa read --all --message ID --direction downstream
-ioa send --content '{"text":"TEXT"}'
-ioa send --content '{"text":"TEXT"}' --ref-messages ID
-Replace ID with the observed message id. Set bash timeout=10, omit wait. No shell operators, files, external hosts or other tools. Each read returns real server state; poll again if a peer message is not present yet. All siblings share one IOA node, so identify the thread by message IDs, not by distinct senders. Do not use subagent.message. Use exactly one send per required message.`
-	jobA := "HARNESS_A\n" + common + "\nSend offer:" + nonce + " as a root message, then read until a reply:" + nonce + " references your offer. Send ack:" + nonce + " referencing that reply. Read back the ack and finish with summary A_DONE:" + nonce + "."
-	jobB := "HARNESS_B\n" + common + "\nRead until a root offer:NONCE is present. Discover NONCE only from that message. Send reply:NONCE referencing the offer. Read until ack:NONCE references your reply, then finish with summary B_DONE:NONCE. Preserve the nonce exactly."
-	prompt := "HARNESS_PARENT\nRun this local communication acceptance task. First use bash with timeout=10 to run exactly: ioa space " + space + " harness\nThen create exactly two async subagents named worker-a and worker-b (type empty), using the following respective task prompts, including their HARNESS_A/HARNESS_B markers. Dispatch both before waiting. You must call the real subagent tool. Do not do their IOA messaging yourself, do not relay messages through subagent.message, and never include worker-a's nonce in worker-b's prompt.\nWorker A prompt:\n" + jobA + "\nWorker B prompt:\n" + jobB + "\nAfter dispatching both, output a brief waiting message without tool calls so the runtime can wait for subagent completions. Once BOTH actual completion notifications have arrived, verify A_DONE and B_DONE, read the IOA thread using bash command ioa read --all --limit 20, and return final text PARENT_DONE:" + nonce + " without tool calls. Only bash and subagent create/list are available."
+	common := `Use only bash IOA commands, timeout=10. Ongoing messages arrive as user messages with origin="peer", message_id, and source_session_id. Send exactly with:
+ioa send --content '{"text":"TEXT"}' --target-session SESSION --ref-messages MESSAGE
+For the initial offer omit --ref-messages. While awaiting an Inbox message, call ioa space nodes to keep running; do not return final text until the exchange is complete. Never invent IDs or nonce. No shell operators, files, external hosts, or extra tools.`
+	jobA := "HARNESS_A\n" + common + "\nUse ioa read --all --limit 20 to find worker-b's delegate handoff meta.subagent.session_id. Send offer:" + nonce + " targeted to that Session. Await reply:" + nonce + " in your peer Inbox. Send ack:" + nonce + " targeted to reply's source_session_id and referencing its message_id. Finish A_DONE:" + nonce + "."
+	jobB := "HARNESS_B\n" + common + "\nDo not use ioa read: discover the nonce only from offer:NONCE in your peer Inbox. Send reply:NONCE targeted to its source_session_id and referencing its message_id. Await ack:NONCE in peer Inbox, then finish B_DONE:NONCE."
+	prompt := "HARNESS_PARENT\nExecute this bounded communication task. First bash: ioa space " + space + " harness. Create exactly two async subagents, worker-b first then worker-a, name omitted and labels worker-b and worker-a, with the exact respective tasks below. Use subagent create, not IOA, to dispatch. Do not give A's nonce to B. Wait for BOTH actual subagent_completion notifications, then verify A_DONE and B_DONE, bash ioa read --all --limit 20, and finish PARENT_DONE:" + nonce + ". Do not send peer messages yourself.\nWorker B task:\n" + jobB + "\nWorker A task:\n" + jobA
 	r := p.request(t, "aop.ProtocolMessage", "runTurnRequest", map[string]any{"sessionId": "operator", "turnId": "delegation-task", "maxTurns": 16, "input": map[string]any{"role": "user", "content": []any{map[string]any{"text": map[string]any{"text": prompt}}}}})
 	if field(r, "runTurnResponse", "accepted") == nil {
 		t.Fatalf("parent turn rejected: %v", r)
@@ -70,7 +73,7 @@ waitParent:
 	offer := uniqueIOAMessage(t, work, "offer:"+nonce)
 	reply := uniqueIOAMessage(t, work, "reply:"+nonce)
 	ack := uniqueIOAMessage(t, work, "ack:"+nonce)
-	if len(work) != 3 || len(offer.Refs.Messages) != 0 {
+	if len(work) != 7 || len(offer.Refs.Messages) != 0 {
 		t.Fatalf("unexpected sibling conversation: %+v", work)
 	}
 	for _, pair := range [][2]ioaMessage{{reply, offer}, {ack, reply}} {
@@ -80,11 +83,6 @@ waitParent:
 		}
 	}
 	proof := assertSiblingEvents(t, events, offer, reply, ack, nonce)
-	// Automatic handoff recording is another application path, separate from the
-	// siblings' own IOA messages. Read it before closing the runtime.
-	if _, err := p.command(t, "ioa space "+space+"-inbox-parent harness"); err != nil {
-		t.Fatal(err)
-	}
 	handoffs := waitSiblingHandoffs(t, p, proof)
 	gate.mu.Lock()
 	counts := make(map[string]int)
@@ -92,7 +90,14 @@ waitParent:
 		counts[role] = count
 	}
 	notifications := gate.parentCompletions["worker-a"] && gate.parentCompletions["worker-b"]
+	peerInputs := map[string]bool{}
+	for key, value := range gate.peerInputs {
+		peerInputs[key] = value
+	}
 	gate.mu.Unlock()
+	if !peerInputs["a:reply"] || !peerInputs["b:offer"] || !peerInputs["b:ack"] {
+		t.Fatalf("missing automatic peer Inbox delivery: %v", peerInputs)
+	}
 	if !notifications || counts["parent"] == 0 || counts["a"] == 0 || counts["b"] == 0 {
 		t.Fatalf("missing actual model participation or completions: %v", counts)
 	}
@@ -101,7 +106,7 @@ waitParent:
 		t.Fatal(err)
 	default:
 	}
-	writeEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
+	writeEvidence(t, filepath.Join(w.dir, "subagent-evidence.json"), map[string]any{"backend": map[bool]string{true: "memory", false: "external"}[memory], "peer_inbox": peerInputs, "sessions": proof, "work": work, "handoffs": handoffs, "model_requests": counts, "shared_ioa_node": offer.Sender})
 	t.Logf("parent and two real subagents completed IOA exchange; model requests: %v", counts)
 }
 
@@ -145,7 +150,7 @@ func assertSiblingEvents(t *testing.T, events []map[string]any, offer, reply, ac
 				if session != "operator" {
 					t.Fatal("child created a subagent")
 				}
-				name, _ := args["name"].(string)
+				name, _ := args["label"].(string)
 				spawns[name] = id
 			}
 		}
@@ -217,13 +222,21 @@ func assertSiblingEvents(t *testing.T, events []map[string]any, offer, reply, ac
 			t.Fatalf("invalid child provenance: %s %+v", name, child)
 		}
 	}
+	for _, expected := range []struct {
+		message        ioaMessage
+		source, target string
+	}{{offer, a.Session, b.Session}, {reply, b.Session, a.Session}, {ack, a.Session, b.Session}} {
+		if expected.message.Meta["source_session_id"] != expected.source || expected.message.Meta["target_session_id"] != expected.target {
+			t.Fatalf("incorrect Session addressing: %+v", expected.message)
+		}
+	}
 	if a.Session == b.Session || a.Started >= b.Ended || b.Started >= a.Ended {
 		t.Fatal("siblings were not distinct overlapping async sessions")
 	}
 	if sent[offer.ID] != a.Session || sent[reply.ID] != b.Session || sent[ack.ID] != a.Session {
 		t.Fatalf("IOA messages did not originate from the correct subagents: %+v", sent)
 	}
-	if !observed[a.Session][reply.ID] || !observed[b.Session][offer.ID] || !observed[b.Session][ack.ID] || !observed["operator"][ack.ID] {
+	if !observed["operator"][ack.ID] {
 		t.Fatal("missing peer reads or parent verification of the IOA exchange")
 	}
 	return proof
@@ -267,6 +280,13 @@ func waitSiblingHandoffs(t *testing.T, p *stdioClient, proof map[string]siblingS
 		if err := json.Unmarshal([]byte(out), &messages); err != nil {
 			t.Fatal(err)
 		}
+		handoffs := messages[:0]
+		for _, message := range messages {
+			if message["content_type"] == "handoff" {
+				handoffs = append(handoffs, message)
+			}
+		}
+		messages = handoffs
 		if len(messages) == 4 {
 			for name, child := range proof {
 				var delegate, returned map[string]any

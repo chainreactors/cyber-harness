@@ -14,7 +14,7 @@ import (
 	coreevents "github.com/chainreactors/cyber/core/events"
 	corehooks "github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
-	"github.com/chainreactors/cyber/core/tool"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
 )
 
@@ -113,7 +113,7 @@ type CompactionSettings struct {
 type Config struct {
 	Loop             Loop
 	Provider         Provider
-	Tools            tool.Executor
+	Tools            coretool.Executor
 	Model            string
 	SystemPrompt     string
 	SystemPromptFn   SystemPromptFunc
@@ -131,10 +131,12 @@ type Config struct {
 	Bus              aop.EventPublisher
 	// Hooks is the typed extension registry shared by a runtime and its derived
 	// agents. Nil means no handlers and keeps the dispatch fast path allocation-free.
-	Hooks            *corehooks.Registry
-	MaxTurns         int
-	LoopScheduler    *LoopScheduler
-	Inbox            inbox.Inbox
+	Hooks         *corehooks.Registry
+	MaxTurns      int
+	LoopScheduler *LoopScheduler
+	Inbox         inbox.Inbox
+	// Lifetime bounds derived work independently of one tool invocation.
+	Lifetime         context.Context
 	Expander         *inbox.Expander
 	MaxResultSize    int
 	MaxParallelTools int
@@ -158,10 +160,10 @@ type Config struct {
 
 // Builder methods — each returns a modified copy (Config is a value type).
 
-func (c Config) WithProvider(p Provider) Config   { c.Provider = p; return c }
-func (c Config) WithLoop(loop Loop) Config        { c.Loop = loop; return c }
-func (c Config) WithTools(t tool.Executor) Config { c.Tools = t; return c }
-func (c Config) WithModel(m string) Config        { c.Model = m; return c }
+func (c Config) WithProvider(p Provider) Config       { c.Provider = p; return c }
+func (c Config) WithLoop(loop Loop) Config            { c.Loop = loop; return c }
+func (c Config) WithTools(t coretool.Executor) Config { c.Tools = t; return c }
+func (c Config) WithModel(m string) Config            { c.Model = m; return c }
 func (c Config) WithSystemPrompt(s string) Config {
 	c.SystemPrompt, c.SystemPromptFn = s, nil
 	return c
@@ -227,7 +229,7 @@ func (c Config) init() Config {
 		c.AgentName = "cyber"
 	}
 	if c.Tools == nil {
-		c.Tools = tool.EmptyExecutor()
+		c.Tools = coretool.EmptyExecutor()
 	}
 	if c.Inbox == nil {
 		c.Inbox = inbox.NewBuffered(SubInboxCapacity)
@@ -275,7 +277,7 @@ type Result struct {
 
 type State struct {
 	Messages     []*aop.Message
-	Tools        tool.Executor
+	Tools        coretool.Executor
 	ErrorMessage string
 	LastError    error
 }

@@ -13,9 +13,10 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
+	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 	observe "github.com/chainreactors/cyber/pkg/exts/observe"
-	"github.com/chainreactors/cyber/pkg/toolset"
 	"github.com/chainreactors/cyber/tools/files"
 )
 
@@ -26,11 +27,12 @@ func TestObservePublishesOneCorrelatedAOPStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry := toolset.NewRegistry()
+	registry := coretool.NewToolRegistry()
 	fileTools := fileext.New(files.Config{Directory: t.TempDir()})
 	set, err := extension.New(
 		extension.Provided[*hooks.Registry](hookRegistry),
 		extension.Provided[*coreevents.Stream](stream),
+		extension.Provided[telemetry.Logger](telemetry.NopLogger()),
 		registry,
 		observer,
 		fileTools,

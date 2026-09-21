@@ -43,7 +43,9 @@ The agent lets the model choose tool calls. The scan pipeline chooses work throu
 
 ## Configure a model
 
-Create `cyber.yaml` in your working directory:
+Run `aiscan init` to configure your model in `~/.cyber/cyber.yaml`. For project overrides, use `aiscan init --project`. These are shared cyber-harness commands, also available in the minimal `agent` CLI. Existing files are preserved. [Configuration guide](docs/configuration.md).
+
+Example `cyber.yaml`:
 
 ```yaml
 llm:
@@ -78,7 +80,7 @@ make full     # frontend + full distribution
 
 Use the Go version declared in [go.mod](go.mod). Full builds also need Node.js/npm; standard and full builds use CGO_ENABLED=0. Build tags are defined in [editions.env](editions.env); native recording requires CGO and is a separate [record build](docs/record.md).
 
-For custom distributions, call `base.New(config)`, append your extensions, and pass them to `extension.New`. The host owns Load/Close. Use `pkg/aiscan.New` to embed the reference distribution. See the runnable [custom example](examples/custom) and the [extension development guide](docs/development.md).
+For custom distributions, call `harness.BaseExtensions(config)`, append your extensions, and pass them to `extension.New`. The host owns Load/Close. The reference distribution is assembled in [cmd/aiscan](cmd/aiscan). Embedders can use [pkg/harness](pkg/harness) for a generic host, or compose their own extensions; it does not reproduce the complete aiscan distribution. See the runnable [custom example](examples/custom) and the [extension development guide](docs/development.md).
 
 ## Contributing
 

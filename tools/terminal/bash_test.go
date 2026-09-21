@@ -16,8 +16,8 @@ import (
 
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/core/operation"
-	"github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/pkg/commands"
+	coretool "github.com/chainreactors/cyber/core/tool"
+
 	"github.com/chainreactors/utils/proc"
 )
 
@@ -30,7 +30,7 @@ type simpleCommand struct{ name string }
 
 func (c *simpleCommand) Name() string  { return c.name }
 func (c *simpleCommand) Usage() string { return c.name }
-func (c *simpleCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *simpleCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	fmt.Fprint(execution.Stdout, "ok")
 	return nil, nil
 }
@@ -43,7 +43,7 @@ type argsCapture struct {
 
 func (c *argsCapture) Name() string  { return c.name }
 func (c *argsCapture) Usage() string { return c.name }
-func (c *argsCapture) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *argsCapture) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	c.got = append([]string(nil), execution.Args...)
 	fmt.Fprint(execution.Stdout, strings.Join(execution.Args, " "))
 	return nil, nil
@@ -68,14 +68,14 @@ type delayedCommand struct {
 
 func (c *stagedOutputCommand) Name() string  { return c.name }
 func (c *stagedOutputCommand) Usage() string { return c.name }
-func (c *stagedOutputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *stagedOutputCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	fmt.Fprint(execution.Stdout, c.value+"-first\n")
 	time.Sleep(75 * time.Millisecond)
 	fmt.Fprint(execution.Stdout, c.value+"-second\n")
 	return nil, nil
 }
 
-func (c *delayedCommand) Run(ctx context.Context, execution *commands.Execution) (any, error) {
+func (c *delayedCommand) Run(ctx context.Context, execution *coretool.Execution) (any, error) {
 	timer := time.NewTimer(c.delay)
 	defer timer.Stop()
 	select {
@@ -89,7 +89,7 @@ func (c *delayedCommand) Run(ctx context.Context, execution *commands.Execution)
 
 func (c *outputCommand) Name() string  { return c.name }
 func (c *outputCommand) Usage() string { return c.name + " — test command" }
-func (c *outputCommand) Run(_ context.Context, execution *commands.Execution) (any, error) {
+func (c *outputCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
 	_, err := execution.Stdout.Write([]byte(c.output))
 	return nil, err
 }
@@ -100,9 +100,9 @@ func bashArgs(cmd string) string {
 }
 
 func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTool {
-	decls := make([]commands.Command, 0, len(cmds))
+	decls := make([]coretool.Command, 0, len(cmds))
 	for _, c := range cmds {
-		decls = append(decls, commands.Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run})
+		decls = append(decls, coretool.Command{Name: c.Name(), Usage: c.Usage(), Run: c.Run})
 	}
 	registry, _ := loadTestRegistry(t, commandBatch(decls...))
 	bash := NewBashTool(dir, 10, nil)
@@ -116,7 +116,7 @@ func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTo
 
 func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 	impl := &simpleCommand{name: "spray"}
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	bash.SetCommandRegistry(registry)
 
@@ -141,7 +141,7 @@ func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
 			if err == nil {
-				t.Fatalf("expected error, got output %q", tool.ResultText(res))
+				t.Fatalf("expected error, got output %q", coretool.ResultText(res))
 			}
 			if !strings.Contains(err.Error(), tt.wantHint) {
 				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
@@ -163,7 +163,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	out := tool.ResultText(res)
+	out := coretool.ResultText(res)
 	for _, envVar := range []string{"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
 		if !strings.Contains(out, envVar+"="+proxy) {
 			t.Errorf("env output missing %s", envVar)
@@ -181,38 +181,37 @@ func TestBashNoProxyEnvWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bash env: %v", err)
 	}
-	if strings.Contains(tool.ResultText(res), "ALL_PROXY=socks5://") {
+	if strings.Contains(coretool.ResultText(res), "ALL_PROXY=socks5://") {
 		t.Errorf("should not inject proxy when empty")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// No-color injection tests (from nocolor_test.go)
+// Command-owned color policy
 // ---------------------------------------------------------------------------
 
-func TestNormalizeNoColorInjectForScan(t *testing.T) {
+func TestRegistryLeavesScanColorPolicyToCommand(t *testing.T) {
 	cmd := &argsCapture{name: "scan"}
-	reg, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1"}, &coretool.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
 	for _, a := range cmd.got {
 		if a == "--no-color" {
-			return
+			t.Fatalf("registry must leave scan color policy to the command, got %v", cmd.got)
 		}
 	}
-	t.Fatalf("scan should get --no-color auto-injected, got %v", cmd.got)
 }
 
-func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
+func TestRegistryPreservesExplicitNoColor(t *testing.T) {
 	cmd := &argsCapture{name: "scan"}
-	reg, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"scan", "-i", "10.0.0.1", "--no-color"}, &coretool.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -227,12 +226,12 @@ func TestNormalizeNoColorScanNoDuplicate(t *testing.T) {
 	}
 }
 
-func TestNormalizeNoColorSkipsNonScan(t *testing.T) {
+func TestRegistryDoesNotInjectColorFlags(t *testing.T) {
 	cmd := &argsCapture{name: "gogo"}
-	reg, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
+	reg, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: cmd.Name(), Usage: cmd.Usage(), Run: cmd.Run}))
 
 	var output bytes.Buffer
-	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &commands.Execution{Stdout: &output, Stderr: &output})
+	_, err := reg.Run(context.Background(), []string{"gogo", "-i", "10.0.0.1"}, &coretool.Execution{Stdout: &output, Stderr: &output})
 	if err != nil {
 		t.Fatalf("ExecuteArgs error: %v", err)
 	}
@@ -264,7 +263,7 @@ func TestPseudoPipeGrep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -288,7 +287,7 @@ func TestPseudoPipeHead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -307,7 +306,7 @@ func TestPseudoPipeWc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "5" {
@@ -325,7 +324,7 @@ func TestPseudoPipeChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output: %q", out)
 
 	if out != "3" {
@@ -343,7 +342,7 @@ func TestPseudoPipeAwk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	if !strings.Contains(out, "[critical]") {
@@ -366,7 +365,7 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	t.Logf("output:\n%s", out)
 
 	lines := strings.Split(out, "\n")
@@ -412,8 +411,8 @@ func TestNoPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(tool.ResultText(res), "all findings here") {
-		t.Errorf("output %q should contain expected text", tool.ResultText(res))
+	if !strings.Contains(coretool.ResultText(res), "all findings here") {
+		t.Errorf("output %q should contain expected text", coretool.ResultText(res))
 	}
 }
 
@@ -431,7 +430,7 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 	bash := NewBashTool(root, 5, nil)
 	defer bash.Close()
 
-	results := make([]*commands.Execution, 2)
+	results := make([]*coretool.Execution, 2)
 	outputs := make([]bytes.Buffer, 2)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -486,7 +485,7 @@ func TestBashRunForegroundHonorsInvocationWorkDir(t *testing.T) {
 
 func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 	root := t.TempDir()
-	byName := map[string]commands.Command{
+	byName := map[string]coretool.Command{
 		"one": {Name: "one", Usage: "one", Run: (&stagedOutputCommand{name: "one", value: "one"}).Run},
 		"two": {Name: "two", Usage: "two", Run: (&stagedOutputCommand{name: "two", value: "two"}).Run},
 	}
@@ -521,9 +520,9 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 
 func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 	want := map[string]any{"targets": 2}
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: "details",
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: "details",
 		Usage: "details",
-		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		Run: func(_ context.Context, execution *coretool.Execution) (any, error) {
 			fmt.Fprint(execution.Stdout, "done")
 			return want, nil
 		},
@@ -550,9 +549,9 @@ func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 }
 
 func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: "consume",
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: "consume",
 		Usage: "consume",
-		Run: func(_ context.Context, execution *commands.Execution) (any, error) {
+		Run: func(_ context.Context, execution *coretool.Execution) (any, error) {
 			data, err := io.ReadAll(execution.Stdin)
 			if err != nil {
 				return nil, err
@@ -613,13 +612,13 @@ func TestBashExecuteHonorsTimeoutArg(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("timeout arg not enforced promptly, took %s", elapsed)
 	}
-	if !strings.Contains(tool.ResultText(res), "timeout after 1s") {
-		t.Fatalf("result = %q", tool.ResultText(res))
+	if !strings.Contains(coretool.ResultText(res), "timeout after 1s") {
+		t.Fatalf("result = %q", coretool.ResultText(res))
 	}
 }
 
 func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
-	omitted, err := tool.ParseArgs[BashArgs](`{"command":"work"}`)
+	omitted, err := coretool.ParseArgs[BashArgs](`{"command":"work"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +626,7 @@ func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
 		t.Fatal("omitted timeout should use the tool default")
 	}
 
-	unlimited, err := tool.ParseArgs[BashArgs](`{"command":"work","timeout":0}`)
+	unlimited, err := coretool.ParseArgs[BashArgs](`{"command":"work","timeout":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +637,7 @@ func TestBashArgsDistinguishesOmittedAndZeroTimeout(t *testing.T) {
 
 func TestBashWaitZeroStaysForeground(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 200 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 2, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -651,14 +650,14 @@ func TestBashWaitZeroStaysForeground(t *testing.T) {
 	if elapsed := time.Since(started); elapsed < 150*time.Millisecond {
 		t.Fatalf("wait=0 returned before completion after %s", elapsed)
 	}
-	if got := tool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "background") {
+	if got := coretool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "background") {
 		t.Fatalf("result = %q", got)
 	}
 }
 
 func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 1500 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 3, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -675,7 +674,7 @@ func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 	if elapsed < 800*time.Millisecond || elapsed > 1400*time.Millisecond {
 		t.Fatalf("wait=1 background transition took %s", elapsed)
 	}
-	if got := tool.ResultText(res); !strings.Contains(got, "moved to background") {
+	if got := coretool.ResultText(res); !strings.Contains(got, "moved to background") {
 		t.Fatalf("result = %q", got)
 	}
 	if scoped.ActiveProducers() != 1 {
@@ -706,7 +705,7 @@ func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 
 func TestBashExplicitZeroTimeoutIsUnlimited(t *testing.T) {
 	delayed := &delayedCommand{name: "delayed", delay: 1200 * time.Millisecond, output: "finished"}
-	registry, _ := loadTestRegistry(t, commandBatch(commands.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
+	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: delayed.name, Usage: delayed.name, Run: delayed.Run}))
 	bash := NewBashTool(t.TempDir(), 1, nil)
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
@@ -719,7 +718,7 @@ func TestBashExplicitZeroTimeoutIsUnlimited(t *testing.T) {
 	if elapsed := time.Since(started); elapsed < time.Second {
 		t.Fatalf("timeout=0 did not remain unlimited; returned after %s", elapsed)
 	}
-	if got := tool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "command stopped") {
+	if got := coretool.ResultText(res); !strings.Contains(got, "finished") || strings.Contains(got, "command stopped") {
 		t.Fatalf("result = %q", got)
 	}
 }
@@ -775,7 +774,7 @@ func TestShellPipeStillWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	out := strings.TrimSpace(tool.ResultText(res))
+	out := strings.TrimSpace(coretool.ResultText(res))
 	if out != "3" {
 		t.Errorf("expected 3, got %q", out)
 	}
@@ -794,8 +793,8 @@ func TestPseudoFlagWithPipeChar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(tool.ResultText(res), "match") {
-		t.Errorf("output %q should contain 'match'", tool.ResultText(res))
+	if !strings.Contains(coretool.ResultText(res), "match") {
+		t.Errorf("output %q should contain 'match'", coretool.ResultText(res))
 	}
 }
 
