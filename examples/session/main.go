@@ -12,6 +12,7 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/events"
+	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/pkg/harness"
 )
 
@@ -57,6 +58,14 @@ func run(ctx context.Context) (resultErr error) {
 		Session: &agentsession.Config{
 			PrimarySessionID: "main",
 		},
+		Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error {
+			providers, err := extension.Use[*provider.State](scope)
+			if err != nil {
+				return err
+			}
+			providers.Set(demoProvider{}, provider.ProviderConfig{Model: "demo"})
+			return nil
+		}}},
 	})
 	if err != nil {
 		return err
@@ -70,7 +79,6 @@ func run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	runtime.SetProvider(demoProvider{}, provider.ProviderConfig{Model: "demo"})
 	sub := runtime.Observe(events.ObserverFunc(func(event *aop.Event) {
 		if ended := event.GetTurnEnded(); ended != nil {
 			fmt.Printf("Turn ended: %s\n", ended.StopReason)
