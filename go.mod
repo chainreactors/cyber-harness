@@ -1,6 +1,6 @@
 module github.com/chainreactors/cyber
 
-go 1.26
+go 1.26.0
 
 tool (
 	connectrpc.com/connect/cmd/protoc-gen-connect-go
@@ -8,10 +8,10 @@ tool (
 )
 
 require (
-	connectrpc.com/connect v1.20.0
+	connectrpc.com/connect v1.21.0
 	github.com/Microsoft/go-winio v0.6.2
-	github.com/alecthomas/chroma/v2 v2.14.0
-	github.com/carapace-sh/carapace v1.11.6
+	github.com/alecthomas/chroma/v2 v2.27.0
+	github.com/carapace-sh/carapace v1.16.1
 	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
 	github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744
@@ -35,30 +35,30 @@ require (
 	github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2
 	github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5
 	github.com/charmbracelet/bubbles v1.0.0
-	github.com/charmbracelet/glamour v0.8.0
+	github.com/charmbracelet/glamour v1.0.0
 	github.com/go-rod/rod v0.116.2
 	github.com/go-rod/stealth v0.4.9
-	github.com/gookit/config/v2 v2.2.8
+	github.com/gookit/config/v2 v2.2.9
 	github.com/gorilla/websocket v1.5.3
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jessevdk/go-flags v1.6.1
-	github.com/mattn/go-runewidth v0.0.23
+	github.com/mattn/go-runewidth v0.0.30
 	github.com/muesli/termenv v0.16.0
-	github.com/projectdiscovery/goflags v0.1.75
-	github.com/projectdiscovery/gologger v1.1.71
+	github.com/projectdiscovery/goflags v0.2.1
+	github.com/projectdiscovery/gologger v1.1.73
 	github.com/projectdiscovery/katana v1.7.0
 	github.com/projectdiscovery/uncover v1.2.1
-	github.com/projectdiscovery/utils v0.11.1
+	github.com/projectdiscovery/utils v0.11.5
 	github.com/spf13/cobra v1.10.2
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	github.com/ysmood/gson v0.7.3
-	golang.org/x/image v0.42.0
-	golang.org/x/sys v0.46.0
-	golang.org/x/term v0.44.0
-	google.golang.org/protobuf v1.36.11
+	golang.org/x/image v0.46.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/term v0.45.0
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.45.0
+	modernc.org/sqlite v1.59.0
 )
 
 require (
@@ -80,7 +80,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6 // indirect
 	github.com/aws/smithy-go v1.25.1 // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
 	github.com/cloudflare/ahocorasick v0.0.0-20240916140611-054963ec9396 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/flier/gohs v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -150,7 +152,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -160,7 +162,6 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cnf/structhash v0.0.0-20250313080605-df4c6cc74a9a // indirect
 	github.com/creack/pty v1.1.24 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/denisbrodbeck/machineid v1.0.1 // indirect
 	github.com/denisenkom/go-mssqldb v0.12.3 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
@@ -201,7 +202,7 @@ require (
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gookit/goutil v0.7.5 // indirect
+	github.com/gookit/goutil v0.8.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gosnmp/gosnmp v1.43.2 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
@@ -232,7 +233,7 @@ require (
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
 	github.com/mark3labs/mcp-go v0.45.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/metacubex/utls v1.7.3 // indirect
 	github.com/mfonda/simhash v0.0.0-20151007195837-79f94a1100d6 // indirect
@@ -256,15 +257,14 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/projectdiscovery/blackrock v0.0.1 // indirect
-	github.com/projectdiscovery/fastdialer v0.5.14 // indirect
-	github.com/projectdiscovery/hmap v0.0.101 // indirect
+	github.com/projectdiscovery/blackrock v0.0.2 // indirect
+	github.com/projectdiscovery/fastdialer v0.5.20 // indirect
+	github.com/projectdiscovery/hmap v0.0.102 // indirect
 	github.com/projectdiscovery/mapcidr v1.1.97 // indirect
-	github.com/projectdiscovery/networkpolicy v0.1.44 // indirect
+	github.com/projectdiscovery/networkpolicy v0.1.49 // indirect
 	github.com/projectdiscovery/ratelimit v0.0.88 // indirect
-	github.com/projectdiscovery/retryabledns v1.0.115 // indirect
-	github.com/projectdiscovery/retryablehttp-go v1.3.21 // indirect
+	github.com/projectdiscovery/retryabledns v1.0.116 // indirect
+	github.com/projectdiscovery/retryablehttp-go v1.3.26 // indirect
 	github.com/projectdiscovery/wappalyzergo v0.2.91 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.57.1 // indirect
@@ -287,8 +287,8 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/streadway/amqp v1.1.0 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/objx v0.5.3 // indirect
+	github.com/stretchr/testify v1.12.1
 	github.com/syndtr/goleveldb v1.0.0 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/tidwall/btree v1.6.0 // indirect
@@ -321,29 +321,29 @@ require (
 	github.com/ysmood/goob v0.4.0 // indirect
 	github.com/ysmood/got v0.40.0 // indirect
 	github.com/ysmood/leakless v0.9.0 // indirect
-	github.com/yuin/goldmark v1.7.4
-	github.com/yuin/goldmark-emoji v1.0.3 // indirect
+	github.com/yuin/goldmark v1.7.13
+	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	github.com/zmap/rc2 v0.0.0-20190804163417-abaa70531248 // indirect
 	github.com/zmap/zcrypto v0.0.0-20240803002437-3a861682ac77 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
 	go.mongodb.org/mongo-driver v1.17.9 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/exp v0.0.0-20260529124908-c761662dc8c9 // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	modernc.org/libc v1.67.6 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
 	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
