@@ -91,6 +91,7 @@ func IsImageUnsupportedError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "image_url") ||
 		strings.Contains(msg, "image url") ||
+		strings.Contains(msg, "not a multimodal model") ||
 		(strings.Contains(msg, "image") && strings.Contains(msg, "not support"))
 }
 

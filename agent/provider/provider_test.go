@@ -351,6 +351,47 @@ func TestOpenAIProviderChatCompletionStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIStreamMixedReasoningAndText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"reasoning_content":"think","content":"answer","tool_calls":[{"index":0,"id":"call-1","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`)
+		fmt.Fprintln(w, `data: [DONE]`)
+	}))
+	defer server.Close()
+	p, err := NewOpenAIProvider(&ProviderConfig{Provider: "test", BaseURL: server.URL, Timeout: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, err := p.ChatCompletionStream(context.Background(), &ChatCompletionRequest{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasoning, text string
+	var tools, usages, finishes, done int
+	for event := range ch {
+		if event.Err != nil {
+			t.Fatal(event.Err)
+		}
+		if event.MessageDelta != nil {
+			reasoning += event.MessageDelta.GetReasoning()
+			text += event.MessageDelta.GetText()
+		}
+		tools += len(event.ToolDeltas)
+		if event.Usage != nil {
+			usages++
+		}
+		if event.FinishReason != "" {
+			finishes++
+		}
+		if event.Done {
+			done++
+		}
+	}
+	if reasoning != "think" || text != "answer" || tools != 1 || usages != 1 || finishes != 1 || done != 1 {
+		t.Fatalf("mixed frame: reasoning=%q text=%q tools=%d usages=%d finishes=%d done=%d", reasoning, text, tools, usages, finishes, done)
+	}
+}
+
 func TestAnthropicProviderChatCompletionStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {

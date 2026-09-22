@@ -23,6 +23,9 @@ const uriPrefix = "cyber://skills/"
 //go:embed all:*
 var embeddedFS embed.FS
 
+// EmbeddedFS exposes the read-only skill tree for virtual file mounts.
+func EmbeddedFS() fs.FS { return embeddedFS }
+
 type SkillSource string
 
 const (

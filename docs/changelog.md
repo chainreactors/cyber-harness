@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v1.0.0-rc5 — 跨平台命令、Goal 时间线与模型容错修复
+
+rc5 修复内置 Skill 文件读取、Shell 组合命令和 Goal 模式的流式展示，并收敛运行时与应用包的职责。
+
+### Bug Fixes
+
+- 补齐 `skills.EmbeddedFS()`，在默认 Harness 中挂载 `cyber://skills/`，修复内置知识读取报错及 rc4 后续提交的测试编译失败。
+- 文件工具统一处理两种路径分隔符、`.` 和重复分隔符；先解析 Shell 语法再分发命令，保留引号、空参数、管道、重定向及条件组合的语义。Windows 优先使用 Git/MSYS bash，并在取消时回收子进程。
+- Goal 模式按消息 ID 保留各步骤的正文与思考，在评估和压缩处拆分响应卡片，避免后续轮次覆盖前面的内容或插入到错误位置；压缩计数支持 protobuf bigint。
+- 同一 OpenAI 流式帧中的思考和正文均保留；重试前清除失败尝试的临时内容，避免重复拼接。思考和流式正文在各自的滚动区内展示。
+- 重连后只以 `turnEnded` 确认运行结束，重复事件不再重复改变运行状态；切换会话时隔离迟到的发送、取消和附件读取结果。
+- 识别 `is not a multimodal model` 错误并自动去除图片重试，保留文字上下文，后续对话继续使用文字模式。
+
+### Architecture
+
 - 合并 `pkg/base` 到 `pkg/harness`，以 `BaseConfig` 和 `BaseExtensions` 提供默认能力。
 - 将 `pkg/commands` 与 `pkg/toolset` 归入 `core/tool`，保留独立的命令和工具注册表；进程会话桥接从 `agent/proc` 移至 `core/proc`。
 - 应用配置与输出分别从 `core/config`、`core/output` 移至 `pkg/config`、`pkg/output`；发布版本注入路径同步更新。

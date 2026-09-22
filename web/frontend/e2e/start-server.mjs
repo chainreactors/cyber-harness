@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
+import { issueGoalReply, issueInteractionReply, issueStreamReply } from './issue-goal-fixture.mjs'
 
 const host = '127.0.0.1'
 const webPort = Number(process.env.CYBER_E2E_PORT || 38080)
@@ -43,6 +44,9 @@ if (externalLLMValues === 0) {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    if (await issueGoalReply(payload, res)) return
+    if (await issueStreamReply(payload, res)) return
+    if (await issueInteractionReply(payload, res)) return
     const delayedReply = JSON.stringify(payload.messages || []).includes('Reply with exactly one word: PONG')
     if (payload.stream) {
       res.writeHead(200, {

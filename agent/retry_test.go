@@ -212,7 +212,7 @@ func TestStreamAssistantMessageReturnsContextErrorOnClosedCanceledStream(t *test
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := streamAssistantMessageWithUsage(ctx,
+	_, _, _, err := streamAssistantMessageWithUsage(ctx,
 		&scriptedProvider{},
 		&ChatCompletionRequest{Model: "test"},
 		newAOPEmitter(coreevents.New(), "cyber", "test-session", "", "", nil, 0),

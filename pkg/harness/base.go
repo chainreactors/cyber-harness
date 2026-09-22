@@ -1,7 +1,10 @@
 package harness
 
 import (
+	"io/fs"
+
 	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/agent/skills"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/egress"
 	"github.com/chainreactors/cyber/core/eventbus"
@@ -68,7 +71,9 @@ func BaseExtensions(c BaseConfig) ([]extension.Extension, error) {
 		library,
 		promptext.New(),
 		egressProvider,
-		fileext.New(files.Config{Directory: c.Directory}),
+		fileext.New(files.Config{Directory: c.Directory, Mounts: map[string]fs.FS{
+			"cyber://skills/": skills.EmbeddedFS(),
+		}}),
 		terminalext.New(terminal),
 		tmuxext.New(),
 		providerext.New(c.Provider),

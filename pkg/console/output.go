@@ -402,6 +402,14 @@ func (o *AgentOutput) HandleEvent(event *aop.Event) {
 		data := payload.Message
 		delete(o.deltas, data.Id)
 		if data.Role == "assistant" {
+			if len(data.Content) == 0 {
+				// Retry discards the attempt. Reset the print cursor so the
+				// replacement is not skipped; this is not a committed reply.
+				o.stream.EnsureNewline()
+				o.stream.closeReasoning()
+				o.stream.Reset()
+				break
+			}
 			o.lastAssistant = data
 			if event.TurnId == "" {
 				if content := strings.TrimSpace(messagePartText(data, false)); content != "" {

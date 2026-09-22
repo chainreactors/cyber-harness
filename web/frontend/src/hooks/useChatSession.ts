@@ -177,6 +177,7 @@ export function useChatSession() {
   const activeSessionRef = useRef<string | null>(null)
   const activeTurnRef = useRef<string>('')
   const endedTurnIDsRef = useRef<Set<string>>(new Set())
+  const seenEventIDsRef = useRef<Set<string>>(new Set())
   // Latest roster mirrors `agents` for event handlers that run between renders.
   // selectedNodeID is the Web-scoped node_id; no second identity or
   // reconnect remapping state is needed.
@@ -242,6 +243,7 @@ export function useChatSession() {
   function resetTransientState() {
     activeTurnRef.current = ''
     endedTurnIDsRef.current.clear()
+    seenEventIDsRef.current.clear()
     setActiveTurnID('')
     setIsThinking(false)
     setRunRequestPending(false)
@@ -293,6 +295,10 @@ export function useChatSession() {
     setActiveTurnID(id)
   }
 
+  function isCurrentSession(sessionID: string, activation: number): boolean {
+    return activation === activationRef.current && activeSessionRef.current === sessionID
+  }
+
   // A Run converges only on turn_ended. Session lifecycle is independent and a
   // turn-scoped error is diagnostic until its terminal turn_ended arrives.
   // Ignore a late terminal event for an older turn so it cannot clear a newer
@@ -307,10 +313,11 @@ export function useChatSession() {
   }
 
   function handleAOPEvent(event: AOPEvent) {
-    setAOPEvents((previous) => {
-      if (event.id && previous.some((item) => item.id === event.id)) return previous
-      return [...previous, event]
-    })
+    // Replay must not repeat lifecycle side effects either: a duplicate old
+    // turnStarted can otherwise resurrect a completed turn after reconnect.
+    if (event.id && seenEventIDsRef.current.has(event.id)) return
+    if (event.id) seenEventIDsRef.current.add(event.id)
+    setAOPEvents((previous) => [...previous, event])
     switch (event.payload.case) {
       case 'turnStarted':
         endedTurnIDsRef.current.delete(event.turnId)
@@ -319,23 +326,16 @@ export function useChatSession() {
         setIsThinking(true)
         break
       case 'messageDelta':
-        if (!event.turnId) break
-        activateTurn(event.turnId)
         setIsThinking(event.payload.value.value.case === 'reasoning')
         break
       case 'toolCall':
-        if (!event.turnId) break
-        activateTurn(event.turnId)
         setIsThinking(false)
         break
       case 'message':
         // Messages carry content, not lifecycle. Command results are durable
         // assistant messages with no turn_id and must never reactivate the Run
         // state during live delivery or history replay.
-        if (event.turnId && event.payload.value.role === 'assistant') {
-          activateTurn(event.turnId)
-          setIsThinking(false)
-        }
+        if (event.payload.value.role === 'assistant') setIsThinking(false)
         break
       case 'turnEnded':
         finalizeRun(event.turnId)
@@ -393,22 +393,19 @@ export function useChatSession() {
   }
 
   // WatchEvents reconnects from its last durable cursor. This extra reconciliation
-  // is a conservative UI fallback when transport failure and component state
-  // updates cross: a persisted assistant tail proves the run progressed far enough
-  // to rebuild the visible message projection while cursor replay catches up.
+  // refreshes the durable message projection while cursor replay catches up.
+  // An assistant tail may be an intermediate tool step or Goal round; only
+  // turnEnded from the event stream can settle the active run.
   async function reconcileAfterReconnect(id: string) {
     if (id !== activeSessionRef.current) return
     const activation = activationRef.current
     try {
       const msgs = (await listChatMessages(id)).flatMap((delivery) => deliveryToChatMessage(delivery) || [])
       if (activation !== activationRef.current || id !== activeSessionRef.current) return
-      const last = msgs[msgs.length - 1]
-      if (!last || last.role !== 'assistant') return
       setMessages(msgs)
       const rebuilt = buildTimelineFromMessages(msgs)
       timelineRef.current = rebuilt
       setTimeline(rebuilt)
-      finalizeRun()
     } catch {}
   }
 
@@ -527,6 +524,7 @@ export function useChatSession() {
 
   async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) {
     const sessionID = activeSessionRef.current
+    const activation = activationRef.current
     if (!sessionID) return
     const trimmed = content.trim()
     if (!trimmed) return
@@ -567,8 +565,9 @@ export function useChatSession() {
 		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
 		try {
 			await executeChatCommand(sessionID, runContent)
+			if (!isCurrentSession(sessionID, activation)) return
 		} catch (err: any) {
-			setError(err.message || 'Failed to execute command')
+			if (isCurrentSession(sessionID, activation)) setError(err.message || 'Failed to execute command')
 		}
 		return
 	}
@@ -590,12 +589,14 @@ export function useChatSession() {
     setRunRequestPending(true)
 
     try {
-		const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
+			const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
+			if (!isCurrentSession(sessionID, activation)) return
       setRunRequestPending(false)
       if (sent.turnId && !endedTurnIDsRef.current.has(sent.turnId)) activateTurn(sent.turnId)
       await refreshSessions()
     } catch (err: any) {
-      setRunRequestPending(false)
+			if (!isCurrentSession(sessionID, activation)) return
+			setRunRequestPending(false)
       setError(err.message || 'Failed to send message')
     }
   }
@@ -723,13 +724,17 @@ export function useChatSession() {
 
   async function handleCancelMessage() {
     const sessionID = activeSessionRef.current
-    if (!sessionID) return
+    const turnID = activeTurnRef.current
+    const activation = activationRef.current
+    if (!sessionID || !turnID) return
     try {
-		await cancelChatSession(sessionID, activeTurnRef.current)
-		finalizeRun(activeTurnRef.current)
+			await cancelChatSession(sessionID, turnID)
+			// The request acknowledgement is not the turn terminal event. Keep the
+			// run active until durable turnEnded arrives, including after reconnect.
+			if (!isCurrentSession(sessionID, activation)) return
       await refreshSessions()
     } catch (err: any) {
-      setError(err.message || 'Failed to pause response')
+			if (isCurrentSession(sessionID, activation)) setError(err.message || 'Failed to pause response')
     }
   }
 

@@ -93,6 +93,11 @@ function presentAOPEvent(event: AOPEvent): AOPEvent {
   return event
 }
 
+function responseBoundary(event: AOPEvent): boolean {
+  return event.payload.case === 'status'
+    && ['eval_start', 'compact_start'].includes(event.payload.value.state)
+}
+
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
   return Object.fromEntries(event.extensions.map((extension) => [extension.typeUrl, extension.typeUrl]))
 }
@@ -294,7 +299,7 @@ function reduceConversationAOP(
   const topLevel = collapseRepeatedDividers(mergeTimelineItems(
     reduceAOPToTimeline(
       topLevelSplit.messages.map(presentAOPEvent),
-      { streaming, lifecycle: 'errors' },
+      { streaming, lifecycle: 'errors', responseBoundary },
     ) as ViewerTimelineItem[],
     orderedTimelineItems(statusTimelineItems(topLevelSplit.messages), topLevelSplit.commands),
   ))
@@ -325,6 +330,7 @@ function reduceConversationAOP(
       reduceAOPToTimeline(childSplit.messages.map(presentAOPEvent), {
         streaming: streaming && !end,
         lifecycle: 'errors',
+        responseBoundary,
       }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
       orderedTimelineItems(statusTimelineItems(childSplit.messages), childSplit.commands),
     ))
@@ -504,6 +510,8 @@ export default function ChatPanel({
   )
   const inputFormClass = cn(contentOffsetClass, hasIOARail && threadOffsetClass)
   const [persist, setPersist] = useState(false)
+  const activeSessionRef = useRef(activeSessionID)
+  useEffect(() => { activeSessionRef.current = activeSessionID }, [activeSessionID])
   // Goal mode: describe done-when criteria in natural language and let an
   // independent evaluator judge completion each round, re-driving the agent
   // until it passes or the evaluator itself says further rounds won't help.
@@ -653,6 +661,7 @@ export default function ChatPanel({
   )
 
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
+    const sessionAtStart = activeSessionID
     const opts = sendOpts()
     const hadGoal = persist
     if (!attachments?.length) {
@@ -671,6 +680,10 @@ export default function ChatPanel({
         } catch { /* upload error is surfaced by the Connect call */ }
       }
     }
+    // File reads/uploads are asynchronous. If the operator switches sessions
+    // while they are in flight, never send the completed payload into the new
+    // session's composer.
+    if (sessionAtStart !== activeSessionRef.current) return
     const fullContent = contextParts.length > 0
       ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}`
       : content
@@ -1123,6 +1136,11 @@ function EvalNote({ pass, round, reason }: { pass: boolean; round?: number; reas
 }
 
 function numOrUndefined(value: unknown): number | undefined {
+  // Protobuf uint64 counters decode as bigint (compaction and token budgets).
+  if (typeof value === 'bigint') {
+    const number = Number(value)
+    return Number.isSafeInteger(number) ? number : undefined
+  }
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
@@ -1185,7 +1203,11 @@ function AssistantResponseEntry({
       actorName={response.actorName}
       timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
-      thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
+      thinking={hasThinking ? (
+        <div role="region" aria-label={t('thinkingLabel')} tabIndex={0} className="max-h-64 overflow-y-auto overscroll-contain">
+          <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted />
+        </div>
+      ) : undefined}
       thinkingExpanded={thinkingExpanded}
       onThinkingToggle={setThinkingExpanded}
       tools={toolCount > 0 ? (
@@ -1203,7 +1225,11 @@ function AssistantResponseEntry({
           ))}
         </div>
       ) : undefined}
-      response={hasResponse ? <MarkdownContent content={trimDisplayContent(message?.content || '')} compact /> : undefined}
+      response={hasResponse ? (
+        <div className={cn(response.streaming && 'max-h-96 overflow-y-auto overscroll-contain')}>
+          <MarkdownContent content={trimDisplayContent(message?.content || '')} compact />
+        </div>
+      ) : undefined}
       labels={{ tools: toolsLabel, thinking: t('thinkingLabel'), response: t('responseLabel') }}
       headerClassName="xl:hidden"
       timeLabel={formatRailTime(response)}
