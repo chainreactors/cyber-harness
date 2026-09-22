@@ -8,6 +8,37 @@ import (
 	"testing/fstest"
 )
 
+func TestConfiguredMountsUseSpecificPrefixes(t *testing.T) {
+	config := Config{Directory: t.TempDir(), Mounts: map[string]fs.FS{
+		"cyber://":        fstest.MapFS{"skills/doc.md": &fstest.MapFile{Data: []byte("fallback")}},
+		"cyber://skills/": fstest.MapFS{"doc.md": &fstest.MapFile{Data: []byte("specific")}},
+	}}
+	resource, err := New(config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(config.Mounts, "cyber://skills/") // construction owns its config snapshot
+	if err := resource.Open(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer resource.Close(context.Background())
+	data, err := resource.Files.Read(t.Context(), "cyber://skills/doc.md")
+	if err != nil || string(data) != "specific" {
+		t.Fatalf("read=%q err=%v", data, err)
+	}
+	for _, name := range []string{"cyber://skills/../doc.md", "cyber://skills//doc.md", "cyber://skillshadow/doc.md"} {
+		if _, err := resource.Files.Read(t.Context(), name); err == nil {
+			t.Fatalf("accepted %s", name)
+		}
+	}
+	if err := resource.Files.Unmount(t.Context(), "cyber://skills/"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resource.Files.Read(t.Context(), "cyber://skills/doc.md"); err == nil {
+		t.Fatal("revoked mount fell back to broader prefix")
+	}
+}
+
 type gatedMount struct {
 	fs.FS
 	entered, release chan struct{}

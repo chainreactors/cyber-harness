@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -22,11 +23,27 @@ import (
 
 var ErrUnavailable = errors.New("file service is not active")
 
+// slashPath accepts an OS path or a slash path and returns one root-relative
+// slash path. path.Match treats '\' as an escape on every OS, so the files
+// namespace stays slash-separated. Clean drops "." and duplicate separators first.
+func slashPath(path string) (string, error) {
+	if !filepath.IsLocal(path) {
+		return "", fmt.Errorf("path is not local")
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if !filepath.IsLocal(filepath.FromSlash(cleaned)) {
+		return "", fmt.Errorf("path is not local")
+	}
+	return cleaned, nil
+}
+
 type Config struct {
 	Directory string
 	// MaxBytes bounds each read and write; zero means 1 MiB.
 	MaxBytes int64
 	ReadOnly bool
+	// Mounts maps virtual URI prefixes to immutable read-only filesystems.
+	Mounts map[string]fs.FS
 }
 
 // Files exposes bounded filesystem behavior. Its Config is immutable after
@@ -63,6 +80,11 @@ func New(config Config, registry *corehooks.Registry) (*Resource, error) {
 	if config.MaxBytes == 0 {
 		config.MaxBytes = 1 << 20
 	}
+	mounts := make(map[string]fs.FS, len(config.Mounts))
+	for prefix, source := range config.Mounts {
+		mounts[prefix] = source
+	}
+	config.Mounts = mounts
 	return &Resource{Files: &Files{config: config, hooks: registry, done: make(chan struct{})}}, nil
 }
 
@@ -83,6 +105,14 @@ func (r *Resource) Open(ctx context.Context) error {
 		return nil
 	}
 	f.attempted = true
+	f.mounts = make(map[string]*mount, len(f.config.Mounts))
+	for prefix, source := range f.config.Mounts {
+		m, err := newMount(prefix, source)
+		if err != nil {
+			return err
+		}
+		f.mounts[prefix] = m
+	}
 	root, err := os.OpenRoot(f.config.Directory)
 	if err != nil {
 		return err
@@ -169,9 +199,11 @@ func (f *Files) read(ctx context.Context, path string, observed bool) (result []
 	if f.lifetime.Err() != nil {
 		cancel()
 	}
-	if !filepath.IsLocal(path) {
+	local, nerr := slashPath(path)
+	if nerr != nil {
 		return nil, fmt.Errorf("read requires a local path")
 	}
+	path = local
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -241,9 +273,11 @@ func (f *Files) writeBytes(ctx context.Context, path string, data []byte, op fil
 	if f.config.ReadOnly {
 		return &os.PathError{Op: "write", Path: path, Err: os.ErrPermission}
 	}
-	if strings.Contains(path, "://") || !filepath.IsLocal(path) || int64(len(data)) > f.config.MaxBytes {
+	local, nerr := slashPath(path)
+	if strings.Contains(path, "://") || nerr != nil || int64(len(data)) > f.config.MaxBytes {
 		return fmt.Errorf("write requires a local path within %d bytes", f.config.MaxBytes)
 	}
+	path = local
 	if err := ctx.Err(); err != nil {
 		return err
 	}

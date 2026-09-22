@@ -55,7 +55,8 @@ func (f *Files) List(ctx context.Context, directory string) ([]fs.DirEntry, erro
 	if directory == "" {
 		directory = "."
 	}
-	if !filepath.IsLocal(directory) {
+	directory, err = slashPath(directory)
+	if err != nil {
 		return nil, fmt.Errorf("ls requires a local path")
 	}
 	return readDirectory(ctx, root, directory, maxListEntries)
@@ -75,6 +76,12 @@ func (f *Files) Glob(ctx context.Context, pattern string, limit int) ([]string, 
 	defer stop()
 	if f.lifetime.Err() != nil {
 		cancel()
+	}
+	if pattern != "" {
+		pattern, err = slashPath(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("glob requires a local path")
+		}
 	}
 	if strings.Contains(pattern, "**") {
 		return nil, fmt.Errorf("glob does not support **")

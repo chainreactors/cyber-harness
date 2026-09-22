@@ -434,12 +434,12 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	}
 	left, right, hasPipe := splitPipeline(command)
 	leftToken := firstCommandToken(left)
-	if !hasPipe {
+	// Inspect the original line before tokenization loses quotes and operator
+	// boundaries (for example "port;", "--help&&echo", or a newline).
+	if !hasPipe && shellSyntaxIndex(command) < 0 {
 		if cmd, ok := t.resolve(leftToken); ok {
 			if tokens, err := coretool.SplitCommandLine(left); err == nil {
-				if args, syntaxErr := coretool.StripShellSyntax(tokens[1:]); syntaxErr == nil {
-					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
-				}
+				return t.startBuiltin(ctx, cmd, tokens[1:], timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
 			}
 		}
 	}
@@ -483,6 +483,9 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 		args, err := coretool.StripShellSyntax(tokens[1:])
 		if err != nil {
 			return nil, err
+		}
+		if !hasPipe && shellSyntaxIndex(command) >= 0 {
+			return nil, fmt.Errorf("shell composition for %s requires the shell command adapter; issue the command separately", leftToken)
 		}
 		if hasPipe && right != "" {
 			options, cleanup, err := t.prepareShell(command, options)
@@ -965,7 +968,49 @@ func firstCommandToken(input string) string {
 	if err != nil || len(tokens) == 0 {
 		return ""
 	}
-	return tokens[0]
+	// Shell separators need not have whitespace on either side. Only inspect
+	// the command word here, so substitutions in later arguments cannot turn
+	// a known command into an empty/unterminated command name.
+	name := tokens[0]
+	if index := strings.IndexAny(name, ";|&<>"); index >= 0 {
+		name = name[:index]
+	}
+	return name
+}
+
+// shellSyntaxIndex locates syntax that needs shell evaluation. Quoted literal
+// operators stay in argv; substitutions in double quotes still need the shell.
+func shellSyntaxIndex(input string) int {
+	var quote rune
+	escaped := false
+	for index, value := range input {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if value == quote {
+				quote = 0
+				continue
+			}
+			if quote == '"' && (value == '$' || value == '`') {
+				return index
+			}
+			continue
+		}
+		if value == '\'' || value == '"' {
+			quote = value
+			continue
+		}
+		if strings.ContainsRune(";|&<>\n\r$`()", value) {
+			return index
+		}
+	}
+	return -1
 }
 
 func splitPipeline(commandLine string) (left, right string, ok bool) {

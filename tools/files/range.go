@@ -7,7 +7,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	"github.com/chainreactors/cyber/core/operation"
 	"io"
-	"path/filepath"
 )
 
 // ReadRange bounds a binary transfer independently of the total artifact size.
@@ -24,7 +23,8 @@ func (f *Files) ReadRange(ctx context.Context, path string, offset int64, limit 
 	defer f.release()
 	stop := context.AfterFunc(f.lifetime, func() { cancel(nil) })
 	defer stop()
-	if !filepath.IsLocal(path) {
+	path, err = slashPath(path)
+	if err != nil {
 		return nil, 0, fmt.Errorf("read requires a local path")
 	}
 	defer func() {
@@ -61,7 +61,8 @@ func (f *Files) Mkdir(ctx context.Context, path string) error {
 		return err
 	}
 	defer f.release()
-	if !filepath.IsLocal(path) {
+	path, err = slashPath(path)
+	if err != nil {
 		return fmt.Errorf("mkdir requires a local path")
 	}
 	if err := ctx.Err(); err != nil {

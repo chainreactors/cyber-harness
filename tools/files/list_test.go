@@ -54,6 +54,14 @@ func TestListingAndGlobRespectRootAndCancellation(t *testing.T) {
 			t.Fatalf("glob %s: %v %v", tt.pattern, got, err)
 		}
 	}
+	body, err := f.Read(t.Context(), filepath.Join("sub", "c.txt"))
+	if err != nil || string(body) != "x" {
+		t.Fatalf("os separator read: %q %v", body, err)
+	}
+	native, err := f.Glob(t.Context(), filepath.Join("sub", "*.txt"), 10)
+	if err != nil || !reflect.DeepEqual(native, []string{"sub/c.txt"}) {
+		t.Fatalf("os separator glob: %v %v", native, err)
+	}
 	if _, err := f.Glob(t.Context(), "**/*.txt", 10); err == nil {
 		t.Fatal("silently accepted unsupported recursive glob")
 	}
