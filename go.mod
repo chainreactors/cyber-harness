@@ -59,6 +59,7 @@ require (
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.45.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (
@@ -344,7 +345,6 @@ require (
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
 replace github.com/wasilibs/go-re2 => github.com/chainreactors/native v1.11.1-native.1

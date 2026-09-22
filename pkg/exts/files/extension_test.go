@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,12 +13,34 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
+	fileext "github.com/chainreactors/cyber/pkg/exts/files"
 
 	"github.com/chainreactors/cyber/tools/files"
 )
+
+func TestReadEmbeddedSkill(t *testing.T) {
+	r, set := fileSet(t, files.Config{Directory: t.TempDir(), Mounts: map[string]fs.FS{
+		"cyber://skills/": skills.EmbeddedFS(),
+	}})
+	if err := set.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.ExecuteTool(t.Context(), "read", `{"path":"cyber://skills/cyber/okf/easm/gogo.md"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := fs.ReadFile(skills.EmbeddedFS(), "cyber/okf/easm/gogo.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := coretool.ResultText(result); got != string(want) {
+		t.Fatalf("embedded skill content differs: %q", got)
+	}
+}
 
 func fileSet(t *testing.T, cfg files.Config) (coretool.Executor, *extension.Set) {
 	t.Helper()

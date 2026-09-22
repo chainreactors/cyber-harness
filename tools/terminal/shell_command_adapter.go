@@ -373,7 +373,12 @@ func (b *shellCommandAdapter) syncAliases(names []string) error {
 		}
 		b.aliases[name] = path
 	}
-	return nil
+	aliasNames := make([]string, 0, len(b.aliases))
+	for name := range b.aliases {
+		aliasNames = append(aliasNames, name)
+	}
+	sort.Strings(aliasNames)
+	return writeShellCommandBashEnv(b.runtimeDir, aliasNames)
 }
 
 func validShellCommandAdapterName(name string) bool {
@@ -415,12 +420,16 @@ func (b *shellCommandAdapter) releaseContext(id string) {
 }
 
 func (b *shellCommandAdapter) environment(contextID string) []string {
-	return []string{
+	env := []string{
 		shellCommandAdapterMarkerEnv + "=1",
 		shellCommandAdapterEndpointEnv + "=" + b.endpoint,
 		shellCommandAdapterExecutableEnv + "=" + b.executable,
 		shellCommandAdapterContextEnv + "=" + contextID,
 	}
+	if path := shellBashEnv(b.runtimeDir); path != "" {
+		env = append(env, "BASH_ENV="+path)
+	}
+	return env
 }
 
 func (b *shellCommandAdapter) shutdown() {

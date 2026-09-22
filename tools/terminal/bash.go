@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -291,8 +290,8 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 		return nil, err
 	}
 
-	command := strings.TrimSpace(args.Command)
-	if command == "" {
+	command := args.Command
+	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
 	if isOnlyCommentsOrBlank(command) {
@@ -325,8 +324,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
 	options.foreground = true
-	command = strings.TrimSpace(command)
-	if command == "" {
+	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
 	if options.WorkDir == "" {
@@ -408,10 +406,10 @@ func (t *BashTool) RunForegroundTool(ctx context.Context, command string, option
 	return result, nil
 }
 
-// Start resolves command through the built-in registry or the system shell and
-// always returns an Execution backed by one PTY session.
+// start routes one script. A single literal registered command stays in
+// process. Shell syntax is parsed before argv splitting; composition runs
+// through a POSIX shell when one is available.
 func (t *BashTool) start(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
-	command = stripCommentsAndBlanks(command)
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
@@ -432,134 +430,108 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	if workDir == "" {
 		workDir = t.workDir
 	}
-	left, right, hasPipe := splitPipeline(command)
-	leftToken := firstCommandToken(left)
-	if !hasPipe {
-		if cmd, ok := t.resolve(leftToken); ok {
-			if tokens, err := coretool.SplitCommandLine(left); err == nil {
-				if args, syntaxErr := coretool.StripShellSyntax(tokens[1:]); syntaxErr == nil {
-					return t.startBuiltin(ctx, cmd, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
-				}
-			}
-		}
+	script, err := parseShellCommand(command)
+	if err != nil {
+		return nil, err
 	}
-	if _, standalone := t.standaloneCommands[leftToken]; standalone {
-		return nil, fmt.Errorf("%s must be a standalone command without shell composition", leftToken)
+	if len(script.Stmts) == 0 {
+		return nil, fmt.Errorf("empty command")
+	}
+	if spec, args, ok := t.literalBuiltin(script); ok {
+		return t.startBuiltin(ctx, spec, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
+	}
+	if name, ok := leadingCommandName(script); ok {
+		if _, standalone := t.standaloneCommands[name]; standalone {
+			return nil, fmt.Errorf("%s must be a standalone command without shell composition", name)
+		}
 	}
 	adapter, err := t.ensureShellCommands()
 	if err != nil {
 		return nil, err
 	}
 	if adapter != nil {
-		var cleanup func()
-		options, cleanup, err = t.prepareShell(command, options)
-		if err != nil {
-			return nil, err
-		}
-		contextID := adapter.retainContext(ctx)
-		env := t.runEnv(ctx, options.Env, adapter, contextID)
-		execution := coretool.NewExecution(t.tasks, command, nil, workDir, env)
-		info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
-			shellAttachment(command, workDir, env, options))
-		if err != nil {
-			adapter.releaseContext(contextID)
-			cleanup()
-			return nil, err
-		}
-		execution.BindID(info.ID)
-		go func() {
-			<-t.tasks.Done(execution.ID)
-			adapter.releaseContext(contextID)
-		}()
-		t.releaseProcess(cleanup, execution)
-		return execution, nil
+		return t.startShellScript(ctx, command, timeout, workDir, options, adapter)
 	}
-	env := t.runEnv(ctx, options.Env, nil, "")
-	if cmd, ok := t.resolve(leftToken); ok {
-		tokens, err := coretool.SplitCommandLine(left)
-		if err != nil {
-			return nil, err
-		}
-		args, err := coretool.StripShellSyntax(tokens[1:])
-		if err != nil {
-			return nil, err
-		}
-		if hasPipe && right != "" {
-			options, cleanup, err := t.prepareShell(command, options)
-			if err != nil {
-				return nil, err
+	if left, right, ok := splitPipeline(script, command); ok {
+		leftScript, leftErr := parseShellCommand(left)
+		rightScript, rightErr := parseShellCommand(right)
+		if leftErr == nil && rightErr == nil {
+			if spec, args, builtin := t.literalBuiltin(leftScript); builtin && !t.hasRegisteredCommand(rightScript) {
+				options, cleanup, err := t.prepareShell(command, options)
+				if err != nil {
+					return nil, err
+				}
+				execution, err := t.startBuiltinToShell(ctx, spec, args, right, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
+				if err != nil {
+					cleanup()
+					return nil, err
+				}
+				t.releaseProcess(cleanup, execution)
+				return execution, nil
 			}
-			env = t.runEnv(ctx, options.Env, nil, "")
-			execution, err := t.startBuiltinToShell(ctx, cmd, args, right, timeout, workDir, env, options)
-			if err != nil {
-				cleanup()
-				return nil, err
+			if spec, args, builtin := t.literalBuiltin(rightScript); builtin && !t.hasRegisteredCommand(leftScript) {
+				options, cleanup, err := t.prepareShell(command, options)
+				if err != nil {
+					return nil, err
+				}
+				execution, err := t.startShellToBuiltin(ctx, left, spec, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
+				if err != nil {
+					cleanup()
+					return nil, err
+				}
+				t.releaseProcess(cleanup, execution)
+				return execution, nil
 			}
-			t.releaseProcess(cleanup, execution)
-			return execution, nil
-		}
-		return t.startBuiltin(ctx, cmd, args, timeout, workDir, env, options)
-	}
-	if hasPipe && right != "" {
-		rightToken := firstCommandToken(right)
-		if cmd, ok := t.resolve(rightToken); ok {
-			tokens, err := coretool.SplitCommandLine(right)
-			if err != nil {
-				return nil, err
-			}
-			args, err := coretool.StripShellSyntax(tokens[1:])
-			if err != nil {
-				return nil, err
-			}
-			options, cleanup, err := t.prepareShell(command, options)
-			if err != nil {
-				return nil, err
-			}
-			env = t.runEnv(ctx, options.Env, nil, "")
-			execution, err := t.startShellToBuiltin(ctx, left, cmd, args, timeout, workDir, env, options)
-			if err != nil {
-				cleanup()
-				return nil, err
-			}
-			t.releaseProcess(cleanup, execution)
-			return execution, nil
 		}
 	}
+	if t.hasRegisteredCommand(script) {
+		return nil, fmt.Errorf("registered commands with shell pipes, command chaining, file redirection or expansion require EnableShellCommands")
+	}
+	return t.startShellScript(ctx, command, timeout, workDir, options, nil)
+}
+
+func (t *BashTool) startShellScript(ctx context.Context, command string, timeout time.Duration, workDir string, options BashExecOptions, adapter *shellCommandAdapter) (*coretool.Execution, error) {
 	options, cleanup, err := t.prepareShell(command, options)
 	if err != nil {
 		return nil, err
 	}
-	env = t.runEnv(ctx, options.Env, nil, "")
+	var contextID string
+	if adapter != nil {
+		contextID = adapter.retainContext(ctx)
+	}
+	env := t.runEnv(ctx, options.Env, adapter, contextID)
 	execution := coretool.NewExecution(t.tasks, command, nil, workDir, env)
-	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout),
-		shellAttachment(command, workDir, env, options))
+	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout), shellAttachment(command, workDir, env))
 	if err != nil {
+		if adapter != nil {
+			adapter.releaseContext(contextID)
+		}
 		cleanup()
 		return nil, err
 	}
 	execution.BindID(info.ID)
+	if adapter != nil {
+		go func() {
+			<-t.tasks.Done(execution.ID)
+			adapter.releaseContext(contextID)
+		}()
+	}
 	t.releaseProcess(cleanup, execution)
 	return execution, nil
 }
 
-func shellAttachment(command, workDir string, env []string, options BashExecOptions) proc.Attachment {
-	attachment := proc.TTY(proc.ProcOptions{Line: command, Dir: workDir, Env: env})
-	if !options.foreground || runtime.GOOS != "windows" {
-		return attachment
+func shellAttachment(command, workDir string, env []string) proc.Attachment {
+	env = prepareShellProcessEnv(env)
+	procOptions := proc.ProcOptions{Dir: workDir, Env: env}
+	if binary, args, useLine := commandShell(command); useLine {
+		procOptions.Line = command
+	} else {
+		procOptions.Binary = binary
+		procOptions.Args = args
 	}
-	return proc.AttachFunc(func(ctx context.Context) (*proc.Attached, error) {
-		attached, err := attachment.Start(ctx)
-		if err != nil {
-			return nil, err
-		}
-		// Ctrl+C on a Windows terminal can interrupt only the current child,
-		// allowing cmd.exe to execute the remainder of a canceled command line.
-		// Foreground RPC cancellation must terminate the whole invocation. Keep
-		// the registry's one stop/drain lifecycle, but skip interactive signals.
-		signal := attached.Signal
-		attached.Signal = func(proc.Signal) error { return signal(proc.SigKill) }
-		return attached, nil
-	})
+	// Windows uses a pipe so the console cannot rewrite newlines or trailing
+	// spaces, and a job so cancel stops descendants the process tree misses.
+	return shellProcess(procOptions)
 }
 
 // procSpec is the registry-level half of a bash invocation: identity and
@@ -652,7 +624,7 @@ func (t *BashTool) startBuiltinToShell(
 	}
 	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
 		reader, writer := io.Pipe()
-		sh := exec.CommandContext(runCtx, "sh", "-c", pipeline)
+		sh := pipeCommand(runCtx, pipeline)
 		sh.Stdin = reader
 		sh.Stdout = joinedWriter(session, options.Stdout)
 		sh.Stderr = joinedWriter(session, options.Stderr)
@@ -698,7 +670,7 @@ func (t *BashTool) startShellToBuiltin(
 	}
 	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
 		reader, writer := io.Pipe()
-		sh := exec.CommandContext(runCtx, "sh", "-c", shellLine)
+		sh := pipeCommand(runCtx, shellLine)
 		sh.Stdin = options.Stdin
 		sh.Stdout = writer
 		sh.Stderr = joinedWriter(session, options.Stderr)
@@ -735,11 +707,16 @@ func joinedWriter(session, extra io.Writer) io.Writer {
 	return io.MultiWriter(session, extra)
 }
 
+func pipeCommand(ctx context.Context, script string) *exec.Cmd {
+	binary, args := pipeShell(script)
+	return exec.CommandContext(ctx, binary, args...)
+}
+
 func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	if len(env) > 0 {
+	if env = prepareShellProcessEnv(env); len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
 }
@@ -945,62 +922,6 @@ func isOnlyCommentsOrBlank(cmdLine string) bool {
 		}
 	}
 	return true
-}
-
-func stripCommentsAndBlanks(input string) string {
-	lines := strings.Split(input, "\n")
-	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.Join(kept, "\n")
-}
-
-func firstCommandToken(input string) string {
-	tokens, err := coretool.SplitCommandLine(input)
-	if err != nil || len(tokens) == 0 {
-		return ""
-	}
-	return tokens[0]
-}
-
-func splitPipeline(commandLine string) (left, right string, ok bool) {
-	var quote rune
-	escaped := false
-	runes := []rune(commandLine)
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if r == '\\' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if r == quote {
-				quote = 0
-			}
-			continue
-		}
-		if r == '\'' || r == '"' {
-			quote = r
-			continue
-		}
-		if r == '|' {
-			if i+1 < len(runes) && runes[i+1] == '|' {
-				i++
-				continue
-			}
-			return strings.TrimSpace(string(runes[:i])), strings.TrimSpace(string(runes[i+1:])), true
-		}
-	}
-	return commandLine, "", false
 }
 
 // WithEnvironment sets the composition's child-process environment. Call only
