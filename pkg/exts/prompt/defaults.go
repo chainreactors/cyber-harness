@@ -107,7 +107,7 @@ func renderEnvironment(_ context.Context, input agentprompt.Context) (string, er
 		out.WriteString(input.Agent.NodeName)
 	}
 	if input.Agent.Windows {
-		out.WriteString("\nShell: cmd.exe - do NOT use Unix shell syntax (2>&1, |, /dev/null). Pseudo-commands run in-process and need no shell redirections.")
+		out.WriteString("\nShell: the bash tool accepts POSIX syntax. It runs native bash when Git or MSYS bash is installed, and cmd.exe only when bash is absent. Pseudo-commands run in-process; quote literal operators so they stay arguments.")
 	}
 	return out.String(), nil
 }

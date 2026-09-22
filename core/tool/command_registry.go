@@ -197,10 +197,7 @@ func (r *CommandRegistry) Run(ctx context.Context, tokens []string, parent *Exec
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
-	args, err := StripShellSyntax(tokens[1:])
-	if err != nil {
-		return nil, err
-	}
+	args := append([]string(nil), tokens[1:]...)
 	name := tokens[0]
 	if parent == nil {
 		return nil, fmt.Errorf("command %s requires an execution", name)

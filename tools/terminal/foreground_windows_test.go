@@ -24,7 +24,7 @@ func TestForegroundCancelDoesNotRunRemainingCommands(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := bash.RunForeground(ctx, "echo started > started.txt & ping -n 30 127.0.0.1 > nul & echo leaked > leaked.txt", BashExecOptions{Timeout: budget, TimeoutSet: true})
+				_, err := bash.RunForeground(ctx, blockingCommand(), BashExecOptions{Timeout: budget, TimeoutSet: true})
 				done <- err
 			}()
 			deadline := time.Now().Add(5 * time.Second)
@@ -53,4 +53,11 @@ func TestForegroundCancelDoesNotRunRemainingCommands(t *testing.T) {
 			}
 		})
 	}
+}
+
+func blockingCommand() string {
+	if posixShellAvailable() {
+		return "echo started > started.txt; sleep 30; echo leaked > leaked.txt"
+	}
+	return "echo started > started.txt & ping -n 30 127.0.0.1 > nul & echo leaked > leaked.txt"
 }

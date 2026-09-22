@@ -36,6 +36,12 @@ func dialShellCommandAdapter(ctx context.Context, endpoint string) (net.Conn, er
 
 func createShellCommandAdapterAlias(executable, runtimeDir, name string) (string, error) {
 	_ = executable
+	if windowsBash() != "" {
+		// Bash functions (and +x shims for names that are not identifiers) own
+		// dispatch. A .cmd on PATH would win when BASH_ENV is not sourced and
+		// %* drops empty arguments.
+		return name, nil
+	}
 	path := filepath.Join(runtimeDir, name+".cmd")
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
