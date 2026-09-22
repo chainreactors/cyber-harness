@@ -27,5 +27,6 @@
 - cyber-ui `pnpm --filter @cyber/viewer test`：8 项通过。
 - 前端 `npm run test:e2e`：18 项通过，1 项真实模型 Goal 测试按条件跳过；启动过程包含 TypeScript/Vite 构建和 full Go 二进制构建。
 - 按 `editions.env` 构建 Windows standard/full，`--version` 均为 `aiscan v1.0.0-rc5`，验证 `scan --help` 和 full `web --help`。
+- WSL Ubuntu / Go 1.26.0：`go vet ./...`、根模块/AOP tidy 及 AOP race 测试通过；tmux 多轮交互用例改为用单引号向内层 Shell 发送变量，`go test -race -count=3 ./agent -run '^TestAgentTmuxMultiRoundInteraction$'` 通过。
 
 发布仍要求 release commit 的 GitHub CI 成功，包括 Linux race、Windows、scanner、浏览器及发布包验证；本地 fixture 结果不代表任意模型都不会自行生成重复内容。
