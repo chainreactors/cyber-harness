@@ -32,7 +32,7 @@ if (externalLLMValues === 0) {
   mockLLM = createServer(async (req, res) => {
     if (req.url === '/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ data: [{ id: 'deepseek-chat', object: 'model' }] }))
+      res.end(JSON.stringify({ data: [{ id: 'deepseek-flash', object: 'model' }] }))
       return
     }
     if (req.url !== '/v1/chat/completions' || req.method !== 'POST') {
@@ -44,6 +44,13 @@ if (externalLLMValues === 0) {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    const imageParts = (payload.messages || []).flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === 'image_url')
+    if (imageParts.length) {
+      const valid = imageParts.every(part => part.image_url?.url?.startsWith('data:image/png;base64,iVBOR'))
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: valid ? 'IMAGE_RECEIVED' : 'INVALID_IMAGE' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
+      return
+    }
     if (await issueGoalReply(payload, res)) return
     if (await issueStreamReply(payload, res)) return
     if (await issueInteractionReply(payload, res)) return
@@ -83,7 +90,7 @@ if (externalLLMValues === 0) {
   if (!llmAddress || typeof llmAddress === 'string') throw new Error('mock LLM did not expose a TCP address')
   llmBaseURL = `http://${host}:${llmAddress.port}/v1`
   llmAPIKey = 'test-key'
-  llmModel = 'deepseek-chat'
+  llmModel = 'deepseek-flash'
 }
 
 const configPath = join(workDir, 'cyber.yaml')
@@ -92,7 +99,7 @@ await writeFile(configPath, `llm:
   providers:
     - id: e2e
       name: E2E DeepSeek
-      provider: openai
+      provider: ${JSON.stringify(process.env.CYBER_E2E_LLM_PROVIDER || 'openai')}
       base_url: ${JSON.stringify(llmBaseURL)}
       api_key: ${JSON.stringify(llmAPIKey)}
       model: ${JSON.stringify(llmModel)}

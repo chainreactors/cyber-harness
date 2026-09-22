@@ -17,7 +17,7 @@ import {
   sendChatMessage,
   subscribeAOPEvents,
 } from '../api'
-import type { AgentView, AOPEvent, AOPSession, EventDelivery, SCONode, SessionRecord } from '../api'
+import type { AgentView, AOPEvent, AOPSession, ChatSendOptions, EventDelivery, SCONode, SessionRecord } from '../api'
 import { listSCONodes, syncCSTXArtifacts } from '../lib/cstx-runtime'
 import {
   isRootPath,
@@ -522,12 +522,12 @@ export function useChatSession() {
     }
   }
 
-  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) {
+  async function handleSendMessage(content: string, opts?: ChatSendOptions) {
     const sessionID = activeSessionRef.current
     const activation = activationRef.current
     if (!sessionID) return
     const trimmed = content.trim()
-    if (!trimmed) return
+    if (!trimmed && !opts?.images?.length) return
 	const lower = trimmed.toLowerCase()
 	if (lower === '/clear') {
 		try {

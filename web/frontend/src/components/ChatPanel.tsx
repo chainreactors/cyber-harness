@@ -45,7 +45,7 @@ import {
   type ViewerTimelineItem,
   type AOPEvent,
 } from '@/viewer'
-import { fetchSessionCommands, uploadChatFile } from '../api'
+import { fetchSessionCommands, uploadChatFile, type ChatSendOptions } from '../api'
 import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
@@ -422,7 +422,7 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) => void
+  onSend: (content: string, opts?: ChatSendOptions) => void
   onPause: () => void
   onClearError: () => void
 }
@@ -451,6 +451,7 @@ export default function ChatPanel({
   onClearError,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
+  const [attachmentError, setAttachmentError] = useState('')
   const agentEvents = useMemo(
     () => aopEvents.filter((event) => !isInternalUserEvent(event)),
     [aopEvents],
@@ -662,7 +663,8 @@ export default function ChatPanel({
 
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
     const sessionAtStart = activeSessionID
-    const opts = sendOpts()
+    const opts: ChatSendOptions = sendOpts() || {}
+    setAttachmentError('')
     const hadGoal = persist
     if (!attachments?.length) {
       onSend(content, opts)
@@ -670,15 +672,23 @@ export default function ChatPanel({
       return
     }
     const contextParts: string[] = []
-    for (const a of attachments) {
-      if (a.mode === 'context') {
-        const text = await a.file.text()
-        contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
-      } else if (a.mode === 'upload' && activeSessionID) {
-        try {
-          await uploadChatFile(activeSessionID, a.file)
-        } catch { /* upload error is surfaced by the Connect call */ }
+    try {
+      for (const a of attachments) {
+        if (a.file.type.startsWith('image/')) {
+          if (a.file.size > 20 * 1024 * 1024) throw new Error('Image exceeds 20 MiB limit')
+          opts.images ??= []
+          opts.images.push({ data: new Uint8Array(await a.file.arrayBuffer()), mediaType: a.file.type, filename: a.file.name })
+        } else if (a.mode === 'context') {
+          const text = await a.file.text()
+          contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
+        } else if (a.mode === 'upload' && sessionAtStart) {
+          const uploaded = await uploadChatFile(sessionAtStart, a.file)
+          contextParts.push(`Uploaded file: ${uploaded.path}`)
+        }
       }
+    } catch (err) {
+      if (sessionAtStart === activeSessionRef.current) setAttachmentError(err instanceof Error ? err.message : 'Failed to read attachment')
+      return
     }
     // File reads/uploads are asynchronous. If the operator switches sessions
     // while they are in flight, never send the completed payload into the new
@@ -687,7 +697,7 @@ export default function ChatPanel({
     const fullContent = contextParts.length > 0
       ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}`
       : content
-    if (fullContent.trim()) onSend(fullContent, opts)
+    if (fullContent.trim() || opts.images?.length) onSend(fullContent, opts)
     if (hadGoal) resetGoal()
   }
 
@@ -803,15 +813,15 @@ export default function ChatPanel({
       timeline={viewerTimeline as unknown as CyberTimelineItem[]}
       className="min-w-0 bg-transparent"
     >
-      {error && (
+      {(error || attachmentError) && (
         <ViewerChatPanel.ErrorBar>
           <div
             role="alert"
             className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive animate-in fade-in slide-in-from-top-1 duration-200"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-            <button type="button" aria-label={t('dismiss')} onClick={onClearError} className="rounded p-0.5 hover:bg-destructive/10">
+            <span className="min-w-0 flex-1 break-words">{error || attachmentError}</span>
+            <button type="button" aria-label={t('dismiss')} onClick={() => { setAttachmentError(''); onClearError() }} className="rounded p-0.5 hover:bg-destructive/10">
               <X className="h-4 w-4" />
             </button>
           </div>

@@ -324,13 +324,17 @@ export async function fetchSessionCommands(sessionID: string): Promise<CommandSp
   }
 }
 
+export type ChatSendOptions = {
+  persist?: boolean
+  evalCriteria?: string
+  evalRounds?: string
+  images?: { data: Uint8Array; mediaType: string; filename: string }[]
+}
+
 export async function sendChatMessage(
   sessionID: string,
   content: string,
-  opts?: {
-    persist?: boolean
-    evalCriteria?: string
-    evalRounds?: string
+  opts?: ChatSendOptions & {
     messageID?: string
     turnID?: string
     requestID?: string
@@ -348,7 +352,12 @@ export async function sendChatMessage(
   try {
 	const request = create(AOPProtocolMessageSchema, { message: { case: 'runTurnRequest', value: {
 	  sessionId: sessionID, turnId: turnID, continueSession: opts?.continueSession === true,
-	  input: { id: messageID, role: 'user', content: opts?.continueSession ? [] : [{ value: { case: 'text', value: { text: content } } }] }, extensions,
+	  input: { id: messageID, role: 'user', content: opts?.continueSession ? [] : [
+      ...(content ? [{ value: { case: 'text' as const, value: { text: content } } }] : []),
+      ...(opts?.images || []).map(image => ({ value: { case: 'media' as const, value: {
+        kind: 'image', resource: { mediaType: image.mediaType, filename: image.filename, source: { case: 'data' as const, value: image.data } },
+      } } })),
+    ] }, extensions,
 	} } })
 	const response = await requestCore(request, 'runTurnResponse', opts?.requestID)
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to send message')

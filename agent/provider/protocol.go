@@ -1,6 +1,9 @@
 package provider
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
 // Wire protocols cyber speaks to LLM endpoints.
 const (
@@ -72,11 +75,19 @@ func ProviderBaseURL(name string) string {
 }
 
 // InferFromBaseURL guesses the wire protocol from the base URL when no
-// provider is set. The official Anthropic endpoint is unambiguous; everything
-// else speaks the OpenAI protocol in the common case. A wrong guess is caught
+// provider is set. Official Anthropic and DeepSeek Anthropic endpoints are
+// unambiguous; other endpoints default to OpenAI. A wrong guess is caught
 // later as an actionable 404 from the provider, not a silent failure.
 func InferFromBaseURL(baseURL string) string {
-	if strings.Contains(strings.ToLower(baseURL), "anthropic.com") {
+	endpoint, err := url.Parse(baseURL)
+	if err != nil {
+		return ProviderOpenAI
+	}
+	host := strings.ToLower(endpoint.Hostname())
+	if host == "api.anthropic.com" || host == "anthropic.com" {
+		return ProviderAnthropic
+	}
+	if host == "api.deepseek.com" && (endpoint.Path == "/anthropic" || strings.HasPrefix(endpoint.Path, "/anthropic/")) {
 		return ProviderAnthropic
 	}
 	return ProviderOpenAI
