@@ -7,4 +7,6 @@ type FlagGroup struct {
 	Name        string
 	Description string
 	Options     any
+	// Hidden keeps the flags parseable but out of help output.
+	Hidden bool
 }

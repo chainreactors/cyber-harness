@@ -109,6 +109,33 @@ func TestRejectedCommandDoesNotLeaveParents(t *testing.T) {
 	}
 }
 
+func TestHiddenGroupParsesButSkipsHelp(t *testing.T) {
+	parser := flags.NewNamedParser("host", flags.HelpFlag)
+	r := New(parser)
+	if err := r.Command("run", "Run", &struct{}{}, Action{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Group("run", "secret", cfg.FlagGroup{
+		Name: "Secret Options", Hidden: true,
+		Options: &struct {
+			Token string `long:"secret-token" config:"token"`
+		}{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var help bytes.Buffer
+	parser.WriteHelp(&help)
+	if strings.Contains(help.String(), "secret") {
+		t.Fatalf("hidden group leaked into help: %s", help.String())
+	}
+	if _, err := r.Parse([]string{"run", "--secret-token=x"}); err != nil {
+		t.Fatalf("hidden flag rejected: %v", err)
+	}
+	if values := r.Values()["secret"]; values["token"] != "x" {
+		t.Fatalf("hidden flag values = %#v", values)
+	}
+}
+
 func TestTypedContributionsMaterializeAtSealAndCanRetractBeforeIt(t *testing.T) {
 	parser := flags.NewNamedParser("host", 0)
 	r := New(parser)
