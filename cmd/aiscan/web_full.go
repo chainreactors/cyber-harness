@@ -88,8 +88,10 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 			}
 			return candidateProfile, nil
 		},
-		MaxConcurrent: opts.MaxScans,
-		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
+		Scans: &webservice.ScanServiceConfig{
+			MaxConcurrent: opts.MaxScans,
+			ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
+		},
 	}
 	if option.Debug {
 		webConfig.AllowedOrigins = []string{"*"}

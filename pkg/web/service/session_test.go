@@ -128,7 +128,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service := NewService(ServiceConfig{Store: store})
+	service := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 	pool := NewAgentPool(service.Hub(), nil)
 	service.SetAgentPool(pool)
 	fake := &remoteAgent{

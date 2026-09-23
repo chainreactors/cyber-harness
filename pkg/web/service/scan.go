@@ -22,7 +22,13 @@ var (
 	ErrScanUnavailable   = managementapi.ErrScanUnavailable
 	ErrScanNotFound      = managementapi.ErrScanNotFound
 	ErrScanNotCancelable = managementapi.ErrScanNotCancelable
+	// ErrScanConsoleDisabled rejects scan operations on a host built without
+	// the scan console (ServiceConfig.Scans == nil).
+	ErrScanConsoleDisabled = managementapi.ErrScanConsoleDisabled
 )
+
+// scansEnabled reports whether the service mounts the scan console.
+func (s *Service) scansEnabled() bool { return s.sem != nil }
 
 // scanStatusToDB maps the proto enum to the string stored in scans.status.
 func scanStatusToDB(value types.ScanStatus) string {
@@ -41,6 +47,9 @@ func scanStatusToDB(value types.ScanStatus) string {
 }
 
 func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*types.Scan, error) {
+	if !s.scansEnabled() {
+		return nil, ErrScanConsoleDisabled
+	}
 	workCtx, admitted := s.beginWork()
 	if !admitted {
 		return nil, fmt.Errorf("web service is closing")
@@ -92,6 +101,9 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 }
 
 func (s *Service) GetScan(ctx context.Context, id string) (*types.Scan, error) {
+	if !s.scansEnabled() {
+		return nil, ErrScanConsoleDisabled
+	}
 	scan, err := s.store.Get(ctx, id)
 	if err != nil {
 		return nil, err
@@ -108,6 +120,9 @@ func (s *Service) ListScans(ctx context.Context) ([]*types.Scan, error) {
 }
 
 func (s *Service) CancelScan(id string) error {
+	if !s.scansEnabled() {
+		return ErrScanConsoleDisabled
+	}
 	ctx := context.Background()
 	scan, err := s.store.Get(ctx, id)
 	if err != nil {

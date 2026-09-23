@@ -397,7 +397,7 @@ func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
 			if err := store.Create(context.Background(), scan); err != nil {
 				t.Fatal(err)
 			}
-			service := NewService(ServiceConfig{Store: store})
+			service := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 			var responses []*types.ScanEvent
 			err = service.api.Scans.WatchScanEvents(
 				&types.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),

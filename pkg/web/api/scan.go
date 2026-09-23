@@ -16,6 +16,9 @@ var (
 	ErrScanUnavailable   = errors.New("no scan execution nodes connected; connect an external agent or start Web without --no-agent")
 	ErrScanNotFound      = errors.New("scan not found")
 	ErrScanNotCancelable = errors.New("scan cannot be canceled")
+	// ErrScanConsoleDisabled rejects scan work on a host built without the
+	// scan console, including session scan bindings.
+	ErrScanConsoleDisabled = errors.New("scan console is disabled")
 )
 
 type ScanBackend interface {
@@ -46,7 +49,7 @@ func (s *Scans) SubmitScan(ctx context.Context, request *types.SubmitScanRequest
 	scan, err := s.backend.SubmitScan(ctx, request.Target, request.Mode, options.GetVerify(), options.GetSniper(), options.GetDeep())
 	if err != nil {
 		code := "INVALID_ARGUMENT"
-		if errors.Is(err, ErrScanUnavailable) {
+		if errors.Is(err, ErrScanUnavailable) || errors.Is(err, ErrScanConsoleDisabled) {
 			code = "FAILED_PRECONDITION"
 		}
 		return rejectedSubmitScan(request, code, err.Error()), nil
@@ -190,6 +193,9 @@ func rejection(code, message string) *aop.Rejection {
 func scanError(err error) error {
 	if errors.Is(err, ErrScanNotFound) || errors.Is(err, sql.ErrNoRows) {
 		return NewError(CodeNotFound, ErrScanNotFound)
+	}
+	if errors.Is(err, ErrScanConsoleDisabled) {
+		return NewError(CodeFailedPrecondition, err)
 	}
 	return fmt.Errorf("scan service: %w", err)
 }

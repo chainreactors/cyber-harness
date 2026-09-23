@@ -2,14 +2,19 @@ package service
 
 import (
 	"context"
-	aop "github.com/chainreactors/cyber/aop"
-	toolpb "github.com/chainreactors/cyber/aop/tool"
-	types "github.com/chainreactors/cyber/core/types"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
+	types "github.com/chainreactors/cyber/core/types"
+	webpkg "github.com/chainreactors/cyber/pkg/web"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want types.ScanStatus) *types.Scan {
@@ -39,7 +44,7 @@ func TestSubmitScanWithoutNodeRejectsBeforeCreatingRecord(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = store.Close() })
-			svc := NewService(ServiceConfig{Store: store})
+			svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 			if withPool {
 				svc.SetAgentPool(NewAgentPool(svc.Hub(), nil))
 			}
@@ -73,7 +78,7 @@ func TestQueuedScanLosingNodeFailsWithoutLocalFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{MaxConcurrent: 1, ScanTimeout: time.Minute}})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	agent, _ := newFakeAgent("departing-node", 1)
@@ -100,7 +105,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{MaxConcurrent: 1, ScanTimeout: time.Minute}})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 
@@ -158,7 +163,7 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1, ScanTimeout: time.Minute})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{MaxConcurrent: 1, ScanTimeout: time.Minute}})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	srv, _ := setupTestServerWithPool(t, svc, pool)
@@ -220,7 +225,7 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{MaxConcurrent: 1}})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	agent, sent := newFakeAgent("timeout-agent", 1)
@@ -284,7 +289,7 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	svc := NewService(ServiceConfig{Store: store, MaxConcurrent: 1})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{MaxConcurrent: 1}})
 	pool := NewAgentPool(svc.Hub(), nil)
 	svc.SetAgentPool(pool)
 	agent, sent := newFakeAgent("timeout-agent", 1)
@@ -406,7 +411,7 @@ func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := NewService(ServiceConfig{Store: store})
+	svc := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 	changed, err := svc.completeScan(context.Background(), scan)
 	if err != nil {
 		t.Fatal(err)
@@ -442,7 +447,7 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service := NewService(ServiceConfig{Store: store})
+	service := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 	response, err := service.api.Scans.CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-completed", ScanId: scan.Id,
 	})
@@ -468,7 +473,7 @@ func TestCancelMissingScanReturnsNotFound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	service := NewService(ServiceConfig{Store: store})
+	service := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
 	response, err := service.api.Scans.CancelScan(context.Background(), &types.CancelScanRequest{
 		RequestId: "cancel-missing", ScanId: "missing",
 	})
@@ -529,5 +534,58 @@ func TestValidateMode(t *testing.T) {
 		if got != tt.want && !tt.wantErr {
 			t.Errorf("ValidateMode(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// A host built without the scan console mounts no scan surface: no API, no
+// routes, no execution, and session scan bindings are refused.
+func TestScanConsoleDisabledContract(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := NewService(ServiceConfig{Store: store})
+	defer svc.Close(context.Background())
+	if svc.api.Scans != nil {
+		t.Fatal("scan API mounted without scan configuration")
+	}
+	for _, route := range webpkg.ManagementRoutes(svc) {
+		if strings.Contains(route.Pattern, "Scan") {
+			t.Fatalf("scan route mounted without the scan console: %s", route.Pattern)
+		}
+	}
+	if _, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false); !errors.Is(err, ErrScanConsoleDisabled) {
+		t.Fatalf("SubmitScan = %v", err)
+	}
+	if _, err := svc.GetScan(context.Background(), "scan-1"); !errors.Is(err, ErrScanConsoleDisabled) {
+		t.Fatalf("GetScan = %v", err)
+	}
+	if err := svc.CancelScan("scan-1"); !errors.Is(err, ErrScanConsoleDisabled) {
+		t.Fatalf("CancelScan = %v", err)
+	}
+
+	pool := NewAgentPool(svc.Hub(), nil)
+	svc.SetAgentPool(pool)
+	fake := &remoteAgent{
+		nodeState: &nodeState{tasks: make(map[string]chan taskResult), turns: make(map[string]int), openSessions: map[string]struct{}{}, toolCalls: make(map[string]struct{}), childSessions: make(map[string]map[string]struct{})},
+		nodeID:    "agent-1", name: "agent-1",
+	}
+	bindAgentQueue(fake, 1)
+	pool.agents[fake.nodeID] = fake
+	binding, err := anypb.New(&types.SessionBinding{ScanId: "scan-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := svc.api.Sessions.OpenSession(context.Background(), "open-1", &aop.OpenSessionRequest{
+		SessionId: "session-1", NodeId: fake.nodeID,
+		Extensions: []*anypb.Any{binding},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected := response.GetRejected()
+	if rejected == nil || rejected.GetCode() != "FAILED_PRECONDITION" {
+		t.Fatalf("scan binding on a scan-less host = %+v", response)
 	}
 }

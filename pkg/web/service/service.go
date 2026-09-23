@@ -18,6 +18,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// ScanServiceConfig enables the scan console. A nil Scans field disables it:
+// no scan routes, no scan dispatch namespace, and no session scan bindings.
+type ScanServiceConfig struct {
+	MaxConcurrent int
+	ScanTimeout   time.Duration
+}
+
 type ServiceConfig struct {
 	ConfigAPI   managementapi.ConfigOptions
 	Store       *SQLiteStore
@@ -25,10 +32,9 @@ type ServiceConfig struct {
 	ConfigStore ConfigStore
 	// BuildProfile returns a fresh candidate, including partial results on error.
 	// Service owns every returned candidate and its cleanup.
-	BuildProfile  func(ctx context.Context, prepared *PreparedConfig) (profile.Profile, error)
-	MaxConcurrent int
-	ScanTimeout   time.Duration
-	AccessKey     string
+	BuildProfile func(ctx context.Context, prepared *PreparedConfig) (profile.Profile, error)
+	Scans        *ScanServiceConfig
+	AccessKey    string
 }
 
 type Service struct {
@@ -64,14 +70,6 @@ type Service struct {
 }
 
 func NewService(cfg ServiceConfig) *Service {
-	maxConcurrent := cfg.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = 3
-	}
-	timeout := cfg.ScanTimeout
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
 	workContext, stopWork := context.WithCancel(context.Background())
 	svc := &Service{
 		workContext: workContext, stopWork: stopWork,
@@ -80,8 +78,6 @@ func NewService(cfg ServiceConfig) *Service {
 		buildProfile: cfg.BuildProfile,
 		store:        cfg.Store,
 		hub:          NewHub(),
-		sem:          make(chan struct{}, maxConcurrent),
-		timeout:      timeout,
 		auth:         NewAuth(cfg.AccessKey),
 		cancels:      make(map[string]context.CancelFunc),
 		scanNodeIDs:  make(map[string]string),
@@ -96,10 +92,22 @@ func NewService(cfg ServiceConfig) *Service {
 	svc.api = &managementapi.API{
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,
-		Scans:     managementapi.NewScans(svc, svc.hub),
 		Artifacts: managementapi.NewArtifacts(cfg.Store),
 		Status:    svc,
 		ServerURL: "/",
+	}
+	if cfg.Scans != nil {
+		maxConcurrent := cfg.Scans.MaxConcurrent
+		if maxConcurrent <= 0 {
+			maxConcurrent = 3
+		}
+		timeout := cfg.Scans.ScanTimeout
+		if timeout <= 0 {
+			timeout = 10 * time.Minute
+		}
+		svc.sem = make(chan struct{}, maxConcurrent)
+		svc.timeout = timeout
+		svc.api.Scans = managementapi.NewScans(svc, svc.hub)
 	}
 	return svc
 }

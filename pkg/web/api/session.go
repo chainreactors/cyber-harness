@@ -190,6 +190,9 @@ func (s *Sessions) OpenSession(ctx context.Context, requestID string, request *a
 	if scanID != "" {
 		if _, err := s.runtime.GetScan(ctx, scanID); err != nil {
 			cleanup()
+			if errors.Is(err, ErrScanConsoleDisabled) {
+				return finish(rejectedOpen(string(CodeFailedPrecondition), err.Error()))
+			}
 			return finish(rejectedOpen("NOT_FOUND", "scan not found"))
 		}
 		if err := s.store.LinkScanToSession(ctx, id, scanID); err != nil {
