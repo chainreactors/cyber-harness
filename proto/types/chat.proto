@@ -5,6 +5,7 @@ package cyber.chat;
 import "aop/chat.proto";
 import "types/command.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/chainreactors/cyber/core/types;types";
 
@@ -20,11 +21,12 @@ message SessionHistory {
 }
 
 message SessionRecord {
+  reserved 3;
   aop.Session session = 1;
   string agent_name = 2;
-  repeated string scan_ids = 3;
   google.protobuf.Timestamp created_at = 4;
   google.protobuf.Timestamp updated_at = 5;
+  map<string, google.protobuf.Struct> extensions = 6;
 }
 
 message ListSessionsRequest {

@@ -33,11 +33,11 @@ traffic:
 		t.Fatal(err)
 	}
 	view := managementapi.ConfigView(value, "", true)
-	if !proto.Equal(view.Agent, value.Agent) || !proto.Equal(view.Traffic, value.Traffic) || view.Cyberhub.Mitm == nil || *view.Cyberhub.Mitm {
+	if !proto.Equal(view.Agent, value.Agent) || !proto.Equal(view.Traffic, value.Traffic) || cfg.ValuesFromProto(value.Extensions)[scannerext.CyberhubConfigKey]["mitm"] != false {
 		t.Fatalf("settings missing in view: %v", view)
 	}
 	// The settings page submits these same values from its view.
-	updated := &types.DistributeConfig{Agent: view.Agent, Traffic: view.Traffic, Cyberhub: &types.CyberhubConfig{Mitm: view.Cyberhub.Mitm}}
+	updated := &types.DistributeConfig{Agent: view.Agent, Traffic: view.Traffic, Extensions: value.Extensions}
 	data, err := marshalConfig(updated, source)
 	if err != nil {
 		t.Fatal(err)

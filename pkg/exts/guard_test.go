@@ -7,9 +7,63 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+// The runtime packages must not gain scanner domain types or depend on the
+// scanner extension. Protocols and other extension packages may stay specific.
+func TestAgentAndCoreRemainScannerNeutral(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, packageDir := range []string{"agent", "core"} {
+		err := filepath.WalkDir(filepath.Join(root, packageDir), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			source, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if packageDir == "core" && filepath.Dir(path) == filepath.Join(root, "core", "types") && strings.HasSuffix(path, ".pb.go") {
+				lower := strings.ToLower(string(source))
+				for _, word := range []string{"scanner", "scan", "cyberhub", "recon"} {
+					if strings.Contains(lower, word) {
+						t.Errorf("%s contains scanner domain %q", path, word)
+					}
+				}
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, source, 0)
+			if err != nil {
+				return err
+			}
+			for _, imp := range file.Imports {
+				name, _ := strconv.Unquote(imp.Path.Value)
+				if strings.Contains(name, "/scanner") || strings.Contains(name, "/scan") {
+					t.Errorf("%s imports scanner domain package %s", path, name)
+				}
+			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				name, ok := node.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				value := name.Name
+				if strings.HasPrefix(value, "Cyberhub") || strings.HasPrefix(value, "Recon") || (strings.HasPrefix(value, "Scan") && len(value) > 4 && value[4] >= 'A' && value[4] <= 'Z' && value != "ScanJSONL") {
+					t.Errorf("%s contains scanner domain identifier %s", path, value)
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // Every feature under pkg/exts is mounted as a whole, so its subtree must
 // declare at least one Extension. A subtree without one is either glue that

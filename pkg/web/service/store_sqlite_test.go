@@ -89,14 +89,81 @@ func TestSQLiteStoreCoreSchemaOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(session.ScanIds) != 0 {
-		t.Fatalf("core-only store backfilled scan ids: %v", session.ScanIds)
+	if session.Extensions["scan"] != nil {
+		t.Fatalf("core-only store backfilled scan ids: %v", session.Extensions["scan"])
 	}
 	if _, _, err := store.ListSessionPage(context.Background(), 0, 100, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpdateSession(context.Background(), session); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSessionScanAssociationsAreReadOnlyExtensions(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "session-scan.db"), ScanSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	createStoredSession(t, store, "session-1")
+	if err := store.Create(ctx, &scanpb.Scan{Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: nowProto(), UpdatedAt: nowProto()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkScanToSession(ctx, "session-1", "scan-1"); err != nil {
+		t.Fatal(err)
+	}
+	assertLinked := func(session *types.SessionRecord) {
+		t.Helper()
+		ids := session.GetExtensions()["scan"].GetFields()["ids"].GetListValue().GetValues()
+		if len(ids) != 1 || ids[0].GetStringValue() != "scan-1" {
+			t.Fatalf("scan association = %v", ids)
+		}
+	}
+	session, err := store.GetSession(ctx, "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLinked(session)
+	listed, err := store.ListSessions(ctx, 10)
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("ListSessions = %v, %v", listed, err)
+	}
+	assertLinked(listed[0])
+	paged, _, err := store.ListSessionPage(ctx, 0, 10, true)
+	if err != nil || len(paged) != 1 {
+		t.Fatalf("ListSessionPage = %v, %v", paged, err)
+	}
+	assertLinked(paged[0])
+	if err := store.UpdateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := store.db.QueryRow(`SELECT session_json FROM chat_sessions WHERE id = ?`, "session-1").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := saved["extensions"]; exists {
+		t.Fatalf("derived scan association persisted: %s", raw)
+	}
+	saved["scanIds"] = json.RawMessage(`["old-scan"]`)
+	legacy, _ := json.Marshal(saved)
+	if _, err := store.db.Exec(`UPDATE chat_sessions SET session_json = ? WHERE id = ?`, string(legacy), "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := store.GetSession(ctx, "session-1"); err != nil {
+		t.Fatal(err)
+	} else {
+		assertLinked(loaded)
+	}
+	saved["unexpectedField"] = json.RawMessage(`true`)
+	invalid, _ := json.Marshal(saved)
+	if _, err := sessionFromJSON(string(invalid)); err == nil {
+		t.Fatal("unexpected session field was accepted")
 	}
 }
 

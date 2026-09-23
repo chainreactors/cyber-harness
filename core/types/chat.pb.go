@@ -10,6 +10,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -119,12 +120,12 @@ func (x *SessionHistory) GetMode() SessionHistory_Mode {
 }
 
 type SessionRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Session       *aop.Session           `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
-	AgentName     string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	ScanIds       []string               `protobuf:"bytes,3,rep,name=scan_ids,json=scanIds,proto3" json:"scan_ids,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Session       *aop.Session                `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	AgentName     string                      `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	CreatedAt     *timestamppb.Timestamp      `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp      `protobuf:"bytes,5,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Extensions    map[string]*structpb.Struct `protobuf:"bytes,6,rep,name=extensions,proto3" json:"extensions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -173,13 +174,6 @@ func (x *SessionRecord) GetAgentName() string {
 	return ""
 }
 
-func (x *SessionRecord) GetScanIds() []string {
-	if x != nil {
-		return x.ScanIds
-	}
-	return nil
-}
-
 func (x *SessionRecord) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
@@ -190,6 +184,13 @@ func (x *SessionRecord) GetCreatedAt() *timestamppb.Timestamp {
 func (x *SessionRecord) GetUpdatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *SessionRecord) GetExtensions() map[string]*structpb.Struct {
+	if x != nil {
+		return x.Extensions
 	}
 	return nil
 }
@@ -839,22 +840,27 @@ var File_types_chat_proto protoreflect.FileDescriptor
 const file_types_chat_proto_rawDesc = "" +
 	"\n" +
 	"\x10types/chat.proto\x12\n" +
-	"cyber.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x88\x01\n" +
+	"cyber.chat\x1a\x0eaop/chat.proto\x1a\x13types/command.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x88\x01\n" +
 	"\x0eSessionHistory\x123\n" +
 	"\x04mode\x18\x01 \x01(\x0e2\x1f.cyber.chat.SessionHistory.ModeR\x04mode\"A\n" +
 	"\x04Mode\x12\x14\n" +
 	"\x10MODE_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fMODE_INHERIT\x10\x01\x12\x11\n" +
-	"\rMODE_SNAPSHOT\x10\x02\"\xe7\x01\n" +
+	"\rMODE_SNAPSHOT\x10\x02\"\xf5\x02\n" +
 	"\rSessionRecord\x12&\n" +
 	"\asession\x18\x01 \x01(\v2\f.aop.SessionR\asession\x12\x1d\n" +
 	"\n" +
-	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x19\n" +
-	"\bscan_ids\x18\x03 \x03(\tR\ascanIds\x129\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x129\n" +
 	"\n" +
 	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"u\n" +
+	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12I\n" +
+	"\n" +
+	"extensions\x18\x06 \x03(\v2).cyber.chat.SessionRecord.ExtensionsEntryR\n" +
+	"extensions\x1aV\n" +
+	"\x0fExtensionsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
+	"\x05value\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x05value:\x028\x01J\x04\b\x03\x10\x04\"u\n" +
 	"\x13ListSessionsRequest\x12!\n" +
 	"\fafter_cursor\x18\x01 \x01(\tR\vafterCursor\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12%\n" +
@@ -914,7 +920,7 @@ func file_types_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_types_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_types_chat_proto_goTypes = []any{
 	(SessionHistory_Mode)(0),      // 0: cyber.chat.SessionHistory.Mode
 	(*SessionHistory)(nil),        // 1: cyber.chat.SessionHistory
@@ -930,30 +936,34 @@ var file_types_chat_proto_goTypes = []any{
 	(*DeleteSessionResponse)(nil), // 11: cyber.chat.DeleteSessionResponse
 	(*ListCommandsRequest)(nil),   // 12: cyber.chat.ListCommandsRequest
 	(*ListCommandsResponse)(nil),  // 13: cyber.chat.ListCommandsResponse
-	(*aop.Session)(nil),           // 14: aop.Session
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
-	(*aop.Rejection)(nil),         // 16: aop.Rejection
-	(*CommandSpec)(nil),           // 17: cyber.command.CommandSpec
+	nil,                           // 14: cyber.chat.SessionRecord.ExtensionsEntry
+	(*aop.Session)(nil),           // 15: aop.Session
+	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
+	(*aop.Rejection)(nil),         // 17: aop.Rejection
+	(*CommandSpec)(nil),           // 18: cyber.command.CommandSpec
+	(*structpb.Struct)(nil),       // 19: google.protobuf.Struct
 }
 var file_types_chat_proto_depIdxs = []int32{
 	0,  // 0: cyber.chat.SessionHistory.mode:type_name -> cyber.chat.SessionHistory.Mode
-	14, // 1: cyber.chat.SessionRecord.session:type_name -> aop.Session
-	15, // 2: cyber.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
-	15, // 3: cyber.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
-	2,  // 4: cyber.chat.ListSessionsResponse.sessions:type_name -> cyber.chat.SessionRecord
-	2,  // 5: cyber.chat.GetSessionResponse.session:type_name -> cyber.chat.SessionRecord
-	14, // 6: cyber.chat.ResetSessionReceipt.previous:type_name -> aop.Session
-	2,  // 7: cyber.chat.ResetSessionReceipt.current:type_name -> cyber.chat.SessionRecord
-	8,  // 8: cyber.chat.ResetSessionResponse.accepted:type_name -> cyber.chat.ResetSessionReceipt
-	16, // 9: cyber.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
-	14, // 10: cyber.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
-	16, // 11: cyber.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
-	17, // 12: cyber.chat.ListCommandsResponse.commands:type_name -> cyber.command.CommandSpec
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	15, // 1: cyber.chat.SessionRecord.session:type_name -> aop.Session
+	16, // 2: cyber.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
+	16, // 3: cyber.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
+	14, // 4: cyber.chat.SessionRecord.extensions:type_name -> cyber.chat.SessionRecord.ExtensionsEntry
+	2,  // 5: cyber.chat.ListSessionsResponse.sessions:type_name -> cyber.chat.SessionRecord
+	2,  // 6: cyber.chat.GetSessionResponse.session:type_name -> cyber.chat.SessionRecord
+	15, // 7: cyber.chat.ResetSessionReceipt.previous:type_name -> aop.Session
+	2,  // 8: cyber.chat.ResetSessionReceipt.current:type_name -> cyber.chat.SessionRecord
+	8,  // 9: cyber.chat.ResetSessionResponse.accepted:type_name -> cyber.chat.ResetSessionReceipt
+	17, // 10: cyber.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
+	15, // 11: cyber.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
+	17, // 12: cyber.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
+	18, // 13: cyber.chat.ListCommandsResponse.commands:type_name -> cyber.command.CommandSpec
+	19, // 14: cyber.chat.SessionRecord.ExtensionsEntry.value:type_name -> google.protobuf.Struct
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_types_chat_proto_init() }
@@ -976,7 +986,7 @@ func file_types_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_chat_proto_rawDesc), len(file_types_chat_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

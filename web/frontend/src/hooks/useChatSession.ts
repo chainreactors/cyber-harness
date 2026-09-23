@@ -445,12 +445,15 @@ export function useChatSession() {
 
       const session = await getChatSession(id)
       if (activation !== activationRef.current) return
-      if (session.scanIds.length) {
+      const scanIDs = Array.isArray(session.extensions.scan?.ids)
+        ? session.extensions.scan.ids.filter((id): id is string => typeof id === 'string')
+        : []
+      if (scanIDs.length) {
 		await syncCSTXArtifacts()
 		if (activation !== activationRef.current) return
         // Read every linked scan's CSTX nodes together after the archive sync.
         const loaded = await Promise.all(
-          session.scanIds.map(async (scanID) => {
+          scanIDs.map(async (scanID) => {
             try {
               const nodes = await listSCONodes({ scanId: scanID, limit: 2000 })
               return { scanID, nodes }

@@ -154,7 +154,7 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 }
 
 // projectExtensionSections restores same-named proto sections from normalized
-// extension values. Alias root keys (search:, recon:, ...) are canonicalized
+// extension values. Alias root keys (search:, etc.) are canonicalized
 // under extensions by the snapshot loader, so the proto projection never sees
 // them; the wire config is the canonical settings document and must carry them.
 func projectExtensionSections(value *types.DistributeConfig, fields cfg.Values) error {
@@ -174,8 +174,8 @@ func projectExtensionSections(value *types.DistributeConfig, fields cfg.Values) 
 			return err
 		}
 		message := msg.NewField(field).Message()
-		// The section schema is a superset of the wire section (e.g. recon's
-		// tavily_key); the proto keeps only what the wire models.
+		// The section schema can be wider than the wire section; the proto
+		// keeps only what the wire models.
 		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, message.Interface()); err != nil {
 			return fmt.Errorf("extension %s: %w", field.Name(), err)
 		}
@@ -187,7 +187,7 @@ func projectExtensionSections(value *types.DistributeConfig, fields cfg.Values) 
 // foldProtoSections merges the wire sections into extension values at the
 // proto-to-document boundary. The wire config is the canonical settings
 // document: fields the proto models replace the stored values wholesale, while
-// extension fields the proto does not model (e.g. recon's tavily_key) survive.
+// extension fields the proto does not model survive.
 // Empty proto strings clear the stored value, matching how every reader treats
 // "" as unset.
 func foldProtoSections(config *types.DistributeConfig, values cfg.Values) error {

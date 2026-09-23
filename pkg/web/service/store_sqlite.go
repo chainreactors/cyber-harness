@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite"
 )
@@ -165,8 +167,8 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*types.Session
 	if err != nil {
 		return nil, err
 	}
-	if s.hasModule(ScanSchema.Name) {
-		session.ScanIds, _ = s.SessionScanIDs(ctx, id)
+	if err := s.attachSessionScans(ctx, session); err != nil {
+		return nil, err
 	}
 	return session, nil
 }
@@ -179,7 +181,16 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*types.Ses
 	if err := s.orm.NewSelect().Model(&models).Column("session_json").OrderExpr("updated_at DESC").Limit(limit).Scan(ctx); err != nil {
 		return nil, err
 	}
-	return sessionsFromModels(models)
+	sessions, err := sessionsFromModels(models)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if err := s.attachSessionScans(ctx, session); err != nil {
+			return nil, err
+		}
+	}
+	return sessions, nil
 }
 
 func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*types.SessionRecord, bool, error) {
@@ -208,10 +219,9 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	if err != nil {
 		return nil, false, err
 	}
-	if s.hasModule(ScanSchema.Name) {
-		for _, session := range sessions {
-			scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
-			session.ScanIds = scanIDs
+	for _, session := range sessions {
+		if err := s.attachSessionScans(ctx, session); err != nil {
+			return nil, false, err
 		}
 	}
 	return sessions, hasMore, nil
@@ -231,7 +241,19 @@ func sessionsFromModels(models []sessionModel) ([]*types.SessionRecord, error) {
 
 func sessionFromJSON(raw string) (*types.SessionRecord, error) {
 	session := new(types.SessionRecord)
-	if err := unmarshalProtoJSON(raw, session, "session"); err != nil {
+	// Older records stored a scan association in the shared message. The
+	// association now comes from session_scans; ignore only that retired key.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, fmt.Errorf("decode session: %w", err)
+	}
+	delete(fields, "scan_ids")
+	delete(fields, "scanIds")
+	clean, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshalProtoJSON(string(clean), session, "session"); err != nil {
 		return nil, err
 	}
 	return session, nil
@@ -241,7 +263,9 @@ func sessionToModel(session *types.SessionRecord) (*sessionModel, error) {
 	if session == nil || session.GetSession() == nil {
 		return nil, fmt.Errorf("session is required")
 	}
-	raw, err := marshalProtoJSON(session)
+	copy := protobuf.Clone(session).(*types.SessionRecord)
+	delete(copy.Extensions, "scan") // session_scans is the source of this association.
+	raw, err := marshalProtoJSON(copy)
 	if err != nil {
 		return nil, err
 	}
@@ -254,12 +278,6 @@ func sessionToModel(session *types.SessionRecord) (*sessionModel, error) {
 }
 
 func (s *SQLiteStore) UpdateSession(ctx context.Context, session *types.SessionRecord) error {
-	if s.hasModule(ScanSchema.Name) {
-		scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
-		if len(scanIDs) > 0 {
-			session.ScanIds = scanIDs
-		}
-	}
 	model, err := sessionToModel(session)
 	if err != nil {
 		return err
@@ -267,6 +285,32 @@ func (s *SQLiteStore) UpdateSession(ctx context.Context, session *types.SessionR
 	_, err = s.orm.NewUpdate().Model(model).
 		Column("node_id", "status", "title", "agent_name", "session_json", "updated_at").WherePK().Exec(ctx)
 	return err
+}
+
+func (s *SQLiteStore) attachSessionScans(ctx context.Context, session *types.SessionRecord) error {
+	if !s.hasModule(ScanSchema.Name) {
+		return nil
+	}
+	ids, err := s.SessionScanIDs(ctx, session.GetSession().GetId())
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	values := make([]any, len(ids))
+	for index, id := range ids {
+		values[index] = id
+	}
+	section, err := structpb.NewStruct(map[string]any{"ids": values})
+	if err != nil {
+		return err
+	}
+	if session.Extensions == nil {
+		session.Extensions = make(map[string]*structpb.Struct)
+	}
+	session.Extensions["scan"] = section
+	return nil
 }
 
 func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {

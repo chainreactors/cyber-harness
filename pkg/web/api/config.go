@@ -216,14 +216,8 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 		view.Llm.Active = view.Llm.Providers[0]
 		view.Llm.ActiveProfile = view.Llm.Active.Id
 	}
-	view.Cyberhub = &types.CyberhubView{Url: config.GetCyberhub().GetUrl(), KeyConfigured: config.GetCyberhub().GetKey() != "", Mode: config.GetCyberhub().GetMode(), Proxy: config.GetCyberhub().GetProxy()}
-	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
-	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
 	view.Agent = proto.CloneOf(config.GetAgent())
 	view.Traffic = proto.CloneOf(config.GetTraffic())
-	if config.Cyberhub != nil {
-		view.Cyberhub.Mitm = config.Cyberhub.Mitm
-	}
 	return view
 }
