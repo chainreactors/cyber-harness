@@ -49,7 +49,7 @@ func TestServiceStatusReportsLLMAvailability(t *testing.T) {
 }
 
 func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
 }
 
 func TestRemovedChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestParseCommand(t *testing.T) {
 
 func newMenuTestService(t *testing.T) *Service {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 // an empty context. The hub still holds the transcript, so it must say so
 // instead of letting the operator believe the agent remembers the conversation.
 func TestSessionRecreationBroadcastsContextResetNotice(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

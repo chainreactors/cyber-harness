@@ -123,7 +123,7 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 }
 
 func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +508,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 }
 
 func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +918,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 
 func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1394,7 +1394,7 @@ func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 }
 
 func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
-	store, err := NewSQLiteStore(t.TempDir() + "/chat.db")
+	store, err := NewSQLiteStore(t.TempDir() + "/chat.db", ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1550,7 +1550,7 @@ func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
 // their replies to their own request identity — uploads by envelope id, PTY
 // stream frames by stream id.
 func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "mixed.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "mixed.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1739,7 +1739,7 @@ func TestWSReconnectClosesReplacedConnection(t *testing.T) {
 // A8: a session's node binding still resolves after the node reconnects —
 // dispatch to the session's node lands on the replacement connection.
 func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bind.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bind.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

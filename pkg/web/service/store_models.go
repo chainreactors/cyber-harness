@@ -6,23 +6,6 @@ import "github.com/uptrace/bun"
 // The complete protobuf value is stored as protojson in the *_json column, so
 // protobuf-only additions need no schema change unless they must be indexed.
 
-type scanModel struct {
-	bun.BaseModel `bun:"table:scans,alias:scan"`
-
-	ID        string `bun:"id,pk"`
-	Target    string `bun:"target,notnull"`
-	Mode      string `bun:"mode,notnull"`
-	Verify    bool   `bun:"verify,notnull"`
-	Sniper    bool   `bun:"sniper,notnull"`
-	Deep      bool   `bun:"deep,notnull"`
-	Status    string `bun:"status,notnull"`
-	Progress  string `bun:"progress,notnull"`
-	Error     string `bun:"error,notnull"`
-	ScanJSON  string `bun:"scan_json,type:text,notnull"`
-	CreatedAt string `bun:"created_at,notnull"`
-	UpdatedAt string `bun:"updated_at,notnull"`
-}
-
 type sessionModel struct {
 	bun.BaseModel `bun:"table:chat_sessions,alias:session"`
 
@@ -49,15 +32,6 @@ type aopEventModel struct {
 	EventJSON string        `bun:"event_json,type:text,notnull"`
 	CreatedAt string        `bun:"created_at,notnull"`
 	Session   *sessionModel `bun:"rel:belongs-to,join:session_id=id,on_delete:cascade"`
-}
-
-type sessionScanModel struct {
-	bun.BaseModel `bun:"table:session_scans,alias:session_scan"`
-
-	SessionID string        `bun:"session_id,pk"`
-	ScanID    string        `bun:"scan_id,pk"`
-	Session   *sessionModel `bun:"rel:belongs-to,join:session_id=id,on_delete:cascade"`
-	Scan      *scanModel    `bun:"rel:belongs-to,join:scan_id=id,on_delete:cascade"`
 }
 
 type requestLedgerModel struct {

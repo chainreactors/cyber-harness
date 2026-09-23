@@ -34,7 +34,7 @@ func TestSubmitScanWithoutNodeRejectsBeforeCreatingRecord(t *testing.T) {
 			name = "empty-pool"
 		}
 		t.Run(name, func(t *testing.T) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +68,7 @@ func TestSubmitScanWithoutNodeRejectsBeforeCreatingRecord(t *testing.T) {
 }
 
 func TestQueuedScanLosingNodeFailsWithoutLocalFallback(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestQueuedScanLosingNodeFailsWithoutLocalFallback(t *testing.T) {
 }
 
 func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 }
 
 func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func (c *controlledDeadlineContext) Err() error {
 func (c *controlledDeadlineContext) expire() { close(c.done) }
 
 func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 }
 
 func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestCancelTaskWaitsForSaturatedSendChannel(t *testing.T) {
 }
 
 func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
 }
 
 func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +462,7 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 }
 
 func TestCancelMissingScanReturnsNotFound(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

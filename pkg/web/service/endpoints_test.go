@@ -185,7 +185,7 @@ func TestHandlerTestConnRouting(t *testing.T) {
 }
 
 func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "connect-parity.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "connect-parity.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 // A1: a full Application Endpoint session lifecycle over Connect while the
 // answering node uses the separate Node WebSocket Endpoint.
 func TestConnectBidiClientSessionLifecycle(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lifecycle.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lifecycle.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

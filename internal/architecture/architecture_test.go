@@ -165,7 +165,7 @@ var installationRules = map[string][]installationRule{
 		{"pkg/exts/scanner", []string{"NewCyberhubSearch"}},
 		{"pkg/exts/search", []string{"NewTavilySearch", "NewWebSearchTool", "NewFetchCommand"}},
 	},
-	"pkg/web/service": {{"pkg/exts/web", []string{"NewService", "NewSQLiteStore", "NewAgentPool"}}},
+	"pkg/web/service": {{"pkg/exts/web", []string{"NewService", "NewSQLiteStore", "NewAgentPool", "ScanSchema"}}},
 	"pkg/web":         {{"pkg/exts/web", []string{"ManagementRoutes", "AOPRoute", "SessionRoute", "ScanRoute", "ConfigRoute", "AgentRoute", "SystemRoute", "ArtifactRoute"}}},
 }
 

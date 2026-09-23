@@ -74,7 +74,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return fmt.Errorf("web database path is required")
 	}
 	var err error
-	e.database, err = webservice.NewSQLiteStore(e.config.Database)
+	e.database, err = webservice.NewSQLiteStore(e.config.Database, webservice.ScanSchema)
 	if err != nil {
 		return err
 	}

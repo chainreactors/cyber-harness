@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
 }
 
 func TestListSessionPageDoesNotDeadlockOnNonEmptyStore(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "session-page.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "session-page.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,13 +62,69 @@ func TestSQLiteStoreRejectsUnversionedSchema(t *testing.T) {
 	}
 	_ = db.Close()
 
-	if _, err := NewSQLiteStore(path); err == nil {
+	if _, err := NewSQLiteStore(path, ScanSchema); err == nil {
 		t.Fatal("NewSQLiteStore() accepted an unversioned schema")
 	}
 }
 
+// A host without a scan console opens the core schema only: four tables, and
+// session reads skip the scan backfill instead of touching absent tables.
+func TestSQLiteStoreCoreSchemaOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "core-only.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	tables, err := schemaTables(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := coreSchema.tableNames(); !slices.Equal(tables, want) {
+		t.Fatalf("core-only tables = %v, want %v", tables, want)
+	}
+	createStoredSession(t, store, "session-1")
+	session, err := store.GetSession(context.Background(), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.ScanIds) != 0 {
+		t.Fatalf("core-only store backfilled scan ids: %v", session.ScanIds)
+	}
+	if _, _, err := store.ListSessionPage(context.Background(), 0, 100, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A database holding module tables is rejected when the module is not
+// configured, and vice versa: the union must match exactly.
+func TestSQLiteStoreModuleUnionIsExact(t *testing.T) {
+	root := t.TempDir()
+	full := filepath.Join(root, "full.db")
+	store, err := NewSQLiteStore(full, ScanSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if _, err := NewSQLiteStore(full); err == nil {
+		t.Fatal("scan database accepted without the scan module")
+	}
+	bare := filepath.Join(root, "bare.db")
+	store, err = NewSQLiteStore(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if _, err := NewSQLiteStore(bare, ScanSchema); err == nil {
+		t.Fatal("core database accepted with the scan module")
+	}
+}
+
 func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +189,7 @@ func TestSQLiteStoreAOPMessageRoundTrip(t *testing.T) {
 }
 
 func TestSQLiteStoreAppendAOPEventIsIdempotentByEventID(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "aop-idempotency.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "aop-idempotency.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +224,7 @@ func TestSQLiteStoreAppendAOPEventIsIdempotentByEventID(t *testing.T) {
 }
 
 func TestSQLiteStoreRejectsAOPEventWithoutIdentity(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "missing-event-id.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "missing-event-id.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +237,7 @@ func TestSQLiteStoreRejectsAOPEventWithoutIdentity(t *testing.T) {
 }
 
 func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "scans.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "scans.db"), ScanSchema)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
@@ -210,7 +267,7 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 }
 
 func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "protojson.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "protojson.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +310,7 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 }
 
 func TestSQLiteStoreArtifactArchiveRoundTrip(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +343,7 @@ func TestSQLiteStoreArtifactArchiveRoundTrip(t *testing.T) {
 }
 
 func TestSQLiteStoreArtifactArchiveUsesFixedPages(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifact-pages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifact-pages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +372,7 @@ func testArtifactEvent(t *testing.T, id string) *aop.Event {
 }
 
 func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "transitions.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "transitions.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +408,7 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 }
 
 func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +462,7 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 }
 
 func TestSQLiteStoreRejectsAOPEventForMissingSession(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "foreign-keys.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

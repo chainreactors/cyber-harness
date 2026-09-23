@@ -68,7 +68,7 @@ func TestAOPEnvelopeBinaryAndJSONAreEquivalent(t *testing.T) {
 }
 
 func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestAOPRequestIDReplayDoesNotDispatchTwice(t *testing.T) {
 }
 
 func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func acceptCancelTurnRequests(pool *AgentPool, agent *remoteAgent) {
 }
 
 func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestCancelTurnDispatchesRuntimeOwnedTurn(t *testing.T) {
 }
 
 func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "chat.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestCancelTurnTargetsOnlyRequestedTurn(t *testing.T) {
 
 func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.db")
-	store, err := NewSQLiteStore(path)
+	store, err := NewSQLiteStore(path, ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err = NewSQLiteStore(path)
+	store, err = NewSQLiteStore(path, ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestAOPRequestLedgerSurvivesServerRestart(t *testing.T) {
 // ListEvents replay is a pure read: it must not dispatch frames, converge an
 // in-flight task, or append another copy of a terminal event.
 func TestListEventsReplayHasNoSideEffects(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "replay.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "replay.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +441,7 @@ func TestListEventsReplayHasNoSideEffects(t *testing.T) {
 }
 
 func TestWatchEventsResumesAfterCursor(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestWatchEventsResumesAfterCursor(t *testing.T) {
 // before the close, so no close dispatch is attempted; the hub persists the
 // terminal session event itself.
 func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "close.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "close.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestCloseSessionMarksStoreClosedAndRecordsEvent(t *testing.T) {
 }
 
 func TestHandleFileUploadCancellationRemovesPendingAgentTask(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "upload.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

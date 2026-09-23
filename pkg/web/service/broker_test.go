@@ -16,7 +16,7 @@ import (
 )
 
 func TestRoutedChildEventsShareParentTimelineSequence(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestRoutedChildEventsShareParentTimelineSequence(t *testing.T) {
 }
 
 func TestWebTimelineConcurrentOrderingAndRestartDedup(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestWebTimelineConcurrentOrderingAndRestartDedup(t *testing.T) {
 }
 
 func TestFailedPersistenceDoesNotSealTurn(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestScanSubscriptionReturnsSnapshotSequenceBoundary(t *testing.T) {
 }
 
 func TestBroadcastAOPEventPersistsCanonicalProtoJSON(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestBroadcastAOPEventPersistsCanonicalProtoJSON(t *testing.T) {
 }
 
 func TestBroadcastAOPEventDoesNotFanOutRetryWithSameEventID(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestBroadcastAOPEventDoesNotFanOutRetryWithSameEventID(t *testing.T) {
 }
 
 func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestEvalMetadataPersistsOnlyInAOP(t *testing.T) {
 }
 
 func TestServerGeneratedAOPEventContinuesStoredSessionSequence(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestServerGeneratedAOPEventContinuesStoredSessionSequence(t *testing.T) {
 }
 
 func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 }
 
 func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
 func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
 	for _, status := range []types.ScanStatus{types.ScanStatus_SCAN_STATUS_COMPLETED, types.ScanStatus_SCAN_STATUS_FAILED, types.ScanStatus_SCAN_STATUS_CANCELED} {
 		t.Run(scanStatusToDB(status), func(t *testing.T) {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 			if err != nil {
 				t.Fatal(err)
 			}
