@@ -11,6 +11,7 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	ptypb "github.com/chainreactors/cyber/aop/pty"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -244,7 +245,7 @@ func (s *Service) serveApplication(connection *aopconn.Connection, registerNames
 	}
 
 	handleScan := func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
-		value, ok := message.(*types.ScanProtocolMessage)
+		value, ok := message.(*scanpb.ScanProtocolMessage)
 		if !ok {
 			return fmt.Errorf("unexpected application scan message %T", message)
 		}
@@ -259,11 +260,11 @@ func (s *Service) serveApplication(connection *aopconn.Connection, registerNames
 		go func(subscriptionID string) {
 			defer workers.Done()
 			defer cancelSubscription(subscriptionID)
-			err := s.api.Scans.WatchScanEvents(request, subscriptionCtx, func(event *types.ScanEvent) error {
+			err := s.api.Scans.WatchScanEvents(request, subscriptionCtx, func(event *scanpb.ScanEvent) error {
 				if event == nil {
 					return nil
 				}
-				return send(subscriptionID, strconv.FormatUint(event.Sequence, 10), &types.ScanProtocolMessage{Message: &types.ScanProtocolMessage_Event{Event: event}})
+				return send(subscriptionID, strconv.FormatUint(event.Sequence, 10), &scanpb.ScanProtocolMessage{Message: &scanpb.ScanProtocolMessage_Event{Event: event}})
 			})
 			if err != nil && subscriptionCtx.Err() == nil {
 				fail(subscriptionID, "WATCH_SCAN_FAILED", err)
@@ -338,7 +339,7 @@ func (s *Service) serveApplication(connection *aopconn.Connection, registerNames
 		{enabled: true, prototype: &aop.ProtocolMessage{}, handler: handleCore},
 		{enabled: true, prototype: &types.CommandProtocolMessage{}, handler: handleCommand},
 		{enabled: true, prototype: &filepb.ProtocolMessage{}, handler: handleFile},
-		{enabled: s.api.Scans != nil, prototype: &types.ScanProtocolMessage{}, handler: handleScan},
+		{enabled: s.api.Scans != nil, prototype: &scanpb.ScanProtocolMessage{}, handler: handleScan},
 		{enabled: s.agents != nil, prototype: &ptypb.ProtocolMessage{}, handler: handlePTY},
 	}
 	for _, registration := range registrations {

@@ -12,9 +12,9 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
-	types "github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/pkg/output"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -31,22 +31,22 @@ var (
 func (s *Service) scansEnabled() bool { return s.sem != nil }
 
 // scanStatusToDB maps the proto enum to the string stored in scans.status.
-func scanStatusToDB(value types.ScanStatus) string {
+func scanStatusToDB(value scanpb.ScanStatus) string {
 	switch value {
-	case types.ScanStatus_SCAN_STATUS_RUNNING:
+	case scanpb.ScanStatus_SCAN_STATUS_RUNNING:
 		return "running"
-	case types.ScanStatus_SCAN_STATUS_COMPLETED:
+	case scanpb.ScanStatus_SCAN_STATUS_COMPLETED:
 		return "completed"
-	case types.ScanStatus_SCAN_STATUS_FAILED:
+	case scanpb.ScanStatus_SCAN_STATUS_FAILED:
 		return "failed"
-	case types.ScanStatus_SCAN_STATUS_CANCELED:
+	case scanpb.ScanStatus_SCAN_STATUS_CANCELED:
 		return "canceled"
 	default:
 		return "queued"
 	}
 }
 
-func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*types.Scan, error) {
+func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*scanpb.Scan, error) {
 	if !s.scansEnabled() {
 		return nil, ErrScanConsoleDisabled
 	}
@@ -72,12 +72,12 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 	}
 
 	now := nowProto()
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Id:        generateID(),
 		Target:    target,
 		Mode:      mode,
-		Options:   &types.ScanOptions{Verify: verify, Sniper: sniper, Deep: deep},
-		Status:    types.ScanStatus_SCAN_STATUS_QUEUED,
+		Options:   &scanpb.ScanOptions{Verify: verify, Sniper: sniper, Deep: deep},
+		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -100,7 +100,7 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 	return scan, nil
 }
 
-func (s *Service) GetScan(ctx context.Context, id string) (*types.Scan, error) {
+func (s *Service) GetScan(ctx context.Context, id string) (*scanpb.Scan, error) {
 	if !s.scansEnabled() {
 		return nil, ErrScanConsoleDisabled
 	}
@@ -111,7 +111,7 @@ func (s *Service) GetScan(ctx context.Context, id string) (*types.Scan, error) {
 	return scan, nil
 }
 
-func (s *Service) ListScans(ctx context.Context) ([]*types.Scan, error) {
+func (s *Service) ListScans(ctx context.Context) ([]*scanpb.Scan, error) {
 	scans, err := s.store.List(ctx, 100)
 	if err != nil {
 		return nil, err
@@ -131,15 +131,15 @@ func (s *Service) CancelScan(id string) error {
 		}
 		return err
 	}
-	if scan.Status == types.ScanStatus_SCAN_STATUS_CANCELED {
+	if scan.Status == scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 		return nil
 	}
-	if scan.Status != types.ScanStatus_SCAN_STATUS_RUNNING && scan.Status != types.ScanStatus_SCAN_STATUS_QUEUED {
+	if scan.Status != scanpb.ScanStatus_SCAN_STATUS_RUNNING && scan.Status != scanpb.ScanStatus_SCAN_STATUS_QUEUED {
 		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, scanStatusToDB(scan.Status))
 	}
-	scan.Status = types.ScanStatus_SCAN_STATUS_CANCELED
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
 	scan.UpdatedAt = nowProto()
-	changed, err := s.store.TransitionScan(ctx, scan, types.ScanStatus_SCAN_STATUS_RUNNING, types.ScanStatus_SCAN_STATUS_QUEUED)
+	changed, err := s.store.TransitionScan(ctx, scan, scanpb.ScanStatus_SCAN_STATUS_RUNNING, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (s *Service) CancelScan(id string) error {
 			}
 			return err
 		}
-		if current.Status == types.ScanStatus_SCAN_STATUS_CANCELED {
+		if current.Status == scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 			return nil
 		}
 		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, scanStatusToDB(current.Status))
@@ -201,20 +201,20 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 	if err != nil {
 		return
 	}
-	scan.Status = types.ScanStatus_SCAN_STATUS_RUNNING
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_RUNNING
 	scan.UpdatedAt = nowProto()
-	changed, err := s.store.TransitionScan(context.Background(), scan, types.ScanStatus_SCAN_STATUS_QUEUED)
+	changed, err := s.store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil || !changed {
 		return
 	}
 
-	s.hub.BroadcastScan(managementapi.ScanStatusEvent(scanID, types.ScanStatus_SCAN_STATUS_RUNNING), false)
+	s.hub.BroadcastScan(managementapi.ScanStatusEvent(scanID, scanpb.ScanStatus_SCAN_STATUS_RUNNING), false)
 
 	// The Web hub delegates scans to nodes; it does not own scanning engines.
 	s.runScanViaAgent(ctx, scan)
 }
 
-func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
+func (s *Service) runScanViaAgent(ctx context.Context, scan *scanpb.Scan) {
 	var agent *remoteAgent
 	if s.agents != nil {
 		agent = s.agents.Pick()
@@ -273,7 +273,7 @@ func (s *Service) runScanViaAgent(ctx context.Context, scan *types.Scan) {
 	_, _ = s.completeScan(context.Background(), scan)
 }
 
-func (s *Service) finishScanContext(scan *types.Scan, err error) {
+func (s *Service) finishScanContext(scan *scanpb.Scan, err error) {
 	if err == nil {
 		return
 	}
@@ -282,17 +282,17 @@ func (s *Service) finishScanContext(scan *types.Scan, err error) {
 		return
 	}
 	next := proto.CloneOf(scan)
-	next.Status = types.ScanStatus_SCAN_STATUS_CANCELED
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
 	next.UpdatedAt = nowProto()
-	_, _ = s.store.TransitionScan(context.Background(), next, types.ScanStatus_SCAN_STATUS_QUEUED, types.ScanStatus_SCAN_STATUS_RUNNING)
+	_, _ = s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 }
 
-func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, error) {
+func (s *Service) completeScan(ctx context.Context, scan *scanpb.Scan) (bool, error) {
 	next := proto.CloneOf(scan)
-	next.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_COMPLETED
 	next.Error = ""
 	next.UpdatedAt = nowProto()
-	changed, err := s.store.TransitionScan(ctx, next, types.ScanStatus_SCAN_STATUS_RUNNING)
+	changed, err := s.store.TransitionScan(ctx, next, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err
 	}
@@ -302,12 +302,12 @@ func (s *Service) completeScan(ctx context.Context, scan *types.Scan) (bool, err
 	return true, nil
 }
 
-func (s *Service) failScan(scan *types.Scan, errMsg string) (bool, error) {
+func (s *Service) failScan(scan *scanpb.Scan, errMsg string) (bool, error) {
 	next := proto.CloneOf(scan)
-	next.Status = types.ScanStatus_SCAN_STATUS_FAILED
+	next.Status = scanpb.ScanStatus_SCAN_STATUS_FAILED
 	next.Error = errMsg
 	next.UpdatedAt = nowProto()
-	changed, err := s.store.TransitionScan(context.Background(), next, types.ScanStatus_SCAN_STATUS_QUEUED, types.ScanStatus_SCAN_STATUS_RUNNING)
+	changed, err := s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err
 	}
@@ -316,7 +316,7 @@ func (s *Service) failScan(scan *types.Scan, errMsg string) (bool, error) {
 	return true, nil
 }
 
-func scanArgsForScan(scan *types.Scan) []string {
+func scanArgsForScan(scan *scanpb.Scan) []string {
 	args := []string{"-i", scan.Target, "--mode", scan.Mode}
 	options := scan.GetOptions()
 	if options.GetVerify() {

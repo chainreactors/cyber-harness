@@ -14,6 +14,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -243,12 +244,12 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 	}
 	defer store.Close()
 
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Id:        "scan-1",
 		Target:    "127.0.0.1",
 		Mode:      "quick",
-		Options:   &types.ScanOptions{Verify: true, Deep: true},
-		Status:    types.ScanStatus_SCAN_STATUS_QUEUED,
+		Options:   &scanpb.ScanOptions{Verify: true, Deep: true},
+		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: nowProto(),
 		UpdatedAt: nowProto(),
 	}
@@ -273,10 +274,10 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	}
 	defer store.Close()
 
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Id: "scan-json", Target: "example.com", Mode: "deep",
-		Options: &types.ScanOptions{Verify: true, Sniper: true},
-		Status:  types.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
+		Options: &scanpb.ScanOptions{Verify: true, Sniper: true},
+		Status:  scanpb.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
 		Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
@@ -378,23 +379,23 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 	}
 	defer store.Close()
 
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Id: "scan-transition", Target: "127.0.0.1", Mode: "quick",
-		Status: types.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
 
-	scan.Status = types.ScanStatus_SCAN_STATUS_CANCELED
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
 	scan.UpdatedAt = nowProto()
-	changed, err := store.TransitionScan(context.Background(), scan, types.ScanStatus_SCAN_STATUS_QUEUED, types.ScanStatus_SCAN_STATUS_RUNNING)
+	changed, err := store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		t.Fatalf("queued -> canceled = %v, %v; want true, nil", changed, err)
 	}
 
-	scan.Status = types.ScanStatus_SCAN_STATUS_COMPLETED
-	changed, err = store.TransitionScan(context.Background(), scan, types.ScanStatus_SCAN_STATUS_RUNNING)
+	scan.Status = scanpb.ScanStatus_SCAN_STATUS_COMPLETED
+	changed, err = store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +403,7 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 		t.Fatal("terminal canceled status was overwritten")
 	}
 	stored, err := store.Get(context.Background(), scan.Id)
-	if err != nil || stored.Status != types.ScanStatus_SCAN_STATUS_CANCELED {
+	if err != nil || stored.Status != scanpb.ScanStatus_SCAN_STATUS_CANCELED {
 		t.Fatalf("stored scan = %+v, %v", stored, err)
 	}
 }
@@ -437,9 +438,9 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Create(ctx, &types.Scan{
+	if err := store.Create(ctx, &scanpb.Scan{
 		Id: "scan-cascade", Target: "127.0.0.1", Mode: "quick",
-		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
 	}

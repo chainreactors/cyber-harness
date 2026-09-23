@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"github.com/uptrace/bun"
 )
 
@@ -56,7 +56,7 @@ func (*sessionScanModel) customizeCreateTable(query *bun.CreateTableQuery) *bun.
 		ForeignKey("(scan_id) REFERENCES scans(id) ON DELETE CASCADE")
 }
 
-func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
+func (s *SQLiteStore) Create(ctx context.Context, scan *scanpb.Scan) error {
 	model, err := scanToModel(scan)
 	if err != nil {
 		return err
@@ -65,7 +65,7 @@ func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
 	return err
 }
 
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
+func (s *SQLiteStore) Get(ctx context.Context, id string) (*scanpb.Scan, error) {
 	var model scanModel
 	if err := s.orm.NewSelect().Model(&model).Column("scan_json").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
 	return scanFromModel(model)
 }
 
-func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error) {
+func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -81,7 +81,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error
 	if err := s.orm.NewSelect().Model(&models).Column("scan_json").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
 		return nil, err
 	}
-	scans := make([]*types.Scan, 0, len(models))
+	scans := make([]*scanpb.Scan, 0, len(models))
 	for _, model := range models {
 		scan, err := scanFromModel(model)
 		if err != nil {
@@ -92,7 +92,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error
 	return scans, nil
 }
 
-func (s *SQLiteStore) Update(ctx context.Context, scan *types.Scan) error {
+func (s *SQLiteStore) Update(ctx context.Context, scan *scanpb.Scan) error {
 	model, err := scanToModel(scan)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (s *SQLiteStore) Update(ctx context.Context, scan *types.Scan) error {
 	return err
 }
 
-func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *types.Scan, expected ...types.ScanStatus) (bool, error) {
+func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *scanpb.Scan, expected ...scanpb.ScanStatus) (bool, error) {
 	if scan == nil {
 		return false, fmt.Errorf("scan is required")
 	}
@@ -133,7 +133,7 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func scanToModel(scan *types.Scan) (*scanModel, error) {
+func scanToModel(scan *scanpb.Scan) (*scanModel, error) {
 	if scan == nil {
 		return nil, fmt.Errorf("scan is required")
 	}
@@ -151,12 +151,12 @@ func scanToModel(scan *types.Scan) (*scanModel, error) {
 	}, nil
 }
 
-func scanFromModel(model scanModel) (*types.Scan, error) {
+func scanFromModel(model scanModel) (*scanpb.Scan, error) {
 	return scanFromJSON(model.ScanJSON)
 }
 
-func scanFromJSON(raw string) (*types.Scan, error) {
-	scan := new(types.Scan)
+func scanFromJSON(raw string) (*scanpb.Scan, error) {
+	scan := new(scanpb.Scan)
 	if err := unmarshalProtoJSON(raw, scan, "scan"); err != nil {
 		return nil, err
 	}

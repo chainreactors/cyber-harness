@@ -4,7 +4,7 @@
 // 	protoc        v7.35.1
 // source: types/scan.proto
 
-package types
+package scan
 
 import (
 	aop "github.com/chainreactors/cyber/aop"
@@ -1320,7 +1320,7 @@ const file_types_scan_proto_rawDesc = "" +
 	"\x13SCAN_STATUS_RUNNING\x10\x02\x12\x19\n" +
 	"\x15SCAN_STATUS_COMPLETED\x10\x03\x12\x16\n" +
 	"\x12SCAN_STATUS_FAILED\x10\x04\x12\x18\n" +
-	"\x14SCAN_STATUS_CANCELED\x10\x05B1Z/github.com/chainreactors/cyber/core/types;typesb\x06proto3"
+	"\x14SCAN_STATUS_CANCELED\x10\x05B2Z0github.com/chainreactors/cyber/pkg/web/scan;scanb\x06proto3"
 
 var (
 	file_types_scan_proto_rawDescOnce sync.Once

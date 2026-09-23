@@ -7,6 +7,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -93,7 +94,7 @@ type sessionTestRuntime struct {
 }
 
 func (r *sessionTestRuntime) AgentInfo(string) (string, bool) { return "agent", r.connected }
-func (*sessionTestRuntime) GetScan(context.Context, string) (*types.Scan, error) {
+func (*sessionTestRuntime) GetScan(context.Context, string) (*scanpb.Scan, error) {
 	return nil, sql.ErrNoRows
 }
 func (*sessionTestRuntime) OpenAgentSession(context.Context, string, *aop.OpenSessionRequest) error {

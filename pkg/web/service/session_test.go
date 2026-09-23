@@ -6,6 +6,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -123,7 +124,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.Create(context.Background(), &types.Scan{
+	if err := store.Create(context.Background(), &scanpb.Scan{
 		Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
@@ -137,7 +138,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	}
 	bindAgentQueue(fake, 1)
 	pool.agents[fake.nodeID] = fake
-	value, err := anypb.New(&types.SessionBinding{ScanId: "scan-1"})
+	value, err := anypb.New(&scanpb.SessionBinding{ScanId: "scan-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

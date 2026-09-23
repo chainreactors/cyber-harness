@@ -11,6 +11,7 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -198,7 +199,7 @@ func TestScanSubscriptionReturnsSnapshotSequenceBoundary(t *testing.T) {
 	if sequence != 1 {
 		t.Fatalf("subscription sequence = %d, want 1", sequence)
 	}
-	snapshot := managementapi.ScanSnapshot(&types.Scan{Id: "scan-1"}, sequence)
+	snapshot := managementapi.ScanSnapshot(&scanpb.Scan{Id: "scan-1"}, sequence)
 	if snapshot.Sequence != sequence {
 		t.Fatalf("snapshot sequence = %d, want %d", snapshot.Sequence, sequence)
 	}
@@ -327,9 +328,9 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	}
 	defer store.Close()
 	createStoredSession(t, store, "session-scan")
-	if err := store.Create(context.Background(), &types.Scan{
+	if err := store.Create(context.Background(), &scanpb.Scan{
 		Id: "scan-123", Target: "127.0.0.1", Mode: "quick",
-		Status: types.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -346,14 +347,14 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 		t.Fatalf("events = %+v, err = %v", events, err)
 	}
 	extension := events[0].GetExtension()
-	value := new(types.SessionScanEvent)
+	value := new(scanpb.SessionScanEvent)
 	if extension == nil || !extension.MessageIs(value) {
 		t.Fatalf("extension = %+v", extension)
 	}
 	if err := extension.UnmarshalTo(value); err != nil {
 		t.Fatal(err)
 	}
-	if value.ScanId != "scan-123" || value.Status != types.ScanStatus_SCAN_STATUS_COMPLETED {
+	if value.ScanId != "scan-123" || value.Status != scanpb.ScanStatus_SCAN_STATUS_COMPLETED {
 		t.Fatalf("scan extension = %+v", value)
 	}
 	ids, err := store.SessionScanIDs(context.Background(), "session-scan")
@@ -386,22 +387,22 @@ func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
 }
 
 func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
-	for _, status := range []types.ScanStatus{types.ScanStatus_SCAN_STATUS_COMPLETED, types.ScanStatus_SCAN_STATUS_FAILED, types.ScanStatus_SCAN_STATUS_CANCELED} {
+	for _, status := range []scanpb.ScanStatus{scanpb.ScanStatus_SCAN_STATUS_COMPLETED, scanpb.ScanStatus_SCAN_STATUS_FAILED, scanpb.ScanStatus_SCAN_STATUS_CANCELED} {
 		t.Run(scanStatusToDB(status), func(t *testing.T) {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			scan := &types.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+			scan := &scanpb.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: nowProto(), UpdatedAt: nowProto()}
 			if err := store.Create(context.Background(), scan); err != nil {
 				t.Fatal(err)
 			}
 			service := NewService(ServiceConfig{Store: store, Scans: &ScanServiceConfig{}})
-			var responses []*types.ScanEvent
+			var responses []*scanpb.ScanEvent
 			err = service.api.Scans.WatchScanEvents(
-				&types.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),
-				func(event *types.ScanEvent) error {
+				&scanpb.WatchScanEventsRequest{ScanId: scan.Id}, context.Background(),
+				func(event *scanpb.ScanEvent) error {
 					responses = append(responses, event)
 					return nil
 				},

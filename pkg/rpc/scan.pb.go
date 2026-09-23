@@ -7,7 +7,7 @@
 package rpc
 
 import (
-	types "github.com/chainreactors/cyber/core/types"
+	scan "github.com/chainreactors/cyber/pkg/web/scan"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -35,14 +35,14 @@ const file_rpc_scan_proto_rawDesc = "" +
 	"CancelScan\x12\x1d.cyber.scan.CancelScanRequest\x1a\x1e.cyber.scan.CancelScanResponseB,Z*github.com/chainreactors/cyber/pkg/rpc;rpcb\x06proto3"
 
 var file_rpc_scan_proto_goTypes = []any{
-	(*types.SubmitScanRequest)(nil),  // 0: cyber.scan.SubmitScanRequest
-	(*types.GetScanRequest)(nil),     // 1: cyber.scan.GetScanRequest
-	(*types.ListScansRequest)(nil),   // 2: cyber.scan.ListScansRequest
-	(*types.CancelScanRequest)(nil),  // 3: cyber.scan.CancelScanRequest
-	(*types.SubmitScanResponse)(nil), // 4: cyber.scan.SubmitScanResponse
-	(*types.GetScanResponse)(nil),    // 5: cyber.scan.GetScanResponse
-	(*types.ListScansResponse)(nil),  // 6: cyber.scan.ListScansResponse
-	(*types.CancelScanResponse)(nil), // 7: cyber.scan.CancelScanResponse
+	(*scan.SubmitScanRequest)(nil),  // 0: cyber.scan.SubmitScanRequest
+	(*scan.GetScanRequest)(nil),     // 1: cyber.scan.GetScanRequest
+	(*scan.ListScansRequest)(nil),   // 2: cyber.scan.ListScansRequest
+	(*scan.CancelScanRequest)(nil),  // 3: cyber.scan.CancelScanRequest
+	(*scan.SubmitScanResponse)(nil), // 4: cyber.scan.SubmitScanResponse
+	(*scan.GetScanResponse)(nil),    // 5: cyber.scan.GetScanResponse
+	(*scan.ListScansResponse)(nil),  // 6: cyber.scan.ListScansResponse
+	(*scan.CancelScanResponse)(nil), // 7: cyber.scan.CancelScanResponse
 }
 var file_rpc_scan_proto_depIdxs = []int32{
 	0, // 0: cyber.rpc.scan.ScanService.SubmitScan:input_type -> cyber.scan.SubmitScanRequest

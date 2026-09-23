@@ -25,13 +25,14 @@ import (
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Target:  "127.0.0.1",
 		Mode:    "full",
-		Options: &types.ScanOptions{Verify: true, Sniper: true, Deep: true},
+		Options: &scanpb.ScanOptions{Verify: true, Sniper: true, Deep: true},
 	}
 
 	got := scanArgsForScan(scan)

@@ -12,6 +12,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -46,7 +47,7 @@ type SessionStore interface {
 // event delivery.
 type SessionRuntime interface {
 	AgentInfo(string) (string, bool)
-	GetScan(context.Context, string) (*types.Scan, error)
+	GetScan(context.Context, string) (*scanpb.Scan, error)
 	OpenAgentSession(context.Context, string, *aop.OpenSessionRequest) error
 	CloseAgentSession(context.Context, string, string, *aop.CloseSessionRequest) (bool, error)
 	StartAgentTurn(string, *aop.RunTurnRequest)
@@ -631,7 +632,7 @@ func openSessionScanID(request *aop.OpenSessionRequest) (string, error) {
 		return "", nil
 	}
 	for _, extension := range request.Extensions {
-		link := new(types.SessionBinding)
+		link := new(scanpb.SessionBinding)
 		if extension == nil || !extension.MessageIs(link) {
 			continue
 		}
