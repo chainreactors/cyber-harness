@@ -123,7 +123,7 @@ var installationRules = map[string][]installationRule{
 	"agent/session":              {{"pkg/exts/session", []string{"NewResource", "Resource"}}},
 	"agent/provider":             {{"pkg/exts/provider", []string{"Initialize"}}},
 	"agent/prompt":               {{"pkg/exts/prompt", []string{"NewRegistry"}}},
-	"agent/skills":               {{"pkg/exts/skills", []string{"NewStore", "LoadAll", "LoadFrom"}}},
+	"agent/skills":               {{"pkg/exts/skills", []string{"NewStore", "LoadFrom"}}},
 	"tools/ioa":                  {{"pkg/exts/ioa/client/extension.go", []string{"New", "Resource"}}},
 	"tools/ioa/server":           {{"pkg/exts/ioa/server/extension.go", []string{"New", "Resource"}}},
 	"tools/terminal": {

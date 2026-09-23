@@ -81,33 +81,30 @@ type bundleBatch struct {
 	mu      sync.Mutex
 }
 
-// LoadAll loads skills from all sources with override support.
-// Priority (later overrides earlier): bundles < .cyber/skills/ < .agent/skills/ < CLI paths.
-func LoadAll(cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
-	directory, _ := os.Getwd()
-	return LoadFrom(directory, cliPaths, bundles...)
+// SkillDir pairs a project-relative skills directory with its source label.
+// The composition layer decides which directories exist; the runtime holds no
+// convention of its own.
+type SkillDir struct {
+	Dir    string
+	Source SkillSource
 }
 
-// LoadFrom resolves project and relative CLI paths against the profile directory.
-func LoadFrom(directory string, cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
+// LoadFrom resolves project skill directories and relative CLI paths against
+// the profile directory. Later sources override earlier ones: bundles <
+// projectDirs (in order) < CLI paths.
+func LoadFrom(directory string, projectDirs []SkillDir, cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
 
-	for _, rel := range []struct {
-		dir    string
-		source SkillSource
-	}{
-		{".cyber/skills", SourceProject},
-		{".agent/skills", SourceAgent},
-	} {
-		dir := filepath.Join(directory, rel.dir)
+	for _, rel := range projectDirs {
+		dir := filepath.Join(directory, rel.Dir)
 		if directory == "" {
 			continue
 		}
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
 		}
-		local, diags := LoadFromDir(dir, rel.source)
+		local, diags := LoadFromDir(dir, rel.Source)
 		allSkills = append(allSkills, local...)
 		allDiags = append(allDiags, diags...)
 	}

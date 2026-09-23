@@ -16,11 +16,11 @@ func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {
 		}
 		return "---\nname: extension-fixture\ndescription: fixture\n---\nBundle body", true, nil
 	}}
-	absent, _ := LoadAll(nil)
+	absent, _ := LoadFrom(t.TempDir(), nil, nil)
 	if _, ok := absent.ByName(name); ok {
 		t.Fatal("unselected bundle was loaded")
 	}
-	store, _ := LoadAll(nil, bundle)
+	store, _ := LoadFrom(t.TempDir(), nil, nil, bundle)
 	if store.ReadBody(name) != "Bundle body" {
 		t.Fatal("bundle body was not resolved")
 	}
@@ -28,7 +28,7 @@ func TestBundleIsExplicitAndLocalOverrideWins(t *testing.T) {
 	if err := os.WriteFile(local, []byte("---\nname: extension-fixture\ndescription: fixture\n---\nLocal body"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	store, diags := LoadAll([]string{local}, bundle)
+	store, diags := LoadFrom(t.TempDir(), nil, []string{local}, bundle)
 	if len(diags) != 0 {
 		t.Fatalf("diagnostics = %v", diags)
 	}
