@@ -121,7 +121,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		if err != nil {
 			return err
 		}
-		if err := extension.Add(scope, scannerPromptContribution()); err != nil {
+		if err := extension.Add(scope, scannerPromptContribution(), cyberPromptContribution()); err != nil {
 			return err
 		}
 		executor, err := extension.Use[subagent.Executor](scope)

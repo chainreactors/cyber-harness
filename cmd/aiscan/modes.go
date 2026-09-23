@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/prompt"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
@@ -22,6 +21,7 @@ import (
 	"github.com/chainreactors/cyber/pkg/console"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	profile "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/tools/scan"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	"github.com/chainreactors/cyber/tools/toolargs"
 	"github.com/chainreactors/utils/proc"
@@ -131,7 +131,8 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 	var sessionConfig *agentsession.Config
 	if option.AI && scannerArgs[0] != "scan" {
 		sessionConfig = &agentsession.Config{
-			Loop: agent.StandardLoop{}, PromptTarget: prompt.ScannerSystem, ScannerName: scannerArgs[0],
+			Loop: agent.StandardLoop{}, PromptTarget: scan.ScannerSystemTarget,
+			CommandName: scannerArgs[0], SkipBaseSkills: true,
 		}
 	}
 	if newProfile == nil {

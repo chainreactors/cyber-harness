@@ -41,7 +41,7 @@ type Runtime struct {
 	shell            coretool.Tool
 	nodeName         string
 	promptTarget     prompt.Target
-	scannerName      string
+	commandName      string
 	loadedSkills     []prompt.LoadedSkill
 	heartbeat        time.Duration
 	agentConfig      agent.Config
@@ -86,8 +86,13 @@ type Config struct {
 	PrimarySessionID      string
 	PromptResolver        prompt.Resolver
 	PromptTarget          prompt.Target
-	ScannerName           string
-	MaxPending            int
+	// CommandName identifies the command-focused worker session (e.g. a
+	// single-scanner run); empty for a general conversational session.
+	CommandName string
+	// SkipBaseSkills disables BaseSkills injection for focused worker sessions
+	// that receive their skills explicitly.
+	SkipBaseSkills       bool
+	MaxPending           int
 	// Loop supplies the installed reasoning algorithm.
 	Loop agent.Loop
 }
@@ -189,9 +194,9 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	if rt.promptTarget == "" {
 		rt.promptTarget = prompt.MainSystem
 	}
-	rt.scannerName = rc.ScannerName
+	rt.commandName = rc.CommandName
 	skillNames := rc.SelectedSkills
-	if rt.promptTarget != prompt.ScannerSystem {
+	if !rc.SkipBaseSkills {
 		skillNames = append(append([]string(nil), rc.BaseSkills...), skillNames...)
 	}
 	for _, name := range skillNames {
@@ -199,12 +204,6 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 			continue
 		}
 		body := rt.skills.ReadBody(name)
-		if body == "" {
-			body = skills.ReadFile("skills/" + name + ".md")
-		}
-		if body == "" {
-			body = skills.ReadFile(name)
-		}
 		if body != "" {
 			rt.loadedSkills = append(rt.loadedSkills, prompt.LoadedSkill{Name: name, Body: body})
 		}
@@ -269,7 +268,7 @@ func (rt *Runtime) resolveSystemPrompt(ctx context.Context, config *agent.Config
 	}
 	hostname, _ := os.Hostname()
 	input := prompt.Context{Target: rt.promptTarget, Agent: prompt.AgentContext{
-		NodeName: rt.nodeName, ScannerName: rt.scannerName,
+		NodeName: rt.nodeName, CommandName: rt.commandName,
 		OS: runtime.GOOS, Arch: runtime.GOARCH, Hostname: hostname,
 		Now: time.Now(), Windows: runtime.GOOS == "windows",
 		LoadedSkills: append([]prompt.LoadedSkill(nil), rt.loadedSkills...),
@@ -283,7 +282,7 @@ func (rt *Runtime) resolveSystemPrompt(ctx context.Context, config *agent.Config
 		}
 	}
 	if rt.commandRegistry != nil {
-		input.Agent.ScannerDocs = rt.commandRegistry.UsageDocs()
+		input.Agent.CommandDocs = rt.commandRegistry.UsageDocs()
 	}
 	if rt.skills != nil {
 		for _, value := range rt.skills.All() {

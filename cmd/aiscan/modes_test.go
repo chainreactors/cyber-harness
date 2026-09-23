@@ -12,7 +12,6 @@ import (
 	procbus "github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/internal/testutil/apptest"
 
-	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
@@ -22,6 +21,7 @@ import (
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
+	"github.com/chainreactors/cyber/tools/scan"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 )
 
@@ -109,8 +109,8 @@ func TestDirectScannerAIUsesProfileRuntime(t *testing.T) {
 	if request.Session == nil || request.Session.Loop == nil {
 		t.Fatalf("runtime request = %#v, want scanner Agent configuration", request.Session)
 	}
-	if request.Session.PromptTarget != prompt.ScannerSystem || request.Session.ScannerName != "gogo" {
-		t.Fatalf("scanner prompt selection = target %q scanner %q", request.Session.PromptTarget, request.Session.ScannerName)
+	if request.Session.PromptTarget != scan.ScannerSystemTarget || request.Session.CommandName != "gogo" || !request.Session.SkipBaseSkills {
+		t.Fatalf("scanner prompt selection = target %q command %q skipBaseSkills=%v", request.Session.PromptTarget, request.Session.CommandName, request.Session.SkipBaseSkills)
 	}
 	if !p.loaded || !p.closed || p.runtimeCalls != 1 {
 		t.Fatalf("profile lifecycle: loaded=%v closed=%v runtime calls=%d", p.loaded, p.closed, p.runtimeCalls)

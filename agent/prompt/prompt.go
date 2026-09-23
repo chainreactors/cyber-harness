@@ -18,7 +18,6 @@ type Target string
 
 const (
 	MainSystem       Target = "main.system"
-	ScannerSystem    Target = "scanner.system"
 	EvaluatorSystem  Target = "evaluator.system"
 	EvaluatorRequest Target = "evaluator.request"
 	CompactSystem    Target = "compact.system"
@@ -59,14 +58,14 @@ type AgentContext struct {
 	Name         string
 	Model        string
 	NodeName     string
-	ScannerName  string
+	CommandName  string
 	OS           string
 	Arch         string
 	Hostname     string
 	Now          time.Time
 	Windows      bool
 	Tools        []Tool
-	ScannerDocs  string
+	CommandDocs  string
 	Skills       []Skill
 	LoadedSkills []LoadedSkill
 	Instructions string

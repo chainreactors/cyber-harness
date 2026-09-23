@@ -8,6 +8,7 @@ import (
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/core/extension"
 	okftool "github.com/chainreactors/cyber/tools/okf"
+	"github.com/chainreactors/cyber/tools/scan"
 )
 
 type Extension struct{}
@@ -27,7 +28,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	if err := extension.Add(scope, prompt.Contribution{
 		Name: "okf.markdown", Targets: []prompt.Target{
-			prompt.MainSystem, prompt.ScannerSystem,
+			prompt.MainSystem, scan.ScannerSystemTarget,
 		},
 		Apply: applyPolicy,
 	}); err != nil {
