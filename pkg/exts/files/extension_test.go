@@ -13,32 +13,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	fileext "github.com/chainreactors/cyber/pkg/exts/files"
+	skillsext "github.com/chainreactors/cyber/pkg/exts/skills"
 
 	"github.com/chainreactors/cyber/tools/files"
 )
 
-func TestReadEmbeddedSkill(t *testing.T) {
+func TestReadRuntimeDocument(t *testing.T) {
 	r, set := fileSet(t, files.Config{Directory: t.TempDir(), Mounts: map[string]fs.FS{
-		"cyber://skills/": skills.EmbeddedFS(),
+		skillsext.RuntimeDocsURI: skillsext.RuntimeDocsFS(),
 	}})
 	if err := set.Load(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	result, err := r.ExecuteTool(t.Context(), "read", `{"path":"cyber://skills/cyber/okf/easm/gogo.md"}`)
+	result, err := r.ExecuteTool(t.Context(), "read", `{"path":"cyber://skills/runtime/tmux.md"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := fs.ReadFile(skills.EmbeddedFS(), "cyber/okf/easm/gogo.md")
+	want, err := fs.ReadFile(skillsext.RuntimeDocsFS(), "tmux.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := coretool.ResultText(result); got != string(want) {
-		t.Fatalf("embedded skill content differs: %q", got)
+		t.Fatalf("runtime document content differs: %q", got)
 	}
 }
 

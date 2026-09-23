@@ -28,7 +28,7 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 	cmd.SetCommandExecutor(execute)
 	proxyCommand := coretool.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/proxy.md",
+		DescriptionPath: "cyber://skills/runtime/proxy.md",
 		Run:             cmd.Run,
 	}
 
@@ -36,7 +36,7 @@ func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) [
 	mitmCmd.SetCommandExecutor(execute)
 	mitmCommand := coretool.Command{
 		Name: mitmCmd.Name(), Usage: mitmCmd.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/mitm.md",
+		DescriptionPath: "cyber://skills/runtime/mitm.md",
 		Run:             mitmCmd.Run,
 	}
 	return []coretool.Command{proxyCommand, mitmCommand}

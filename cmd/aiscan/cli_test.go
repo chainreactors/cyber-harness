@@ -653,10 +653,7 @@ func TestParseCLIPassthroughScannerExtractsAIIntentArgs(t *testing.T) {
 }
 
 func TestScannerAIIntentInjectsCommandSkill(t *testing.T) {
-	store, diagnostics := skills.LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
-	}
+	store := skills.NewStore(nil)
 	intent, err := store.ApplySelected("focus on risky exposed services", nil)
 	if err != nil {
 		t.Fatalf("ApplySelected() error = %v", err)

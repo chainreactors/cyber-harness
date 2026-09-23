@@ -2,10 +2,7 @@ package skills
 
 import (
 	"context"
-	"embed"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,19 +15,13 @@ import (
 	"github.com/chainreactors/cyber/core/resource"
 )
 
-const uriPrefix = "cyber://skills/"
-
-//go:embed all:*
-var embeddedFS embed.FS
-
 type SkillSource string
 
 const (
-	SourceEmbedded SkillSource = "embedded"
-	SourceProject  SkillSource = "project" // .cyber/skills/
-	SourceAgent    SkillSource = "agent"   // .agent/skills/
-	SourceCLI      SkillSource = "cli"     // -s path
-	SourceBundle   SkillSource = "bundle"  // explicitly selected extension
+	SourceProject SkillSource = "project" // .cyber/skills/
+	SourceAgent   SkillSource = "agent"   // .agent/skills/
+	SourceCLI     SkillSource = "cli"     // -s path
+	SourceBundle  SkillSource = "bundle"  // explicitly selected extension
 )
 
 type Frontmatter struct {
@@ -91,7 +82,7 @@ type bundleBatch struct {
 }
 
 // LoadAll loads skills from all sources with override support.
-// Priority (later overrides earlier): embedded < .cyber/skills/ < .agent/skills/ < CLI paths.
+// Priority (later overrides earlier): bundles < .cyber/skills/ < .agent/skills/ < CLI paths.
 func LoadAll(cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 	directory, _ := os.Getwd()
 	return LoadFrom(directory, cliPaths, bundles...)
@@ -101,10 +92,6 @@ func LoadAll(cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 func LoadFrom(directory string, cliPaths []string, bundles ...Bundle) (*Store, []Diagnostic) {
 	var allSkills []Skill
 	var allDiags []Diagnostic
-
-	embedded, diags := LoadEmbedded()
-	allSkills = append(allSkills, embedded...)
-	allDiags = append(allDiags, diags...)
 
 	for _, rel := range []struct {
 		dir    string
@@ -153,50 +140,6 @@ func LoadFrom(directory string, cliPaths []string, bundles ...Bundle) (*Store, [
 		_, _ = store.Add(bundles...)
 	}
 	return store, allDiags
-}
-
-func LoadEmbedded() ([]Skill, []Diagnostic) {
-	entries, err := fs.ReadDir(embeddedFS, ".")
-	if err != nil {
-		return nil, []Diagnostic{{Message: fmt.Sprintf("read embedded skills: %s", err.Error())}}
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-
-	var loaded []Skill
-	var diagnostics []Diagnostic
-	seen := make(map[string]Skill)
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		filePath := path.Join(entry.Name(), "SKILL.md")
-		raw, err := embeddedFS.ReadFile(filePath)
-		if err != nil {
-			// Directories without a SKILL.md (e.g. scan/ workflow docs) are
-			// plain embedded content, not skills.
-			if !errors.Is(err, fs.ErrNotExist) {
-				diagnostics = append(diagnostics, Diagnostic{Path: filePath, Message: err.Error()})
-			}
-			continue
-		}
-		skill, skillDiagnostics, ok := parseSkill(filePath, entry.Name(), string(raw), SourceEmbedded)
-		diagnostics = append(diagnostics, skillDiagnostics...)
-		if !ok {
-			continue
-		}
-		skill.Location = uriPrefix + skill.Name + "/SKILL.md"
-		skill.BaseDir = uriPrefix + skill.Name
-		if existing, exists := seen[skill.Name]; exists {
-			diagnostics = append(diagnostics, Diagnostic{
-				Path:    filePath,
-				Message: fmt.Sprintf("name %q collision with %s", skill.Name, existing.Location),
-			})
-			continue
-		}
-		seen[skill.Name] = skill
-		loaded = append(loaded, skill)
-	}
-	return loaded, diagnostics
 }
 
 // LoadFromDir loads skills from a local directory. Each subdirectory with a SKILL.md is a skill.
@@ -260,11 +203,6 @@ func LoadFromFile(filePath string) (Skill, []Diagnostic, bool) {
 	return skill, diags, true
 }
 
-func LoadEmbeddedStore() (*Store, []Diagnostic) {
-	loaded, diagnostics := LoadEmbedded()
-	return NewStore(loaded), diagnostics
-}
-
 func NewStore(skills []Skill) *Store {
 	store := &Store{base: append([]Skill(nil), skills...)}
 	store.rebuildLocked()
@@ -325,11 +263,6 @@ func (b *bundleBatch) Close(context.Context) error {
 
 func (s *Store) rebuildLocked() {
 	var all []Skill
-	for _, skill := range s.base {
-		if skill.Source == SourceEmbedded {
-			all = append(all, skill)
-		}
-	}
 	var bundles []Bundle
 	for _, batch := range s.batches {
 		bundles = append(bundles, batch.bundles...)
@@ -337,11 +270,7 @@ func (s *Store) rebuildLocked() {
 			all = append(all, bundle.Skills...)
 		}
 	}
-	for _, skill := range s.base {
-		if skill.Source != SourceEmbedded {
-			all = append(all, skill)
-		}
-	}
+	all = append(all, s.base...)
 	resolved := newStoreWithOverride(all).snapshot
 	resolved.Bundles = bundles
 	s.snapshot = resolved
@@ -399,7 +328,7 @@ func (s *Store) AgentTypes() []Skill {
 	return agents
 }
 
-// ReadVirtual reads a file from skill sources (embedded or local).
+// ReadVirtual reads a file from skill sources (bundles or local files).
 func (s *Store) ReadVirtual(location string) (string, bool, error) {
 	s.mu.RLock()
 	bundles := append([]Bundle(nil), s.snapshot.Bundles...)
@@ -421,26 +350,12 @@ func (s *Store) ReadVirtual(location string) (string, bool, error) {
 		}
 		return string(data), true, nil
 	}
-
-	var embedPath string
-	if strings.HasPrefix(location, uriPrefix) {
-		embedPath = strings.TrimPrefix(location, uriPrefix)
-	} else {
-		embedPath = normalizeEmbedPath(location)
-		if embedPath == "" {
-			return "", false, nil
-		}
-	}
-	data, err := fs.ReadFile(embeddedFS, embedPath)
-	if err != nil {
-		return "", true, fmt.Errorf("virtual file not found: %s", location)
-	}
-	return string(data), true, nil
+	return "", false, nil
 }
 
 func (s *Store) isKnownLocalPath(absPath string) bool {
 	for _, skill := range s.All() {
-		if skill.Source == SourceEmbedded || skill.Source == "" {
+		if skill.Source == "" || skill.Source == SourceBundle {
 			continue
 		}
 		if strings.HasPrefix(absPath, skill.BaseDir+string(filepath.Separator)) || absPath == skill.Location {
@@ -453,18 +368,8 @@ func (s *Store) isKnownLocalPath(absPath string) bool {
 func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
 	var allMatches []string
 
-	embedPattern := normalizeEmbedPath(pattern)
-	if embedPattern != "" {
-		matches, err := fs.Glob(embeddedFS, embedPattern)
-		if err == nil {
-			for _, m := range matches {
-				allMatches = append(allMatches, "skills/"+m)
-			}
-		}
-	}
-
 	for _, skill := range s.All() {
-		if skill.Source == SourceEmbedded || skill.Source == "" {
+		if skill.Source == "" || skill.Source == SourceBundle {
 			continue
 		}
 		localPattern := filepath.Join(skill.BaseDir, filepath.Base(pattern))
@@ -481,14 +386,13 @@ func (s *Store) GlobVirtual(pattern string) ([]string, bool) {
 }
 
 // ReadBody reads a skill's markdown body (without frontmatter).
-// It checks the store for local overrides before falling back to embedded.
 func (s *Store) ReadBody(name string) string {
 	if s == nil {
-		return readEmbeddedBody(name)
+		return ""
 	}
 	skill, ok := s.ByName(name)
 	if !ok {
-		return readEmbeddedBody(name)
+		return ""
 	}
 	if skill.Source == SourceBundle {
 		raw, handled, err := s.ReadVirtual(skill.Location)
@@ -498,53 +402,12 @@ func (s *Store) ReadBody(name string) string {
 		_, body := splitRaw(raw)
 		return strings.TrimSpace(body)
 	}
-	if skill.Source == SourceEmbedded || skill.Source == "" {
-		return readEmbeddedBody(name)
-	}
 	raw, err := os.ReadFile(skill.Location)
 	if err != nil {
 		return ""
 	}
 	_, body := splitRaw(string(raw))
 	return strings.TrimSpace(body)
-}
-
-func readEmbeddedBody(name string) string {
-	filePath := path.Join(name, "SKILL.md")
-	raw, err := embeddedFS.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-	_, body := splitRaw(string(raw))
-	return strings.TrimSpace(body)
-}
-
-// ReadFile reads any file from the embedded skills filesystem.
-func ReadFile(embedPath string) string {
-	normalized := normalizeEmbedPath(embedPath)
-	if normalized == "" {
-		return ""
-	}
-	data, err := fs.ReadFile(embeddedFS, normalized)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func normalizeEmbedPath(location string) string {
-	location = strings.TrimSpace(location)
-	if location == "" {
-		return ""
-	}
-	location = path.Clean(location)
-	if strings.HasPrefix(location, "skills/") {
-		return strings.TrimPrefix(location, "skills/")
-	}
-	if !strings.HasPrefix(location, "/") && !strings.HasPrefix(location, ".") {
-		return location
-	}
-	return ""
 }
 
 // ReadVirtualBody reads a virtual file and returns its body with frontmatter stripped.
@@ -564,7 +427,7 @@ func (s *Store) FormatInvocation(skill Skill, args string) string {
 	return formatInvocationBody(skill, body, args)
 }
 
-// FormatVirtualInvocation formats an embedded virtual document (e.g. an OKF
+// FormatVirtualInvocation formats a virtual document (e.g. an OKF
 // tool concept) for prompt injection with the same wrapper as skill invocations.
 func FormatVirtualInvocation(name, location, body string) string {
 	return formatInvocationBody(Skill{Name: name, Location: location, BaseDir: path.Dir(location)}, body, "")
@@ -612,8 +475,7 @@ func ExpandCommand(text string, store *Store) string {
 	return store.FormatInvocation(skill, args)
 }
 
-// ApplySelected prepends the selected skills to text, falling back to the
-// embedded bundle for names the store does not know.
+// ApplySelected prepends the selected skills to text.
 func (s *Store) ApplySelected(text string, selected []string) (string, error) {
 	if len(selected) == 0 {
 		return text, nil
@@ -631,17 +493,7 @@ func (s *Store) ApplySelected(text string, selected []string) (string, error) {
 			sb.WriteString(s.FormatInvocation(skill, ""))
 			continue
 		}
-		body := ReadFile("skills/" + name + ".md")
-		if body == "" {
-			body = ReadFile(name)
-		}
-		if body == "" {
-			return "", fmt.Errorf("unknown skill %q", name)
-		}
-		if sb.Len() > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(body)
+		return "", fmt.Errorf("unknown skill %q", name)
 	}
 	if strings.TrimSpace(text) != "" {
 		if sb.Len() > 0 {
@@ -668,7 +520,7 @@ func (s *Store) selected(value string) (Skill, bool) {
 	}
 	abs = filepath.Clean(abs)
 	for _, skill := range s.All() {
-		if skill.Location == "" || skill.Source == SourceEmbedded {
+		if skill.Location == "" || skill.Source == "" || skill.Source == SourceBundle {
 			continue
 		}
 		location, err := filepath.Abs(skill.Location)

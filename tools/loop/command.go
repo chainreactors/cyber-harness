@@ -23,7 +23,7 @@ func NewCommand() coretool.Command {
 	value := &loopCommand{}
 	return coretool.Command{
 		Name: value.Name(), Usage: value.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/loop.md",
+		DescriptionPath: "cyber://skills/runtime/loop.md",
 		Run:             value.Run,
 	}
 }

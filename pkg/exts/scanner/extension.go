@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"io/fs"
 
 	curltools "github.com/chainreactors/cyber/tools/curl"
 	gotools "github.com/chainreactors/cyber/tools/gogo"
@@ -26,6 +27,8 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 
+	scannerskills "github.com/chainreactors/cyber/pkg/exts/scanner/skills"
+	"github.com/chainreactors/cyber/tools/files"
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
@@ -42,6 +45,7 @@ type Extension struct {
 	workDir       string
 	engines       *engine.Set
 	executionOnly bool
+	files         *files.Files
 }
 
 func New(config Config, workDir string) *Extension {
@@ -124,6 +128,29 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		if err := extension.Add(scope, scannerPromptContribution(), cyberPromptContribution()); err != nil {
 			return err
 		}
+		bundle, bundleDiags := scannerskills.Bundle()
+		for _, diag := range bundleDiags {
+			logger.Warnf("scanner skills: %s %s", diag.Path, diag.Message)
+		}
+		if err := extension.Add(scope, bundle); err != nil {
+			return err
+		}
+		// Mount the owned skill tree so the read tool resolves the command
+		// DescriptionPaths; the store bundle above serves skill invocations.
+		filesCap, err := extension.Use[*files.Files](scope)
+		if err != nil {
+			return err
+		}
+		e.files = filesCap
+		for _, dir := range []string{"cyber", "scan"} {
+			sub, err := fs.Sub(scannerskills.FS(), dir)
+			if err != nil {
+				return err
+			}
+			if err := filesCap.Mount("cyber://skills/"+dir+"/", sub); err != nil {
+				return err
+			}
+		}
 		executor, err := extension.Use[subagent.Executor](scope)
 		if err != nil {
 			return err
@@ -198,7 +225,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	cyberhub := searchtools.NewCyberhubSearch(index)
 	values = append(values, coretool.Command{
 		Name: cyberhub.Name(), Usage: cyberhub.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/search.md",
+		DescriptionPath: "cyber://skills/runtime/search.md",
 		Run:             cyberhub.Run,
 	})
 	if command, err := newScanCommand(e.engines, options, proxyURL, stream); err != nil {
@@ -213,9 +240,17 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	return extension.Provide[*Availability](scope, availability(values, e.engines))
 }
 
-func (e *Extension) Close(context.Context) error {
+func (e *Extension) Close(ctx context.Context) error {
 	if e == nil {
 		return nil
+	}
+	if e.files != nil {
+		for _, dir := range []string{"scan", "cyber"} {
+			if err := e.files.Unmount(ctx, "cyber://skills/"+dir+"/"); err != nil {
+				return err
+			}
+		}
+		e.files = nil
 	}
 	if e.engines != nil {
 		e.engines.Close()

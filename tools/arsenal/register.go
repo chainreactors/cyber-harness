@@ -11,7 +11,7 @@ func NewCommand(directory string) (coretool.Command, error) {
 	}
 	return coretool.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/arsenal.md",
+		DescriptionPath: "cyber://skills/runtime/arsenal.md",
 		Run:             cmd.Run,
 	}, nil
 }

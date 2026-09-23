@@ -53,6 +53,10 @@ func (e *Library) Load(scope *extension.Scope) error {
 	if err := extension.Define[skills.Bundle](scope, e.store); err != nil {
 		return err
 	}
+	// Every distribution can read the neutral runtime tool documents.
+	if err := extension.Add(scope, runtimeDocsBundle()); err != nil {
+		return err
+	}
 	return scope.Init().Err()
 }
 

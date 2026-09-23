@@ -10,7 +10,7 @@ import (
 )
 
 // ReferenceURI is the command's virtual usage document.
-const ReferenceURI = "cyber://skills/cyber/okf/runtime/okf.md"
+const ReferenceURI = "cyber://skills/runtime/okf.md"
 
 func NewCommand() coretool.Command {
 	return coretool.Command{

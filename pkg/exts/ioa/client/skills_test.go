@@ -5,6 +5,7 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	promptext "github.com/chainreactors/cyber/pkg/exts/prompt"
+	scannerskills "github.com/chainreactors/cyber/pkg/exts/scanner/skills"
 	skillsext "github.com/chainreactors/cyber/pkg/exts/skills"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 
@@ -89,7 +90,13 @@ func installedSkills(t *testing.T, collaboration bool) *skills.Store {
 		if len(diagnostics) != 0 {
 			t.Fatal(diagnostics)
 		}
-		values = append(values, New(ioatools.Config{}), NewCollaboration(CollaborationOptions{Skills: []skills.Bundle{bundle}}))
+		// The scanner bundle owns cyber://skills/cyber/ (report convention);
+		// the ioa bundle shares that namespace, mirroring the aiscan composition.
+		scannerBundle, scannerDiagnostics := scannerskills.Bundle()
+		if len(scannerDiagnostics) != 0 {
+			t.Fatal(scannerDiagnostics)
+		}
+		values = append(values, New(ioatools.Config{}), NewCollaboration(CollaborationOptions{Skills: []skills.Bundle{bundle, scannerBundle}}))
 	}
 	hosttest.Load(t, t.Context(), values...)
 	return library.Store()

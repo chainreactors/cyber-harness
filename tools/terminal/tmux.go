@@ -45,7 +45,7 @@ func NewTmuxCommand(bash *BashTool) coretool.Command {
 	runner := &tmuxCommand{bash: bash, manager: bash.Manager(), start: bash.Start}
 	return coretool.Command{
 		Name: "tmux", Usage: tmuxUsage,
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/tmux.md",
+		DescriptionPath: "cyber://skills/runtime/tmux.md",
 		Run:             runner.run,
 	}
 }

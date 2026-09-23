@@ -50,7 +50,7 @@ func (m *Extension) Load(scope *extension.Scope) error {
 	command := playwright.New(m.workDir).WithDefaultSession(m.defaultSession)
 	if err := extension.Add(scope, coretool.Command{
 		Name: command.Name(), Usage: command.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/easm/playwright.md",
+		DescriptionPath: "cyber://skills/runtime/playwright.md",
 		Run:             command.Run,
 	}); err != nil {
 		command.Close()
