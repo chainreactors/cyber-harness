@@ -12,8 +12,6 @@ func ResolveString(value, fallback string) string {
 func ApplyDefaults(option *Option) {
 	defaults := map[string]string{
 		"Transport": "auto", "OutputFormat": "text", "ViewFormat": "terminal",
-		"CyberhubURL": DefaultCyberhubURL, "CyberhubKey": DefaultCyberhubKey,
-		"CyberhubMode": ResolveString(DefaultCyberhubMode, "merge"), "Proxy": DefaultScannerProxy,
 		"NodeID": DefaultNodeID, "NodeName": DefaultNodeName, "Model": DefaultModel,
 	}
 	visitOptions(option, func(field reflect.StructField, value reflect.Value, path string, _ bool) {

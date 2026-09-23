@@ -23,6 +23,30 @@ func ScanSection() cfg.Section {
 	}
 }
 
+// ReadScan decodes the scan section exactly as configured: Verify stays empty
+// when unconfigured so distributed configuration never invents a value.
+func ReadScan(option *cfg.Option) (ScanOptions, error) {
+	if option == nil {
+		return ScanOptions{}, nil
+	}
+	if option.Resolved != nil {
+		decoded, err := cfg.Get[*ScanOptions](option.Resolved, ScanConfigKey)
+		if err != nil {
+			return ScanOptions{}, err
+		}
+		return *decoded, nil
+	}
+	registry := cfg.NewSections()
+	if _, err := registry.Add(ScanSection()); err != nil {
+		return ScanOptions{}, err
+	}
+	raw, err := registry.Decode(ScanConfigKey, option.Extensions[ScanConfigKey])
+	if err != nil {
+		return ScanOptions{}, err
+	}
+	return *raw.(*ScanOptions), nil
+}
+
 // ReadVerify returns the configured verification level or DefaultVerify.
 func ReadVerify(option *cfg.Option) string {
 	if option == nil {

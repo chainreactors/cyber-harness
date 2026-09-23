@@ -46,7 +46,6 @@ func decodeConfig(c *gkcfg.Config, v interface{}) error {
 	if err := c.Decode(v); err != nil {
 		return err
 	}
-	applyExplicitReconNumericOptions(c, v)
 	if option, ok := v.(*Option); ok {
 		if option.Sections != nil {
 			var err error
@@ -63,17 +62,6 @@ func decodeConfig(c *gkcfg.Config, v interface{}) error {
 		})
 	}
 	return nil
-}
-
-func applyExplicitReconNumericOptions(c *gkcfg.Config, v interface{}) {
-	opt, ok := v.(*Option)
-	if !ok || opt == nil {
-		return
-	}
-	if c.Exists("recon.limit") {
-		v := c.Int("recon.limit")
-		opt.ReconLimit = &v
-	}
 }
 
 func LoadAndApplyConfig(option *Option) (string, error) {

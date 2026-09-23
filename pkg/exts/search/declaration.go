@@ -14,7 +14,10 @@ import (
 const connectionTimeout = 20 * time.Second
 
 func Declare(resources *resource.Registry) error {
-	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: "search", Test: testConnection})
+	if _, err := resource.Add[cfg.Section](resources, Section()); err != nil {
+		return err
+	}
+	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: ConfigKey, Test: testConnection})
 	return err
 }
 

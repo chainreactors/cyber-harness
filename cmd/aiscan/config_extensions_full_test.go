@@ -5,6 +5,7 @@ package main
 import (
 	"github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,7 @@ func TestWebLayeredExtensionSavePreservesOwnership(t *testing.T) {
 // Runtime credentials must never be materialized by a settings save.
 func TestWebConfigStoreDoesNotPersistRuntimeCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, ScannerOptions: cfg.ScannerOptions{CyberhubKey: "hub-secret"}}
+	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, Extensions: cfg.Values{scannerext.CyberhubConfigKey: {"key": "hub-secret"}}}
 	store := &webConfigStore{explicit: path, runtime: option}
 	_, loaded, current, err := store.GetDistributeConfig(t.Context())
 	if err != nil {

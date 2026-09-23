@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -9,6 +10,7 @@ import (
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	ioaserver "github.com/chainreactors/cyber/pkg/exts/ioa/server"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -134,6 +136,9 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = projectExtensionSections(value, fields); err != nil {
+		return nil, err
+	}
 	if err = validateConfig(value); err != nil {
 		return nil, err
 	}
@@ -148,10 +153,92 @@ func parseConfig(data []byte) (*types.DistributeConfig, error) {
 	return value, nil
 }
 
+// projectExtensionSections restores same-named proto sections from normalized
+// extension values. Alias root keys (search:, recon:, ...) are canonicalized
+// under extensions by the snapshot loader, so the proto projection never sees
+// them; the wire config is the canonical settings document and must carry them.
+func projectExtensionSections(value *types.DistributeConfig, fields cfg.Values) error {
+	msg := value.ProtoReflect()
+	descriptors := msg.Descriptor().Fields()
+	for index := 0; index < descriptors.Len(); index++ {
+		field := descriptors.Get(index)
+		if field.Kind() != protoreflect.MessageKind || field.IsMap() || field.IsList() || msg.Has(field) {
+			continue
+		}
+		section, ok := fields[string(field.Name())]
+		if !ok || len(section) == 0 {
+			continue
+		}
+		raw, err := json.Marshal(section)
+		if err != nil {
+			return err
+		}
+		message := msg.NewField(field).Message()
+		// The section schema is a superset of the wire section (e.g. recon's
+		// tavily_key); the proto keeps only what the wire models.
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, message.Interface()); err != nil {
+			return fmt.Errorf("extension %s: %w", field.Name(), err)
+		}
+		msg.Set(field, protoreflect.ValueOfMessage(message))
+	}
+	return nil
+}
+
+// foldProtoSections merges the wire sections into extension values at the
+// proto-to-document boundary. The wire config is the canonical settings
+// document: fields the proto models replace the stored values wholesale, while
+// extension fields the proto does not model (e.g. recon's tavily_key) survive.
+// Empty proto strings clear the stored value, matching how every reader treats
+// "" as unset.
+func foldProtoSections(config *types.DistributeConfig, values cfg.Values) error {
+	msg := config.ProtoReflect()
+	descriptors := msg.Descriptor().Fields()
+	for index := 0; index < descriptors.Len(); index++ {
+		field := descriptors.Get(index)
+		if field.Kind() != protoreflect.MessageKind || field.IsMap() || field.IsList() || !msg.Has(field) {
+			continue
+		}
+		key := string(field.Name())
+		if !defaultSections().Has(key) {
+			continue
+		}
+		raw, err := (protojson.MarshalOptions{UseProtoNames: true, EmitDefaultValues: true}).Marshal(msg.Get(field).Message().Interface())
+		if err != nil {
+			return err
+		}
+		var projection map[string]any
+		if err := json.Unmarshal(raw, &projection); err != nil {
+			return err
+		}
+		fields := values[key]
+		if fields == nil {
+			fields = map[string]any{}
+			values[key] = fields
+		}
+		for name, value := range projection {
+			if value == "" {
+				delete(fields, name)
+				continue
+			}
+			fields[name] = value
+		}
+	}
+	return nil
+}
+
 // original is the file being replaced; local settings are carried over from it
 // because the proto projection cannot express them.
 func marshalConfig(config *types.DistributeConfig, original []byte) ([]byte, error) {
 	copy := proto.Clone(config).(*types.DistributeConfig)
+	values := cfg.ValuesFromProto(copy.Extensions)
+	if err := foldProtoSections(copy, values); err != nil {
+		return nil, err
+	}
+	extensions, err := cfg.ValuesToProto(values)
+	if err != nil {
+		return nil, err
+	}
+	copy.Extensions = extensions
 	data, err := cfg.MarshalDistributeConfigYAML(copy)
 	if err != nil {
 		return nil, err
@@ -161,6 +248,7 @@ func marshalConfig(config *types.DistributeConfig, original []byte) ([]byte, err
 		return nil, err
 	}
 	dropNullValues(document)
+	dropAliasSections(document, defaultSections().Aliases())
 	own, err := ownConfig(original)
 	if err != nil {
 		return nil, err
@@ -187,6 +275,17 @@ func dropNullValues(section map[string]any) {
 				}
 			}
 		}
+	}
+}
+
+// dropAliasSections removes root sections owned by registered aliases from a
+// marshaled settings document. Their canonical storage is the extensions map:
+// wire edits are folded into it before patching, and the snapshot loader
+// canonicalizes alias keys away, so emitting both forms would make the patch
+// baseline disagree with the stored document and oscillate between forms.
+func dropAliasSections(document map[string]any, aliases []string) {
+	for _, alias := range aliases {
+		delete(document, alias)
 	}
 }
 func configAPI() managementapi.ConfigOptions {

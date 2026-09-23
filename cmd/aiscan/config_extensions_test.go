@@ -4,6 +4,7 @@ import (
 	"github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -46,10 +47,12 @@ traffic:
 		t.Fatalf("round trip=%v, error=%v\n%s", roundTrip, err, data)
 	}
 	var option cfg.Option
+	option.Sections = defaultSections()
 	if err := cfg.LoadConfigBytes(data, &option); err != nil {
 		t.Fatal(err)
 	}
-	if option.Timeout != 0 || option.Heartbeat != 7 || option.EvalCriteria != "finish" || option.EvalModel != "judge" || option.EvalRounds != "3" || !option.CaptureProviderFrames || option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" || option.BodyMaxBytes != 123 || option.BodyRetentionBytes != 456 {
+	hub, hubErr := scannerext.ReadCyberhub(&option)
+	if option.Timeout != 0 || option.Heartbeat != 7 || option.EvalCriteria != "finish" || option.EvalModel != "judge" || option.EvalRounds != "3" || !option.CaptureProviderFrames || hubErr != nil || hub.Mitm == nil || *hub.Mitm || option.BodyStorage != "disk" || option.BodyMaxBytes != 123 || option.BodyRetentionBytes != 456 {
 		t.Fatal("saved settings were not restored by the runtime loader")
 	}
 }

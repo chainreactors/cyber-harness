@@ -81,8 +81,7 @@ func TestReconSectionEnvironmentAndExplicitLimit(t *testing.T) {
 	}
 }
 
-func TestScanSectionVerifyStaysEmptyUnlessConfigured(t *testing.T) {
-	resolved := resolveSections(t, nil, nil, nil)
+func TestScanSectionVerifyStaysEmptyUnlessConfigured(t *testing.T) {	resolved := resolveSections(t, nil, nil, nil)
 	value, err := cfg.Get[*ScanOptions](resolved, ScanConfigKey)
 	if err != nil {
 		t.Fatal(err)
@@ -94,5 +93,41 @@ func TestScanSectionVerifyStaysEmptyUnlessConfigured(t *testing.T) {
 	value, _ = cfg.Get[*ScanOptions](resolved, ScanConfigKey)
 	if value.Verify != "high" {
 		t.Fatalf("verify = %q", value.Verify)
+	}
+}
+
+func TestCyberhubSectionPreservesExplicitMitmFalse(t *testing.T) {
+	resolved := resolveSections(t, cfg.Values{CyberhubConfigKey: map[string]any{"mitm": false}}, nil, nil)
+	value, err := cfg.Get[*CyberhubOptions](resolved, CyberhubConfigKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Mitm == nil || *value.Mitm {
+		t.Fatalf("explicit mitm:false lost: %#v", value.Mitm)
+	}
+}
+
+func TestReconSectionPreservesExplicitZeroLimitFromFile(t *testing.T) {
+	resolved := resolveSections(t, cfg.Values{ReconConfigKey: map[string]any{"limit": 0}}, nil, nil)
+	value, err := cfg.Get[*ReconOptions](resolved, ReconConfigKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Limit == nil || *value.Limit != 0 {
+		t.Fatalf("file explicit zero limit lost: %#v", value.Limit)
+	}
+}
+
+func TestUncoverCredentialsFromEnvironment(t *testing.T) {
+	values := map[string]string{"SHODAN_API_KEY": "shodan-key", "CENSYS_API_TOKEN": "  "}
+	credentials := UncoverCredentials(func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	})
+	if len(credentials) != 1 || credentials["SHODAN_API_KEY"] != "shodan-key" {
+		t.Fatalf("credentials = %#v", credentials)
+	}
+	if UncoverCredentials(nil) != nil {
+		t.Fatal("nil lookup must yield nil credentials")
 	}
 }

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	configpkg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
+	flags "github.com/jessevdk/go-flags"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +44,12 @@ func (f *fakeConfigStore) ActivateConfig(context.Context, string) (*types.Config
 func newConfig(backend ConfigBackend) *Config {
 	sections := configpkg.NewSections()
 	resources := resource.New()
+	if _, err := resource.Define[configpkg.Section](resources, sections); err != nil {
+		panic(err)
+	}
+	if _, err := resource.Define[hostcli.Contribution](resources, hostcli.New(flags.NewParser(&struct{}{}, flags.None))); err != nil {
+		panic(err)
+	}
 	if _, err := resource.Define[configpkg.Connection](resources, sections.ConnectionPoint()); err != nil {
 		panic(err)
 	}

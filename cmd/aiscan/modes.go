@@ -104,7 +104,7 @@ type shellHost interface {
 }
 
 func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
-	defaultVerify := cfg.ResolveString(option.ScanConfig.Verify, cfg.DefaultVerify)
+	defaultVerify := scannerext.ReadVerify(option)
 	mode, scannerArgs, err := resolveScannerMode(rest, defaultVerify)
 	if err != nil {
 		return err

@@ -13,6 +13,7 @@ import (
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	"github.com/chainreactors/cyber/pkg/profile"
 	goflags "github.com/jessevdk/go-flags"
 )
@@ -56,8 +57,12 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 	if opt.MaxTokens != 16384 || opt.ContextWindow != 1000000 {
 		t.Fatalf("llm limits = max:%d context:%d", opt.MaxTokens, opt.ContextWindow)
 	}
-	if opt.CyberhubURL != "http://hub:8080" || opt.CyberhubKey != "HUBKEY" {
-		t.Fatalf("scanner options = %#v", opt.ScannerOptions)
+	hub, err := scannerext.ReadCyberhub(&opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.URL != "http://hub:8080" || hub.Key != "HUBKEY" {
+		t.Fatalf("scanner options = %#v", hub)
 	}
 }
 
@@ -519,8 +524,12 @@ func TestParseCLICyberhubModeRootAndPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
-	if parsed.Option.CyberhubMode != "override" {
-		t.Fatalf("cyberhub mode = %q, want override", parsed.Option.CyberhubMode)
+	hub, err := scannerext.ReadCyberhub(&parsed.Option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.Mode != "override" {
+		t.Fatalf("cyberhub mode = %q, want override", hub.Mode)
 	}
 	if !reflect.DeepEqual(parsed.ScannerArgs, []string{"spray", "-u", "http://127.0.0.1:5000"}) {
 		t.Fatalf("scanner args = %#v", parsed.ScannerArgs)
@@ -541,8 +550,8 @@ func TestParseCLINonScanScannerKeepsPostRootArgsIsolated(t *testing.T) {
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
-	if parsed.Option.CyberhubURL != "" || parsed.Option.CyberhubKey != "" {
-		t.Fatalf("scanner options = %#v", parsed.Option.ScannerOptions)
+	if _, ok := parsed.Option.Extensions[scannerext.CyberhubConfigKey]; ok {
+		t.Fatalf("scanner options leaked from post-command args: %#v", parsed.Option.Extensions)
 	}
 }
 
@@ -560,8 +569,12 @@ func TestParseCLIScannerRootArgsBeforeCommandStillApply(t *testing.T) {
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
-	if parsed.Option.CyberhubURL != "http://hub:8080" || parsed.Option.CyberhubKey != "HUBKEY" {
-		t.Fatalf("scanner options = %#v", parsed.Option.ScannerOptions)
+	hub, err := scannerext.ReadCyberhub(&parsed.Option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.URL != "http://hub:8080" || hub.Key != "HUBKEY" {
+		t.Fatalf("scanner options = %#v", hub)
 	}
 }
 
@@ -669,7 +682,11 @@ func TestParseCLIAgentIOAFlag(t *testing.T) {
 		t.Fatalf("mode = %s, want %s", parsed.Mode, cfg.RunModeAgent)
 	}
 	opt := parsed.Option
-	if !opt.Debug || opt.Prompt != "scan localhost" || readClientOptions(t, &opt).Space != "case-1" || opt.Heartbeat != 5 || opt.Model != "gpt-4o" || opt.CyberhubMode != "override" {
+	hub, err := scannerext.ReadCyberhub(&opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opt.Debug || opt.Prompt != "scan localhost" || readClientOptions(t, &opt).Space != "case-1" || opt.Heartbeat != 5 || opt.Model != "gpt-4o" || hub.Mode != "override" {
 		t.Fatalf("option = %#v", opt)
 	}
 	if !reflect.DeepEqual(opt.Skills, []string{"cyber"}) {
@@ -728,8 +745,8 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 
 func TestResolveScannerModeForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
-		cfg.DefaultVerify = "off"
-		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, cfg.DefaultVerify)
+		scannerext.DefaultVerify = "off"
+		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -740,7 +757,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -751,7 +768,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -762,7 +779,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, cfg.DefaultVerify)
+		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -770,7 +787,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("mode = %#v", mode)
 		}
 
-		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, cfg.DefaultVerify)
+		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -778,7 +795,7 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("sniper mode = %#v", mode)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, cfg.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, scannerext.DefaultVerify)
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -793,10 +810,10 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 
 func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 	withDefaults(t, func() {
-		cfg.DefaultCyberhubURL = "http://hub:8080"
-		cfg.DefaultCyberhubKey = "HUBKEY"
-		cfg.DefaultCyberhubMode = "override"
-		cfg.DefaultTavilyKeys = "BUILTIN_TAVILY"
+		scannerext.DefaultCyberhubURL = "http://hub:8080"
+		scannerext.DefaultCyberhubKey = "HUBKEY"
+		scannerext.DefaultCyberhubMode = "override"
+		searchext.DefaultTavilyKeys = "BUILTIN_TAVILY"
 		cfg.DefaultNodeID = "node-1"
 		cfg.DefaultNodeName = "worker-1"
 
@@ -804,6 +821,25 @@ func TestAppConfigUsesCompiledDefaults(t *testing.T) {
 		cfg.ApplyDefaults(opt)
 		if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {
 			t.Fatal("compiled node defaults were not resolved")
+		}
+
+		resolved, err := defaultSections().ResolveValues(nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hub, err := cfg.Get[*scannerext.CyberhubOptions](resolved, scannerext.CyberhubConfigKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hub.URL != "http://hub:8080" || hub.Key != "HUBKEY" || hub.Mode != "override" {
+			t.Fatalf("compiled cyberhub defaults were not resolved: %#v", hub)
+		}
+		search, err := cfg.Get[*searchext.Options](resolved, searchext.ConfigKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if search.TavilyKeys != "BUILTIN_TAVILY" {
+			t.Fatalf("compiled tavily default was not resolved: %#v", search)
 		}
 	})
 }
@@ -818,12 +854,12 @@ func withDefaults(t *testing.T, fn func()) {
 		{&cfg.DefaultBaseURL, cfg.DefaultBaseURL},
 		{&cfg.DefaultAPIKey, cfg.DefaultAPIKey},
 		{&cfg.DefaultModel, cfg.DefaultModel},
-		{&cfg.DefaultScannerProxy, cfg.DefaultScannerProxy},
-		{&cfg.DefaultCyberhubURL, cfg.DefaultCyberhubURL},
-		{&cfg.DefaultCyberhubKey, cfg.DefaultCyberhubKey},
-		{&cfg.DefaultCyberhubMode, cfg.DefaultCyberhubMode},
-		{&cfg.DefaultVerify, cfg.DefaultVerify},
-		{&cfg.DefaultTavilyKeys, cfg.DefaultTavilyKeys},
+		{&scannerext.DefaultScannerProxy, scannerext.DefaultScannerProxy},
+		{&scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubURL},
+		{&scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubKey},
+		{&scannerext.DefaultCyberhubMode, scannerext.DefaultCyberhubMode},
+		{&scannerext.DefaultVerify, scannerext.DefaultVerify},
+		{&searchext.DefaultTavilyKeys, searchext.DefaultTavilyKeys},
 		{&cfg.DefaultNodeID, cfg.DefaultNodeID},
 		{&cfg.DefaultNodeName, cfg.DefaultNodeName},
 	}

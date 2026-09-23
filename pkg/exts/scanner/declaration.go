@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 	"io"
@@ -25,11 +26,31 @@ var (
 )
 
 func Declare(resources *resource.Registry) error {
+	if _, err := resource.Add[cfg.Section](resources, CyberhubSection(), ReconSection(), ScanSection()); err != nil {
+		return err
+	}
+	if _, err := resource.Add[hostcli.Contribution](resources, contributeFlags); err != nil {
+		return err
+	}
 	_, err := resource.Add[cfg.Connection](resources,
-		cfg.Connection{Section: "cyberhub", Test: testCyberhubConnection},
-		cfg.Connection{Section: "recon", Test: testReconConnections},
+		cfg.Connection{Section: CyberhubConfigKey, Test: testCyberhubConnection},
+		cfg.Connection{Section: ReconConfigKey, Test: testReconConnections},
 	)
 	return err
+}
+
+// contributeFlags mounts the scanner flag groups on the commands that run
+// scanner-backed workloads.
+func contributeFlags(registry *hostcli.Registry) error {
+	for _, command := range []string{"agent", "web"} {
+		if err := registry.Group(command, CyberhubConfigKey, CyberhubFlagGroup()); err != nil {
+			return err
+		}
+		if err := registry.Group(command, ReconConfigKey, ReconFlagGroup()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func testCyberhubConnection(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -243,6 +244,33 @@ func installationViolations(relative string, file *ast.File) []string {
 	})
 	return violations
 }
+// The core Option holds host-neutral configuration only. Scanner-domain
+// sections are extension declarations owned by pkg/exts/scanner and reach the
+// runtime through Option.Extensions.
+func TestCoreOptionHasNoScannerSections(t *testing.T) {
+	repository := root(t)
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repository, "pkg", "config", "options.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := map[string]bool{"cyberhub": true, "recon": true, "scan": true, "search": true}
+	ast.Inspect(file, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || field.Tag == nil {
+			return true
+		}
+		raw, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			return true
+		}
+		key := strings.Split(reflect.StructTag(raw).Get("config"), ",")[0]
+		if forbidden[key] {
+			t.Errorf("pkg/config Option carries scanner configuration key %q; register a config.Section instead", key)
+		}
+		return true
+	})
+}
+
 func TestExtensionsAreTheInstallationEntryPoints(t *testing.T) {
 	repository := root(t)
 	for _, tree := range []string{"cmd", "pkg", "examples", "internal/testutil"} {
