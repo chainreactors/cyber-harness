@@ -72,8 +72,7 @@ Common patterns: `{name}_{version}_{os}_{arch}.tar.gz` | `{name}_{version}_{os}_
 
 ## Related concepts
 
-- Arsenal manages companion security binaries; [gogo](/easm/gogo.md),
-  [spray](/easm/spray.md), and [zombie](/easm/zombie.md) are already available
-  as built-in Cyber pseudo-commands.
+- Security distributions ship companions such as `gogo`, `spray`, and
+  `zombie` as built-in pseudo-commands; Arsenal covers everything else.
 - Use [tmux](tmux.md) to observe long-running commands installed through
   Arsenal.

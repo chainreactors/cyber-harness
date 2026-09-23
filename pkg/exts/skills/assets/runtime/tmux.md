@@ -94,7 +94,7 @@ bash: tmux capture-pane -t <id> -c 2048
 
 ## Related concepts
 
-- Tmux manages long-running [scan](/easm/scan.md) and
-  [gogo](/easm/gogo.md) command sessions.
+- Tmux manages long-running command sessions such as scan pipelines and
+  `gogo` port scans.
 - Recurring [loop](loop.md) tasks may launch commands whose progress is exposed
   through tmux sessions.

@@ -83,8 +83,8 @@ The scan AI sub-skills are independent references:
 - Scan orchestrates [gogo](gogo.md), [spray](spray.md), [katana](katana.md),
   [zombie](zombie.md), and [neutron](neutron.md).
 - [Passive discovery](passive.md) can seed targets before a scan, while
-  [proton](proton.md) and [playwright](playwright.md) provide focused follow-up.
-- Runtime support comes from [cyberhub](/runtime/search.md) for fingerprint-to-POC
-  lookup, [proxy](/runtime/proxy.md) for routed execution,
-  [mitm](/runtime/mitm.md) for traffic evidence, and
-  [tmux](/runtime/tmux.md) for long-running sessions.
+  [proton](proton.md) and [playwright](cyber://skills/runtime/playwright.md) provide focused follow-up.
+- Runtime support comes from [cyberhub](cyber://skills/runtime/search.md) for fingerprint-to-POC
+  lookup, [proxy](cyber://skills/runtime/proxy.md) for routed execution,
+  [mitm](cyber://skills/runtime/mitm.md) for traffic evidence, and
+  [tmux](cyber://skills/runtime/tmux.md) for long-running sessions.

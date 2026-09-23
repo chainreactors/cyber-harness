@@ -7,7 +7,7 @@ import (
 	"github.com/chainreactors/cyber/tools/okf"
 )
 
-func TestEmbeddedOKFBundlePassesProductionChecks(t *testing.T) {
+func TestScannerOKFBundlePassesProductionChecks(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("cyber", "okf"))
 	if err != nil {
 		t.Fatal(err)
@@ -17,6 +17,6 @@ func TestEmbeddedOKFBundlePassesProductionChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !report.Valid() {
-		t.Fatalf("embedded OKF bundle has production errors: %#v", report.Issues)
+		t.Fatalf("scanner OKF bundle has production errors: %#v", report.Issues)
 	}
 }

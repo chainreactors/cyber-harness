@@ -2,7 +2,7 @@
 type: Tool Playbook
 title: playwright
 description: Use this playbook to learn how to use the playwright pseudo-command for headless browsing, screenshots, network capture, and interactive vulnerability verification. Aligned with microsoft/playwright-cli conventions.
-tags: [easm, browser]
+tags: [browser]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 ---

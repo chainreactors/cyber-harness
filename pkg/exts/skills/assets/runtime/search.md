@@ -85,7 +85,7 @@ cyberhub search poc struts --tag rce
 
 ## Related concepts
 
-- Cyberhub resolves fingerprints produced by [gogo](/easm/gogo.md),
-  [spray](/easm/spray.md), and the [scan pipeline](/easm/scan.md).
-- Matching POC templates are executed with [neutron](/easm/neutron.md), while
-  [fetch](fetch.md) can retrieve external advisories and documentation.
+- Cyberhub resolves fingerprints produced by scanners such as `gogo` and
+  `spray` and by the scan pipeline.
+- Matching POC templates are executed with `neutron`, while [fetch](fetch.md)
+  can retrieve external advisories and documentation.

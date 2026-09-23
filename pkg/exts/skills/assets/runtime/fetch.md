@@ -21,8 +21,7 @@ fetch <url> [--extract <hint>]
 
 ## Related concepts
 
-- Use [playwright](/easm/playwright.md) instead when content requires browser
+- Use [playwright](playwright.md) instead when content requires browser
   rendering or interaction.
-- Fetched text can be piped into [proton](/easm/proton.md) for sensitive-data
-  inspection or used alongside [cyberhub](search.md) during vulnerability
-  research.
+- Fetched text can be piped into inspection tools such as `proton` or used
+  alongside [cyberhub](search.md) during vulnerability research.

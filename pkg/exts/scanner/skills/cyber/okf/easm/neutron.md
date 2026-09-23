@@ -55,6 +55,6 @@ neutron -u <target> -t ./pocs --restrict-templates
 
 - Neutron consumes fingerprints from [gogo](gogo.md), [spray](spray.md), and
   the [scan pipeline](scan.md), with associations resolved by
-  [cyberhub](/runtime/search.md).
-- Capture HTTP template execution with [mitm](/runtime/mitm.md); browser-based
-  templates can be recorded or replayed with [playwright](playwright.md).
+  [cyberhub](cyber://skills/runtime/search.md).
+- Capture HTTP template execution with [mitm](cyber://skills/runtime/mitm.md); browser-based
+  templates can be recorded or replayed with [playwright](cyber://skills/runtime/playwright.md).

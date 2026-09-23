@@ -11,6 +11,6 @@ This bundle organizes Cyber's external attack surface scanning documentation as 
 - [neutron](neutron.md) — template-based POC execution
 - [proton](proton.md) — sensitive information / secrets scanning
 - [passive](passive.md) — cyberspace asset discovery via uncover
-- [playwright](playwright.md) — headless browser automation
+- [playwright](cyber://skills/runtime/playwright.md) — headless browser automation
 - [scan](scan.md) — multi-stage orchestration pipeline
 - [curl](curl.md) — browser-naturalized HTTP requests and evidence capture

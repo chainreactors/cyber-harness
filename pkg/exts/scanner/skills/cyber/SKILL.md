@@ -52,14 +52,14 @@ Available only when they appear in the runtime pseudo-command list:
 
 - `passive`: domain/ICP seed → IPs, CIDRs, domains via cyberspace search (FOFA/Hunter/Shodan/etc.)
 - `katana`: deep web crawling with full parameter discovery
-- `playwright`: headless Chromium browser for JS-rendered pages, screenshots, network capture, and interactive verification. Reference: `cyber://skills/cyber/okf/easm/playwright.md`. Key commands: `playwright goto <url>`, `playwright screenshot <url>`, `playwright open <url> --session s1`, `playwright discover s1`, `playwright close s1`.
+- `playwright`: headless Chromium browser for JS-rendered pages, screenshots, network capture, and interactive verification. Reference: `cyber://skills/runtime/playwright.md`. Key commands: `playwright goto <url>`, `playwright screenshot <url>`, `playwright open <url> --session s1`, `playwright discover s1`, `playwright close s1`.
 
 ### Utilities
 
-- `arsenal`: security tool package manager (22+ tools from chainreactors & projectdiscovery). Run `arsenal list` first. Reference: `cyber://skills/cyber/okf/runtime/arsenal.md`.
-- `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `cyber://skills/cyber/okf/runtime/search.md`.
-- `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `cyber://skills/cyber/okf/runtime/tmux.md`.
-- `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `cyber://skills/cyber/okf/runtime/proxy.md`.
+- `arsenal`: security tool package manager (22+ tools from chainreactors & projectdiscovery). Run `arsenal list` first. Reference: `cyber://skills/runtime/arsenal.md`.
+- `cyberhub`: search fingerprints and POC templates. Key: `cyberhub search --finger <name>`. Reference: `cyber://skills/runtime/search.md`.
+- `tmux`: session management. Key: `tmux ls`, `tmux capture-pane -t <id>`, `tmux kill-session -t <id>`. Reference: `cyber://skills/runtime/tmux.md`.
+- `proxy`: proxy nodes and proxied execution. Key: `proxy <url> <cmd>`, `proxy auto <sub-url>`. Reference: `cyber://skills/runtime/proxy.md`.
 
 ## Scan Output Consumption
 

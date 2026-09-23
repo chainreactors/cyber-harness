@@ -11,4 +11,5 @@ workflow as a document graph.
 ## Domains
 
 - [EASM tools](easm/) — discovery, probing, crawling, verification, and scanning
-- [Runtime tools](runtime/) — execution, proxying, capture, research, and collaboration
+- Runtime tools (execution, proxying, capture, research) live on the neutral
+  document shelf at `cyber://skills/runtime/`, owned by the skill library extension

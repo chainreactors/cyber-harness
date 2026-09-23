@@ -80,7 +80,7 @@ proton -l targets.txt --severity high -j
 ## Related concepts
 
 - Proton can inspect content collected by [spray](spray.md) or
-  [fetch](/runtime/fetch.md), and can be used as a focused follow-up to the
+  [fetch](cyber://skills/runtime/fetch.md), and can be used as a focused follow-up to the
   [scan pipeline](scan.md).
 - Its template conventions are related to [neutron](neutron.md), while Proton
   specializes in secrets and sensitive text rather than network POCs.

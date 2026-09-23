@@ -24,7 +24,7 @@ mitm clear
 
 ## Related concepts
 
-- MITM captures HTTP traffic produced by the [scan pipeline](/easm/scan.md),
-  [neutron](/easm/neutron.md), and [playwright](/easm/playwright.md).
+- MITM captures HTTP traffic produced by scan pipelines, tools such as
+  `neutron`, and [playwright](playwright.md) browser sessions.
 - Combine it with [proxy](proxy.md) when the observed command also requires
   routed execution.

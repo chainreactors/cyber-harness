@@ -57,7 +57,7 @@ Subscription: Clash YAML format with proxy node definitions.
 
 ## Related concepts
 
-- Proxy can route the [scan pipeline](/easm/scan.md), [gogo](/easm/gogo.md),
-  [zombie](/easm/zombie.md), [passive discovery](/easm/passive.md), and
-  [playwright](/easm/playwright.md).
+- Proxy can route scanner pipelines (`scan`, `gogo`, `zombie`, passive
+  discovery) and [playwright](playwright.md) browser sessions when the
+  distribution provides them.
 - Add [mitm](mitm.md) when routed HTTP traffic also needs evidence capture.

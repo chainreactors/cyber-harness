@@ -23,7 +23,7 @@ loop stop-all
 
 ## Related concepts
 
-- A loop can schedule recurring [scan](/easm/scan.md) or
-  [fetch](fetch.md) workflows.
-- Use [ioa send](cyber://skills/cyber/okf/runtime/ioa-send.md) to publish recurring checkpoints and
-  [tmux](tmux.md) to inspect long-running command sessions launched by a task.
+- A loop can schedule recurring scan or [fetch](fetch.md) workflows.
+- Use `ioa send` to publish recurring checkpoints when the collaboration
+  extension is installed, and [tmux](tmux.md) to inspect long-running command
+  sessions launched by a task.

@@ -94,5 +94,5 @@ Generic JSON array:
 
 - Passive discovery supplies targets to the [scan pipeline](scan.md),
   [gogo](gogo.md), [spray](spray.md), and [katana](katana.md).
-- Use the [proxy runtime](/runtime/proxy.md) when a configured discovery source
+- Use the [proxy runtime](cyber://skills/runtime/proxy.md) when a configured discovery source
   requires routed access.

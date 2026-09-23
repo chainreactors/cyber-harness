@@ -64,6 +64,6 @@ zombie -i 10.0.0.1:23 -s telnet -p admin --concurrency 8
 
 - Zombie checks services discovered by [gogo](gogo.md) or selected by the
   [scan pipeline](scan.md).
-- Use [proxy](/runtime/proxy.md) for routed execution and
-  [mitm](/runtime/mitm.md) when an HTTP-backed authentication flow needs
+- Use [proxy](cyber://skills/runtime/proxy.md) for routed execution and
+  [mitm](cyber://skills/runtime/mitm.md) when an HTTP-backed authentication flow needs
   request and response evidence.

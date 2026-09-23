@@ -37,7 +37,7 @@ Notes:
 - Spray probes web services discovered by [gogo](gogo.md), [passive](passive.md),
   or the [scan pipeline](scan.md).
 - Use [katana](katana.md) for deeper parameter-aware crawling and
-  [playwright](playwright.md) for rendered, interactive application behavior.
-- Resolve fingerprints with [cyberhub](/runtime/search.md), execute matching
+  [playwright](cyber://skills/runtime/playwright.md) for rendered, interactive application behavior.
+- Resolve fingerprints with [cyberhub](cyber://skills/runtime/search.md), execute matching
   POCs with [neutron](neutron.md), and inspect exposed text with
   [proton](proton.md).

@@ -57,4 +57,4 @@ Notes:
 - Use [spray](spray.md) for breadth (many URLs, fingerprints, exposed paths) and
   curl for a single, precise, evidence-backed request.
 - Deeper crawling is [katana](katana.md); rendered interaction is
-  [playwright](playwright.md).
+  [playwright](cyber://skills/runtime/playwright.md).

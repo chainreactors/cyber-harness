@@ -44,5 +44,5 @@ Notes:
 - The [scan pipeline](scan.md) orchestrates gogo during target discovery.
 - Discovered services feed [spray](spray.md) for HTTP probing and
   [zombie](zombie.md) for authorized credential checks.
-- Fingerprints can be resolved through [cyberhub](/runtime/search.md) and
+- Fingerprints can be resolved through [cyberhub](cyber://skills/runtime/search.md) and
   validated with [neutron](neutron.md) templates.
