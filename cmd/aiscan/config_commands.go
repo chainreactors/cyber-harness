@@ -15,7 +15,7 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 	if !online {
 		return nil
 	}
-	value, err := cfg.DistributeFromOption(option)
+	value, err := DistributeFromOption(option)
 	if err != nil {
 		return []configuration.Check{{Name: "connections", Message: "cannot resolve connection settings"}}
 	}
