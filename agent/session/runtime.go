@@ -87,7 +87,7 @@ type Config struct {
 	PromptResolver        prompt.Resolver
 	PromptTarget          prompt.Target
 	// CommandName identifies the command-focused worker session (e.g. a
-	// single-scanner run); empty for a general conversational session.
+	// single-command run); empty for a general conversational session.
 	CommandName string
 	// SkipBaseSkills disables BaseSkills injection for focused worker sessions
 	// that receive their skills explicitly.
@@ -185,11 +185,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		logger.Importantf("resumed %d messages from %s", len(data.Messages), rc.Resume)
 	}
 
-	nodeName := rc.NodeName
-	if nodeName == "" {
-		nodeName = "cyber"
-	}
-	rt.nodeName = nodeName
+	rt.nodeName = rc.NodeName
 	rt.promptTarget = rc.PromptTarget
 	if rt.promptTarget == "" {
 		rt.promptTarget = prompt.MainSystem

@@ -146,7 +146,7 @@ type Config struct {
 	ParentSessionID  string
 	ParentToolCallID string
 	Delegation       *types.DelegationDetail
-	// AgentName tags emitted AOP events; defaults to "cyber".
+	// AgentName tags emitted AOP events; the composition root sets it.
 	AgentName string
 	// MessageCounter seeds message_id allocation ("m-<n>") when a session is
 	// restored; Result.MessageCounter carries the final value for saving.
@@ -224,9 +224,6 @@ func (c Config) init() Config {
 	}
 	if c.SessionID == "" {
 		c.SessionID = randomID()
-	}
-	if c.AgentName == "" {
-		c.AgentName = "cyber"
 	}
 	if c.Tools == nil {
 		c.Tools = coretool.EmptyExecutor()

@@ -38,6 +38,9 @@ import (
 type Config struct {
 	Resources resources.Options
 	Recon     engine.ReconOptions
+	// AgentName tags the scanner worker's AOP events; the composition root
+	// sets it (aiscan passes "cyber").
+	AgentName string
 }
 
 type Extension struct {
@@ -167,6 +170,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		}
 		model, providerConfig := providers.Current()
 		config := agent.Config{
+			AgentName:      e.config.AgentName,
 			Lifetime:       scope.Lifetime(),
 			Hooks:          hookRegistry,
 			Loop:           loop,

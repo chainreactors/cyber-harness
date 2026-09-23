@@ -540,9 +540,6 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	if agentName == "" {
 		agentName = rt.nodeName
 	}
-	if agentName == "" {
-		agentName = "cyber"
-	}
 
 	rt.mu.Lock()
 	if rt.ctx.Err() != nil {

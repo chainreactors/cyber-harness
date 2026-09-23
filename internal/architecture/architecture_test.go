@@ -52,6 +52,19 @@ func TestRuntimeDependencies(t *testing.T) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
+		// The agent runtime is distribution-neutral: no product identity
+		// literals or virtual namespaces may appear in it.
+		if strings.HasPrefix(relative, "agent/") && !strings.HasSuffix(path, "_test.go") {
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			for _, forbidden := range []string{`"cyber"`, "cyber://"} {
+				if strings.Contains(string(content), forbidden) {
+					t.Errorf("%s embeds distribution identity %s in the neutral runtime", relative, forbidden)
+				}
+			}
+		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
 			return err

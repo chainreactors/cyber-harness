@@ -42,6 +42,7 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 			Fallbacks: cfg.FallbackProviderConfigs(option),
 		},
 		Scanner: scannerext.Config{
+			AgentName: "cyber",
 			Resources: resources.Options{
 				CyberhubURL: option.CyberhubURL, APIKey: option.CyberhubKey,
 				Mode: option.CyberhubMode, Proxy: option.Proxy,
