@@ -16,6 +16,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/session"
+	"github.com/chainreactors/cyber/agent/skills"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 )
@@ -47,9 +48,19 @@ func TestCommandSpecsIncludeNodeRegistryCommands(t *testing.T) {
 		promptext.New(), loopext.New(agent.NoLoop()),
 		extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			return extension.Add(scope,
-				coretool.Command{Name: "gogo", Usage: "Usage: gogo [OPTIONS]", DescriptionPath: "cyber://skills/cyber/okf/easm/gogo.md", Run: func(context.Context, *coretool.Execution) (any, error) { return nil, nil }},
+				coretool.Command{Name: "gogo", Usage: "Usage: gogo [OPTIONS]", DescriptionPath: "fixture://docs/gogo.md", Run: func(context.Context, *coretool.Execution) (any, error) { return nil, nil }},
 			)
 		}}, installed)...)
+	// Description resolution reads the store; serve the fixture document from
+	// a bundle so the test stays neutral about who owns the content.
+	if _, err := f.Skills.Add(skills.Bundle{ReadVirtual: func(location string) (string, bool, error) {
+		if location != "fixture://docs/gogo.md" {
+			return "", false, nil
+		}
+		return "---\ndescription: Use this playbook when working with gogo for host, port, service, banner, fingerprint, or vulnerability-hint discovery.\n---\n# gogo", true, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	runtime := installed.Runtime()
 	catalog := CommandSpecs(runtime)
 	got := make(map[string]*struct{ usage, description string }, len(catalog))
