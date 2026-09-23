@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent"
-	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/telemetry"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
@@ -649,17 +648,6 @@ func TestParseCLIPassthroughScannerExtractsAIIntentArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opt.Skills, []string{"scan", "cyber"}) {
 		t.Fatalf("skills = %#v", opt.Skills)
-	}
-}
-
-func TestScannerAIIntentInjectsCommandSkill(t *testing.T) {
-	store := skills.NewStore(nil)
-	intent, err := store.ApplySelected("focus on risky exposed services", nil)
-	if err != nil {
-		t.Fatalf("ApplySelected() error = %v", err)
-	}
-	if !strings.Contains(intent, "focus on risky exposed services") {
-		t.Fatalf("intent missing user text:\n%s", intent)
 	}
 }
 

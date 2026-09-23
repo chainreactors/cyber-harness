@@ -14,10 +14,10 @@ Prompt 是模型行为指导，执行控制需要工具/命令边界的 hooks。
 
 ## Skills 的发现和读取
 
-Skill 提供描述、位置和正文。内置知识在编译时嵌入；本地 Skill 从项目目录加载；功能扩展还可以贡献 Bundle 和虚拟文件。常见位置：
+Skill 提供描述、位置和正文。框架本身不内嵌任何知识；内容由扩展以 Bundle 和虚拟文件贡献（参考发行版的 `cyber` 基础 Skill 由 scanner 扩展提供，中立运行时工具文档由 Skill 库扩展提供），本地 Skill 从项目目录加载。常见位置：
 
 ```text
-内置资源 < 扩展 Bundle < .cyber/skills/ < .agent/skills/ < CLI paths
+扩展 Bundle < .cyber/skills/ < .agent/skills/ < CLI paths
 ```
 
 同名条目按来源优先级覆盖。Skill 库中“存在”不等于正文全部进入上下文；模型可以读取目录后按需读取引用，调用方也可以通过 `-s` 显式选择。当前参考发行版默认加入 `cyber` 基础 Skill，许多工具说明已组织为它下面的 OKF 参考文档，不能把所有文件名都当成可直接 `-s` 选择的 Skill 名。

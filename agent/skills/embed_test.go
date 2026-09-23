@@ -98,6 +98,17 @@ func TestApplySelectedRejectsUnknownSkill(t *testing.T) {
 	}
 }
 
+func TestApplySelectedPassesIntentThrough(t *testing.T) {
+	store := NewStore(nil)
+	intent, err := store.ApplySelected("focus on risky exposed services", nil)
+	if err != nil {
+		t.Fatalf("ApplySelected() error = %v", err)
+	}
+	if !strings.Contains(intent, "focus on risky exposed services") {
+		t.Fatalf("intent missing user text:\n%s", intent)
+	}
+}
+
 func TestReadVirtual(t *testing.T) {
 	store := NewStore(nil)
 	if _, err := store.Add(fixtureBundle()); err != nil {

@@ -36,7 +36,7 @@ aiscan> !tmux ls
 aiscan> !tmux kill -t <session-id>
 ```
 
-长输出可能只在模型上下文中保留部分内容。需要查看较早输出时使用工具返回的读取提示，完整管理语法见[终端命令说明](../../agent/skills/cyber/okf/runtime/tmux.md)。远程 API 的前台执行入口有独立契约，不能把 Agent 的后台等待参数等同于所有入口的行为。
+长输出可能只在模型上下文中保留部分内容。需要查看较早输出时使用工具返回的读取提示，完整管理语法见[终端命令说明](../../pkg/exts/skills/assets/runtime/tmux.md)。远程 API 的前台执行入口有独立契约，不能把 Agent 的后台等待参数等同于所有入口的行为。
 
 ## 网络与代理
 
@@ -52,7 +52,7 @@ HTTPS 捕获依赖客户端信任 Hub CA。`--mitm=false` 关闭捕获，保留�
 
 ## 浏览器与外部工具
 
-full 版的浏览器支持页面导航、交互、截图和网络捕获。持久浏览器会话保留多步交互状态，适合需要登录或 JavaScript 渲染的页面；它的状态与 Agent 的对话历史不同，恢复聊天记录不会恢复旧浏览器实例。具体命令见[浏览器说明](../../agent/skills/cyber/okf/easm/playwright.md)。
+full 版的浏览器支持页面导航、交互、截图和网络捕获。持久浏览器会话保留多步交互状态，适合需要登录或 JavaScript 渲染的页面；它的状态与 Agent 的对话历史不同，恢复聊天记录不会恢复旧浏览器实例。具体命令见[浏览器说明](../../pkg/exts/skills/assets/runtime/playwright.md)。
 
 Arsenal 管理外部安全工具，并将安装目录加入子进程 PATH。安装后的工具仍需要满足平台与运行依赖。原生桌面录屏是另外的可选构建，见 [record](../record.md)。
 
