@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/core/extension"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
@@ -16,6 +17,7 @@ import (
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	harness "github.com/chainreactors/cyber/pkg/harness"
+	"github.com/chainreactors/cyber/tools/scan"
 )
 
 // extensions returns the product's extensions in the order they must load. It
@@ -44,7 +46,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	}
 	// The loop installation publishes agent.Loop, so it precedes every
 	// extension that runs against one.
-	extensions = append(extensions, okfext.New(), loopext.New(loop), subagentext.New(), arsenal)
+	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenal)
 
 	if !config.SkipEngines {
 		extensions = append(extensions, scannerext.New(config.Scanner, workDir))

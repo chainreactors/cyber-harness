@@ -65,8 +65,8 @@ type BashTool struct {
 	processWG          sync.WaitGroup
 	workDir            string
 	timeout            int
-	scannerProxy       string
-	scannerProxyCA     string
+	egressProxy       string
+	egressProxyCA     string
 	egressResolver     func(context.Context) (proxyURL, caPath string, release func())
 	tasks              *procbus.Manager
 	registry           coretool.CommandExecutor
@@ -89,8 +89,8 @@ func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashToo
 }
 
 func (t *BashTool) Manager() *procbus.Manager       { return t.tasks }
-func (t *BashTool) SetScannerProxy(proxy string)    { t.scannerProxy = proxy }
-func (t *BashTool) SetScannerProxyCA(caPath string) { t.scannerProxyCA = caPath }
+func (t *BashTool) SetEgressProxy(proxy string)    { t.egressProxy = proxy }
+func (t *BashTool) SetEgressProxyCA(caPath string) { t.egressProxyCA = caPath }
 func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, func())) {
 	t.egressResolver = fn
 }
@@ -209,13 +209,13 @@ func (t *BashTool) ensureShellCommands() (*shellCommandAdapter, error) {
 	return t.shellAdapter, nil
 }
 
-func (t *BashTool) WithScannerProxy(proxy string) *BashTool {
-	t.scannerProxy = proxy
+func (t *BashTool) WithEgressProxy(proxy string) *BashTool {
+	t.egressProxy = proxy
 	return t
 }
 
-func (t *BashTool) WithScannerProxyCA(caPath string) *BashTool {
-	t.scannerProxyCA = caPath
+func (t *BashTool) WithEgressProxyCA(caPath string) *BashTool {
+	t.egressProxyCA = caPath
 	return t
 }
 
@@ -853,7 +853,7 @@ func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adap
 }
 
 func (t *BashTool) proxyEnv(ctx context.Context) []string {
-	proxy, ca := t.scannerProxy, t.scannerProxyCA
+	proxy, ca := t.egressProxy, t.egressProxyCA
 	// Point the same common proxy/CA surface at child processes that built-in
 	// tools consume through Execution.Env.
 	return coretool.EgressEnvironment(proxy, ca)

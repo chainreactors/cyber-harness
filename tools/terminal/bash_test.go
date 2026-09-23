@@ -155,7 +155,7 @@ func TestBashProxyEnvInjection(t *testing.T) {
 		t.Skip("unix-only test")
 	}
 	proxy := "socks5://127.0.0.1:1080"
-	bash := NewBashTool(t.TempDir(), 5, nil).WithScannerProxy(proxy)
+	bash := NewBashTool(t.TempDir(), 5, nil).WithEgressProxy(proxy)
 
 	res, err := bash.Execute(context.Background(), bashArgs(
 		`env | grep -E '^(ALL_PROXY|all_proxy|HTTP_PROXY|http_proxy|HTTPS_PROXY|https_proxy)='`,
