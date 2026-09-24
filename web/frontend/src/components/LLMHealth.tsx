@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button, StatusDot, Tooltip, TooltipContent, TooltipTrigger, type StatusKind } from '@cyber/ui'
-import { getConfigStatus, getStatus, llmConfigured, testLLM } from '../api'
+import { getStatus, llmConfigured, testLLM } from '../api'
 
 type Phase = 'checking' | 'ok' | 'error' | 'unconfigured'
 
@@ -11,13 +11,9 @@ interface Props {
   reloadSignal: number
 }
 
-// A persistent LLM health dot in the header. getStatus()'s `llm_available` only
-// means "a provider client was constructed" — it stays green even when the
-// base_url 404s at request time (the misconfig people actually hit). So we run a
-// real testLLM round-trip against the *stored* config (a blank api_key reuses
-// the server-side secret) on mount and whenever reloadSignal changes — i.e.
-// exactly when a bad endpoint would first bite: startup and just after saving
-// settings. No tight polling, so we never hammer the model.
+// Probe the effective server provider on mount and after a settings save.
+// A constructed client alone does not guarantee working credentials or endpoints.
+// An empty probe resolves environment and CLI overrides on the server.
 export default function LLMHealth({ onOpenSettings, reloadSignal }: Props) {
   const { t } = useTranslation('app')
   const [phase, setPhase] = useState<Phase>('checking')
@@ -27,23 +23,16 @@ export default function LLMHealth({ onOpenSettings, reloadSignal }: Props) {
     setPhase('checking')
     setDetail('')
     try {
-      const [cfg, status] = await Promise.all([getConfigStatus(), getStatus()])
+      const status = await getStatus()
       // Same predicate the settings panel uses, so the two never disagree.
       if (!llmConfigured(status)) {
         setPhase('unconfigured')
         return
       }
-      const active = cfg.llm?.active
-      const res = await testLLM({
-        provider: status.llmProvider || active?.provider || '',
-        baseUrl: active?.baseUrl || '',
-        apiKey: '', // reuse the key already stored server-side
-        model: status.llmModel || active?.model || '',
-        proxy: active?.proxy || '',
-      })
+      const res = await testLLM({})
       if (res.ok) {
         setPhase('ok')
-        const label = res.model || status.llmModel || active?.model || ''
+        const label = res.model || status.llmModel || ''
         setDetail(res.latencyMs ? `${label} · ${res.latencyMs}ms` : label)
       } else {
         setPhase('error')

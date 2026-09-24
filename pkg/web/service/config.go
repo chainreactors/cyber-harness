@@ -140,7 +140,7 @@ func (s *Service) saveConfig(ctx context.Context, config *types.DistributeConfig
 		s.pending = nil
 	}
 	if s.agents != nil {
-		s.agents.BroadcastConfigReload(prepared.Config)
+		s.agents.BroadcastConfigReload(s.configWithRuntimeLLM(prepared.Config))
 	}
 	return s.api.Config.View(ctx)
 }

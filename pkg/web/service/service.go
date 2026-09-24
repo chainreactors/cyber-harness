@@ -88,7 +88,9 @@ func NewService(cfg ServiceConfig) *Service {
 	if cfg.Profile != nil {
 		svc.profile = cfg.Profile
 	}
-	configAPI := managementapi.NewConfig(svc, cfg.ConfigAPI)
+	configOptions := cfg.ConfigAPI
+	configOptions.RuntimeLLM = svc.runtimeLLMConfig
+	configAPI := managementapi.NewConfig(svc, configOptions)
 	svc.api = &managementapi.API{
 		Sessions:  managementapi.NewSessions(cfg.Store, svc, generateID),
 		Config:    configAPI,
@@ -127,7 +129,7 @@ func (s *Service) SetAgentPool(pool *AgentPool) {
 		return
 	}
 	pool.SetSessionLookup(s)
-	pool.config = s.api.Config.Distribute
+	pool.config = s.nodeConfig
 }
 
 func (s *Service) Close(ctx context.Context) (resultErr error) {
