@@ -4,18 +4,19 @@ import type { TFunction } from 'i18next'
 import i18n from '../i18n'
 import {
   AlertTriangle,
+  Box,
+  Bug,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
   FileText,
+  Fingerprint,
   GitBranch,
   Layers,
   Link2,
   Loader2,
   MessageSquare,
   Network,
-  Radar,
-  RefreshCw,
   Sparkles,
   Target,
   User,
@@ -26,6 +27,7 @@ import {
 import { cn } from '@cyber/theme'
 import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import BrandMark from './brand/BrandMark'
+import BrandLogo from './brand/BrandLogo'
 import { CodeBlock, MarkdownContent } from '@/markdown'
 import {
   AssistantResponse,
@@ -519,20 +521,6 @@ export default function ChatPanel({
   const [livePhase, setLivePhase] = useState<'thinking' | 'done' | null>(null)
   const wasActiveRef = useRef(false)
 
-  // Composer seed — the mobile greeting's capability cards push a starter prompt
-  // into the composer through ChatInput's injectText (nonce-guarded append). Own
-  // the nonce here so each card tap reliably re-injects; still fold in an external
-  // injectText if one ever arrives (the asset-pool source is gone, so it's inert).
-  const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number }>(
-    () => injectText ?? { text: '', nonce: 0 },
-  )
-  useEffect(() => {
-    if (injectText && injectText.nonce > 0) setComposerSeed(injectText)
-  }, [injectText])
-  const seedComposer = useCallback((text: string) => {
-    setComposerSeed((s) => ({ text, nonce: s.nonce + 1 }))
-  }, [])
-
   function sendOpts() {
     if (!persist) return undefined
     const criteria = evalCriteria.trim()
@@ -728,7 +716,7 @@ export default function ChatPanel({
   const emptyState = !isThinking ? (
     <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-center py-4')}>
       <div className={inputFormClass}>
-        <ChatGreeting onSeed={seedComposer} />
+        <ChatGreeting />
         {!hasActiveSession && agents.length === 0 && (
           <p className="px-1 py-3 text-sm text-muted-foreground">{t('connectNodeHint')}</p>
         )}
@@ -831,11 +819,12 @@ export default function ChatPanel({
                         <Button
                           variant="ghost"
                           active={persist}
+                          aria-label={t('persistMode')}
                           onClick={() => setPersist((v) => !v)}
-                          className={cn('h-9 shrink-0 gap-1.5 rounded-full px-3 text-xs md:h-10 md:px-3.5', !persist && 'text-muted-foreground')}
+                          className={cn('h-9 shrink-0 gap-1.5 rounded-full px-2 text-xs sm:px-3 md:h-10 md:px-3.5', !persist && 'text-muted-foreground')}
                         >
                           <Target className="h-3.5 w-3.5" />
-                          {t('persistMode')}
+                          <span className="hidden sm:inline">{t('persistMode')}</span>
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t('persistHint')}</TooltipContent>
@@ -850,7 +839,7 @@ export default function ChatPanel({
                   composerHelp={composerHelp}
                   mentionables={mentionables}
                   renderMentionPopup={renderMentionPopup}
-                  injectText={composerSeed}
+                  injectText={injectText}
                   placeholder={t('typeMessageWithCommands')}
                   labels={{
                     dropFiles: t('dropFiles'),
@@ -1365,33 +1354,85 @@ function mergeIOAPayload(primary: IOAMessagePayload, fallback: IOAMessagePayload
   }
 }
 
-function ChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
+const mockVulnerabilityKeys = [
+  'idleFindingCVELog4j',
+  'idleFindingCVEPanOS',
+  'idleFindingOWASPAccess',
+  'idleFindingOWASPInjection',
+  'idleFindingIDOR',
+  'idleFindingSQLi',
+  'idleFindingXSS',
+  'idleFindingSSRF',
+] as const
+
+function ChatGreeting() {
   const { t } = useTranslation('chat')
-  const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
-    { key: 'scan', Icon: Radar, seed: '!scan -i ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
-    { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
-    { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
-  ]
+  const [findingIndex, setFindingIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let revealTimer: ReturnType<typeof setTimeout>
+    let hideTimer: ReturnType<typeof setTimeout>
+    let lastIndex = -1
+
+    const reveal = () => {
+      revealTimer = setTimeout(() => {
+        lastIndex = lastIndex < 0
+          ? Math.floor(Math.random() * mockVulnerabilityKeys.length)
+          : (lastIndex + 1 + Math.floor(Math.random() * (mockVulnerabilityKeys.length - 1))) % mockVulnerabilityKeys.length
+        setFindingIndex(lastIndex)
+        hideTimer = setTimeout(() => {
+          setFindingIndex(null)
+          reveal()
+        }, 1800)
+      }, 500 + Math.random() * 1300)
+    }
+
+    const updateMotion = () => {
+      clearTimeout(revealTimer)
+      clearTimeout(hideTimer)
+      setFindingIndex(reducedMotion.matches ? 0 : null)
+      if (!reducedMotion.matches) reveal()
+    }
+
+    updateMotion()
+    reducedMotion.addEventListener('change', updateMotion)
+    return () => {
+      reducedMotion.removeEventListener('change', updateMotion)
+      clearTimeout(revealTimer)
+      clearTimeout(hideTimer)
+    }
+  }, [])
+
   return (
-    <div className="px-1 pb-2 pt-8">
-      <h2 className="text-balance text-[1.35rem] font-bold leading-tight tracking-tight text-foreground">{t('mobileGreetingTitle')}</h2>
-      <p className="mb-5 mt-1 text-sm text-muted-foreground">{t('mobileGreetingSubtitle')}</p>
-      <div className="grid grid-cols-2 gap-2.5">
-        {cards.map(({ key, Icon, seed, seedKey, titleKey, subKey }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onSeed(seed ?? t(seedKey!))}
-            className="flex flex-col gap-2 rounded-[0.7rem] border border-border/75 bg-card p-3.5 text-left shadow-soft transition-transform active:scale-[0.98]"
-          >
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-primary">
-              <Icon className="h-[18px] w-[18px]" />
-            </span>
-            <span className="text-sm font-semibold text-foreground">{t(titleKey)}</span>
-            <span className="text-[11.5px] leading-snug text-muted-foreground">{t(subKey)}</span>
-          </button>
-        ))}
+    <div className="cyber-intro flex flex-col items-center px-1 py-5 text-center">
+      <div className="cyber-intro-visual" aria-hidden="true">
+        <span className="cyber-intro-axis cyber-intro-axis-horizontal" />
+        <span className="cyber-intro-axis cyber-intro-axis-vertical" />
+        <span className="cyber-intro-ring cyber-intro-ring-outer" />
+        <span className="cyber-intro-ring cyber-intro-ring-middle" />
+        <span className="cyber-intro-ring cyber-intro-ring-inner" />
+        <span className="cyber-intro-sweep" />
+        <span className="cyber-intro-detection cyber-intro-detection-asset">
+          <Box size={12} />{t('idleAsset')}
+        </span>
+        <span className="cyber-intro-detection cyber-intro-detection-port">
+          <Network size={12} />{t('idlePort')}
+        </span>
+        <span className="cyber-intro-detection cyber-intro-detection-fingerprint">
+          <Fingerprint size={12} />{t('idleFingerprint')}
+        </span>
+        {findingIndex !== null && (
+          <span className="cyber-intro-detection cyber-intro-detection-finding">
+            <Bug size={12} />{t(mockVulnerabilityKeys[findingIndex])}
+          </span>
+        )}
+        <span className="cyber-intro-core">
+          <BrandLogo size={60} animated={false} />
+        </span>
       </div>
+      <h2 className="mt-5 font-display text-2xl font-semibold text-foreground">Cyber</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">{t('idlePrompt')}</p>
     </div>
   )
 }
