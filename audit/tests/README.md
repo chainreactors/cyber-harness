@@ -18,14 +18,14 @@ Build from the repository root with `make audit ARSENAL_EMBED=1`. Then run from
 `audit/`, supplying an absolute path to the resulting executable:
 
 ```sh
-AUDIT_SINGLEFILE_BINARY=/absolute/path/to/bin/cyber-audit go test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 3m
+AUDIT_SINGLEFILE_BINARY=/absolute/path/to/bin/cyber-audit go test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 10m
 ```
 
 PowerShell:
 
 ```powershell
 $env:AUDIT_SINGLEFILE_BINARY = (Resolve-Path ../bin/cyber-audit.exe).Path
-go test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 3m
+go test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 10m
 ```
 
 The test copies only the executable to a temporary directory, starts with empty
@@ -35,7 +35,9 @@ and first-run preparation before the model starts. A local scripted provider the
 executes arsenal remove/install, ripgrep, ast-grep, OSV's CLI capability check,
 proton and OKF through the real agent process and verifies the saved report.
 It makes no paid model calls and does not claim to test offline advisory coverage.
-The release workflow runs it against the actual Linux/amd64 artifact.
+It also invokes the available radare2/capa/FLOSS executables by name to analyze
+a benign PE fixture and validates their JSON evidence. The release workflow runs
+it against packaged Linux artifacts and the Windows amd64 artifact after UPX.
 
 ## Live model evaluation
 

@@ -208,7 +208,7 @@ func resolveAuditTask(option *cfg.Option) (string, bool, error) {
 	}
 	explicit := option.Prompt != "" || option.TaskFile != "" || len(option.Inputs) > 0
 	if task == "" && len(option.Inputs) > 0 {
-		task = "Audit the supplied source code for vulnerabilities and record evidence and coverage."
+		task = "Audit the supplied source code or binaries for vulnerabilities and record evidence and coverage."
 	}
 	if len(option.Inputs) > 0 {
 		task += "\n\nAudit inputs:\n" + strings.Join(option.Inputs, "\n")

@@ -69,6 +69,30 @@ and path; inspect all events to preserve multiple occurrences. Report directorie
 and .git are excluded by the audit extension. No full Git-history scan or Gitleaks
 parity is implied. Redact secret values in written findings and verify context.
 
+## Binary inspection
+
+Use only the tools listed in the current Tool versions. Windows amd64 includes
+radare2, capa and FLOSS; Linux amd64 includes capa and FLOSS. Other release
+platforms currently include only the source tools. Invoke executable names directly.
+
+```sh
+radare2 -N -q -c ij sample.exe > <report>/raw/binary-info.json
+radare2 -N -q -c 'aaa;aflj' sample.exe > <report>/raw/functions.json
+radare2 -N -q -c 'aaa;s entry0;pdfj' sample.exe > <report>/raw/entry-disassembly.json
+capa -q -j sample.exe > <report>/raw/capa.json
+floss -q -j sample.exe > <report>/raw/floss.json
+```
+
+Capture stderr and exit status too. radare2 uses `-v` for its version; `-N`
+disables user startup scripts. Select addresses from the function list for
+focused disassembly. The standalone build has no r2ghidra decompiler. capa
+includes its rules; matches describe capabilities, not confirmed vulnerabilities.
+FLOSS decoding coverage depends on target format/architecture; static strings
+alone do not establish code behavior. Preserve incomplete-analysis warnings.
+Do not execute samples unless the task explicitly authorizes it. Record file
+hashes, addresses/offsets, relevant instructions and unresolved analysis. These
+tools do not provide Java/Android/.NET decompilation or firmware unpacking.
+
 ## Git and tools
 
 Git is supplied by the environment. Use `git status`, `git diff`, `git show` and

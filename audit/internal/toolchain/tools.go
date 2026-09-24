@@ -26,7 +26,7 @@ var Required = requiredTools()
 
 func requiredTools() []Spec {
 	var tools []Spec
-	for name, version := range ToolSpec.Tools {
+	for name, version := range ToolSpec.ToolsFor(crtm.CurrentTarget()) {
 		tools = append(tools, Spec{name, version})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
@@ -173,7 +173,11 @@ func command(ctx context.Context, path, input string, args ...string) ([]byte, e
 func Probe(ctx context.Context, spec Spec, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	output, err := command(ctx, path, "", "--version")
+	versionFlag := "--version"
+	if spec.Name == "radare2" {
+		versionFlag = "-v"
+	}
+	output, err := command(ctx, path, "", versionFlag)
 	if err != nil {
 		return "", fmt.Errorf("version check: %w", err)
 	}
@@ -212,8 +216,6 @@ func Probe(ctx context.Context, spec Spec, path string) (string, error) {
 				}
 			}
 		}
-	default:
-		return version, fmt.Errorf("unknown required tool %s", spec.Name)
 	}
 	if err != nil {
 		return version, fmt.Errorf("capability check: %w", err)

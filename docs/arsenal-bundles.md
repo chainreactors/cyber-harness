@@ -4,7 +4,7 @@ Arsenal 可以在构建时下载指定工具，把可执行文件压缩并嵌入
 
 ## 构建
 
-Arsenal 在 CRTM 的 [arsenal.yaml](https://github.com/chainreactors/crtm/blob/master/pkg/registry/arsenal.yaml) 统一维护工具的仓库、默认版本、平台文件名和使用提示。命令安装和 bundle 构建共用这个目录。新增场景需要的工具直接补充到这里，例如：
+Arsenal 在本仓库的 [arsenal.yaml](../pkg/exts/arsenal/arsenal.yaml) 统一维护工具的仓库、默认版本、平台文件名和使用提示。命令安装和 bundle 构建共用这个目录。新增场景需要的工具直接补充到这里，例如：
 
 ```yaml
 - name: example
@@ -18,14 +18,18 @@ Arsenal 在 CRTM 的 [arsenal.yaml](https://github.com/chainreactors/crtm/blob/m
 
 空的平台条目使用 `asset_pattern`；特殊平台可以用 `asset` 指定文件名。声明了 `platforms` 的工具会在下载前拒绝未列出的平台。
 
-发行入口只选择工具名称：[aiscan](../cmd/aiscan/bundle.yaml) 选择 `rg`，[audit](../audit/cmd/cyber-audit/bundle.yaml) 选择三个工具。audit 的完整清单为：
+发行入口只选择工具名称：[aiscan](../cmd/aiscan/bundle.yaml) 选择 `rg`，[audit](../audit/cmd/cyber-audit/bundle.yaml) 按平台选择工具。audit 的完整清单为：
 
 ```yaml
 id: cyber-audit
+catalog: ../../../pkg/exts/arsenal/arsenal.yaml
 tools: [rg, ast-grep, osv-scanner]
+platforms:
+  windows/amd64: [radare2, capa, floss]
+  linux/amd64: [capa, floss]
 ```
 
-无需复制工具定义或维护另一份版本表。CRTM 依赖版本锁定目录修订，生成器按名称取出默认版本与平台规则。`id` 标识发行版，应跨应用版本保持不变。需要单独覆盖版本时，`tools` 也支持 `{rg: "15.2.0"}` 映射；未知名称在构建时失败。可选 `catalog` 指向一份同格式的外部工具目录，路径相对 bundle 清单。audit 的版本预检需要固定版本。
+无需复制工具定义或维护另一份版本表。工具目录随 cyber-harness 版本维护，增删工具或更新版本无需修改 CRTM。生成器按名称取出默认版本与平台规则；`platforms` 是各平台在公共 `tools` 之上的增量选择。`id` 标识发行版，应跨应用版本保持不变。需要单独覆盖版本时，`tools` 也支持 `{rg: "15.2.0"}` 映射；未知名称在构建时失败。`catalog` 路径相对 bundle 清单。运行时的 Arsenal 扩展嵌入同一份完整目录，所以未打包的工具仍可按需下载；生成元数据仅保留选中工具定义。CRTM 自带目录保留为独立使用时的默认值，本仓库定义优先。audit 的版本预检需要固定版本。
 
 ```sh
 make ARSENAL_EMBED=1

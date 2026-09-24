@@ -154,12 +154,6 @@ jobs:
           if [[ -x "${OUTDIR}/${BUILD}_linux_amd64" ]]; then
             expected="aiscan"; [[ "$BUILD" == "cyber-audit" ]] && expected="cyber-audit"
             test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "$expected v${VERSION}"
-
-            if [[ "$BUILD" == "cyber-audit" ]]; then
-              AUDIT_SINGLEFILE_BINARY="$(realpath "${OUTDIR}/${BUILD}_linux_amd64")" \
-                CGO_ENABLED=0 GOWORK=off go -C audit test ./internal/app \
-                  -run '^TestSingleFileRelease$' -count=1 -v -timeout 3m
-            fi
           fi
 
           echo "=== Binaries ==="
@@ -271,6 +265,17 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: audit/go.mod
+          cache-dependency-path: audit/go.sum
+
       - name: Download release bundle
         uses: actions/download-artifact@v7
         with:
@@ -296,12 +301,30 @@ jobs:
             fi
           done
 
+      - name: Test packaged audit single-file release
+        env:
+          AUDIT_SINGLEFILE_BINARY: ${{ runner.temp }}/cyber-audit/cyber-audit
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: go -C audit test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 10m
+
   # UPX can report a structurally valid PE that still crashes at process
   # startup. Run the exact packaged Windows binaries before publishing them.
   verify-windows-release:
     needs: package
     runs-on: windows-2022
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: audit/go.mod
+          cache-dependency-path: audit/go.sum
+
       - name: Download release bundle
         uses: actions/download-artifact@v7
         with:
@@ -339,3 +362,10 @@ jobs:
               }
             }
           }
+
+      - name: Test packaged audit single-file release after UPX
+        env:
+          AUDIT_SINGLEFILE_BINARY: ${{ runner.temp }}/cyber-audit_windows_amd64/cyber-audit.exe
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: go -C audit test ./internal/app -run '^TestSingleFileRelease$' -count=1 -v -timeout 10m

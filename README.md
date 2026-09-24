@@ -83,7 +83,7 @@ make ARSENAL_EMBED=1 # download and embed tools for automatic offline extraction
 
 Use the Go version declared in [go.mod](go.mod). Full builds also need Node.js/npm; standard and full builds use CGO_ENABLED=0. Build tags are defined in [editions.env](editions.env); native recording requires CGO and is a separate [record build](docs/record.md).
 
-Arsenal maintains tool definitions and default versions in CRTM's [arsenal.yaml](https://github.com/chainreactors/crtm/blob/master/pkg/registry/arsenal.yaml). Each distribution selects names in [cmd/aiscan/bundle.yaml](cmd/aiscan/bundle.yaml) or [audit/cmd/cyber-audit/bundle.yaml](audit/cmd/cyber-audit/bundle.yaml). See [Arsenal bundles](docs/arsenal-bundles.md) for cross compilation, offline distribution, and tool upgrade behavior.
+Arsenal maintains tool definitions and default versions in the harness [arsenal.yaml](pkg/exts/arsenal/arsenal.yaml). Each distribution selects names in [cmd/aiscan/bundle.yaml](cmd/aiscan/bundle.yaml) or [audit/cmd/cyber-audit/bundle.yaml](audit/cmd/cyber-audit/bundle.yaml). See [Arsenal bundles](docs/arsenal-bundles.md) for cross compilation, offline distribution, and tool upgrade behavior.
 
 For custom distributions, call `harness.BaseExtensions(config)`, append your extensions, and pass them to `extension.New`. The host owns Load/Close. The reference distribution is assembled in [cmd/aiscan](cmd/aiscan). Embedders can use [pkg/harness](pkg/harness) for a generic host, or compose their own extensions; it does not reproduce the complete aiscan distribution. See the runnable [custom example](examples/custom) and the [extension development guide](docs/development.md).
 

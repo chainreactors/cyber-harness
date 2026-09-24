@@ -59,7 +59,7 @@ func TestSingleFileRelease(t *testing.T) {
 	env = append(env, "PATH="+path, "HOME="+root, "USERPROFILE="+root, "HTTP_PROXY="+proxy.URL, "HTTPS_PROXY="+proxy.URL, "ALL_PROXY="+proxy.URL, "NO_PROXY=127.0.0.1,localhost")
 	run := func(want int, args ...string) string {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, executable, args...)
 		cmd.Dir, cmd.Env = root, env
@@ -128,6 +128,27 @@ func TestSingleFileRelease(t *testing.T) {
 		{"write", map[string]any{"path": "report/index.md", "content": "---\nokf_version: \"0.2\"\n---\n\n# Single-file audit\n\nSee [coverage](coverage.json), [findings](findings.json) and [log](log.md).\n"}},
 		{"bash", map[string]any{"command": "okf validate report"}},
 	}
+	// Analyze a benign PE as data on each supported host. The target is never run.
+	reverse := map[string]string{
+		"radare2": `radare2 -N -q -c ij sample.exe > report/raw/radare2.json`,
+		"capa":    `capa -q -j sample.exe > report/raw/capa.json`,
+		"floss":   `floss -q -j sample.exe > report/raw/floss.json`,
+	}
+	for _, spec := range toolchain.Required {
+		if command, ok := reverse[spec.Name]; ok {
+			steps = append(steps, struct {
+				name string
+				args any
+			}{"bash", map[string]any{"command": command}})
+		}
+	}
+	fixture, err := os.ReadFile("testdata/reverse/sample.pe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "sample.exe"), fixture, 0644); err != nil {
+		t.Fatal(err)
+	}
 	var requests atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -145,7 +166,7 @@ func TestSingleFileRelease(t *testing.T) {
 	defer provider.Close()
 	// A second empty data directory exercises automatic preparation before model startup.
 	report := filepath.Join(workspace, "report")
-	run(0, "--workdir", workspace, "--data-dir", filepath.Join(root, "agent-data"), "--report-dir", report, "--provider", "openai", "--base-url", provider.URL, "--api-key", "fixture", "--model", "fixture", "-p", "Validate the fixture tools and save a report", "--quiet", "--no-color", "--timeout", "60")
+	run(0, "--workdir", workspace, "--data-dir", filepath.Join(root, "agent-data"), "--report-dir", report, "--provider", "openai", "--base-url", provider.URL, "--api-key", "fixture", "--model", "fixture", "-p", "Validate the fixture tools and save a report", "--quiet", "--no-color", "--timeout", "180")
 	if requests.Load() != int32(len(steps)+1) {
 		t.Fatalf("provider requests: %d", requests.Load())
 	}
@@ -157,6 +178,35 @@ func TestSingleFileRelease(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(report, "raw/proton.jsonl")); err != nil {
 		t.Fatal(err)
+	}
+	for _, spec := range toolchain.Required {
+		if _, ok := reverse[spec.Name]; !ok {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(report, "raw", spec.Name+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result map[string]json.RawMessage
+		if err := json.Unmarshal(body, &result); err != nil {
+			t.Fatalf("%s JSON: %v\n%.1000s", spec.Name, err, body)
+		}
+		switch spec.Name {
+		case "radare2":
+			var bin struct{ Arch string }
+			if err := json.Unmarshal(result["bin"], &bin); err != nil || bin.Arch != "x86" {
+				t.Fatalf("radare2 failed PE inspection: %.1000s", body)
+			}
+		case "capa":
+			var rules map[string]any
+			if err := json.Unmarshal(result["rules"], &rules); err != nil || len(rules) == 0 {
+				t.Fatalf("capa failed bundled-rule analysis: %.1000s", body)
+			}
+		case "floss":
+			if !bytes.Contains(result["strings"], []byte("AUDIT_REVERSE_FIXTURE")) {
+				t.Fatal("FLOSS failed to recover the fixture string")
+			}
+		}
 	}
 	var result runReport
 	body, err = os.ReadFile(filepath.Join(report, "run.json"))

@@ -3,7 +3,7 @@ module github.com/chainreactors/cyber/audit
 go 1.26
 
 require (
-	github.com/chainreactors/crtm v0.0.3-0.20260924045435-079681bc1574
+	github.com/chainreactors/crtm v0.0.3-0.20260924100410-4176599e1a4c
 	github.com/chainreactors/cyber v0.0.0
 	github.com/chainreactors/cyber/aop v0.0.0-20260818112202-76d90a72b2c5
 	github.com/jessevdk/go-flags v1.6.1

@@ -1,14 +1,16 @@
 # cyber-audit
 
-Model-led, multi-language source-code auditing on cyber-harness. The model
+Model-led source and binary auditing on cyber-harness. The model
 investigates code and business logic; tools provide text/AST search, dependency
-advisories and content leak evidence. No LSP or SAST engine is required.
+advisories, content leak evidence and static binary analysis. No LSP or SAST engine
+is required.
 
 ## Build
 
 Go 1.26, from a checkout of this repository:
 
-For a single executable containing all three required tools, run from the repository root:
+For a single executable containing the tools selected for your platform, run
+from the repository root:
 
 ```sh
 make audit ARSENAL_EMBED=1
@@ -16,12 +18,14 @@ make audit ARSENAL_EMBED=1
 
 This produces `bin/cyber-audit` (`.exe` on Windows). Downloads happen during the
 build. On first use, audit extracts the tools before model startup, without
-network access. CRTM's [arsenal.yaml](https://github.com/chainreactors/crtm/blob/master/pkg/registry/arsenal.yaml)
+network access. The harness [arsenal.yaml](../pkg/exts/arsenal/arsenal.yaml)
 owns tool definitions and default versions; [cmd/cyber-audit/bundle.yaml](cmd/cyber-audit/bundle.yaml)
-selects `rg`, `ast-grep`, and `osv-scanner` by name. Both runtime requirements and bundle metadata are generated
+selects tools by name, with platform additions for reverse analysis. Tool updates
+require no CRTM change. Both runtime requirements and bundle metadata are generated
 from that selection. All distributions use the `arsenal_embed` tag, with separate
 payload directories so audit never includes aiscan's bundle.
-GitHub release builds enable this mode and test the Linux executable in isolation.
+GitHub release builds enable this mode and test the packaged Linux and Windows
+executables in isolation, including Windows after UPX.
 
 To generate a bundle and build manually, from the repository root:
 
@@ -93,6 +97,9 @@ Windows uses the harness shell (Git Bash recommended; cmd fallback is available)
 | Structural patterns | `ast-grep` | 0.45.3 |
 | Dependency advisories | `osv-scanner` | 2.6.0 |
 | Content leaks | built-in `proton` | harness dependency and keys rules |
+| Binary inspection and disassembly | `radare2` | 6.2.2; Windows amd64 |
+| Executable capabilities | `capa` | 9.4.0; Windows/Linux amd64 |
+| Static, stack and decoded strings | `floss` | 3.1.1; Windows/Linux amd64 |
 
 Before provider startup, audit checks shared `arsenal/bin` and PATH, verifies
 version and required CLI behavior, then installs missing/incompatible tools via
@@ -103,8 +110,8 @@ performed each launch. Installation validates a staged executable and preserves
 an existing version on failure. `tools install` preprovisions without starting a
 model. `doctor` only checks tools, never creates directories or downloads.
 
-All six platforms have explicit release-asset/executable mappings. Bundled builds
-prepare tools from embedded resources; smaller builds need GitHub access when a
+The three source tools support all six platforms. Reverse tools are included
+only on the platforms listed above. Bundled builds prepare tools from embedded resources; smaller builds need GitHub access when a
 required tool is missing. Bundle-managed installations follow application
 versions, while user upgrades and edits are preserved. `doctor` remains read-only,
 even in bundled builds. SCA needs OSV connectivity or an explicitly provisioned
@@ -116,6 +123,26 @@ Third-party GitHub release tools remain available through
 can define tag patterns and platform-specific assets/executables. This is not a
 generic go/npm/pip/source installer. External CLIs execute through bash; audit
 adds no duplicate search/scan wrappers.
+
+## Binary analysis
+
+Point `--workdir` at a directory containing the sample and describe the target
+with `-p`. Call the available tools directly through bash:
+
+```sh
+radare2 -N -q -c ij sample.exe
+radare2 -N -q -c 'aaa;aflj' sample.exe
+radare2 -N -q -c 'aaa;s entry0;pdfj' sample.exe
+capa -q -j sample.exe
+floss -q -j sample.exe
+```
+
+Each tool is a single executable; capa includes its rules. This first stage adds
+static inspection and disassembly, capability evidence and string extraction.
+It does not include r2ghidra, Java/Android/.NET decompilation or firmware unpacking.
+Host platform support does not imply support for every target format or CPU.
+Record unsupported analysis and warnings in coverage; capability matches and
+strings alone do not prove a vulnerability. Do not execute a sample by default.
 
 ## Evidence and limits
 

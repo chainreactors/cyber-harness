@@ -20,6 +20,32 @@ func TestToolMetadataCurrent(t *testing.T) {
 	if !reflect.DeepEqual(spec, ToolSpec) {
 		t.Fatal("tool metadata is stale; run make audit-arsenal-spec")
 	}
+	for _, os := range []string{"windows", "linux", "darwin"} {
+		for _, arch := range []string{"amd64", "arm64"} {
+			target := crtm.Target{GOOS: os, GOARCH: arch}
+			want := []string{"rg", "ast-grep", "osv-scanner"}
+			if arch == "amd64" && os != "darwin" {
+				want = append(want, "capa", "floss")
+				if os == "windows" {
+					want = append(want, "radare2")
+				}
+			}
+			got := spec.ToolsFor(target)
+			if len(got) != len(want) {
+				t.Fatalf("%s: %v, want %v", target, got, want)
+			}
+			catalog := crtm.NewCatalog(spec.CustomTools)
+			for _, name := range want {
+				entry, ok := catalog.Find(name)
+				if !ok || entry.Version == "" || got[name] != entry.Version {
+					t.Fatalf("%s missing from harness catalog", name)
+				}
+				if _, _, err := entry.AssetFor(entry.Version, os, arch); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
 }
 
 func TestDoctorIsReadOnly(t *testing.T) {
@@ -34,7 +60,7 @@ func TestDoctorIsReadOnly(t *testing.T) {
 		return nil
 	}
 	statuses := manager.Check(t.Context())
-	if len(statuses) != 3 {
+	if len(statuses) != len(Required) {
 		t.Fatal(statuses)
 	}
 	for _, s := range statuses {
@@ -84,12 +110,12 @@ func TestEnsureInstallsOnlyMissingAndValidates(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(statuses) != 3 {
+		if len(statuses) != len(Required) {
 			t.Fatal(statuses)
 		}
 	}
-	if installs != 2 {
-		t.Fatalf("expected two installs total, got %d", installs)
+	if installs != len(Required)-1 {
+		t.Fatalf("expected %d installs total, got %d", len(Required)-1, installs)
 	}
 }
 func TestEnsureFailureAndCancellation(t *testing.T) {
