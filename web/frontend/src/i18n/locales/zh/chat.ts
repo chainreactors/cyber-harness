@@ -83,7 +83,7 @@ export default {
     completed: '已完成',
   },
   persistMode: 'Goal',
-  persistHint: '开启 Goal 模式:用自然语言描述目标与完成标准,由独立评估器逐轮判定,未达标则带反馈自动重跑,直到达标或评估器判定再跑也没有进展。',
+  persistHint: 'Goal：输入目标和完成标准，自动逐轮检查。',
   evalCriteriaLabel: '完成标准',
   evalCriteriaPlaceholder: '用自然语言描述「做到什么程度算完成」，交由独立评估器判定是否达标',
   evalModeBadge: '评估器判定',

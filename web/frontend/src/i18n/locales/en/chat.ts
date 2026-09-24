@@ -83,7 +83,7 @@ export default {
     completed: 'completed',
   },
   persistMode: 'Goal',
-  persistHint: 'Goal mode: describe the goal and its done-when criteria in plain language; an independent evaluator judges each round and re-runs with feedback until it passes, or until it decides another round would not help.',
+  persistHint: 'Goal: describe the objective and completion criteria; each round is checked automatically.',
   evalCriteriaLabel: 'Done-when',
   evalCriteriaPlaceholder: 'Describe in plain language what "done" looks like — judged by an independent evaluator',
   evalModeBadge: 'AI-judged',

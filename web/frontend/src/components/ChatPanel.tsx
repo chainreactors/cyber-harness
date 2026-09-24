@@ -504,16 +504,8 @@ export default function ChatPanel({
     [t, viewerTimeline],
   )
   const inputFormClass = cn(contentOffsetClass, hasIOARail && threadOffsetClass)
+  const composerRootRef = useRef<HTMLDivElement>(null)
   const [persist, setPersist] = useState(false)
-  // Goal mode: describe done-when criteria in natural language and let an
-  // independent evaluator judge completion each round, re-driving the agent
-  // until it passes or the evaluator itself says further rounds won't help.
-  // evalRounds is optional and free-form: a number is a hard ceiling, plain
-  // language ("dig deep, up to ten rounds") is handed to the evaluator to
-  // follow, and empty leaves the stop decision entirely to it.
-  const [evalCriteria, setEvalCriteria] = useState('')
-  const [evalRounds, setEvalRounds] = useState('')
-  const evalRef = useRef<HTMLTextAreaElement>(null)
   // Screen-reader turn status. Streamed replies mutate the DOM silently, so
   // mirror the coarse turn phase into a polite live region below. It announces
   // transitions (thinking → responding → done), never the token stream itself
@@ -521,22 +513,16 @@ export default function ChatPanel({
   const [livePhase, setLivePhase] = useState<'thinking' | 'done' | null>(null)
   const wasActiveRef = useRef(false)
 
-  function sendOpts() {
+  function sendOpts(content: string) {
     if (!persist) return undefined
-    const criteria = evalCriteria.trim()
-    if (criteria) return { persist: true, evalCriteria: criteria, evalRounds: evalRounds.trim() }
-    // Goal toggled on but no criteria typed → nothing for the evaluator to
-    // judge, so send as a plain one-off message rather than an open-ended run.
+    const criteria = content.trim()
+    if (criteria) return { persist: true, evalCriteria: criteria }
     return undefined
   }
 
-  // A Goal is a one-shot kickoff: once dispatched, clear the panel so the next
-  // message isn't silently re-sent as a fresh multi-round run against stale
-  // criteria, and so the composer visibly returns to plain-chat state.
+  // A Goal is a one-shot kickoff; the next message starts in plain-chat mode.
   function resetGoal() {
     setPersist(false)
-    setEvalCriteria('')
-    setEvalRounds('')
   }
 
   // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
@@ -605,23 +591,9 @@ export default function ChatPanel({
   }, [activeSessionID, i18n.language, t])
 
   useEffect(() => {
-    // Goal (persist/eval) mode is per-session intent. ChatPanel doesn't remount
-    // on session switch, so clear it here — otherwise session A's done-when
-    // criteria stays toggled on and gets silently sent with the next message in
-    // session B (an unexpected multi-round agentic run against stale criteria).
+    // Goal mode is per-session intent; ChatPanel stays mounted on session switch.
     setPersist(false)
-    setEvalCriteria('')
-    setEvalRounds('')
   }, [activeSessionID])
-
-  // Auto-grow the goal criteria textarea (min ~2 rows, capped) so long
-  // natural-language goals stay readable instead of scrolling a one-liner.
-  useEffect(() => {
-    const el = evalRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 144) + 'px'
-  }, [evalCriteria, persist])
 
   // Derive the polite screen-reader status from the turn phase. `isBusy` keeps
   // the "working" state across tool-execution gaps (thinking false, no stream)
@@ -643,7 +615,7 @@ export default function ChatPanel({
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
     const sessionID = await ensureSession()
     if (!sessionID) return false
-    const opts = sendOpts()
+    const opts = sendOpts(content)
     const contextParts: string[] = []
     for (const attachment of attachments || []) {
       if (attachment.mode === 'context') {
@@ -777,40 +749,9 @@ export default function ChatPanel({
               </div>
             )}
             <div className={workspaceClass}>
-              <div className={inputFormClass}>
+              <div className={inputFormClass} ref={composerRootRef}>
                 <ViewerChatPanel.Input
                   className="!border-t-0 !bg-transparent !backdrop-blur-none"
-                  topSlot={persist ? (
-                    <div className="bg-primary/[0.04] px-3.5 py-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-primary">
-                          <Target className="h-3.5 w-3.5" />
-                          {t('persistMode')}
-                        </span>
-                        <label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                          {t('evalRoundsLabel')}
-                          <input
-                            type="text"
-                            value={evalRounds}
-                            placeholder={t('evalRoundsAuto')}
-                            onChange={(e) => setEvalRounds(e.target.value)}
-                            className="w-36 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
-                          />
-                        </label>
-                      </div>
-                      <textarea
-                        ref={evalRef}
-                        rows={2}
-                        value={evalCriteria}
-                        onChange={(e) => setEvalCriteria(e.target.value)}
-                        placeholder={t('evalCriteriaPlaceholder')}
-                        className="block max-h-36 min-h-[3.25rem] w-full resize-none overflow-y-auto rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
-                      />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                        {evalRounds.trim() ? t('evalModeHintCapped', { rounds: evalRounds.trim() }) : t('evalModeHint')}
-                      </p>
-                    </div>
-                  ) : undefined}
                   leading={
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -820,11 +761,14 @@ export default function ChatPanel({
                           variant="ghost"
                           active={persist}
                           aria-label={t('persistMode')}
-                          onClick={() => setPersist((v) => !v)}
-                          className={cn('h-9 shrink-0 gap-1.5 rounded-full px-2 text-xs sm:px-3 md:h-10 md:px-3.5', !persist && 'text-muted-foreground')}
+                          aria-pressed={persist}
+                          onClick={() => {
+                            setPersist((v) => !v)
+                            composerRootRef.current?.querySelector('textarea')?.focus()
+                          }}
+                          className={cn('h-9 w-9 shrink-0 rounded-full p-0 md:h-10 md:w-10', !persist && 'text-muted-foreground')}
                         >
                           <Target className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">{t('persistMode')}</span>
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t('persistHint')}</TooltipContent>

@@ -1,8 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
-// Pacing said the way an operator would say it, rather than as a round count.
-const PACING = '尽量深入，最多十轮'
 // Goal mode needs a model that can answer an evaluator call with a verdict tool
 // call — a real one, or a stand-in that scripts it. The default e2e stand-in
 // only replies PONG, so the round-driving test stays opt-in.
@@ -17,32 +15,29 @@ async function login(page: Page) {
 }
 
 async function openGoalSession(page: Page) {
+  const newTask = page.locator('aside [data-node-id="e2e-node"]').getByRole('button', { name: 'New task on e2e-node' })
   const remoteNode = page.getByRole('button', { name: /e2e-node.*idle/ })
-  await expect(remoteNode).toBeVisible({ timeout: 20_000 })
-  await remoteNode.locator('xpath=..').getByRole('button', { name: 'New', exact: true }).click()
-  await expect(page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })).toBeVisible()
+  await expect(newTask.or(remoteNode)).toBeVisible({ timeout: 20_000 })
+  if (await newTask.count()) {
+    await newTask.click()
+  } else {
+    await remoteNode.locator('xpath=..').getByRole('button', { name: 'New', exact: true }).click()
+  }
+  await expect(page.getByRole('textbox', { name: 'Your goal' })).toBeVisible()
   await page.getByRole('button', { name: 'Goal' }).click()
 }
 
-test('goal panel takes pacing in plain language, not a round count', async ({ page }) => {
+test('goal mode uses the existing message box', async ({ page }) => {
   test.setTimeout(90_000)
   await login(page)
   await openGoalSession(page)
-
-  // Empty means auto: the evaluator alone decides when to stop.
-  const rounds = page.getByPlaceholder('auto, or e.g. 10')
-  await expect(rounds).toHaveValue('')
-  await expect(page.getByText(/keeps driving the agent until the goal is met/)).toBeVisible()
-
-  // The field is free-form, so a sentence survives it — the old spinner would
-  // have clamped this to a number.
-  await rounds.fill(PACING)
-  await expect(rounds).toHaveValue(PACING)
-  await expect(page.getByText(`following your pacing: ${PACING}`)).toBeVisible()
-
-  // A number is still a number.
-  await rounds.fill('3')
-  await expect(page.getByText('following your pacing: 3')).toBeVisible()
+  const goal = '统计当前目录下的文件数量，并说明用什么命令得到的'
+  const composer = page.getByRole('textbox', { name: 'Your goal' })
+  await expect(composer).toBeFocused()
+  await composer.fill(goal)
+  await expect(composer).toHaveValue(goal)
+  await expect(page.locator('textarea')).toHaveCount(1)
+  await expect(page.getByPlaceholder(/Describe in plain language what "done" looks like/)).toHaveCount(0)
 })
 
 type EvalDetail = { state?: string; round?: number; maxRounds?: number; pass?: boolean; reason?: string }
@@ -72,18 +67,11 @@ test('goal mode drives rounds off the evaluator verdict', async ({ page, request
   await login(page)
   await openGoalSession(page)
 
-  const rounds = page.getByPlaceholder('auto, or e.g. 10')
-  await rounds.fill(PACING)
-  await expect(rounds).toHaveValue(PACING)
-  const criteria = page.getByPlaceholder(/Describe in plain language what "done" looks like/)
-  await criteria.fill('必须给出当前目录下文件的数量，并说明用什么命令得到的')
-  await expect(criteria).toHaveValue('必须给出当前目录下文件的数量，并说明用什么命令得到的')
-
   const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1) || ''
   expect(sessionID).not.toBe('')
 
-  await page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })
-    .fill('统计当前目录下的文件数量')
+  await page.getByRole('textbox', { name: 'Your goal' })
+    .fill('必须给出当前目录下文件的数量，并说明用什么命令得到的')
   await page.getByRole('button', { name: 'Send message' }).click()
 
   // A round was judged, so what the browser sent really entered the eval loop.
@@ -95,8 +83,7 @@ test('goal mode drives rounds off the evaluator verdict', async ({ page, request
   const details = await evalDetails(request, sessionID)
   expect(details.some((d) => d.state === 'eval_start')).toBeTruthy()
   const ended = details.filter((d) => d.state === 'eval_end')
-  // "最多十轮" is below the default backstop, so it must not lower it — the
-  // evaluator reads the sentence, the backstop only ever gets raised.
+  // With no pacing override, the default backstop remains in force.
   expect(details[0].maxRounds).toBe(20)
   // The loop ended on a verdict, not by exhausting the backstop.
   expect(ended.at(-1)?.round).toBeLessThan(20)
