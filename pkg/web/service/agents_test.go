@@ -1102,6 +1102,11 @@ func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, message *ptypb.Pro
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
+	nodes, err := page.Timeout(5*time.Second).ElementR("aside button", "Nodes")
+	if err != nil {
+		t.Fatalf("nodes view not available: %v", err)
+	}
+	nodes.MustClick()
 	terminal, err := page.Timeout(5*time.Second).ElementR("button", "Terminal")
 	if err != nil {
 		if toggle, toggleErr := page.Timeout(5 * time.Second).Element("button[aria-label='Expand sidebar']"); toggleErr == nil {
