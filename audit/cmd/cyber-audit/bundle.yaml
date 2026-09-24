@@ -1,6 +1,3 @@
 id: cyber-audit
 catalog: ../../../tools/arsenal/arsenal.yaml
 tools: [rg, ast-grep, osv-scanner]
-platforms:
-  windows/amd64: [radare2, capa, floss]
-  linux/amd64: [capa, floss]

@@ -71,9 +71,24 @@ parity is implied. Redact secret values in written findings and verify context.
 
 ## Binary inspection
 
-Use only the tools listed in the current Tool versions. Windows amd64 includes
-radare2, capa and FLOSS; Linux amd64 includes capa and FLOSS. Other release
-platforms currently include only the source tools. Invoke executable names directly.
+The catalog also contains optional reverse plugins. They are not prepared at
+audit startup. Search and install one only after identifying a matching target:
+
+```sh
+arsenal search reverse
+arsenal install goresym       # Go binaries
+arsenal install redress       # Go binaries; check its AGPL-3.0 license
+arsenal install rizin         # Windows amd64 alternative to radare2
+arsenal install upx           # UPX unpacking on Windows amd64
+arsenal install 7zz           # archive extraction on Windows amd64
+```
+
+After installation, verify the command and preserve its version output in the
+report. These tools are optional and are not part of the required-tool preflight.
+
+Use only the tools listed in the current Tool versions for commands that are
+already installed. The optional reverse plugins above are not guaranteed to be
+available until the model installs them. Invoke executable names directly.
 
 ```sh
 radare2 -N -q -c ij sample.exe > <report>/raw/binary-info.json

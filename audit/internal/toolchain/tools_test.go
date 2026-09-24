@@ -24,12 +24,6 @@ func TestToolMetadataCurrent(t *testing.T) {
 		for _, arch := range []string{"amd64", "arm64"} {
 			target := crtm.Target{GOOS: os, GOARCH: arch}
 			want := []string{"rg", "ast-grep", "osv-scanner"}
-			if arch == "amd64" && os != "darwin" {
-				want = append(want, "capa", "floss")
-				if os == "windows" {
-					want = append(want, "radare2")
-				}
-			}
 			got := spec.ToolsFor(target)
 			if len(got) != len(want) {
 				t.Fatalf("%s: %v, want %v", target, got, want)

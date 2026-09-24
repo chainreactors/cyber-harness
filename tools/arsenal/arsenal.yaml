@@ -46,6 +46,87 @@
     linux/amd64:
       asset: 'floss-v{version}-linux.zip'
 
+# Optional reverse-analysis binaries. They remain outside audit's default bundle
+# and are installed explicitly with `arsenal install <name>`.
+- name: rizin
+  version: 0.9.1
+  repo: rizinorg/rizin
+  asset_pattern: 'rizin-windows-static-v{version}.zip'
+  executable: rizin.exe
+  description: Static binary inspection and disassembly, as an alternative to radare2
+  tags: [reverse, binary, disassembly, alternative]
+  category: reverse
+  docs_url: https://rizin.re/
+  hint: 'Windows amd64 static package. Install explicitly when radare2 is not preferred; the Linux release currently uses tar.xz and is not included.'
+  platforms:
+    windows/amd64:
+      asset: 'rizin-windows-static-v{version}.zip'
+
+- name: goresym
+  version: 3.4.1
+  repo: mandiant/GoReSym
+  asset_pattern: 'GoReSym-{os}.zip'
+  executable: GoReSym.exe
+  description: Recover Go symbols, types and metadata from compiled binaries
+  tags: [reverse, binary, go, symbols]
+  category: reverse
+  docs_url: https://github.com/mandiant/GoReSym
+  hint: 'Use for Go binaries after identifying the target as Go. This is an optional plugin, not a general native decompiler.'
+  platforms:
+    darwin/amd64:
+      asset: 'GoReSym-mac.zip'
+    linux/amd64:
+      asset: 'GoReSym-linux.zip'
+    windows/amd64:
+      asset: 'GoReSym-windows.zip'
+
+- name: redress
+  version: 1.2.87
+  repo: goretk/redress
+  asset_pattern: 'redress-v{version}-{os}.zip'
+  executable: redress.exe
+  description: Recover Go binary symbols and runtime metadata
+  tags: [reverse, binary, go, symbols]
+  category: reverse
+  docs_url: https://github.com/goretk/redress
+  hint: 'AGPL-3.0. Use only when the distribution policy permits it; install explicitly for Go-specific analysis.'
+  platforms:
+    darwin/amd64:
+      asset: 'redress-v{version}-macos.tar.gz'
+    linux/amd64:
+      asset: 'redress-v{version}-linux-amd64.tar.gz'
+    windows/amd64:
+      asset: 'redress-v{version}-windows.zip'
+
+- name: upx
+  version: 5.2.1
+  repo: upx/upx
+  asset_pattern: 'upx-{version}-win64.zip'
+  executable: upx.exe
+  description: Detect and unpack UPX-protected executables
+  tags: [reverse, binary, unpacking, upx]
+  category: reverse
+  docs_url: https://upx.github.io/
+  hint: 'Windows amd64 optional unpacking utility. It does not replace format analysis or decompilation.'
+  platforms:
+    windows/amd64:
+      asset: 'upx-{version}-win64.zip'
+
+- name: 7zz
+  version: 26.03
+  repo: ip7z/7zip
+  asset_pattern: '7z2603-x64.exe'
+  tag_pattern: '{version}'
+  executable: 7z.exe
+  description: Standalone archive extraction utility for reverse and firmware workflows
+  tags: [reverse, firmware, archive, utility]
+  category: reverse
+  docs_url: https://www.7-zip.org/
+  hint: 'Windows amd64 standalone extractor. Use as a dependency for archive-based firmware triage; it does not unpack every filesystem format.'
+  platforms:
+    windows/amd64:
+      asset: '7z2603-x64.exe'
+
 - name: gogo
   version: 2.15.0
   repo: chainreactors/gogo

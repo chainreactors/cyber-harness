@@ -25,6 +25,11 @@ func TestHarnessCatalog(t *testing.T) {
 		{"capa", "linux", "capa-v1.2.3-linux.zip", "capa", "v1.2.3"},
 		{"floss", "windows", "floss-v1.2.3-windows.zip", "floss.exe", "v1.2.3"},
 		{"floss", "linux", "floss-v1.2.3-linux.zip", "floss", "v1.2.3"},
+		{"rizin", "windows", "rizin-windows-static-v1.2.3.zip", "rizin.exe", "v1.2.3"},
+		{"goresym", "windows", "GoReSym-windows.zip", "GoReSym.exe", "v1.2.3"},
+		{"redress", "windows", "redress-v1.2.3-windows.zip", "redress.exe", "v1.2.3"},
+		{"upx", "windows", "upx-1.2.3-win64.zip", "upx.exe", "v1.2.3"},
+		{"7zz", "windows", "7z2603-x64.exe", "7z.exe", "1.2.3"},
 	} {
 		entry, ok := manager.Catalog().Find(test.name)
 		if !ok {
