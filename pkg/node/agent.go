@@ -101,6 +101,13 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 					return reloadStatus(current)
 				}
 				nextOption, err := cfg.ResolveDistributedRuntime(distributed, option)
+				// The hub sends its configuration on every connection, including
+				// startup. An equivalent configuration must not close a connection
+				// that has already accepted the user's first session.
+				if err == nil && sameSharedConfig(currentOption, nextOption) {
+					applied = proto.CloneOf(distributed)
+					return reloadStatus(current)
+				}
 				var next profile.Profile
 				if err == nil {
 					mode := profile.ProviderOptional
@@ -181,6 +188,15 @@ func reloadStatus(p profile.Profile) (*types.ReloadResult, *aop.AgentStatus) {
 		result.Provider = active.Name()
 	}
 	return result, p.AgentStatus()
+}
+
+func sameSharedConfig(current, next *cfg.Option) bool {
+	before, err := cfg.SharedFromOption(current)
+	if err != nil {
+		return false
+	}
+	after, err := cfg.SharedFromOption(next)
+	return err == nil && proto.Equal(before, after)
 }
 
 func resolveRemoteAgentURLs(option *cfg.Option) error {

@@ -59,6 +59,8 @@ type ProxyHub struct {
 	decrypt   atomic.Bool
 	filterMu  sync.RWMutex
 	filter    QueryOpts
+	authMu    sync.RWMutex
+	auth      func(*http.Request) error
 
 	correlationMu sync.RWMutex
 	correlations  map[string]*correlationLease
@@ -148,6 +150,29 @@ func (r *Resource) Start(ctx context.Context) error {
 // relays.
 func (h *ProxyHub) Capturing() bool { return h.recording.Load() }
 
+// SetProxyAuth installs an optional, instance-scoped ingress policy. It runs
+// before HTTP forwarding or CONNECT tunneling, including in relay mode. A
+// non-nil error rejects the request with HTTP 407 before contacting the target.
+// The callback must be safe for concurrent requests. Passing nil allows all
+// requests, which is the default. Changes apply to subsequent requests, not
+// traffic inside an already established CONNECT tunnel.
+func (h *ProxyHub) SetProxyAuth(authorize func(*http.Request) error) {
+	h.authMu.Lock()
+	defer h.authMu.Unlock()
+	h.auth = authorize
+}
+
+func (h *ProxyHub) authorize(_ http.ResponseWriter, req *http.Request) (bool, error) {
+	h.authMu.RLock()
+	check := h.auth
+	h.authMu.RUnlock()
+	if check == nil {
+		return true, nil
+	}
+	err := check(req)
+	return err == nil, err
+}
+
 // SetCapture toggles capture at runtime without restarting the listener. record
 // gates storage; decryptHTTPS gates HTTPS MITM interception, which
 // only affects connections opened after the change because a child's CA trust
@@ -227,6 +252,7 @@ func (h *ProxyHub) start(caRootPath string) error {
 	// decrypt are both on, so a relay-mode child that tunnels HTTPS is never
 	// handed a forged certificate its env does not trust.
 	server.AddAddon(&captureAddon{hub: h})
+	server.SetAuthProxy(h.authorize)
 	server.SetShouldInterceptRule(func(*http.Request) bool {
 		return h.recording.Load() && h.decrypt.Load()
 	})

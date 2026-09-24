@@ -74,6 +74,32 @@ type reloadWaitTool struct {
 	drained atomic.Bool
 }
 
+func TestSharedConfigRecognizesStartupReload(t *testing.T) {
+	option := &cfg.Option{}
+	if err := cfg.LoadConfigBytes([]byte("llm:\n  providers:\n    - id: vision\n      provider: anthropic\n      base_url: https://api.deepseek.com/anthropic\n      api_key: test-key\n      model: deepseek-flash\n"), option); err != nil {
+		t.Fatal(err)
+	}
+	distributed, err := cfg.SharedFromOption(option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := cfg.ResolveDistributedRuntime(distributed, option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameSharedConfig(option, next) {
+		t.Fatal("startup sync should preserve the active connection")
+	}
+	distributed.Llm.Providers[0].Model = "deepseek-v4-pro"
+	next, err = cfg.ResolveDistributedRuntime(distributed, option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sameSharedConfig(option, next) {
+		t.Fatal("model change must reload")
+	}
+}
+
 func (*reloadWaitTool) Name() string        { return "reload_wait" }
 func (*reloadWaitTool) Description() string { return "wait for profile cancellation" }
 func (w *reloadWaitTool) Definition() *aop.ToolDefinition {

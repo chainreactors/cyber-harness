@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
-const E2E_MODEL = process.env.CYBER_E2E_LLM_MODEL || 'deepseek-chat'
+const E2E_MODEL = process.env.CYBER_E2E_LLM_MODEL || 'deepseek-flash'
 
 function rpcID(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`

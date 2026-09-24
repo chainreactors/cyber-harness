@@ -85,7 +85,7 @@ func (p *OpenAIProvider) ChatCompletionStream(ctx context.Context, req *ChatComp
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders, p.Name(), ProviderOpenAI,
 		true,
-		func(_ string, data []byte) (ChatCompletionStreamEvent, error) {
+		func(_ string, data []byte) ([]ChatCompletionStreamEvent, error) {
 			return parseOpenAIStreamChunk(data)
 		},
 	)
@@ -436,30 +436,32 @@ type openAIStreamChunk struct {
 	Error *APIError    `json:"error,omitempty"`
 }
 
-func parseOpenAIStreamChunk(data []byte) (ChatCompletionStreamEvent, error) {
+func parseOpenAIStreamChunk(data []byte) ([]ChatCompletionStreamEvent, error) {
 	var chunk openAIStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
-		return ChatCompletionStreamEvent{}, fmt.Errorf("unmarshal stream chunk: %w", err)
+		return nil, fmt.Errorf("unmarshal stream chunk: %w", err)
 	}
 	if chunk.Error != nil {
-		return ChatCompletionStreamEvent{}, chunk.Error
+		return nil, chunk.Error
 	}
 	event := ChatCompletionStreamEvent{Usage: chunk.Usage.toProto()}
 	if len(chunk.Choices) == 0 {
-		return event, nil
+		return []ChatCompletionStreamEvent{event}, nil
 	}
 	delta := chunk.Choices[0].Delta
 	event.Role = delta.Role
 	event.FinishReason = chunk.Choices[0].FinishReason
+	var events []ChatCompletionStreamEvent
+	if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
+		events = append(events, ChatCompletionStreamEvent{MessageDelta: &aop.MessageDelta{
+			Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
+			Value:     &aop.MessageDelta_Reasoning{Reasoning: *delta.ReasoningContent},
+		}})
+	}
 	if delta.Content != nil && *delta.Content != "" {
 		event.MessageDelta = &aop.MessageDelta{
 			Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
 			Value:     &aop.MessageDelta_Text{Text: *delta.Content},
-		}
-	} else if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
-		event.MessageDelta = &aop.MessageDelta{
-			Operation: aop.DeltaOperation_DELTA_OPERATION_APPEND,
-			Value:     &aop.MessageDelta_Reasoning{Reasoning: *delta.ReasoningContent},
 		}
 	}
 	for _, tc := range delta.ToolCalls {
@@ -471,7 +473,7 @@ func parseOpenAIStreamChunk(data []byte) (ChatCompletionStreamEvent, error) {
 		}
 		event.ToolDeltas = append(event.ToolDeltas, callDelta)
 	}
-	return event, nil
+	return append(events, event), nil
 }
 
 // --- WebSearch via OpenAI Responses API ---

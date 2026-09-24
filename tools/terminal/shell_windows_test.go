@@ -41,3 +41,11 @@ func TestWindowsBashFoundWhenInstalled(t *testing.T) {
 		}
 	}
 }
+
+func TestShellCommandAdapterScopesTerminalEnvironmentInCmd(t *testing.T) {
+	// Exercise the cmd fallback even on Windows machines with Git Bash.
+	original := windowsBash
+	windowsBash = func() string { return "" }
+	t.Cleanup(func() { windowsBash = original })
+	TestShellCommandAdapterScopesTerminalEnvironment(t)
+}

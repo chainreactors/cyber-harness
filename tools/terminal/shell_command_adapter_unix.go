@@ -39,7 +39,10 @@ func createShellCommandAdapterAlias(executable, runtimeDir, name string) (string
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	content := "#!/bin/sh\n" + shellCommandAdapterCommandEnv + "='" + name + "' exec \"$" + shellCommandAdapterExecutableEnv + "\" \"$@\"\n"
+	// The child only forwards framed IO. A terminal-color probe during host
+	// initialization can wait for a reply that a capture-only PTY never sends.
+	// Scope TERM to this child so the calling shell retains its terminal type.
+	content := "#!/bin/sh\nTERM=dumb " + shellCommandAdapterCommandEnv + "='" + name + "' exec \"$" + shellCommandAdapterExecutableEnv + "\" \"$@\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		return "", err
 	}

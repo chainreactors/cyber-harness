@@ -46,7 +46,9 @@ func createShellCommandAdapterAlias(executable, runtimeDir, name string) (string
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	content := "@echo off\r\n" +
+	// The framed-IO child must not probe terminal colors. setlocal keeps these
+	// variables private when another batch script calls this adapter.
+	content := "@echo off\r\nsetlocal\r\nset \"TERM=dumb\"\r\n" +
 		"set \"" + shellCommandAdapterCommandEnv + "=" + name + "\"\r\n" +
 		"\"%" + shellCommandAdapterExecutableEnv + "%\" %*\r\n" +
 		"exit /b %errorlevel%\r\n"

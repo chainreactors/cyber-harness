@@ -1049,6 +1049,31 @@ func TestLiveStatusEvalRoundUsesProtocolValue(t *testing.T) {
 	}
 }
 
+func TestRetryReplacesDeltaAccumulatorAndPrintOffsets(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	option := &cfg.Option{}
+	option.NoColor = true
+	o := NewStaticAgentOutputWithWriters(option, &stdout, &stderr, false)
+	defer o.Close()
+	o.SetVerbosity(2)
+	o.stream.enabled = true
+	o.HandleEvent(turnStartEvent(1))
+	o.HandleEvent(reasoningDeltaEvent("m-1", "long failed reasoning"))
+	o.HandleEvent(textDeltaEvent("m-1", "long failed answer"))
+	o.HandleEvent(messageEvent("m-1", "assistant"))
+	stdout.Reset()
+	stderr.Reset()
+	o.HandleEvent(reasoningDeltaEvent("m-1", "new thought"))
+	o.HandleEvent(textDeltaEvent("m-1", "new answer"))
+	o.stream.Flush()
+	if acc := o.deltas["m-1"]; acc.text != "new answer" || acc.reasoning != "new thought" {
+		t.Fatalf("retry accumulator = %+v", acc)
+	}
+	if !strings.Contains(stdout.String(), "new answer") || !strings.Contains(stderr.String(), "new thought") {
+		t.Fatalf("retry output was truncated: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestCompleteMessageClearsDeltaAccumulator(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 0, false)
