@@ -32,9 +32,9 @@ func runtimeDocsBundle() skills.Bundle {
 			return "", false, nil
 		}
 		data, err := assets.ReadFile("assets/runtime/" + strings.TrimPrefix(location, RuntimeDocsURI))
-		if err != nil {
-			return "", false, nil
+		if err == nil {
+			return string(data), true, nil
 		}
-		return string(data), true, nil
+		return "", false, nil
 	}}
 }

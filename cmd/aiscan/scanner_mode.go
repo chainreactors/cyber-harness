@@ -182,22 +182,6 @@ func defaultVerifyMode(value string) string {
 	return value
 }
 
-func removeScannerFlag(args []string, flag string) []string {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		key, _, hasValue := strings.Cut(arg, "=")
-		if key != flag {
-			out = append(out, arg)
-			continue
-		}
-		if !hasValue && i+1 < len(args) {
-			i++
-		}
-	}
-	return out
-}
-
 func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
 	if runtime == nil {
 		return fmt.Errorf("scanner Agent runtime is unavailable")

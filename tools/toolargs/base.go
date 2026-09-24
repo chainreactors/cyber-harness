@@ -34,7 +34,9 @@ func (b *Base) InitLogger(logger telemetry.Logger) {
 }
 
 func (b *Base) EmitArtifactCtx(ctx context.Context, tool, kind, target string, data any) {
-	b.EmitArtifactResultCtx(ctx, ArtifactResultID(tool, kind, target, data), tool, kind, target, data)
+	if err := b.EmitArtifactResultCtx(ctx, ArtifactResultID(tool, kind, target, data), tool, kind, target, data); err != nil && b.Logger != nil {
+		b.Logger.Warnf("emit %s artifact: %s", tool, err)
+	}
 }
 
 // ArtifactResultID returns a stable identity for one scanner-native record.
