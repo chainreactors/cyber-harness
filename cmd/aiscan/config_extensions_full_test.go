@@ -256,7 +256,7 @@ func TestWebConfigExtensionSavePreservesOmittedSectionsAndSecrets(t *testing.T) 
 
 func TestWebConfigScannerExtensionsPreserveSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	original := []byte("extensions:\n  cyberhub:\n    url: https://hub.example\n    key: hub-secret\n  recon:\n    fofa_key: fofa-secret\n    hunter_api_key: hunter-secret\n  scan:\n    verify: low\n")
+	original := []byte("extensions:\n  cyberhub:\n    url: https://hub.example\n    key: hub-secret\n  recon:\n    fofa_key: fofa-secret\n    hunter_api_key: hunter-secret\n  scan:\n    verify: off\n")
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestWebConfigScannerExtensionsPreserveSecrets(t *testing.T) {
 	fields, err := cfg.ValuesToProto(cfg.Values{
 		"cyberhub": {"url": "https://hub.example", "key": ""},
 		"recon":    {"fofa_key": "", "hunter_api_key": ""},
-		"scan":     {"verify": "high"},
+		"scan":     {"verify": "on"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestWebConfigScannerExtensionsPreserveSecrets(t *testing.T) {
 	}
 	defer store.DiscardDistributeConfig(prepared)
 	values := cfg.ValuesFromProto(prepared.Config.Extensions)
-	if values["cyberhub"]["key"] != "hub-secret" || values["recon"]["fofa_key"] != "fofa-secret" || values["recon"]["hunter_api_key"] != "hunter-secret" || values["scan"]["verify"] != "high" {
+	if values["cyberhub"]["key"] != "hub-secret" || values["recon"]["fofa_key"] != "fofa-secret" || values["recon"]["hunter_api_key"] != "hunter-secret" || values["scan"]["verify"] != "on" {
 		t.Fatalf("scanner extensions after edit: %#v", values)
 	}
 }
