@@ -17,6 +17,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	arsenalext "github.com/chainreactors/cyber/pkg/exts/arsenal"
+	"github.com/chainreactors/cyber/tools/arsenal"
 )
 
 type offlineTransport struct{}
@@ -43,12 +44,12 @@ func TestArsenalInitializationOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	instance, err := arsenalext.New(t.TempDir(), ToolSpec.ManagerOption(bundle))
+	manager, err := arsenal.NewManager(t.TempDir(), ToolSpec.ManagerOption(bundle))
 	if err != nil {
 		t.Fatal(err)
 	}
 	commands := coretool.NewCommandRegistry()
-	set, err := extension.New(hosttest.Capabilities(), commands, instance)
+	set, err := extension.New(hosttest.Capabilities(), commands, arsenalext.New(manager))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,23 +68,17 @@ func TestArsenalInitializationOffline(t *testing.T) {
 	if bundle == nil {
 		return
 	}
-	options := ToolSpec.ManagerOption(bundle)
-	options.BinPath, options.ConfigPath = instance.BinDir(), filepath.Join(filepath.Dir(instance.BinDir()), "cyber.yaml")
-	mgr, err := crtm.NewManager(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range mgr.ListTools() {
+	for _, entry := range manager.ListTools() {
 		a, err := bundle.Resolve(t.Context(), crtm.Request{Tool: entry, Target: crtm.CurrentTarget()})
 		if err != nil {
 			continue
 		}
-		path := filepath.Join(instance.BinDir(), crtm.BinaryName(entry.Name))
+		path := filepath.Join(manager.BinPath(), crtm.BinaryName(entry.Name))
 		info, err := os.Stat(path)
 		if err != nil || info.Size() != a.Size {
 			t.Fatalf("%s was not prepared: %v", entry.Name, err)
 		}
-		if got := mgr.InstalledVersion(entry.Name); got != a.Version {
+		if got := manager.InstalledVersion(entry.Name); got != a.Version {
 			t.Fatalf("version %s, want %s", got, a.Version)
 		}
 		if entry.Name == "rg" {

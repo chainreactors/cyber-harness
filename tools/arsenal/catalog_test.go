@@ -1,7 +1,6 @@
 package arsenal
 
 import (
-	"path/filepath"
 	"testing"
 
 	crtm "github.com/chainreactors/crtm/pkg"
@@ -9,18 +8,12 @@ import (
 )
 
 func TestHarnessCatalog(t *testing.T) {
-	ext, err := New(t.TempDir(), crtm.ManagerOption{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := ext.options
-	options.BinPath, options.ConfigPath = ext.BinDir(), filepath.Join(ext.directory, "cyber.yaml")
-	manager, err := crtm.NewManager(options)
+	manager, err := NewManager(t.TempDir(), crtm.ManagerOption{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	for _, entry := range options.Tools {
+	for _, entry := range manager.ListTools() {
 		if seen[entry.Name] || entry.Version == "" || entry.Repo == "" || len(entry.Platforms) == 0 {
 			t.Fatalf("incomplete or duplicate catalog entry: %+v", entry)
 		}
@@ -47,11 +40,11 @@ func TestHarnessCatalog(t *testing.T) {
 	}
 	// A distribution can still pin its own definition without changing Arsenal.
 	override := registry.ToolEntry{Name: "capa", Version: "1.0.0", Repo: "example/capa"}
-	ext, err = New(t.TempDir(), crtm.ManagerOption{Tools: []registry.ToolEntry{override}})
+	manager, err = NewManager(t.TempDir(), crtm.ManagerOption{Catalog: []registry.ToolEntry{override}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, _ := crtm.NewCatalog(ext.options.Tools).Find("capa")
+	entry, _ := manager.Catalog().Find("capa")
 	if entry.Version != override.Version || entry.Repo != override.Repo {
 		t.Fatal("catalog overwrote distribution definition")
 	}

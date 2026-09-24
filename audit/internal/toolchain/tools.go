@@ -18,6 +18,7 @@ import (
 	"time"
 
 	crtm "github.com/chainreactors/crtm/pkg"
+	"github.com/chainreactors/cyber/tools/arsenal"
 )
 
 type Spec struct{ Name, Version string }
@@ -33,12 +34,6 @@ func requiredTools() []Spec {
 	return tools
 }
 
-// Options is shared by preflight and the session's arsenal commands.
-func Options() (crtm.ManagerOption, error) {
-	bundle, err := EmbeddedBundle()
-	return ToolSpec.ManagerOption(bundle), err
-}
-
 type Status struct {
 	Name    string `json:"name"`
 	Path    string `json:"path,omitempty"`
@@ -47,8 +42,7 @@ type Status struct {
 }
 
 type Manager struct {
-	manager *crtm.Manager
-	bundle  *crtm.Bundle
+	*crtm.Manager
 	// Test seams are private; production always executes and installs real tools.
 	lookup  func(string) (string, error)
 	probe   func(context.Context, Spec, string) (string, error)
@@ -56,19 +50,16 @@ type Manager struct {
 }
 
 func New(dataDir string) (*Manager, error) {
-	options, err := Options()
+	bundle, err := EmbeddedBundle()
 	if err != nil {
 		return nil, err
 	}
-	options.BinPath, options.ConfigPath = filepath.Join(dataDir, "arsenal", "bin"), filepath.Join(dataDir, "arsenal", "cyber.yaml")
-	manager, err := crtm.NewManager(options)
+	manager, err := arsenal.NewManager(filepath.Join(dataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
 	if err != nil {
 		return nil, err
 	}
-	bundle, _ := options.Sources[0].(*crtm.Bundle)
-	return &Manager{manager: manager, bundle: bundle, lookup: exec.LookPath, probe: Probe, install: manager.InstallVersionContext}, nil
+	return &Manager{Manager: manager, lookup: exec.LookPath, probe: Probe, install: manager.Install}, nil
 }
-func (m *Manager) BinDir() string { return m.manager.BinPath() }
 
 // Check is read-only and never resolves releases, downloads or creates directories.
 func (m *Manager) Check(ctx context.Context) []Status {
@@ -80,7 +71,7 @@ func (m *Manager) Check(ctx context.Context) []Status {
 }
 func (m *Manager) check(ctx context.Context, spec Spec) Status {
 	status := Status{Name: spec.Name}
-	shared := filepath.Join(m.BinDir(), crtm.BinaryName(spec.Name))
+	shared := filepath.Join(m.BinPath(), crtm.BinaryName(spec.Name))
 	candidate := shared
 	if _, err := os.Stat(shared); os.IsNotExist(err) {
 		candidate, err = m.lookup(spec.Name)
@@ -100,7 +91,7 @@ func (m *Manager) check(ctx context.Context, spec Spec) Status {
 
 // Ensure finishes before provider startup, and does not download compatible tools.
 func (m *Manager) Ensure(ctx context.Context, out io.Writer) ([]Status, error) {
-	if err := m.manager.Prepare(ctx, m.bundle); err != nil {
+	if err := m.Prepare(ctx); err != nil {
 		return nil, err
 	}
 	var statuses []Status

@@ -34,7 +34,7 @@ func TestToolMetadataCurrent(t *testing.T) {
 			if len(got) != len(want) {
 				t.Fatalf("%s: %v, want %v", target, got, want)
 			}
-			catalog := crtm.NewCatalog(spec.CustomTools)
+			catalog := crtm.NewCatalog(spec.Definitions)
 			for _, name := range want {
 				entry, ok := catalog.Find(name)
 				if !ok || entry.Version == "" || got[name] != entry.Version {
@@ -77,7 +77,7 @@ func TestEnsureInstallsOnlyMissingAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.bundle = nil // This unit test injects its own installation behavior.
+	manager.Manager = testUnbundledManager(t, manager.BinPath())
 	versions := map[string]string{"path-rg": "15.2.0"}
 	manager.lookup = func(name string) (string, error) {
 		if name == "rg" {
@@ -95,12 +95,12 @@ func TestEnsureInstallsOnlyMissingAndValidates(t *testing.T) {
 	installs := 0
 	manager.install = func(ctx context.Context, name, version string, validate func(context.Context, string) error) error {
 		installs++
-		path := filepath.Join(manager.BinDir(), crtm.BinaryName(name))
+		path := filepath.Join(manager.BinPath(), crtm.BinaryName(name))
 		versions[path] = version
 		if err := validate(ctx, path); err != nil {
 			return err
 		}
-		if err := os.MkdirAll(manager.BinDir(), 0755); err != nil {
+		if err := os.MkdirAll(manager.BinPath(), 0755); err != nil {
 			return err
 		}
 		return os.WriteFile(path, []byte("fixture"), 0755)
@@ -120,7 +120,7 @@ func TestEnsureInstallsOnlyMissingAndValidates(t *testing.T) {
 }
 func TestEnsureFailureAndCancellation(t *testing.T) {
 	manager, _ := New(t.TempDir())
-	manager.bundle = nil
+	manager.Manager = testUnbundledManager(t, manager.BinPath())
 	manager.lookup = func(string) (string, error) { return "", errors.New("missing") }
 	manager.install = func(context.Context, string, string, func(context.Context, string) error) error {
 		return errors.New("offline")
@@ -143,4 +143,13 @@ func TestVersionCompatibility(t *testing.T) {
 			t.Errorf("%+v: got %v", test, got)
 		}
 	}
+}
+
+func testUnbundledManager(t *testing.T, binPath string) *crtm.Manager {
+	t.Helper()
+	manager, err := crtm.NewManager(crtm.ManagerOption{BinPath: binPath, ConfigPath: filepath.Join(filepath.Dir(binPath), "cyber.yaml"), Catalog: ToolSpec.Definitions, Sources: []crtm.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
 }

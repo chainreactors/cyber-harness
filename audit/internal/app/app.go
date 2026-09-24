@@ -51,15 +51,9 @@ type options struct {
 }
 
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	return run(ctx, args, stdout, stderr, func(ctx context.Context, dataDir string, out io.Writer) ([]toolchain.Status, error) {
-		manager, err := toolchain.New(dataDir)
-		if err != nil {
-			return nil, err
-		}
-		return manager.Ensure(ctx, out)
-	})
+	return run(ctx, args, stdout, stderr, (*toolchain.Manager).Ensure)
 }
-func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure func(context.Context, string, io.Writer) ([]toolchain.Status, error)) error {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure func(*toolchain.Manager, context.Context, io.Writer) ([]toolchain.Status, error)) error {
 	if handled, err := runToolCommand(ctx, args, stdout, stderr); handled {
 		return err
 	}
@@ -117,7 +111,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(option.Timeout)*time.Second)
 		defer cancel()
 	}
-	statuses, err := ensure(ctx, option.DataDir, stderr)
+	manager, err := toolchain.New(option.DataDir)
+	if err != nil {
+		return err
+	}
+	statuses, err := ensure(manager, ctx, stderr)
 	if err != nil {
 		return err
 	}
@@ -127,7 +125,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 	}
 	fmt.Fprintf(stderr, "Audit report: %s\n", report.Directory)
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: stderr, Color: !option.NoColor})
-	profile, err := newAuditProfile(option, logger, workDir, parsed.BashTimeout, report)
+	profile, err := newAuditProfile(option, logger, workDir, parsed.BashTimeout, report, manager.Manager)
 	if err != nil {
 		return report.finish(ctx, err)
 	}

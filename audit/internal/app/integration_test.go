@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/crtm/pkg/registry"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/audit/internal/toolchain"
@@ -36,7 +37,15 @@ func testOption(t *testing.T, url string) cfg.Option {
 	}
 	return option
 }
-func fakeTools(context.Context, string, io.Writer) ([]toolchain.Status, error) {
+func testManager(t *testing.T, directory string) *toolchain.Manager {
+	t.Helper()
+	manager, err := toolchain.New(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
+}
+func fakeTools(*toolchain.Manager, context.Context, io.Writer) ([]toolchain.Status, error) {
 	return []toolchain.Status{{Name: "rg", Version: "15.2.0"}, {Name: "ast-grep", Version: "0.45.3"}, {Name: "osv-scanner", Version: "2.6.0"}}, nil
 }
 func toolReply(w http.ResponseWriter, name string, args any) {
@@ -121,7 +130,7 @@ func TestOneShotAuditToolReportAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, next)
+	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, next, testManager(t, option.DataDir).Manager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +150,7 @@ func TestRequiredToolFailurePrecedesModel(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); textReply(w, "unexpected") }))
 	defer server.Close()
-	fail := func(context.Context, string, io.Writer) ([]toolchain.Status, error) {
+	fail := func(*toolchain.Manager, context.Context, io.Writer) ([]toolchain.Status, error) {
 		return nil, errors.New("required tool missing")
 	}
 	err := run(t.Context(), []string{"--provider", "openai", "--base-url", server.URL, "--api-key", "fixture", "--model", "fixture", "--workdir", t.TempDir(), "--data-dir", t.TempDir(), "-p", "audit"}, io.Discard, io.Discard, fail)
@@ -173,7 +182,8 @@ func TestInteractiveProfileCommandsAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report)
+	manager := testManager(t, option.DataDir)
+	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report, manager.Manager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +191,16 @@ func TestInteractiveProfileCommandsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer profile.Close(context.Background())
+	// Command execution observes the manager used by preflight, including changes
+	// made after the profile loaded. A second manager would retain a stale catalog.
+	if _, err := manager.AddCustomTool(registry.ToolEntry{Name: "shared-fixture", Repo: "example/shared-fixture", AssetPattern: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	var catalog strings.Builder
+	_, err = profile.runtime.CommandRegistry().Execute(t.Context(), "arsenal", &coretool.Execution{Args: []string{"list"}, Stdout: &catalog})
+	if err != nil || !strings.Contains(catalog.String(), "shared-fixture") {
+		t.Fatalf("session has a different Arsenal manager: %v", err)
+	}
 	for _, name := range []string{"proton", "arsenal", "okf"} {
 		if !profile.runtime.CommandRegistry().Has(name) {
 			t.Fatalf("missing %s", name)

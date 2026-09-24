@@ -18,7 +18,7 @@ make audit ARSENAL_EMBED=1
 
 This produces `bin/cyber-audit` (`.exe` on Windows). Downloads happen during the
 build. On first use, audit extracts the tools before model startup, without
-network access. The harness [arsenal.yaml](../pkg/exts/arsenal/arsenal.yaml)
+network access. The harness [arsenal.yaml](../tools/arsenal/arsenal.yaml)
 owns tool definitions and default versions; [cmd/cyber-audit/bundle.yaml](cmd/cyber-audit/bundle.yaml)
 selects tools by name, with platform additions for reverse analysis. Tool updates
 require no CRTM change. Both runtime requirements and bundle metadata are generated
@@ -101,6 +101,7 @@ Windows uses the harness shell (Git Bash recommended; cmd fallback is available)
 | Executable capabilities | `capa` | 9.4.0; Windows/Linux amd64 |
 | Static, stack and decoded strings | `floss` | 3.1.1; Windows/Linux amd64 |
 
+Preflight and the session share one Arsenal manager and installation state.
 Before provider startup, audit checks shared `arsenal/bin` and PATH, verifies
 version and required CLI behavior, then installs missing/incompatible tools via
 CRTM. Compatible versions are retained: same major and at least the pinned

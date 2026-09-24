@@ -65,7 +65,7 @@ func TestAuditWorkflowSurvivesProjectSkillCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report)
+	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report, testManager(t, option.DataDir).Manager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestAuditTimeoutIncludesPreparationAndProviderStartup(t *testing.T) {
 			defer server.Close()
 			ensure := fakeTools
 			if stage == "tools" {
-				ensure = func(ctx context.Context, _ string, _ io.Writer) ([]toolchain.Status, error) {
+				ensure = func(_ *toolchain.Manager, ctx context.Context, _ io.Writer) ([]toolchain.Status, error) {
 					<-ctx.Done()
 					return nil, ctx.Err()
 				}

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/audit/internal/toolchain"
 	auditext "github.com/chainreactors/cyber/audit/pkg/exts/audit"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -34,20 +34,12 @@ type auditProfile struct {
 	bindings   *consoleapi.Registry
 }
 
-func newAuditProfile(option cfg.Option, logger telemetry.Logger, workDir string, bashTimeout int, report *runReport) (*auditProfile, error) {
+func newAuditProfile(option cfg.Option, logger telemetry.Logger, workDir string, bashTimeout int, report *runReport, manager *crtm.Manager) (*auditProfile, error) {
 	sessionConfig := sessionext.ConfigFromOption(&option, agentsession.Config{
 		NodeName:         cfg.ResolveNodeName(option.NodeName),
 		PrimarySessionID: "main", Loop: agent.StandardLoop{},
 	})
 	loop := loopext.New(sessionConfig.Loop)
-	options, err := toolchain.Options()
-	if err != nil {
-		return nil, err
-	}
-	arsenal, err := arsenalext.New(filepath.Join(option.DataDir, "arsenal"), options)
-	if err != nil {
-		return nil, err
-	}
 	recorder, err := telemetryext.New(telemetryext.Options{Path: filepath.Join(report.Directory, "session.jsonl")})
 	if err != nil {
 		return nil, err
@@ -60,7 +52,7 @@ func newAuditProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	for _, tool := range report.Tools {
 		fmt.Fprintf(&summary, "%s %s (%s)\n", tool.Name, tool.Version, tool.Path)
 	}
-	environment := map[string]string{"PATH": arsenal.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH"), "RIPGREP_CONFIG_PATH": rgConfig}
+	environment := map[string]string{"PATH": manager.BinPath() + string(os.PathListSeparator) + os.Getenv("PATH"), "RIPGREP_CONFIG_PATH": rgConfig}
 
 	// This build routes nothing, so it publishes the disabled endpoint and
 	// links no proxy at all.
@@ -80,7 +72,7 @@ func newAuditProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 
 	p := &auditProfile{}
 	values = append(values,
-		recorder, arsenal, okfext.New(),
+		recorder, arsenalext.New(manager), okfext.New(),
 		protonext.New(protonext.Config{Directory: workDir, ExcludePaths: []string{report.Directory, filepath.Join(workDir, ".cyber"), filepath.Join(workDir, ".git")}}),
 		auditext.New(auditext.Config{Workspace: workDir, ReportDir: report.Directory, ToolSummary: summary.String(), SearchExclusions: exclusions}),
 		loop,

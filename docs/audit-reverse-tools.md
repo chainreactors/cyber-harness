@@ -1,6 +1,6 @@
 逆向 CLI 选型调研，2026-09-24。范围：原生 PE/ELF/Mach-O、Java/Android、.NET、固件；目标是供 audit 调用，并最终通过 Arsenal 选择、下载和离线打包。版本来自上游 release/NuGet，运行验证使用自行编译的小样本。本轮完成选型和 CLI 验证，尚未接入 audit 或发布 CI。
 
-当前实施范围：仅单个可执行文件。Windows amd64 选择 radare2 6.2.2（r2blob）、capa 9.4.0、FLOSS 3.1.1；Linux amd64 选择 capa/FLOSS。工具定义由本仓库 `pkg/exts/arsenal/arsenal.yaml` 维护，直接按名称调用。以下多目录、运行时、插件方案是调研备选，暂不实施。
+当前实施范围：仅单个可执行文件。Windows amd64 选择 radare2 6.2.2（r2blob）、capa 9.4.0、FLOSS 3.1.1；Linux amd64 选择 capa/FLOSS。工具定义由本仓库 `tools/arsenal/arsenal.yaml` 维护，直接按名称调用。以下多目录、运行时、插件方案是调研备选，暂不实施。
 
 后续覆盖更多目标时可考虑四个分析入口：**radare2、JADX、ilspycmd、Binwalk**。radare2 配套 r2ghidra，固件配套实际需要的解包器；优先增加 capa 做能力识别。按场景选择 bundle，保留同一份 Arsenal 工具定义。
 

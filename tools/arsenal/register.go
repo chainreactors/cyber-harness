@@ -6,7 +6,7 @@ import (
 )
 
 func NewCommand(mgr *crtm.Manager) coretool.Command {
-	cmd := NewArsenalCommand(mgr)
+	cmd := &command{mgr: mgr}
 	return coretool.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
 		DescriptionPath: "cyber://skills/runtime/arsenal.md",

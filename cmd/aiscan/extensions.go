@@ -18,6 +18,7 @@ import (
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	harness "github.com/chainreactors/cyber/pkg/harness"
+	"github.com/chainreactors/cyber/tools/arsenal"
 	"github.com/chainreactors/cyber/tools/scan"
 )
 
@@ -32,11 +33,11 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	if err != nil {
 		return nil, err
 	}
-	arsenal, err := arsenalext.New(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
+	manager, err := arsenal.NewManager(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
 	if err != nil {
 		return nil, err
 	}
-	childEnv := map[string]string{"PATH": arsenal.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH")}
+	childEnv := map[string]string{"PATH": manager.BinPath() + string(os.PathListSeparator) + os.Getenv("PATH")}
 
 	extensions, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory:  workDir,
@@ -51,7 +52,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	}
 	// The loop installation publishes agent.Loop, so it precedes every
 	// extension that runs against one.
-	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenal)
+	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenalext.New(manager))
 
 	if !config.SkipEngines {
 		extensions = append(extensions, scannerext.New(config.Scanner, workDir), protonext.New(protonext.Config{Directory: workDir}))
