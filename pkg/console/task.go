@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
@@ -14,7 +15,9 @@ import (
 
 // RunTask owns static presentation and its event subscription. Runtime only
 // executes the session and publishes events; Console owns presentation.
-func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, sessionID, label, display string, input agentsession.RunInput) error {
+// finish, when supplied, runs once after session closure and before final output.
+// It returns the final error, preserving any execution error it receives.
+func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, sessionID, label, display string, input agentsession.RunInput, finish func(error) error) (err error) {
 	format := "text"
 	if option != nil && strings.TrimSpace(option.OutputFormat) != "" {
 		format = strings.ToLower(strings.TrimSpace(option.OutputFormat))
@@ -40,22 +43,50 @@ func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, 
 	}
 	selector := &taskEventSelector{deliver: handle}
 	unsubscribe := rt.Observe(selector)
-	if unsubscribe == nil {
-		return errors.New("agent event stream is unavailable")
-	}
-
-	session, err := rt.OpenSession(ctx, agentsession.SessionOptions{ID: sessionID})
-	if err != nil {
-		unsubscribe.Cancel()
+	var session *agentsession.Session
+	defer func() {
+		if session != nil {
+			reason := agentsession.SessionCloseCompleted
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				reason = agentsession.SessionCloseCanceled
+			} else if err != nil {
+				reason = agentsession.SessionCloseError
+			}
+			closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			err = errors.Join(err, rt.CloseSession(closeCtx, session.ID(), reason))
+			cancel()
+		}
+		if finish != nil {
+			err = finish(err)
+		}
+		if err != nil {
+			selector.Bind(sessionID)
+			rt.Publish(&aop.Event{SessionId: sessionID, Emitter: label, Payload: &aop.Event_Error{
+				Error: &aop.ProtocolError{Code: "execution_error", Message: err.Error()},
+			}})
+		}
+		if unsubscribe != nil {
+			closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			err = errors.Join(err, unsubscribe.Close(closeCtx))
+			cancel()
+		}
 		if textOutput != nil {
 			textOutput.Close()
 		} else {
 			machineOutput.SetError(err)
 			err = errors.Join(err, machineOutput.Close())
 		}
+	}()
+	if unsubscribe == nil {
+		return errors.New("agent event stream is unavailable")
+	}
+
+	session, err = rt.OpenSession(ctx, agentsession.SessionOptions{ID: sessionID})
+	if err != nil {
 		return err
 	}
-	selector.Bind(session.ID())
+	sessionID = session.ID()
+	selector.Bind(sessionID)
 	if textOutput != nil {
 		textOutput.Start(label, display)
 	}
@@ -63,21 +94,7 @@ func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, 
 	if err == nil {
 		_, err = run.Wait()
 	}
-	reason := agentsession.SessionCloseCompleted
-	if errors.Is(err, context.Canceled) {
-		reason = agentsession.SessionCloseCanceled
-	} else if err != nil {
-		reason = agentsession.SessionCloseError
-	}
-	closeErr := rt.CloseSession(context.Background(), session.ID(), reason)
-	subErr := unsubscribe.Close(context.Background())
-	if textOutput != nil {
-		textOutput.Close()
-	} else {
-		machineOutput.SetError(errors.Join(err, closeErr, subErr))
-		closeErr = errors.Join(closeErr, machineOutput.Close())
-	}
-	return errors.Join(err, closeErr, subErr)
+	return err
 }
 
 // taskEventSelector subscribes before OpenSession so stream-json includes the

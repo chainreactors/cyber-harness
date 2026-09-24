@@ -17,14 +17,14 @@ func writeTestConfig(t *testing.T, dir, content string) string {
 }
 
 func TestLoadTrafficStoragePreservesMITMBoolean(t *testing.T) {
-	path := writeTestConfig(t, t.TempDir(), "cyberhub:\n  mitm: false\ntraffic:\n  body_storage: disk\n  body_max_bytes: 1024\n  body_retention_bytes: 4096\n")
+	path := writeTestConfig(t, t.TempDir(), "traffic:\n  body_storage: disk\n  body_max_bytes: 1024\n  body_retention_bytes: 4096\n")
 	var option Option
 	if err := LoadConfig(path, &option); err != nil {
 		t.Fatal(err)
 	}
-	if option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" ||
+	if option.BodyStorage != "disk" ||
 		option.BodyMaxBytes != 1024 || option.BodyRetentionBytes != 4096 {
-		t.Fatalf("traffic options not loaded: %+v; mitm=%v", option.TrafficOptions, option.Mitm)
+		t.Fatalf("traffic options not loaded: %+v", option.TrafficOptions)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	src.Provider = "config-provider"
 	src.Model = "config-model"
 	src.ActiveProfile = "config-profile"
-	src.CyberhubURL = "http://config-hub:9000"
+	src.ServerURL = "http://config-web:9000"
 
 	mergeOption(&dst, &src)
 
@@ -47,8 +47,8 @@ func TestMergeOptionOnlyFillsEmpty(t *testing.T) {
 	if dst.Model != "config-model" {
 		t.Errorf("Model: got %q, want %q (config should fill empty)", dst.Model, "config-model")
 	}
-	if dst.CyberhubURL != "http://config-hub:9000" {
-		t.Errorf("CyberhubURL: got %q, want %q", dst.CyberhubURL, "http://config-hub:9000")
+	if dst.ServerURL != "http://config-web:9000" {
+		t.Errorf("ServerURL: got %q, want %q", dst.ServerURL, "http://config-web:9000")
 	}
 	if dst.ActiveProfile != "config-profile" {
 		t.Errorf("ActiveProfile: got %q, want %q", dst.ActiveProfile, "config-profile")
@@ -85,9 +85,6 @@ ioa:
 		{"Provider", opt.Provider, "openai"},
 		{"Model", opt.Model, "deepseek-chat"},
 		{"BaseURL", opt.BaseURL, "https://api.deepseek.com/v1"},
-		{"CyberhubURL", opt.CyberhubURL, "http://hub:9000"},
-		{"CyberhubKey", opt.CyberhubKey, "testkey"},
-		{"CyberhubMode", opt.CyberhubMode, "override"},
 		{"ServerURL", opt.ServerURL, "http://web:8080"},
 	}
 	for _, c := range checks {
@@ -115,39 +112,6 @@ func TestLoadConfigIgnoresNonYamlSuffix(t *testing.T) {
 	}
 }
 
-func TestLoadConfigReconNumericZeroIsExplicit(t *testing.T) {
-	dir := t.TempDir()
-	writeTestConfig(t, dir, `
-recon:
-  limit: 0
-`)
-
-	var opt Option
-	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &opt); err != nil {
-		t.Fatal(err)
-	}
-	if opt.ReconLimit == nil || *opt.ReconLimit != 0 {
-		t.Fatalf("ReconLimit = %#v, want explicit 0", opt.ReconLimit)
-	}
-}
-
-func TestMergeOptionReconExplicitZeroWins(t *testing.T) {
-	zeroInt := 0
-	cfgLimit := 10
-	dst := Option{ReconOptions: ReconOptions{
-		ReconLimit: &zeroInt,
-	}}
-	src := Option{ReconOptions: ReconOptions{
-		ReconLimit: &cfgLimit,
-	}}
-
-	mergeOption(&dst, &src)
-
-	if *dst.ReconLimit != 0 {
-		t.Fatalf("explicit zero was overwritten: %#v", dst.ReconOptions)
-	}
-}
-
 func TestLoadConfigEmptyFieldsAreZero(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, `
@@ -167,9 +131,6 @@ cyberhub:
 	}
 	if opt.Model != "" {
 		t.Errorf("Model should be empty, got %q", opt.Model)
-	}
-	if opt.CyberhubURL != "" {
-		t.Errorf("CyberhubURL should be empty, got %q", opt.CyberhubURL)
 	}
 }
 
@@ -202,9 +163,6 @@ cyberhub:
 	}
 	if option.Model != "config-model" {
 		t.Errorf("Model: got %q, want %q (config fills empty)", option.Model, "config-model")
-	}
-	if option.CyberhubURL != "http://config-hub:9000" {
-		t.Errorf("CyberhubURL: got %q, want %q (config fills empty)", option.CyberhubURL, "http://config-hub:9000")
 	}
 }
 
@@ -288,38 +246,6 @@ llm:
 			t.Errorf("Model after ApplyDefaults: got %q, want %q (build fills remaining)", option.Model, "build-model")
 		}
 	})
-}
-
-func TestLoadConfigSearchOptions(t *testing.T) {
-	dir := t.TempDir()
-	writeTestConfig(t, dir, `
-search:
-  tavily_keys: "K1,K2"
-`)
-
-	var option Option
-	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &option); err != nil {
-		t.Fatal(err)
-	}
-	if option.SearchConfig.TavilyKeys != "K1,K2" {
-		t.Fatalf("search config = %#v", option.SearchConfig)
-	}
-}
-
-func TestLoadScanDefaults(t *testing.T) {
-	dir := t.TempDir()
-	writeTestConfig(t, dir, `
-scan:
-  verify: critical
-`)
-
-	var option Option
-	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &option); err != nil {
-		t.Fatal(err)
-	}
-	if got := option.ScanConfig.Verify; got != "critical" {
-		t.Errorf("VerifyMode: got %q, want %q", got, "critical")
-	}
 }
 
 func TestLoadAndApplyConfigDefaultFile(t *testing.T) {
@@ -430,10 +356,7 @@ func TestInitDefaultConfig(t *testing.T) {
 	if err := LoadConfig(path, &opt); err != nil {
 		t.Errorf("generated config should be parseable: %v", err)
 	}
-	if opt.Mitm != nil && !*opt.Mitm {
-		t.Error("generated config disables MITM capture")
-	}
-	if opt.APIKey != "" || opt.Model != "" || opt.Timeout != 0 || opt.Mitm != nil {
+	if opt.APIKey != "" || opt.Model != "" || opt.Timeout != 0 {
 		t.Fatal("template sets defaults instead of leaving values unspecified")
 	}
 	if !strings.Contains(content, "# llm:") {
@@ -449,15 +372,11 @@ llm:
   provider: config-provider
   model: config-model
   api_key: config-key
-cyberhub:
-  url: http://config-hub:9000
-  proxy: config-proxy
 `)
 
 	withDefaults(t, func() {
 		DefaultProvider = "build-provider"
 		DefaultModel = "build-model"
-		DefaultScannerProxy = "build-proxy"
 
 		origDir, _ := os.Getwd()
 		os.Chdir(dir)
@@ -475,8 +394,6 @@ cyberhub:
 			{"Provider", option.Provider, "cli-provider", "CLI > config > build"},
 			{"Model", option.Model, "config-model", "config > build (CLI empty)"},
 			{"APIKey", option.APIKey, "config-key", "config fills empty"},
-			{"Proxy", option.Proxy, "config-proxy", "config > build"},
-			{"CyberhubURL", option.CyberhubURL, "http://config-hub:9000", "config fills empty"},
 		}
 		for _, c := range checks {
 			if c.got != c.want {
@@ -495,14 +412,11 @@ llm:
   api_key: config-key
   model: config-model
   proxy: http://config-proxy:7890
-cyberhub:
-  url: http://config-hub:9000
 `)
 	t.Setenv("CYBER_MODEL", "env-model")
 	t.Setenv("CYBER_BASE_URL", "https://env.example/v1")
 	t.Setenv("CYBER_API_KEY", "env-key")
 	t.Setenv("CYBER_LLM_PROXY", "http://env-proxy:7890")
-	t.Setenv("CYBER_CYBERHUB_URL", "http://env-hub:9000")
 
 	withDefaults(t, func() {
 		origDir, _ := os.Getwd()
@@ -520,7 +434,6 @@ cyberhub:
 			{"APIKey", option.APIKey, "env-key"},
 			{"Model", option.Model, "env-model"},
 			{"LLMProxy", option.LLMProxy, "http://env-proxy:7890"},
-			{"CyberhubURL", option.CyberhubURL, "http://env-hub:9000"},
 		}
 		for _, c := range checks {
 			if c.got != c.want {
@@ -671,13 +584,12 @@ func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
 	}
 }
 
-func TestApplyEnvironmentCentralizesRuntimeAndUncoverValues(t *testing.T) {
+func TestApplyEnvironmentCentralizesRuntimeValues(t *testing.T) {
 	values := map[string]string{
 		"CYBER_DATA_DIR":         "env-data",
 		"CYBER_RENDER":           "static",
 		"CYBER_REPL":             "fast",
 		"PLAYWRIGHT_CLI_SESSION": "browser-1",
-		"SHODAN_API_KEY":         "shodan-key",
 	}
 	lookup := func(name string) (string, bool) {
 		value, ok := values[name]
@@ -689,37 +601,12 @@ func TestApplyEnvironmentCentralizesRuntimeAndUncoverValues(t *testing.T) {
 	if option.DataDir != "env-data" || option.RenderMode != "static" || option.REPLMode != "fast" || option.PlaywrightSession != "browser-1" {
 		t.Fatalf("runtime environment not resolved: %#v", option)
 	}
-	if option.UncoverCredentials["SHODAN_API_KEY"] != "shodan-key" {
-		t.Fatalf("uncover credentials not resolved: %#v", option.UncoverCredentials)
-	}
 
 	cli := Option{MiscOptions: MiscOptions{DataDir: "cli-data"}}
 	applyEnvironment(&cli, cli, lookup)
 	if cli.DataDir != "cli-data" {
 		t.Fatalf("CLI data dir should win over env: got %q", cli.DataDir)
 	}
-}
-
-func TestResolveRuntimeConfigTavilyPriority(t *testing.T) {
-	dir := t.TempDir()
-	writeTestConfig(t, dir, "search:\n  tavily_keys: config-key\n")
-	t.Setenv("TAVILY_API_KEY", "env-key")
-
-	withDefaults(t, func() {
-		origDir, _ := os.Getwd()
-		if err := os.Chdir(dir); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Chdir(origDir)
-
-		option := Option{ReconOptions: ReconOptions{TavilyKey: "cli-key"}}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
-			t.Fatal(err)
-		}
-		if option.TavilyKey != "cli-key" || option.SearchConfig.TavilyKeys != "config-key" {
-			t.Fatalf("Tavily sources were not centralized: cli=%q config=%q", option.TavilyKey, option.SearchConfig.TavilyKeys)
-		}
-	})
 }
 
 // A provider-scoped model env (ANTHROPIC_MODEL) is often injected by the
@@ -875,10 +762,7 @@ func withDefaults(t *testing.T, fn func()) {
 	t.Helper()
 	saved := []*string{
 		&DefaultProvider, &DefaultBaseURL, &DefaultAPIKey, &DefaultModel,
-		&DefaultScannerProxy, &DefaultCyberhubURL, &DefaultCyberhubKey,
-		&DefaultCyberhubMode, &DefaultVerify,
-		&DefaultTavilyKeys, &DefaultNodeID,
-		&DefaultNodeName,
+		&DefaultNodeID, &DefaultNodeName,
 	}
 	originals := make([]string, len(saved))
 	for i, p := range saved {

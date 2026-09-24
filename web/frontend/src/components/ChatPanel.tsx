@@ -4,18 +4,19 @@ import type { TFunction } from 'i18next'
 import i18n from '../i18n'
 import {
   AlertTriangle,
+  Box,
+  Bug,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
   FileText,
+  Fingerprint,
   GitBranch,
   Layers,
   Link2,
   Loader2,
   MessageSquare,
   Network,
-  Radar,
-  RefreshCw,
   Sparkles,
   Target,
   User,
@@ -26,6 +27,7 @@ import {
 import { cn } from '@cyber/theme'
 import { Button, Callout, DisclosureCard, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import BrandMark from './brand/BrandMark'
+import BrandLogo from './brand/BrandLogo'
 import { CodeBlock, MarkdownContent } from '@/markdown'
 import {
   AssistantResponse,
@@ -50,7 +52,6 @@ import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDeta
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
-import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
@@ -422,7 +423,8 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: ChatSendOptions) => void
+  onSend: (content: string, opts?: ChatSendOptions & { sessionID?: string }) => Promise<boolean>
+  ensureSession: () => Promise<string | null>
   onPause: () => void
   onClearError: () => void
 }
@@ -443,10 +445,9 @@ export default function ChatPanel({
   agentOffline,
   agentName,
   agents = [],
-  onCreateSession,
-  onOpenTerminal,
   onOpenIOA,
   onSend,
+  ensureSession,
   onPause,
   onClearError,
 }: Props) {
@@ -510,18 +511,10 @@ export default function ChatPanel({
     [t, viewerTimeline],
   )
   const inputFormClass = cn(contentOffsetClass, hasIOARail && threadOffsetClass)
+  const composerRootRef = useRef<HTMLDivElement>(null)
   const [persist, setPersist] = useState(false)
   const activeSessionRef = useRef(activeSessionID)
   useEffect(() => { activeSessionRef.current = activeSessionID }, [activeSessionID])
-  // Goal mode: describe done-when criteria in natural language and let an
-  // independent evaluator judge completion each round, re-driving the agent
-  // until it passes or the evaluator itself says further rounds won't help.
-  // evalRounds is optional and free-form: a number is a hard ceiling, plain
-  // language ("dig deep, up to ten rounds") is handed to the evaluator to
-  // follow, and empty leaves the stop decision entirely to it.
-  const [evalCriteria, setEvalCriteria] = useState('')
-  const [evalRounds, setEvalRounds] = useState('')
-  const evalRef = useRef<HTMLTextAreaElement>(null)
   // Screen-reader turn status. Streamed replies mutate the DOM silently, so
   // mirror the coarse turn phase into a polite live region below. It announces
   // transitions (thinking → responding → done), never the token stream itself
@@ -529,36 +522,16 @@ export default function ChatPanel({
   const [livePhase, setLivePhase] = useState<'thinking' | 'done' | null>(null)
   const wasActiveRef = useRef(false)
 
-  // Composer seed — the mobile greeting's capability cards push a starter prompt
-  // into the composer through ChatInput's injectText (nonce-guarded append). Own
-  // the nonce here so each card tap reliably re-injects; still fold in an external
-  // injectText if one ever arrives (the asset-pool source is gone, so it's inert).
-  const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number }>(
-    () => injectText ?? { text: '', nonce: 0 },
-  )
-  useEffect(() => {
-    if (injectText && injectText.nonce > 0) setComposerSeed(injectText)
-  }, [injectText])
-  const seedComposer = useCallback((text: string) => {
-    setComposerSeed((s) => ({ text, nonce: s.nonce + 1 }))
-  }, [])
-
-  function sendOpts() {
+  function sendOpts(content: string) {
     if (!persist) return undefined
-    const criteria = evalCriteria.trim()
-    if (criteria) return { persist: true, evalCriteria: criteria, evalRounds: evalRounds.trim() }
-    // Goal toggled on but no criteria typed → nothing for the evaluator to
-    // judge, so send as a plain one-off message rather than an open-ended run.
+    const criteria = content.trim()
+    if (criteria) return { persist: true, evalCriteria: criteria }
     return undefined
   }
 
-  // A Goal is a one-shot kickoff: once dispatched, clear the panel so the next
-  // message isn't silently re-sent as a fresh multi-round run against stale
-  // criteria, and so the composer visibly returns to plain-chat state.
+  // A Goal is a one-shot kickoff; the next message starts in plain-chat mode.
   function resetGoal() {
     setPersist(false)
-    setEvalCriteria('')
-    setEvalRounds('')
   }
 
   // The "/" and "!" menus come from SessionService/ListCommands: hub-scope
@@ -627,23 +600,9 @@ export default function ChatPanel({
   }, [activeSessionID, i18n.language, t])
 
   useEffect(() => {
-    // Goal (persist/eval) mode is per-session intent. ChatPanel doesn't remount
-    // on session switch, so clear it here — otherwise session A's done-when
-    // criteria stays toggled on and gets silently sent with the next message in
-    // session B (an unexpected multi-round agentic run against stale criteria).
+    // Goal mode is per-session intent; ChatPanel stays mounted on session switch.
     setPersist(false)
-    setEvalCriteria('')
-    setEvalRounds('')
   }, [activeSessionID])
-
-  // Auto-grow the goal criteria textarea (min ~2 rows, capped) so long
-  // natural-language goals stay readable instead of scrolling a one-liner.
-  useEffect(() => {
-    const el = evalRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 144) + 'px'
-  }, [evalCriteria, persist])
 
   // Derive the polite screen-reader status from the turn phase. `isBusy` keeps
   // the "working" state across tool-execution gaps (thinking false, no stream)
@@ -662,18 +621,13 @@ export default function ChatPanel({
   )
 
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
-    const sessionAtStart = activeSessionID
-    const opts: ChatSendOptions = sendOpts() || {}
+    const sessionID = await ensureSession()
+    if (!sessionID) return false
+    const opts: ChatSendOptions = sendOpts(content) || {}
     setAttachmentError('')
-    const hadGoal = persist
-    if (!attachments?.length) {
-      onSend(content, opts)
-      if (hadGoal) resetGoal()
-      return
-    }
     const contextParts: string[] = []
     try {
-      for (const a of attachments) {
+      for (const a of attachments || []) {
         if (a.file.type.startsWith('image/')) {
           if (a.file.size > 20 * 1024 * 1024) throw new Error('Image exceeds 20 MiB limit')
           opts.images ??= []
@@ -681,24 +635,22 @@ export default function ChatPanel({
         } else if (a.mode === 'context') {
           const text = await a.file.text()
           contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
-        } else if (a.mode === 'upload' && sessionAtStart) {
-          const uploaded = await uploadChatFile(sessionAtStart, a.file)
+        } else if (a.mode === 'upload') {
+          const uploaded = await uploadChatFile(sessionID, a.file)
           contextParts.push(`Uploaded file: ${uploaded.path}`)
         }
       }
     } catch (err) {
-      if (sessionAtStart === activeSessionRef.current) setAttachmentError(err instanceof Error ? err.message : 'Failed to read attachment')
-      return
+      if (!activeSessionRef.current || sessionID === activeSessionRef.current) setAttachmentError(err instanceof Error ? err.message : 'Failed to read attachment')
+      return false
     }
-    // File reads/uploads are asynchronous. If the operator switches sessions
-    // while they are in flight, never send the completed payload into the new
-    // session's composer.
-    if (sessionAtStart !== activeSessionRef.current) return
+    if (activeSessionRef.current && sessionID !== activeSessionRef.current) return false
     const fullContent = contextParts.length > 0
       ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}`
       : content
-    if (fullContent.trim() || opts.images?.length) onSend(fullContent, opts)
-    if (hadGoal) resetGoal()
+    const accepted = await onSend(fullContent.trim(), { ...opts, sessionID })
+    if (accepted && persist) resetGoal()
+    return accepted
   }
 
   const renderViewerItem = useCallback(
@@ -751,59 +703,13 @@ export default function ChatPanel({
     [ioaRailItems, onOpenIOA],
   )
 
-  const emptyState = !hasActiveSession ? (
+  const emptyState = !isThinking ? (
     <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-center py-4')}>
       <div className={inputFormClass}>
-        <InstrumentIdle
-          eyebrow={t('consoleReady')}
-          title={t('startConversation')}
-        >
-          {agents.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2">
-              {agents.map((agent) => (
-                // Chat + Terminal read as one segmented control: a shared bordered
-                // surface with a hairline divider, so the pair no longer looks like
-                // a solid chip next to a stray bare link.
-                <div
-                  key={agent.nodeID}
-                  className="inline-flex items-stretch divide-x divide-border overflow-hidden rounded-md border border-border bg-card shadow-soft"
-                >
-                  {onCreateSession && (
-                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.nodeID)} className="gap-1.5 rounded-none shadow-none">
-                      <MessageSquare className="h-3.5 w-3.5 text-primary" />
-                      {agent.name || t('chat')}
-                    </Button>
-                  )}
-                  {onOpenTerminal && (
-                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.nodeID)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
-                      <Terminal className="h-3.5 w-3.5" />
-                      {t('terminal')}
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </InstrumentIdle>
-      </div>
-    </div>
-  ) : !isThinking ? (
-    // Desktop centers the "Ready" instrument in the empty thread; mobile keeps the
-    // greeting top-anchored (it's a full-height card grid, not a centered glyph).
-    <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-start py-4 md:justify-center')}>
-      <div className={inputFormClass}>
-        <div className="hidden md:block">
-          <EmptyState
-            eyebrow={t('readyEyebrow')}
-            title={t('ready')}
-            subtitle={
-              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan -i &lt;target&gt;</code>{t('readyHintAfter')}</>
-            }
-          />
-        </div>
-        <div className="md:hidden">
-          <MobileChatGreeting onSeed={seedComposer} />
-        </div>
+        <ChatGreeting />
+        {!hasActiveSession && agents.length === 0 && (
+          <p className="px-1 py-3 text-sm text-muted-foreground">{t('connectNodeHint')}</p>
+        )}
       </div>
     </div>
   ) : null
@@ -845,7 +751,7 @@ export default function ChatPanel({
         scrollResetKey={activeSessionID}
       />
 
-      {hasActiveSession && (
+      {(
         <div className="bg-background/95 pb-safe backdrop-blur-sm">
             {agentOffline && (
               <div className={cn(workspaceClass, 'pt-2')}>
@@ -861,40 +767,9 @@ export default function ChatPanel({
               </div>
             )}
             <div className={workspaceClass}>
-              <div className={inputFormClass}>
+              <div className={inputFormClass} ref={composerRootRef}>
                 <ViewerChatPanel.Input
                   className="!border-t-0 !bg-transparent !backdrop-blur-none"
-                  topSlot={persist ? (
-                    <div className="bg-primary/[0.04] px-3.5 py-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-primary">
-                          <Target className="h-3.5 w-3.5" />
-                          {t('persistMode')}
-                        </span>
-                        <label className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                          {t('evalRoundsLabel')}
-                          <input
-                            type="text"
-                            value={evalRounds}
-                            placeholder={t('evalRoundsAuto')}
-                            onChange={(e) => setEvalRounds(e.target.value)}
-                            className="w-36 rounded-md border border-border/70 bg-card/60 px-2 py-0.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
-                          />
-                        </label>
-                      </div>
-                      <textarea
-                        ref={evalRef}
-                        rows={2}
-                        value={evalCriteria}
-                        onChange={(e) => setEvalCriteria(e.target.value)}
-                        placeholder={t('evalCriteriaPlaceholder')}
-                        className="block max-h-36 min-h-[3.25rem] w-full resize-none overflow-y-auto rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus:border-ai/50 focus:outline-none focus:ring-1 focus:ring-ai/20"
-                      />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                        {evalRounds.trim() ? t('evalModeHintCapped', { rounds: evalRounds.trim() }) : t('evalModeHint')}
-                      </p>
-                    </div>
-                  ) : undefined}
                   leading={
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -903,11 +778,15 @@ export default function ChatPanel({
                         <Button
                           variant="ghost"
                           active={persist}
-                          onClick={() => setPersist((v) => !v)}
-                          className={cn('h-9 shrink-0 gap-1.5 rounded-full px-3 text-xs md:h-10 md:px-3.5', !persist && 'text-muted-foreground')}
+                          aria-label={t('persistMode')}
+                          aria-pressed={persist}
+                          onClick={() => {
+                            setPersist((v) => !v)
+                            composerRootRef.current?.querySelector('textarea')?.focus()
+                          }}
+                          className={cn('h-9 w-9 shrink-0 rounded-full p-0 md:h-10 md:w-10', !persist && 'text-muted-foreground')}
                         >
                           <Target className="h-3.5 w-3.5" />
-                          {t('persistMode')}
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>{t('persistHint')}</TooltipContent>
@@ -922,7 +801,7 @@ export default function ChatPanel({
                   composerHelp={composerHelp}
                   mentionables={mentionables}
                   renderMentionPopup={renderMentionPopup}
-                  injectText={composerSeed}
+                  injectText={injectText}
                   placeholder={t('typeMessageWithCommands')}
                   labels={{
                     dropFiles: t('dropFiles'),
@@ -932,7 +811,7 @@ export default function ChatPanel({
                     injectAsContext: t('injectAsContext'),
                     uploadToRemote: t('uploadToRemote'),
                   }}
-                  enableAttachments={!!activeSessionID}
+                  enableAttachments
                 />
               </div>
             </div>
@@ -1450,43 +1329,85 @@ function mergeIOAPayload(primary: IOAMessagePayload, fallback: IOAMessagePayload
   }
 }
 
-function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: ReactNode }) {
-  return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} />
-}
+const mockVulnerabilityKeys = [
+  'idleFindingCVELog4j',
+  'idleFindingCVEPanOS',
+  'idleFindingOWASPAccess',
+  'idleFindingOWASPInjection',
+  'idleFindingIDOR',
+  'idleFindingSQLi',
+  'idleFindingXSS',
+  'idleFindingSSRF',
+] as const
 
-// Phone-only greeting for a fresh, empty session: an Cyber hello + a 2×2 grid of
-// capability cards, each seeding the composer with a starter prompt (Doubao's
-// home pattern). Kept in Cyber's own skin — blue accent, warm reserved for
-// severity, no mascot. The scan card seeds the real "!scan " command; the others
-// seed editable natural-language templates the operator completes.
-function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
+function ChatGreeting() {
   const { t } = useTranslation('chat')
-  const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
-    { key: 'scan', Icon: Radar, seed: '!scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
-    { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
-    { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
-    { key: 'swarm', Icon: Network, seedKey: 'cardSwarmSeed', titleKey: 'cardSwarmTitle', subKey: 'cardSwarmSub' },
-  ]
+  const [findingIndex, setFindingIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    let revealTimer: ReturnType<typeof setTimeout>
+    let hideTimer: ReturnType<typeof setTimeout>
+    let lastIndex = -1
+
+    const reveal = () => {
+      revealTimer = setTimeout(() => {
+        lastIndex = lastIndex < 0
+          ? Math.floor(Math.random() * mockVulnerabilityKeys.length)
+          : (lastIndex + 1 + Math.floor(Math.random() * (mockVulnerabilityKeys.length - 1))) % mockVulnerabilityKeys.length
+        setFindingIndex(lastIndex)
+        hideTimer = setTimeout(() => {
+          setFindingIndex(null)
+          reveal()
+        }, 1800)
+      }, 500 + Math.random() * 1300)
+    }
+
+    const updateMotion = () => {
+      clearTimeout(revealTimer)
+      clearTimeout(hideTimer)
+      setFindingIndex(reducedMotion.matches ? 0 : null)
+      if (!reducedMotion.matches) reveal()
+    }
+
+    updateMotion()
+    reducedMotion.addEventListener('change', updateMotion)
+    return () => {
+      reducedMotion.removeEventListener('change', updateMotion)
+      clearTimeout(revealTimer)
+      clearTimeout(hideTimer)
+    }
+  }, [])
+
   return (
-    <div className="px-1 pb-2 pt-8">
-      <h2 className="text-balance text-[1.35rem] font-bold leading-tight tracking-tight text-foreground">{t('mobileGreetingTitle')}</h2>
-      <p className="mb-5 mt-1 text-sm text-muted-foreground">{t('mobileGreetingSubtitle')}</p>
-      <div className="grid grid-cols-2 gap-2.5">
-        {cards.map(({ key, Icon, seed, seedKey, titleKey, subKey }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onSeed(seed ?? t(seedKey!))}
-            className="flex flex-col gap-2 rounded-[0.7rem] border border-border/75 bg-card p-3.5 text-left shadow-soft transition-transform active:scale-[0.98]"
-          >
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-primary">
-              <Icon className="h-[18px] w-[18px]" />
-            </span>
-            <span className="text-sm font-semibold text-foreground">{t(titleKey)}</span>
-            <span className="text-[11.5px] leading-snug text-muted-foreground">{t(subKey)}</span>
-          </button>
-        ))}
+    <div className="cyber-intro flex flex-col items-center px-1 py-5 text-center">
+      <div className="cyber-intro-visual" aria-hidden="true">
+        <span className="cyber-intro-axis cyber-intro-axis-horizontal" />
+        <span className="cyber-intro-axis cyber-intro-axis-vertical" />
+        <span className="cyber-intro-ring cyber-intro-ring-outer" />
+        <span className="cyber-intro-ring cyber-intro-ring-middle" />
+        <span className="cyber-intro-ring cyber-intro-ring-inner" />
+        <span className="cyber-intro-sweep" />
+        <span className="cyber-intro-detection cyber-intro-detection-asset">
+          <Box size={12} />{t('idleAsset')}
+        </span>
+        <span className="cyber-intro-detection cyber-intro-detection-port">
+          <Network size={12} />{t('idlePort')}
+        </span>
+        <span className="cyber-intro-detection cyber-intro-detection-fingerprint">
+          <Fingerprint size={12} />{t('idleFingerprint')}
+        </span>
+        {findingIndex !== null && (
+          <span className="cyber-intro-detection cyber-intro-detection-finding">
+            <Bug size={12} />{t(mockVulnerabilityKeys[findingIndex])}
+          </span>
+        )}
+        <span className="cyber-intro-core">
+          <BrandLogo size={60} animated={false} />
+        </span>
       </div>
+      <h2 className="mt-5 font-display text-2xl font-semibold text-foreground">Cyber</h2>
+      <p className="mt-1.5 text-sm text-muted-foreground">{t('idlePrompt')}</p>
     </div>
   )
 }

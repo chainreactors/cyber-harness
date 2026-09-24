@@ -88,8 +88,10 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 			}
 			return candidateProfile, nil
 		},
-		MaxConcurrent: opts.MaxScans,
-		ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
+		Scans: &webservice.ScanServiceConfig{
+			MaxConcurrent: opts.MaxScans,
+			ScanTimeout:   time.Duration(opts.ScanTimeout) * time.Second,
+		},
 	}
 	if option.Debug {
 		webConfig.AllowedOrigins = []string{"*"}
@@ -346,20 +348,12 @@ func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, incoming *
 	if incoming.Traffic == nil {
 		incoming.Traffic = current.Traffic
 	}
-	if incoming.Scan == nil {
-		incoming.Scan = current.Scan
-	}
 
 	// Preserve existing secrets when incoming value is empty.
 	if incoming.Node == nil {
 		incoming.Node = current.GetNode()
 	}
 	preserveLLMProfileSecrets(incoming.Llm, current.GetLlm())
-	incoming.Cyberhub = preserveConfigSection(incoming.Cyberhub, current.GetCyberhub(), func(c *types.CyberhubConfig) { preserveSecret(&c.Key, current.GetCyberhub().GetKey()) })
-	incoming.Recon = preserveConfigSection(incoming.Recon, current.GetRecon(), func(c *types.ReconConfig) {
-		preserveSecret(&c.FofaKey, current.GetRecon().GetFofaKey())
-		preserveSecret(&c.HunterApiKey, current.GetRecon().GetHunterApiKey())
-	})
 	incoming.Search = preserveConfigSection(incoming.Search, current.GetSearch(), func(c *types.SearchConfig) { preserveSecret(&c.TavilyKeys, current.GetSearch().GetTavilyKeys()) })
 	sections := defaultSections()
 	nextValues, currentValues := cfg.ValuesFromProto(incoming.Extensions), cfg.ValuesFromProto(current.Extensions)

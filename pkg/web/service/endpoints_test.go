@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/core/resource"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	configpkg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	flags "github.com/jessevdk/go-flags"
 
 	"connectrpc.com/connect"
 	aop "github.com/chainreactors/cyber/aop"
@@ -145,6 +147,12 @@ func TestConnectHandlerSupportsConnectGRPCWebAndGRPC(t *testing.T) {
 func TestHandlerTestConnRouting(t *testing.T) {
 	sections := configpkg.NewSections()
 	resources := resource.New()
+	if _, err := resource.Define[configpkg.Section](resources, sections); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resource.Define[hostcli.Contribution](resources, hostcli.New(flags.NewParser(&struct{}{}, flags.None))); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := resource.Define[configpkg.Connection](resources, sections.ConnectionPoint()); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +185,7 @@ func TestHandlerTestConnRouting(t *testing.T) {
 }
 
 func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "connect-parity.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "connect-parity.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +250,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 // A1: a full Application Endpoint session lifecycle over Connect while the
 // answering node uses the separate Node WebSocket Endpoint.
 func TestConnectBidiClientSessionLifecycle(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lifecycle.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lifecycle.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

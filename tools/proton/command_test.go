@@ -1,13 +1,15 @@
 package proton_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	protoncmd "github.com/chainreactors/cyber/tools/proton"
-	"github.com/chainreactors/cyber/tools/resources"
+	"github.com/chainreactors/cyber/tools/proton/resources"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,12 +27,11 @@ func e2eBash(t *testing.T) (*terminaltool.BashTool, string) {
 	t.Helper()
 	dir := t.TempDir()
 
-	rs := &resources.Set{}
-	registry := hosttest.Commands(t, protoncmd.NewCommand(dir, rs, nil, "", nil))
+	registry := hosttest.Commands(t, protoncmd.NewCommand(dir, resources.Config, nil, "", nil))
 
 	bash := terminaltool.NewBashTool(dir, 30, nil)
 	bash.SetCommandRegistry(registry)
-	return bash, dir
+	return bash, filepath.ToSlash(dir)
 }
 
 func run(t *testing.T, bash *terminaltool.BashTool, cmd string) string {
@@ -50,7 +51,7 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	return filepath.ToSlash(p)
 }
 
 func requireUnix(t *testing.T) {
@@ -481,10 +482,56 @@ Just regular text content
 x = 42
 `)
 
-	out := run(t, bash, "proton -i "+filepath.Join(dir, "clean.txt"))
+	out := run(t, bash, "proton -i "+filepath.ToSlash(filepath.Join(dir, "clean.txt")))
 	t.Logf("output:\n%s", out)
 
 	if !strings.Contains(out, "no findings") {
 		t.Error("should report 'no findings' for clean file")
+	}
+}
+
+func TestProtonIndependentResourcesOccurrencesAndExclusions(t *testing.T) {
+	dir := t.TempDir()
+	report := filepath.Join(dir, "report")
+	if err := os.Mkdir(report, 0700); err != nil {
+		t.Fatal(err)
+	}
+	content := "LAB_TOKEN_12345\nLAB_TOKEN_67890\n"
+	if err := os.WriteFile(filepath.Join(dir, "input.txt"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(report, "prior.txt"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := protoncmd.NewCommand(dir, resources.Config, nil, "", nil, report)
+	var output bytes.Buffer
+	_, err := cmd.Run(t.Context(), &coretool.Execution{Args: []string{"-i", dir, "-e", `LAB_TOKEN_[0-9]+`, "-j"}, Dir: dir, Stdout: &output, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "prior.txt") {
+		t.Fatal("report scanned recursively")
+	}
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+		var entry struct {
+			Events []struct {
+				Value string `json:"value"`
+				Line  int    `json:"line"`
+			} `json:"events"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatal(err)
+		}
+		if len(entry.Events) >= 2 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("multiple occurrences were lost: %s", output.String())
+	}
+	_, err = cmd.Run(t.Context(), &coretool.Execution{Args: []string{"-i", filepath.Join(dir, "missing")}, Dir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err == nil {
+		t.Fatal("missing input was presented as a clean scan")
 	}
 }

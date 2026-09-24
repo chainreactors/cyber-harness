@@ -10,9 +10,21 @@ import (
 	okftool "github.com/chainreactors/cyber/tools/okf"
 )
 
-type Extension struct{}
+// Extension contributes the OKF prompt policy, validation command, and
+// reference docs. The prompt targets are configurable so distributions
+// decide which agents receive the policy.
+type Extension struct {
+	targets []prompt.Target
+}
 
-func New() *Extension { return &Extension{} }
+// New builds the extension. Without targets the policy applies to the main
+// system prompt only.
+func New(targets ...prompt.Target) *Extension {
+	if len(targets) == 0 {
+		targets = []prompt.Target{prompt.MainSystem}
+	}
+	return &Extension{targets: targets}
+}
 
 const (
 	// SectionMarkdown is the prompt section contributed by this extension.
@@ -26,9 +38,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return fmt.Errorf("OKF extension is unavailable")
 	}
 	if err := extension.Add(scope, prompt.Contribution{
-		Name: "okf.markdown", Targets: []prompt.Target{
-			prompt.MainSystem, prompt.ScannerSystem,
-		},
+		Name: "okf.markdown", Targets: e.targets,
 		Apply: applyPolicy,
 	}); err != nil {
 		return err

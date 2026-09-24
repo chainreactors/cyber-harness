@@ -87,7 +87,7 @@ func builtinCommands() []Command {
 			help.WriteString("  !<command>")
 			return text("/help", CommandPresentationPreformatted, help.String())
 		}},
-		{Spec: &types.CommandSpec{Name: "/status", Description: "查看 Agent 的 LLM、工具、扫描器和会话健康状态"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
+		{Spec: &types.CommandSpec{Name: "/status", Description: "查看 Agent 的 LLM、工具和会话健康状态"}, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, _ []string) (*types.CommandResult, error) {
 			return text("/status", CommandPresentationPreformatted, s.baseState().commands.statusText())
 		}},
 		{Spec: &types.CommandSpec{Name: "/clear", Description: "清空当前 Agent 上下文"}, AdvertiseRemote: true, rotation: true, Handler: func(ctx context.Context, s *Session, args []string) (*types.CommandResult, error) {

@@ -5,8 +5,6 @@ import { findingTargetURL, PRIORITY_ORDER, type FindingItem, type FindingPriorit
 import { severityTone } from '../lib/tones'
 import { cn } from '@cyber/theme'
 import { Badge, Chip, EmptyState } from '@cyber/ui'
-import { AiPanel } from '@/components/AiPanel'
-import { MarkdownContent } from '@/markdown'
 
 interface FindingsPanelProps {
   findings: FindingItem[]
@@ -20,7 +18,7 @@ export default function FindingsPanel({ findings }: FindingsPanelProps) {
 
   const filtered = useMemo(() => {
     if (filter === 'all') return findings
-    if (filter === 'ai_verified') return findings.filter(f => f.source === 'verify' && f.status === 'confirmed')
+    if (filter === 'ai_verified') return findings.filter(f => f.status === 'confirmed')
     return findings.filter(f => f.priority === filter)
   }, [findings, filter])
 
@@ -36,7 +34,7 @@ export default function FindingsPanel({ findings }: FindingsPanelProps) {
     return <EmptyState icon={Shield} title={t('noFindings')} />
   }
 
-  const aiCount = findings.filter(f => f.source === 'verify' && f.status === 'confirmed').length
+  const aiCount = findings.filter(f => f.status === 'confirmed').length
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -86,7 +84,6 @@ export default function FindingsPanel({ findings }: FindingsPanelProps) {
 
 function FindingCard({ item }: { item: FindingItem }) {
   const { t } = useTranslation('findings')
-  const [expanded, setExpanded] = useState(false)
 
   return (
     <div className="p-3 text-xs">
@@ -110,35 +107,18 @@ function FindingCard({ item }: { item: FindingItem }) {
         </div>
       </div>
 
+      {!!item.evidence?.length && <details className="mt-2 text-xs text-muted-foreground">
+        <summary className="cursor-pointer">{t('evidenceRecords', { count: item.evidence.length })}</summary>
+        {item.evidence.map((evidence) => <div key={evidence.id} className="mt-1 rounded border border-border px-2 py-1">
+          <span className="font-mono">{evidence.source}</span> · {t(`verification_${evidence.status || 'unverified'}`, { defaultValue: evidence.status })}
+          <p>{evidence.description}</p>
+        </div>)}
+      </details>}
       {item.detail && (
-        <div className="mt-2">
-          {!expanded ? (
-            <button
-              type="button"
-              className="text-[11px] text-ai hover:underline"
-              onClick={() => setExpanded(true)}
-            >
-              {t('showAIAnalysis')}
-            </button>
-          ) : (
-            <AiPanel
-              label={item.source === 'verify' ? t('aiVerification') : item.source === 'sniper' ? t('cveIntelligence') : t('analysis')}
-              action={
-                <button
-                  type="button"
-                  className="text-[10px] text-muted-foreground hover:text-foreground"
-                  onClick={() => setExpanded(false)}
-                >
-                  {t('hide')}
-                </button>
-              }
-              className="mt-1"
-              bodyClassName="max-h-72 overflow-auto"
-            >
-              <MarkdownContent content={item.detail} compact muted />
-            </AiPanel>
-          )}
-        </div>
+        <details className="mt-2 text-muted-foreground">
+          <summary className="cursor-pointer text-[11px]">{t('rawEvidence')}</summary>
+          <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-border p-2 font-mono text-xs">{item.detail}</pre>
+        </details>
       )}
     </div>
   )
@@ -176,13 +156,13 @@ function FindingKindIcon({ kind }: { kind: FindingItem['kind'] }) {
 
 function FindingSourceBadge({ source, status }: { source?: string; status?: string }) {
   const { t } = useTranslation('findings')
-  if (source === 'verify' && status === 'confirmed') {
+  if (status === 'confirmed') {
     return <Badge size="sm" variant="success"><CheckCircle2 className="h-3 w-3" />{t('aiVerified')}</Badge>
   }
-  if (source === 'verify' && status === 'not_confirmed') {
+  if (status === 'not_confirmed') {
     return <Badge size="sm" variant="muted">{t('notConfirmed')}</Badge>
   }
-  if (source === 'verify' && status === 'inconclusive') {
+  if (status === 'inconclusive') {
     return <Badge size="sm" variant="warning">{t('inconclusive')}</Badge>
   }
   if (source === 'sniper') {
@@ -193,4 +173,3 @@ function FindingSourceBadge({ source, status }: { source?: string; status?: stri
   }
   return null
 }
-

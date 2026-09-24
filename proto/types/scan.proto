@@ -5,7 +5,7 @@ package cyber.scan;
 import "aop/chat.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/chainreactors/cyber/core/types;types";
+option go_package = "github.com/chainreactors/cyber/pkg/web/scan;scan";
 
 enum ScanStatus {
   SCAN_STATUS_UNSPECIFIED = 0;
@@ -17,9 +17,10 @@ enum ScanStatus {
 }
 
 message ScanOptions {
-  bool verify = 1;
+  optional bool verify = 1;
   bool sniper = 2;
-  bool deep = 3;
+  reserved 3;
+  reserved "deep";
 }
 
 message Scan {

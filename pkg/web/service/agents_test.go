@@ -123,7 +123,7 @@ func ptyMessageKind(value *ptypb.ProtocolMessage) string {
 }
 
 func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +149,37 @@ func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
 	}
 	if len(deliveries) != 1 || !protobuf.Equal(deliveries[0].GetEvent(), event) {
 		t.Fatalf("stored artifact events = %+v", deliveries)
+	}
+}
+
+func TestArchiveFailureWaitsForExecutionTerminal(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"), ScanSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close() // Simulate storage failure after dispatch.
+	pool := NewAgentPool(NewHub(), store)
+	agent := &remoteAgent{nodeState: newNodeState()}
+	result := make(chan taskResult, 1)
+	agent.tasks["scan-call"] = result
+	agent.toolCalls["scan-call"] = struct{}{}
+	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: []byte(`{"ip":"127.0.0.1","port":"80"}`), MediaType: aop.JSONMediaType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.forwardAOPFrame(agent, "scan-call", &aop.Event{Id: "failed-artifact", EmittedAt: timestamppb.Now(), Payload: &aop.Event_Extension{Extension: extension}})
+	if !agent.busy() {
+		t.Fatal("archive error released a still executing task")
+	}
+	select {
+	case <-result:
+		t.Fatal("task completed before its terminal")
+	default:
+	}
+	pool.forwardAOPFrame(agent, "scan-call", &aop.Event{Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{}}})
+	got := <-result
+	if got.Code != "RESULT_ARCHIVE_FAILED" || got.Err == "" || agent.busy() {
+		t.Fatalf("terminal lost archive failure: %+v", got)
 	}
 }
 
@@ -508,7 +539,7 @@ func TestDispatchRunCarriesGoalOptions(t *testing.T) {
 }
 
 func TestHandleFileUploadPersistsSystemMessage(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +949,7 @@ func TestWSTerminalBufferPressure(t *testing.T) {
 
 func setupE2EServer(t *testing.T) (*httptest.Server, *AgentPool) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "e2e.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1071,6 +1102,11 @@ func writeMockAgentPTY(t *testing.T, agent *mockBrowserAgent, message *ptypb.Pro
 
 func openFirstAgentTerminal(t *testing.T, page *rod.Page) { //nolint:unused // referenced by agents_e2e_test.go with the e2e build tag
 	t.Helper()
+	nodes, err := page.Timeout(5*time.Second).ElementR("aside button", "Nodes")
+	if err != nil {
+		t.Fatalf("nodes view not available: %v", err)
+	}
+	nodes.MustClick()
 	terminal, err := page.Timeout(5*time.Second).ElementR("button", "Terminal")
 	if err != nil {
 		if toggle, toggleErr := page.Timeout(5 * time.Second).Element("button[aria-label='Expand sidebar']"); toggleErr == nil {
@@ -1394,7 +1430,7 @@ func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 }
 
 func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
-	store, err := NewSQLiteStore(t.TempDir() + "/chat.db")
+	store, err := NewSQLiteStore(t.TempDir()+"/chat.db", ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1550,7 +1586,7 @@ func TestHandleConfigReloadResultUpdatesAgentStatus(t *testing.T) {
 // their replies to their own request identity — uploads by envelope id, PTY
 // stream frames by stream id.
 func TestWSConcurrentMixedOpsReplyCorrelation(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "mixed.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "mixed.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1739,7 +1775,7 @@ func TestWSReconnectClosesReplacedConnection(t *testing.T) {
 // A8: a session's node binding still resolves after the node reconnects —
 // dispatch to the session's node lands on the replacement connection.
 func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bind.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "bind.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,43 +30,24 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 		return scannerMode{}, rest, nil
 	}
 	verifyMode, explicit := scannerVerifyMode(rest[1:], defaultVerify)
-	sniperEnabled := hasScannerFlag(rest[1:], "--sniper")
-	deepEnabled := hasScannerFlag(rest[1:], "--deep")
-	aiSkillRequested := sniperEnabled || deepEnabled
-
-	mode := scannerMode{}
-
-	if aiSkillRequested {
+	if hasScannerFlag(rest[1:], "--deep") {
+		return scannerMode{}, nil, fmt.Errorf("--deep is no longer supported; use --mode full for full scanning")
+	}
+	if err := scan.ValidateVerify(verifyMode); err != nil {
+		return scannerMode{}, nil, err
+	}
+	if explicit && verifyMode == "" {
+		return scannerMode{}, nil, fmt.Errorf("--verify requires on or off")
+	}
+	mode := scannerMode{Provider: profile.ProviderOptional}
+	if verifyMode == "on" || scannerBoolFlagEnabled(rest[1:], "--sniper") {
 		mode.Provider = profile.ProviderRequired
 		mode.Agent = true
 	}
-
-	switch verifyMode {
-	case "auto":
-		if !aiSkillRequested {
-			mode.Provider = profile.ProviderOptional
-		}
-		mode.Agent = explicit || aiSkillRequested
-		return mode, removeScannerFlag(rest, "--verify"), nil
-	case "off":
-		if explicit {
-			return mode, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
-		}
-		return mode, rest, nil
-	case "low", "medium", "high", "critical":
-		if aiSkillRequested || explicit {
-			mode.Provider = profile.ProviderRequired
-		} else {
-			mode.Provider = profile.ProviderOptional
-		}
-		mode.Agent = explicit || aiSkillRequested
-		return mode, rest, nil
-	default:
-		if explicit {
-			return scannerMode{}, nil, fmt.Errorf("invalid --verify value %q: expected auto, off, low, medium, high, or critical", verifyMode)
-		}
-		return mode, rest, nil
+	if verifyMode != "" {
+		rest = replaceOrAppendScannerFlag(rest, "--verify", verifyMode)
 	}
+	return mode, rest, nil
 }
 
 func hasScannerFlag(args []string, long string) bool {
@@ -196,25 +177,9 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 func defaultVerifyMode(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
-		return "off"
+		return ""
 	}
 	return value
-}
-
-func removeScannerFlag(args []string, flag string) []string {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		key, _, hasValue := strings.Cut(arg, "=")
-		if key != flag {
-			out = append(out, arg)
-			continue
-		}
-		if !hasValue && i+1 < len(args) {
-			i++
-		}
-	}
-	return out
 }
 
 func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {
@@ -235,7 +200,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agent
 		return err
 	}
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
+	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}}, nil)
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {

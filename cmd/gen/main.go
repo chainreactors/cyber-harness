@@ -101,6 +101,9 @@ func main() {
 	if err := removeGeneratedFiles(typesDir, ".pb.go"); err != nil {
 		fatal("clear generated Cyber types", err)
 	}
+	if err := removeGeneratedFiles(filepath.Join(root, "pkg", "web", "scan"), ".pb.go"); err != nil {
+		fatal("clear generated scan console types", err)
+	}
 
 	goInputs := append(append([]string{}, aopProtos...), typeProtos...)
 	goInputs = append(goInputs, rpcProtos...)

@@ -1,4 +1,11 @@
 export default {
+  rawEvidence: '请求与响应证据',
+  evidenceRecords: '{{count}} 条原始证据',
+  verification_confirmed: '已确认',
+  verification_not_confirmed: '本次未确认',
+  verification_inconclusive: '未得出结论',
+  verification_unverified: '未验证',
+
   noFindings: '暂无发现项',
   allCount: '全部 ({{count}})',
   aiVerified: 'AI 已验证',

@@ -3,12 +3,12 @@ package api
 import (
 	"context"
 	"fmt"
-	"google.golang.org/protobuf/proto"
 	"strings"
 
 	agentprovider "github.com/chainreactors/cyber/agent/provider"
 	types "github.com/chainreactors/cyber/core/types"
 	configpkg "github.com/chainreactors/cyber/pkg/config"
+	"google.golang.org/protobuf/proto"
 )
 
 // ConfigBackend owns configuration updates and runtime publication. The API
@@ -22,7 +22,12 @@ type ConfigBackend interface {
 type ConfigOptions struct {
 	Sections *configpkg.Sections
 	Project  func(*types.DistributeConfig, *types.ConfigView)
+
+	// RuntimeLLM supplies the effective provider for an empty health probe.
+	// Explicit settings probes continue to use the requested profile and values.
+	RuntimeLLM func() agentprovider.ProviderConfig
 }
+
 type Config struct {
 	backend ConfigBackend
 	options ConfigOptions
@@ -71,8 +76,20 @@ func (c *Config) ActivateProfile(ctx context.Context, request *types.ActivatePro
 	return &types.ActivateProfileResponse{Config: view}, nil
 }
 
+// TestLLM probes the effective runtime for an empty request. A settings probe
+// uses its explicit values and falls back to the selected profile's stored key.
 func (c *Config) TestLLM(ctx context.Context, request *types.LLMProbeRequest) (*types.LLMProbeResult, error) {
-	result, err := agentprovider.TestLLM(ctx, request, c.storedLLMAPIKey(ctx, request.GetProfileId()))
+	var storedKey string
+	if c.options.RuntimeLLM != nil && (request == nil || proto.Equal(request, &types.LLMProbeRequest{})) {
+		effective := c.options.RuntimeLLM()
+		request = &types.LLMProbeRequest{
+			Provider: effective.Provider, BaseUrl: effective.BaseURL,
+			ApiKey: effective.APIKey, Model: effective.Model, Proxy: effective.Proxy,
+		}
+	} else {
+		storedKey = c.storedLLMAPIKey(ctx, request.GetProfileId())
+	}
+	result, err := agentprovider.TestLLM(ctx, request, storedKey)
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
@@ -216,14 +233,8 @@ func ConfigView(config *types.DistributeConfig, path string, loaded bool) *types
 		view.Llm.Active = view.Llm.Providers[0]
 		view.Llm.ActiveProfile = view.Llm.Active.Id
 	}
-	view.Cyberhub = &types.CyberhubView{Url: config.GetCyberhub().GetUrl(), KeyConfigured: config.GetCyberhub().GetKey() != "", Mode: config.GetCyberhub().GetMode(), Proxy: config.GetCyberhub().GetProxy()}
-	view.Recon = &types.ReconView{FofaKeyConfigured: config.GetRecon().GetFofaKey() != "", HunterApiKeyConfigured: config.GetRecon().GetHunterApiKey() != "", Proxy: config.GetRecon().GetProxy(), Limit: config.GetRecon().GetLimit()}
-	view.Scan = &types.ScanConfig{Verify: config.GetScan().GetVerify()}
 	view.Search = &types.SearchView{TavilyKeysConfigured: config.GetSearch().GetTavilyKeys() != ""}
 	view.Agent = proto.CloneOf(config.GetAgent())
 	view.Traffic = proto.CloneOf(config.GetTraffic())
-	if config.Cyberhub != nil {
-		view.Cyberhub.Mitm = config.Cyberhub.Mitm
-	}
 	return view
 }

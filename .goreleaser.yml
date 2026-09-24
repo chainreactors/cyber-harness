@@ -67,3 +67,25 @@ builds:
       - '{{ .Env.FULL_TAGS }}'
     ldflags:
       - -s -w -X github.com/chainreactors/cyber/pkg/config.Version={{ .Version }}
+
+  - id: cyber-audit
+    dir: audit
+    main: ./cmd/cyber-audit
+    binary: cyber-audit
+    env:
+      - CGO_ENABLED=0
+      - GOWORK=off
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    tags:
+      - arsenal_embed
+    ldflags:
+      - -s -w -X github.com/chainreactors/cyber/pkg/config.Version={{ .Version }}

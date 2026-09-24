@@ -1,31 +1,23 @@
-// Package arsenal owns package-manager initialization and its command declaration.
+// Package arsenal registers the package manager in an extension scope.
 package arsenal
 
 import (
-	"fmt"
+	crtm "github.com/chainreactors/crtm/pkg"
 	"github.com/chainreactors/cyber/core/extension"
 	tool "github.com/chainreactors/cyber/tools/arsenal"
-	"path/filepath"
 )
 
-type Extension struct {
-	directory string
+type Extension struct{ manager *crtm.Manager }
+
+func NewManager(directory string, options crtm.ManagerOption) (*crtm.Manager, error) {
+	return tool.NewManager(directory, options)
 }
 
-func New(directory string) (*Extension, error) {
-	if !filepath.IsAbs(directory) {
-		return nil, fmt.Errorf("arsenal requires an absolute directory")
-	}
-	return &Extension{directory: directory}, nil
-}
-func (e *Extension) BinDir() string { return filepath.Join(e.directory, "bin") }
+func New(manager *crtm.Manager) *Extension { return &Extension{manager: manager} }
+
 func (e *Extension) Load(scope *extension.Scope) error {
-	if err := scope.Init().Err(); err != nil {
+	if err := e.manager.Prepare(scope.Init()); err != nil {
 		return err
 	}
-	command, err := tool.NewCommand(e.directory)
-	if err != nil {
-		return err
-	}
-	return extension.Add(scope, command)
+	return extension.Add(scope, tool.NewCommand(e.manager))
 }

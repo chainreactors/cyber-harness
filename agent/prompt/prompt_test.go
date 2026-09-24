@@ -38,7 +38,7 @@ func add(name string, target Target, id, text string) Contribution {
 func TestRegistryUsesRegistrationOrderAndTargetIsolation(t *testing.T) {
 	registry, _ := activeRegistry(t,
 		add("first", MainSystem, "first", "one"),
-		add("other-target", ScannerSystem, "scanner", "scanner-only"),
+		add("other-target", Target("other.system"), "other", "other-only"),
 		add("last", MainSystem, "last", "two"),
 	)
 	result := registry.Build(t.Context(), Context{Target: MainSystem})

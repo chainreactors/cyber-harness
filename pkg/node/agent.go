@@ -39,8 +39,8 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	build := func(options *cfg.Option) (profile.Profile, error) {
-		p, err := newProfile(profile.Request{Option: options, ProviderMode: profile.ProviderOptional, Logger: logger, Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}}})
+	build := func(options *cfg.Option, mode profile.ProviderMode) (profile.Profile, error) {
+		p, err := newProfile(profile.Request{Option: options, ProviderMode: mode, Logger: logger, Session: &agentsession.Config{PrimarySessionID: console.MainREPLName, Loop: agent.StandardLoop{}}})
 		if err == nil && p == nil {
 			err = fmt.Errorf("profile constructor returned nil")
 		}
@@ -61,7 +61,9 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 		}
 		return p, nil
 	}
-	current, err := build(option)
+	// Enroll without initializing or probing a local model. Only a server
+	// configuration can enable the provider and release the startup task.
+	current, err := build(option, profile.ProviderDisabled)
 	if err != nil {
 		return err
 	}
@@ -108,7 +110,11 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 				}
 				var next profile.Profile
 				if err == nil {
-					next, err = build(nextOption)
+					mode := profile.ProviderOptional
+					if len(distributed.GetLlm().GetProviders()) == 0 {
+						mode = profile.ProviderDisabled
+					}
+					next, err = build(nextOption, mode)
 				}
 				if err != nil {
 					return &types.ReloadResult{Error: err.Error()}, nil
@@ -185,11 +191,11 @@ func reloadStatus(p profile.Profile) (*types.ReloadResult, *aop.AgentStatus) {
 }
 
 func sameSharedConfig(current, next *cfg.Option) bool {
-	before, err := cfg.DistributeFromOption(current)
+	before, err := cfg.SharedFromOption(current)
 	if err != nil {
 		return false
 	}
-	after, err := cfg.DistributeFromOption(next)
+	after, err := cfg.SharedFromOption(next)
 	return err == nil && proto.Equal(before, after)
 }
 

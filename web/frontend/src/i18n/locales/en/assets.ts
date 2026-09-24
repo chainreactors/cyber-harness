@@ -1,4 +1,15 @@
 export default {
+  observation: 'Select execution',
+  allObservations: 'All assets',
+  compareWith: 'Select comparison baseline',
+  comparisonHint: 'Compares observations only. Missing observations do not mean fixed; scope, execution errors and parsing gaps affect the comparison.',
+  change_added: 'Added',
+  change_missing: 'Not observed this time',
+  change_changed: 'Attributes changed',
+  parseFailures: '{{count}} evidence records failed to parse; results are incomplete',
+  failureDetails: 'Error details',
+  retryParsing: 'Retry parsing',
+
   title: 'Assets',
   openAssets: 'Asset pool',
   description: 'Search, filter, import, and reuse discovered assets',

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -46,8 +47,17 @@ func WithLogger(logger telemetry.Logger) Option {
 	return func(c *Command) { c.InitLogger(logger) }
 }
 
-func WithDeepBrowserFunc(fn func(context.Context, string) (string, error)) Option {
-	return func(c *Command) { c.deepBrowser = fn }
+// WithVerification supplies node defaults and checks the current invocation's model.
+func WithVerification(defaultValue string, hasModel func(context.Context) bool) Option {
+	return func(c *Command) { c.verifyDefault, c.hasModel = defaultValue, hasModel }
+}
+
+// ValidateVerify preserves the empty value for resolution at the execution node.
+func ValidateVerify(value string) error {
+	if value != "" && value != "on" && value != "off" {
+		return fmt.Errorf("invalid verify value %q: expected on or off", value)
+	}
+	return nil
 }
 
 // WithExecutionOnly rejects modes requiring inference rather than silently ignoring them.

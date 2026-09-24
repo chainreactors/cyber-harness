@@ -3,21 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
+
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/pkg/aopconn"
 	profile "github.com/chainreactors/cyber/pkg/profile"
-	"log/slog"
 )
 
-func (s *Service) aiAvailable() bool {
-	providers := s.providers()
-	if providers == nil {
-		return false
-	}
-	active, _ := providers.Current()
-	return active != nil
-}
 func (s *Service) providers() *provider.State {
 	s.appMu.Lock()
 	defer s.appMu.Unlock()

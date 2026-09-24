@@ -31,7 +31,14 @@ func formatSummary(d *collector, color bool) string {
 }
 
 func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string {
-	parts := []string{"completed"}
+	status := "completed"
+	if len(d.errors) > 0 {
+		status = "failed"
+	}
+	if d.canceled {
+		status = "canceled"
+	}
+	parts := []string{status}
 	parts = appendCount(parts, stats.Inputs, "target", "targets")
 	parts = appendCount(parts, len(d.gogoResults), "service", "services")
 	parts = appendCount(parts, len(d.seenWeb), "web", "web")

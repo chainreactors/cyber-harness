@@ -1,0 +1,3 @@
+id: cyber-audit
+catalog: ../../../tools/arsenal/arsenal.yaml
+tools: [rg, ast-grep, osv-scanner]

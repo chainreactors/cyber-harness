@@ -28,6 +28,7 @@ type collector struct {
 	artifacts    []artifactResult
 	loots        []parsers.Loot
 	errors       []string
+	canceled     bool
 	trace        []string
 	seenWeb      map[string]struct{}
 	seenFinger   map[string]int

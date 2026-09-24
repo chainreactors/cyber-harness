@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	crtm "github.com/chainreactors/crtm/pkg"
@@ -13,37 +11,18 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-// ArsenalCommand is a pseudo-command invoked via bash:
+// command is a pseudo-command invoked via bash:
 //
 //	bash(command="arsenal list")
 //	bash(command="arsenal install nuclei")
 //	bash(command="arsenal search port scanner")
-type ArsenalCommand struct {
+type command struct {
 	mgr *crtm.Manager
 }
 
-func NewArsenalCommand(base string) (*ArsenalCommand, error) {
-	if !filepath.IsAbs(base) {
-		return nil, fmt.Errorf("arsenal directory must be absolute")
-	}
+func (c *command) Name() string { return "arsenal" }
 
-	mgr, err := crtm.NewManager(crtm.ManagerOption{
-		BinPath:    filepath.Join(base, "bin"),
-		ConfigPath: filepath.Join(base, "cyber.yaml"),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("init arsenal: %w", err)
-	}
-
-	if err := os.MkdirAll(mgr.BinPath(), 0755); err != nil {
-		return nil, err
-	}
-	return &ArsenalCommand{mgr: mgr}, nil
-}
-
-func (c *ArsenalCommand) Name() string { return "arsenal" }
-
-func (c *ArsenalCommand) Usage() string {
+func (c *command) Usage() string {
 	return `arsenal — security tool package manager
 
 Usage:
@@ -56,10 +35,11 @@ Usage:
   arsenal releases <name>                  check latest release tag
   arsenal add <owner/repo> [--name NAME] [--pattern PAT]  register third-party repo
 
-Installed tools become immediately available via bash.`
+Installed tools become immediately available via bash.
+Bundled tools are restored automatically; install uses the bundled version when available.`
 }
 
-func (c *ArsenalCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
+func (c *command) Run(ctx context.Context, execution *coretool.Execution) (any, error) {
 	args := execution.Args
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(execution.Stdout, c.Usage()+"\n")
@@ -80,9 +60,9 @@ func (c *ArsenalCommand) Run(_ context.Context, execution *coretool.Execution) (
 	case "info":
 		result, err = c.info(rest)
 	case "install", "i":
-		result, err = c.install(rest)
+		result, err = c.install(ctx, rest)
 	case "update", "upgrade":
-		result, err = c.update(rest)
+		result, err = c.update(ctx, rest)
 	case "remove", "rm", "uninstall":
 		result, err = c.remove(rest)
 	case "releases", "release":
@@ -104,7 +84,7 @@ func (c *ArsenalCommand) Run(_ context.Context, execution *coretool.Execution) (
 
 // --- subcommands ---
 
-func (c *ArsenalCommand) search(args []string) (string, error) {
+func (c *command) search(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: arsenal search <query>")
 	}
@@ -116,7 +96,7 @@ func (c *ArsenalCommand) search(args []string) (string, error) {
 	return formatEntryList(results, c.mgr), nil
 }
 
-func (c *ArsenalCommand) info(args []string) (string, error) {
+func (c *command) info(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: arsenal info <name>")
 	}
@@ -127,7 +107,7 @@ func (c *ArsenalCommand) info(args []string) (string, error) {
 	return formatToolInfo(info), nil
 }
 
-func (c *ArsenalCommand) install(args []string) (string, error) {
+func (c *command) install(ctx context.Context, args []string) (string, error) {
 	name, version := parseNameVersion(args)
 	if name == "" {
 		return "", fmt.Errorf("usage: arsenal install <name> [--version VER]")
@@ -135,42 +115,35 @@ func (c *ArsenalCommand) install(args []string) (string, error) {
 
 	if c.mgr.IsInstalled(name) {
 		ver := c.mgr.InstalledVersion(name)
-		return fmt.Sprintf("%s already installed (%s). Use 'arsenal update %s' to refresh.", name, displayVer(ver), name), nil
+		if version == "" || strings.TrimPrefix(version, "v") == strings.TrimPrefix(ver, "v") {
+			return fmt.Sprintf("%s already installed (%s). Use 'arsenal update %s' to refresh.", name, displayVer(ver), name), nil
+		}
 	}
 
-	var err error
-	if version != "" {
-		err = c.mgr.InstallVersion(name, version)
-	} else {
-		err = c.mgr.InstallTool(name)
-	}
-	if err != nil {
+	if err := c.mgr.Install(ctx, name, version, nil); err != nil {
 		return "", fmt.Errorf("install %s: %w", name, err)
 	}
 
 	return c.formatPostInstall(name, "Installed"), nil
 }
 
-func (c *ArsenalCommand) update(args []string) (string, error) {
+func (c *command) update(ctx context.Context, args []string) (string, error) {
 	name, version := parseNameVersion(args)
 	if name == "" {
 		return "", fmt.Errorf("usage: arsenal update <name> [--version VER]")
 	}
 
-	var err error
-	if version != "" {
-		err = c.mgr.InstallVersion(name, version)
-	} else {
-		err = c.mgr.UpdateTool(name)
+	if version == "" {
+		version = "latest"
 	}
-	if err != nil {
+	if err := c.mgr.Install(ctx, name, version, nil); err != nil {
 		return "", fmt.Errorf("update %s: %w", name, err)
 	}
 
 	return c.formatPostInstall(name, "Updated"), nil
 }
 
-func (c *ArsenalCommand) remove(args []string) (string, error) {
+func (c *command) remove(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: arsenal remove <name>")
 	}
@@ -184,7 +157,7 @@ func (c *ArsenalCommand) remove(args []string) (string, error) {
 	return fmt.Sprintf("Removed %s.", name), nil
 }
 
-func (c *ArsenalCommand) releases(args []string) (string, error) {
+func (c *command) releases(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: arsenal releases <name>")
 	}
@@ -196,7 +169,7 @@ func (c *ArsenalCommand) releases(args []string) (string, error) {
 	return string(data), nil
 }
 
-func (c *ArsenalCommand) add(args []string) (string, error) {
+func (c *command) add(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: arsenal add <owner/repo> [--name NAME] [--pattern PAT]")
 	}
@@ -242,7 +215,7 @@ func (c *ArsenalCommand) add(args []string) (string, error) {
 
 // --- helpers ---
 
-func (c *ArsenalCommand) formatPostInstall(name, verb string) string {
+func (c *command) formatPostInstall(name, verb string) string {
 	ver := c.mgr.InstalledVersion(name)
 	result := fmt.Sprintf("%s %s (%s). Available via bash.", verb, name, displayVer(ver))
 	if entry, ok := c.mgr.Catalog().Find(name); ok {
@@ -260,14 +233,16 @@ func parseNameVersion(args []string) (name, version string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--version", "-V":
-			if i+1 < len(args) {
-				version = args[i+1]
-				i++
+			if version != "" || i+1 == len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "-") {
+				return "", ""
 			}
+			version = args[i+1]
+			i++
 		default:
-			if name == "" && !strings.HasPrefix(args[i], "-") {
-				name = args[i]
+			if name != "" || strings.HasPrefix(args[i], "-") {
+				return "", ""
 			}
+			name = args[i]
 		}
 	}
 	return
@@ -277,7 +252,7 @@ func displayVer(v string) string {
 	if v == "" || v == "installed" {
 		return "installed"
 	}
-	return "v" + v
+	return "v" + strings.TrimPrefix(v, "v")
 }
 
 func formatEntryList(entries []registry.ToolEntry, mgr *crtm.Manager) string {

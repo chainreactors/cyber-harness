@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
+	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/sdk/pkg/cyberhub"
 	"io"
@@ -25,16 +26,37 @@ var (
 )
 
 func Declare(resources *resource.Registry) error {
+	if _, err := resource.Add[cfg.Section](resources, CyberhubSection(), ReconSection(), ScanSection()); err != nil {
+		return err
+	}
+	if _, err := resource.Add[hostcli.Contribution](resources, contributeFlags); err != nil {
+		return err
+	}
 	_, err := resource.Add[cfg.Connection](resources,
-		cfg.Connection{Section: "cyberhub", Test: testCyberhubConnection},
-		cfg.Connection{Section: "recon", Test: testReconConnections},
+		cfg.Connection{Section: CyberhubConfigKey, Test: testCyberhubConnection},
+		cfg.Connection{Section: ReconConfigKey, Test: testReconConnections},
 	)
 	return err
 }
 
+// contributeFlags mounts the scanner flag groups on the commands that run
+// scanner-backed workloads.
+func contributeFlags(registry *hostcli.Registry) error {
+	for _, command := range []string{"agent", "web"} {
+		if err := registry.Group(command, CyberhubConfigKey, CyberhubFlagGroup()); err != nil {
+			return err
+		}
+		if err := registry.Group(command, ReconConfigKey, ReconFlagGroup()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func testCyberhubConnection(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
-	hubURL := fallbackString(in.GetCyberhub().GetUrl(), stored.GetCyberhub().GetUrl())
-	key := fallbackString(in.GetCyberhub().GetKey(), stored.GetCyberhub().GetKey())
+	inHub, storedHub := connectionSection(in, CyberhubConfigKey), connectionSection(stored, CyberhubConfigKey)
+	hubURL := fallbackString(connectionString(inHub, "url"), connectionString(storedHub, "url"))
+	key := fallbackString(connectionString(inHub, "key"), connectionString(storedHub, "key"))
 	return []*types.ConnectionCheck{connectionCheck("cyberhub", func() (string, error) {
 		if strings.TrimSpace(hubURL) == "" {
 			return "", fmt.Errorf("cyberhub url is empty")
@@ -53,14 +75,15 @@ func testCyberhubConnection(ctx context.Context, in, stored *types.DistributeCon
 }
 
 func testReconConnections(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
-	proxy := fallbackString(in.GetRecon().GetProxy(), stored.GetRecon().GetProxy())
+	inRecon, storedRecon := connectionSection(in, ReconConfigKey), connectionSection(stored, ReconConfigKey)
+	proxy := fallbackString(connectionString(inRecon, "proxy"), connectionString(storedRecon, "proxy"))
 	var checks []*types.ConnectionCheck
-	if fofaKey := fallbackString(in.GetRecon().GetFofaKey(), stored.GetRecon().GetFofaKey()); strings.TrimSpace(fofaKey) != "" {
+	if fofaKey := fallbackString(connectionString(inRecon, "fofa_key"), connectionString(storedRecon, "fofa_key")); strings.TrimSpace(fofaKey) != "" {
 		checks = append(checks, connectionCheck("fofa", func() (string, error) {
 			return testFofaConnection(ctx, fofaKey, proxy)
 		}))
 	}
-	if hunterKey := fallbackString(in.GetRecon().GetHunterApiKey(), stored.GetRecon().GetHunterApiKey()); strings.TrimSpace(hunterKey) != "" {
+	if hunterKey := fallbackString(connectionString(inRecon, "hunter_api_key"), connectionString(storedRecon, "hunter_api_key")); strings.TrimSpace(hunterKey) != "" {
 		checks = append(checks, connectionCheck("hunter", func() (string, error) {
 			return testHunterConnection(ctx, hunterKey, proxy)
 		}))
@@ -69,6 +92,18 @@ func testReconConnections(ctx context.Context, in, stored *types.DistributeConfi
 		checks = append(checks, &types.ConnectionCheck{Name: "recon", Error: "no FOFA or Hunter credentials configured"})
 	}
 	return checks
+}
+
+func connectionSection(config *types.DistributeConfig, key string) map[string]any {
+	if config == nil {
+		return nil
+	}
+	return cfg.ValuesFromProto(config.GetExtensions())[key]
+}
+
+func connectionString(section map[string]any, key string) string {
+	value, _ := section[key].(string)
+	return value
 }
 
 func redactConnectionURL(err error) error {

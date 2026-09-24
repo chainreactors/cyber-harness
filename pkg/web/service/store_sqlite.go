@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,13 +18,15 @@ import (
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"google.golang.org/protobuf/encoding/protojson"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	_ "modernc.org/sqlite"
 )
 
 type SQLiteStore struct {
-	db  *sql.DB
-	orm *bun.DB
+	db      *sql.DB
+	orm     *bun.DB
+	modules []SchemaModule
 }
 
 var (
@@ -32,7 +34,7 @@ var (
 	dbJSONUnmarshal = protojson.UnmarshalOptions{}
 )
 
-func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
+func NewSQLiteStore(dbPath string, modules ...SchemaModule) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -40,7 +42,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	orm := bun.NewDB(db, sqlitedialect.New())
-	if err := initializeSchema(orm, db); err != nil {
+	if err := initializeSchema(orm, db, schemaUnion(modules)); err != nil {
 		_ = orm.Close()
 		return nil, fmt.Errorf("initialize latest sqlite schema: %w", err)
 	}
@@ -52,130 +54,34 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		}
 		return nil, fmt.Errorf("verify sqlite foreign keys: disabled")
 	}
-	return &SQLiteStore{db: db, orm: orm}, nil
+	return &SQLiteStore{db: db, orm: orm, modules: modules}, nil
+}
+
+// hasModule reports whether the store carries a module's tables.
+func (s *SQLiteStore) hasModule(name string) bool {
+	for _, module := range s.modules {
+		if module.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // initializeSchema creates the only supported schema for an empty database.
 // Existing databases must already match it exactly; there are no migrations
 // or historical schema versions before the first release.
-func initializeSchema(orm *bun.DB, db *sql.DB) error {
-	var tables []string
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+func initializeSchema(orm *bun.DB, db *sql.DB, schema SchemaModule) error {
+	tables, err := schemaTables(db)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		tables = append(tables, name)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
 	if len(tables) != 0 {
-		return validateLatestSchema(db, tables)
+		return validateSchema(db, schema)
 	}
-
-	if err := orm.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
-		models := []any{
-			(*scanModel)(nil),
-			(*sessionModel)(nil),
-			(*aopEventModel)(nil),
-			(*sessionScanModel)(nil),
-			(*requestLedgerModel)(nil),
-			(*rawArtifactModel)(nil),
-		}
-		for _, model := range models {
-			query := tx.NewCreateTable().Model(model).WithForeignKeys()
-			switch model.(type) {
-			case *sessionScanModel:
-				// Bun deliberately avoids inferring foreign keys from composite-PK
-				// junction tables unless they are registered as a many-to-many
-				// relation. This table is queried directly, so keep the model simple
-				// and declare its two constraints through the schema builder.
-				query = query.
-					ForeignKey("(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE").
-					ForeignKey("(scan_id) REFERENCES scans(id) ON DELETE CASCADE")
-			}
-			if _, err := query.Exec(ctx); err != nil {
-				return err
-			}
-		}
-		indexes := []*bun.CreateIndexQuery{
-			tx.NewCreateIndex().Model((*scanModel)(nil)).Index("idx_scans_created").ColumnExpr("created_at DESC"),
-			tx.NewCreateIndex().Model((*sessionModel)(nil)).Index("idx_sessions_updated").ColumnExpr("updated_at DESC"),
-			tx.NewCreateIndex().Model((*sessionModel)(nil)).Index("idx_sessions_node_id").Column("node_id"),
-			tx.NewCreateIndex().Model((*aopEventModel)(nil)).Index("idx_aop_events_session").Column("session_id", "cursor"),
-			tx.NewCreateIndex().Model((*aopEventModel)(nil)).Index("idx_aop_events_turn").Column("turn_id"),
-			tx.NewCreateIndex().Model((*rawArtifactModel)(nil)).Index("idx_raw_artifacts_created").Column("created_at"),
-		}
-		for _, index := range indexes {
-			if _, err := index.Exec(ctx); err != nil {
-				return err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX idx_aop_events_event_id ON chat_aop_events(session_id, event_id)`); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	if err := createSchema(context.Background(), orm, schema); err != nil {
 		return err
 	}
-	return validateLatestSchema(db, latestSchemaTables())
-}
-
-func latestSchema() map[string][]string {
-	return map[string][]string{
-		"aop_request_ledger": {"request_id", "method", "request_hash", "response_json", "created_at"},
-		"chat_aop_events":    {"id", "session_id", "event_id", "cursor", "turn_id", "emitter", "sequence", "event_json", "created_at"},
-		"chat_sessions":      {"id", "node_id", "status", "title", "agent_name", "session_json", "created_at", "updated_at"},
-		"raw_artifacts":      {"cursor", "event_id", "event_proto", "created_at"},
-		"scans":              {"id", "target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "created_at", "updated_at"},
-		"session_scans":      {"session_id", "scan_id"},
-	}
-}
-
-func latestSchemaTables() []string {
-	tables := make([]string, 0, len(latestSchema()))
-	for table := range latestSchema() {
-		tables = append(tables, table)
-	}
-	slices.Sort(tables)
-	return tables
-}
-
-func validateLatestSchema(db *sql.DB, tables []string) error {
-	want := latestSchema()
-	if expected := latestSchemaTables(); !slices.Equal(tables, expected) {
-		return fmt.Errorf("database does not match the latest schema: tables %v, want %v; recreate the database", tables, expected)
-	}
-	for _, table := range tables {
-		rows, err := db.Query(`PRAGMA table_info("` + table + `")`)
-		if err != nil {
-			return err
-		}
-		var columns []string
-		for rows.Next() {
-			var cid, notNull, primaryKey int
-			var name, columnType string
-			var defaultValue any
-			if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			columns = append(columns, name)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if !slices.Equal(columns, want[table]) {
-			return fmt.Errorf("database does not match the latest schema: %s columns %v, want %v; recreate the database", table, columns, want[table])
-		}
-	}
-	return nil
+	return validateSchema(db, schema)
 }
 
 func marshalProtoJSON(message protobuf.Message) (string, error) {
@@ -236,113 +142,6 @@ func (s *SQLiteStore) Close() error {
 	return s.orm.Close()
 }
 
-func (s *SQLiteStore) Create(ctx context.Context, scan *types.Scan) error {
-	model, err := scanToModel(scan)
-	if err != nil {
-		return err
-	}
-	_, err = s.orm.NewInsert().Model(model).Exec(ctx)
-	return err
-}
-
-func (s *SQLiteStore) Get(ctx context.Context, id string) (*types.Scan, error) {
-	var model scanModel
-	if err := s.orm.NewSelect().Model(&model).Column("scan_json").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
-		return nil, err
-	}
-	return scanFromModel(model)
-}
-
-func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*types.Scan, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	var models []scanModel
-	if err := s.orm.NewSelect().Model(&models).Column("scan_json").OrderExpr("created_at DESC").Limit(limit).Scan(ctx); err != nil {
-		return nil, err
-	}
-	scans := make([]*types.Scan, 0, len(models))
-	for _, model := range models {
-		scan, err := scanFromModel(model)
-		if err != nil {
-			return nil, err
-		}
-		scans = append(scans, scan)
-	}
-	return scans, nil
-}
-
-func (s *SQLiteStore) Update(ctx context.Context, scan *types.Scan) error {
-	model, err := scanToModel(scan)
-	if err != nil {
-		return err
-	}
-	_, err = s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
-		WherePK().Exec(ctx)
-	return err
-}
-
-func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *types.Scan, expected ...types.ScanStatus) (bool, error) {
-	if scan == nil {
-		return false, fmt.Errorf("scan is required")
-	}
-	if len(expected) == 0 {
-		return false, fmt.Errorf("at least one expected scan status is required")
-	}
-	model, err := scanToModel(scan)
-	if err != nil {
-		return false, err
-	}
-	statuses := make([]string, len(expected))
-	for i, status := range expected {
-		statuses[i] = scanStatusToDB(status)
-	}
-	result, err := s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
-		Where("id = ?", model.ID).Where("status IN (?)", bun.List(statuses)).Exec(ctx)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
-}
-
-func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
-	_, err := s.orm.NewDelete().Model((*scanModel)(nil)).Where("id = ?", id).Exec(ctx)
-	return err
-}
-
-func scanToModel(scan *types.Scan) (*scanModel, error) {
-	if scan == nil {
-		return nil, fmt.Errorf("scan is required")
-	}
-	raw, err := marshalProtoJSON(scan)
-	if err != nil {
-		return nil, err
-	}
-	options := scan.GetOptions()
-	return &scanModel{
-		ID: scan.GetId(), Target: scan.GetTarget(), Mode: scan.GetMode(),
-		Verify: options.GetVerify(), Sniper: options.GetSniper(), Deep: options.GetDeep(),
-		Status: scanStatusToDB(scan.GetStatus()), Progress: scan.GetProgress(),
-		Error: scan.GetError(), ScanJSON: raw,
-		CreatedAt: formatProtoTime(scan.GetCreatedAt()), UpdatedAt: formatProtoTime(scan.GetUpdatedAt()),
-	}, nil
-}
-
-func scanFromModel(model scanModel) (*types.Scan, error) {
-	return scanFromJSON(model.ScanJSON)
-}
-
-func scanFromJSON(raw string) (*types.Scan, error) {
-	scan := new(types.Scan)
-	if err := unmarshalProtoJSON(raw, scan, "scan"); err != nil {
-		return nil, err
-	}
-	return scan, nil
-}
-
 func formatProtoTime(ts *timestamppb.Timestamp) string {
 	if ts == nil {
 		return time.Now().UTC().Format(time.RFC3339Nano)
@@ -368,7 +167,9 @@ func (s *SQLiteStore) GetSession(ctx context.Context, id string) (*types.Session
 	if err != nil {
 		return nil, err
 	}
-	session.ScanIds, _ = s.SessionScanIDs(ctx, id)
+	if err := s.attachSessionScans(ctx, session); err != nil {
+		return nil, err
+	}
 	return session, nil
 }
 
@@ -380,10 +181,19 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*types.Ses
 	if err := s.orm.NewSelect().Model(&models).Column("session_json").OrderExpr("updated_at DESC").Limit(limit).Scan(ctx); err != nil {
 		return nil, err
 	}
-	return sessionsFromModels(models)
+	sessions, err := sessionsFromModels(models)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if err := s.attachSessionScans(ctx, session); err != nil {
+			return nil, err
+		}
+	}
+	return sessions, nil
 }
 
-func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*types.SessionRecord, bool, error) {
+func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, filters *types.ListSessionsRequest) ([]*types.SessionRecord, bool, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -393,9 +203,29 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	if limit > 500 {
 		limit = 500
 	}
-	query := s.orm.NewSelect().Model((*sessionModel)(nil)).Column("session_json").OrderExpr("updated_at DESC").Limit(limit + 1).Offset(offset)
-	if !includeClosed {
+	query := s.orm.NewSelect().Model((*sessionModel)(nil)).Column("session_json").OrderExpr("updated_at DESC, id DESC").Limit(limit + 1).Offset(offset)
+	if filters == nil {
+		filters = &types.ListSessionsRequest{}
+	}
+	if !filters.IncludeClosed {
 		query = query.Where("status = ?", SessionStateOpen)
+	}
+	query = query.Where("archived = ?", filters.GetArchived())
+	if filters.NodeId != "" {
+		query = query.Where("node_id = ?", filters.NodeId)
+	}
+	if filters.Search != "" {
+		if s.hasModule(ScanSchema.Name) {
+			query = query.Where("(instr(lower(title), lower(?)) > 0 OR EXISTS (SELECT 1 FROM session_scans ss JOIN scans sc ON sc.id = ss.scan_id WHERE ss.session_id = session.id AND instr(lower(sc.target), lower(?)) > 0))", filters.Search, filters.Search)
+		} else {
+			query = query.Where("instr(lower(title), lower(?)) > 0", filters.Search)
+		}
+	}
+	if filters.Target != "" {
+		if !s.hasModule(ScanSchema.Name) {
+			return nil, false, nil
+		}
+		query = query.Where("EXISTS (SELECT 1 FROM session_scans ss JOIN scans sc ON sc.id = ss.scan_id WHERE ss.session_id = session.id AND sc.target = ?)", filters.Target)
 	}
 	var models []sessionModel
 	if err := query.Model(&models).Scan(ctx); err != nil {
@@ -410,8 +240,9 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 		return nil, false, err
 	}
 	for _, session := range sessions {
-		scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
-		session.ScanIds = scanIDs
+		if err := s.attachSessionScans(ctx, session); err != nil {
+			return nil, false, err
+		}
 	}
 	return sessions, hasMore, nil
 }
@@ -430,7 +261,19 @@ func sessionsFromModels(models []sessionModel) ([]*types.SessionRecord, error) {
 
 func sessionFromJSON(raw string) (*types.SessionRecord, error) {
 	session := new(types.SessionRecord)
-	if err := unmarshalProtoJSON(raw, session, "session"); err != nil {
+	// Older records stored a scan association in the shared message. The
+	// association now comes from session_scans; ignore only that retired key.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, fmt.Errorf("decode session: %w", err)
+	}
+	delete(fields, "scan_ids")
+	delete(fields, "scanIds")
+	clean, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshalProtoJSON(string(clean), session, "session"); err != nil {
 		return nil, err
 	}
 	return session, nil
@@ -440,30 +283,62 @@ func sessionToModel(session *types.SessionRecord) (*sessionModel, error) {
 	if session == nil || session.GetSession() == nil {
 		return nil, fmt.Errorf("session is required")
 	}
-	raw, err := marshalProtoJSON(session)
+	copy := protobuf.Clone(session).(*types.SessionRecord)
+	delete(copy.Extensions, "scan") // session_scans is the source of this association.
+	raw, err := marshalProtoJSON(copy)
 	if err != nil {
 		return nil, err
 	}
 	domain := session.GetSession()
 	return &sessionModel{
 		ID: domain.GetId(), NodeID: domain.GetNodeId(), Status: domain.GetState(),
-		Title: domain.GetTitle(), AgentName: session.GetAgentName(), SessionJSON: raw,
+		Archived: session.GetArchived(), Title: domain.GetTitle(), AgentName: session.GetAgentName(), SessionJSON: raw,
 		CreatedAt: formatProtoTime(session.GetCreatedAt()), UpdatedAt: formatProtoTime(session.GetUpdatedAt()),
 	}, nil
 }
 
 func (s *SQLiteStore) UpdateSession(ctx context.Context, session *types.SessionRecord) error {
-	scanIDs, _ := s.SessionScanIDs(ctx, session.GetSession().GetId())
-	if len(scanIDs) > 0 {
-		session.ScanIds = scanIDs
-	}
 	model, err := sessionToModel(session)
 	if err != nil {
 		return err
 	}
 	_, err = s.orm.NewUpdate().Model(model).
-		Column("node_id", "status", "title", "agent_name", "session_json", "updated_at").WherePK().Exec(ctx)
+		Column("node_id", "status", "title", "archived", "agent_name", "session_json", "updated_at").WherePK().Exec(ctx)
 	return err
+}
+
+func (s *SQLiteStore) attachSessionScans(ctx context.Context, session *types.SessionRecord) error {
+	if !s.hasModule(ScanSchema.Name) {
+		return nil
+	}
+	ids, err := s.SessionScanIDs(ctx, session.GetSession().GetId())
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	values := make([]any, len(ids))
+	for index, id := range ids {
+		values[index] = id
+	}
+	var targets []string
+	if err := s.orm.NewSelect().Model((*scanModel)(nil)).Column("target").Where("id IN (?)", bun.List(ids)).Distinct().OrderExpr("target ASC").Scan(ctx, &targets); err != nil {
+		return err
+	}
+	targetValues := make([]any, len(targets))
+	for i, target := range targets {
+		targetValues[i] = target
+	}
+	section, err := structpb.NewStruct(map[string]any{"ids": values, "targets": targetValues})
+	if err != nil {
+		return err
+	}
+	if session.Extensions == nil {
+		session.Extensions = make(map[string]*structpb.Struct)
+	}
+	session.Extensions["scan"] = section
+	return nil
 }
 
 func (s *SQLiteStore) DeleteSession(ctx context.Context, id string) error {
@@ -616,30 +491,6 @@ func eventFromJSON(raw string) (*aop.Event, error) {
 	return event, nil
 }
 
-func (s *SQLiteStore) LinkScanToSession(ctx context.Context, sessionID, scanID string) error {
-	_, err := s.orm.NewInsert().Model(&sessionScanModel{SessionID: sessionID, ScanID: scanID}).
-		On("CONFLICT (session_id, scan_id) DO NOTHING").Exec(ctx)
-	return err
-}
-
-func (s *SQLiteStore) SessionScanIDs(ctx context.Context, sessionID string) ([]string, error) {
-	var ids []string
-	err := s.orm.NewSelect().Model((*sessionScanModel)(nil)).Column("scan_id").
-		Where("session_id = ?", sessionID).Scan(ctx, &ids)
-	return ids, err
-}
-
-// ScanSessionIDs lists the sessions a scan is bound to. A session binds a scan
-// at open time (SessionBinding), so this is what a finishing scan needs to
-// address its result card; SessionScanIDs is the same relation read the other
-// way, from a session.
-func (s *SQLiteStore) ScanSessionIDs(ctx context.Context, scanID string) ([]string, error) {
-	var ids []string
-	err := s.orm.NewSelect().Model((*sessionScanModel)(nil)).Column("session_id").
-		Where("scan_id = ?", scanID).Scan(ctx, &ids)
-	return ids, err
-}
-
 const artifactSyncBatch = 100
 
 // SyncArtifactEvents appends raw Artifact events and returns the next archive
@@ -694,8 +545,8 @@ func artifactEventModels(appended []*aop.Event) ([]*rawArtifactModel, error) {
 		}
 		if _, _, found, err := toolpb.FromEvent(event); err != nil {
 			return nil, fmt.Errorf("artifact event %d: %w", index, err)
-		} else if !found {
-			return nil, fmt.Errorf("artifact event %d does not contain an aop.tool.Artifact payload", index)
+		} else if !found && !event.GetExtension().MessageIs(new(toolpb.Loot)) {
+			return nil, fmt.Errorf("artifact event %d does not contain an aop.tool.Artifact or Loot payload", index)
 		}
 		eventID := strings.TrimSpace(event.GetId())
 		if eventID == "" {

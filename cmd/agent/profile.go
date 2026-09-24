@@ -38,7 +38,6 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	values, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory:    workDir,
 		SkillPaths:   agentSkillPaths(option.Skills),
-		SkillExclude: []string{"cyber"},
 		Terminal:     terminalext.Config{Timeout: bashTimeout},
 		Provider: provider.StartupConfig{
 			Mode: provider.StartupRequired, Config: cfg.ProviderConfig(&option),

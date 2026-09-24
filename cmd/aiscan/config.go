@@ -1,12 +1,14 @@
 package main
 
 import (
+	"os"
 	"strings"
 
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/telemetry"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
@@ -35,6 +37,12 @@ type toolConfig struct {
 
 func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, logger telemetry.Logger) appConfig {
 	dataDir := cfg.ResolveDataDir(option.DataDir)
+	// Sections were resolved and validated during startup; a read error here is
+	// structurally impossible, so a zero section is the safe fallback.
+	hub, _ := scannerext.ReadCyberhub(option)
+	recon, _ := scannerext.ReadRecon(option)
+	searchKeys, _ := searchext.ReadKeys(option)
+	scanOptions, _ := scannerext.ReadScan(option)
 	return appConfig{
 		DataDir: dataDir, Resolved: option.Resolved,
 		Provider: provider.StartupConfig{
@@ -42,22 +50,31 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 			Fallbacks: cfg.FallbackProviderConfigs(option),
 		},
 		Scanner: scannerext.Config{
+			AgentName: "cyber",
+			Verify:    scanOptions.Verify,
 			Resources: resources.Options{
-				CyberhubURL: option.CyberhubURL, APIKey: option.CyberhubKey,
-				Mode: option.CyberhubMode, Proxy: option.Proxy,
+				CyberhubURL: hub.URL, APIKey: hub.Key,
+				Mode: hub.Mode, Proxy: hub.Proxy,
 			},
 			Recon: engine.ReconOptions{
-				FofaKey: option.FofaKey, HunterAPIKey: option.HunterAPIKey, IngressProxy: option.ReconProxy,
-				Limit: intValue(option.ReconLimit), Credentials: cloneStrings(option.UncoverCredentials),
+				FofaKey: recon.FofaKey, HunterAPIKey: recon.HunterAPIKey, IngressProxy: recon.Proxy,
+				Limit: intValue(recon.Limit), Credentials: scannerext.UncoverCredentials(envLookup(option)),
 			},
 		},
 		Tools: toolConfig{
-			TavilyKeys:        tavilyKeys(option.TavilyKey, option.SearchConfig.TavilyKeys, cfg.DefaultTavilyKeys),
+			TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
 			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
-			MitmCapture: cloneBool(option.Mitm), TrafficStorage: option.TrafficOptions,
+			MitmCapture: cloneBool(hub.Mitm), TrafficStorage: option.TrafficOptions,
 		},
 		Logger: logger, CLISkillPaths: skillPaths(option),
 	}
+}
+
+func envLookup(option *cfg.Option) func(string) (string, bool) {
+	if option.Context != nil && option.Context.LookupEnv != nil {
+		return option.Context.LookupEnv
+	}
+	return os.LookupEnv
 }
 
 func skillPaths(option *cfg.Option) []string {
@@ -85,17 +102,6 @@ func intValue(value *int) int {
 		return *value
 	}
 	return 0
-}
-
-func cloneStrings(source map[string]string) map[string]string {
-	if len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
 }
 
 func cloneBool(source *bool) *bool {

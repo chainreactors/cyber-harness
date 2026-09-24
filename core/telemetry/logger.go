@@ -77,8 +77,8 @@ func darkGray(s string) string {
 
 func GlobalLogger(cfg LogConfig) Logger {
 	logger := NewLogger(cfg)
-	// Scanner SDKs mutate the global logger during initialization. Keep those
-	// settings separate so they cannot silence application diagnostics.
+	// Dependencies may mutate the global logger during initialization. Keep
+	// those settings separate so they cannot silence application diagnostics.
 	if adapter, ok := NewLogger(cfg).(*logsLogger); ok {
 		logs.Log = adapter.base
 	}

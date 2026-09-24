@@ -74,6 +74,7 @@ func (r *Registry) Group(path, key string, group cfg.FlagGroup) error {
 	if err != nil {
 		return err
 	}
+	added.Hidden = group.Hidden
 	r.bindings = append(r.bindings, binding{key: key, group: added, command: cmd})
 	return r.Validate()
 }

@@ -7,6 +7,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -51,7 +52,7 @@ func (*sessionTestStore) SaveAOPRequest(context.Context, string, string, []byte,
 	return nil
 }
 
-func (s *sessionTestStore) ListSessionPage(context.Context, int, int, bool) ([]*types.SessionRecord, bool, error) {
+func (s *sessionTestStore) ListSessionPage(context.Context, int, int, *types.ListSessionsRequest) ([]*types.SessionRecord, bool, error) {
 	if s.session == nil {
 		return nil, false, nil
 	}
@@ -93,7 +94,7 @@ type sessionTestRuntime struct {
 }
 
 func (r *sessionTestRuntime) AgentInfo(string) (string, bool) { return "agent", r.connected }
-func (*sessionTestRuntime) GetScan(context.Context, string) (*types.Scan, error) {
+func (*sessionTestRuntime) GetScan(context.Context, string) (*scanpb.Scan, error) {
 	return nil, sql.ErrNoRows
 }
 func (*sessionTestRuntime) OpenAgentSession(context.Context, string, *aop.OpenSessionRequest) error {
@@ -114,3 +115,20 @@ func (*sessionTestRuntime) SubscribeSessionEvents(string) (<-chan *aop.EventDeli
 }
 func (*sessionTestRuntime) DeleteSession(context.Context, string) error { return nil }
 func (*sessionTestRuntime) SessionMenu(string) []*types.CommandSpec     { return nil }
+
+func TestUpdateSessionMetadataWorksOfflineWithoutChangingLifecycle(t *testing.T) {
+	store := &sessionTestStore{session: &types.SessionRecord{Session: &aop.Session{Id: "session-1", NodeId: "offline-node", State: SessionStateOpen}}}
+	service := NewSessions(store, nil, nil)
+	response, err := service.UpdateSession(t.Context(), &types.UpdateSessionRequest{RequestId: "rename-1", SessionId: "session-1", Title: proto.String("  Review scan  "), Archived: proto.Bool(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := response.GetAccepted()
+	if got.GetSession().GetTitle() != "Review scan" || !got.Archived || got.Session.State != SessionStateOpen || got.Session.NodeId != "offline-node" {
+		t.Fatalf("metadata update changed session semantics: %v", got)
+	}
+	_, err = service.UpdateSession(t.Context(), &types.UpdateSessionRequest{RequestId: "restore-1", SessionId: "session-1", Archived: proto.Bool(false)})
+	if err != nil || store.session.Archived {
+		t.Fatalf("restore: %v", err)
+	}
+}

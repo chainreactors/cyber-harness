@@ -121,7 +121,7 @@ Web protobuf 增加 `extensions` 数据及脱敏视图；旧 IOA protobuf 字段
 - 协议定义：`ioa://skills/<checkpoint|handoff|swarm|team>/SKILL.md`
 - 协议 schema：`ioa://skills/<name>/schema.json`
 
-覆盖顺序为内置 → 扩展 Bundle → `.cyber/skills` → `.agent/skills` → CLI 路径。
+覆盖顺序为扩展 Bundle → `.cyber/skills` → `.agent/skills` → CLI 路径。
 Bundle 不提供热注册或另一套生命周期。
 
 ## 服务端托管

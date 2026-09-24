@@ -1,17 +1,15 @@
 package arsenal
 
 import (
+	crtm "github.com/chainreactors/crtm/pkg"
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-func NewCommand(directory string) (coretool.Command, error) {
-	cmd, err := NewArsenalCommand(directory)
-	if err != nil {
-		return coretool.Command{}, err
-	}
+func NewCommand(mgr *crtm.Manager) coretool.Command {
+	cmd := &command{mgr: mgr}
 	return coretool.Command{
 		Name: cmd.Name(), Usage: cmd.Usage(),
-		DescriptionPath: "cyber://skills/cyber/okf/runtime/arsenal.md",
+		DescriptionPath: "cyber://skills/runtime/arsenal.md",
 		Run:             cmd.Run,
-	}, nil
+	}
 }

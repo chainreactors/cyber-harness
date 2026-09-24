@@ -74,7 +74,7 @@ func run() error {
 		pc = provider.StartupConfig{Mode: provider.StartupRequired, Config: provider.ProviderConfig{Provider: "openai", BaseURL: entry.BaseURL, APIKey: "harness-gateway-token", Model: entry.Model, MaxTokens: 16384, Timeout: 330}}
 	}
 	logger := telemetry.GlobalLogger(telemetry.LogConfig{Output: os.Stderr})
-	values, err := harness.BaseExtensions(harness.BaseConfig{Directory: wd, SkillExclude: []string{"cyber"}, Terminal: terminalext.Config{Timeout: 120}, Provider: pc, Logger: logger})
+	values, err := harness.BaseExtensions(harness.BaseConfig{Directory: wd, Terminal: terminalext.Config{Timeout: 120}, Provider: pc, Logger: logger})
 	if err != nil {
 		return err
 	}

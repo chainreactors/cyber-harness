@@ -6,19 +6,27 @@ import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ListEventsRequestSchema, ListEventsResponseSchema } from "../../../cyber-ui/packages/aop/src/gen/aop/chat_pb.js";
 import { file_aop_chat } from "../../../cyber-ui/packages/aop/src/gen/aop/chat_pb.js";
-import type { DeleteSessionRequestSchema, DeleteSessionResponseSchema, GetSessionRequestSchema, GetSessionResponseSchema, ListCommandsRequestSchema, ListCommandsResponseSchema, ListSessionsRequestSchema, ListSessionsResponseSchema, ResetSessionRequestSchema, ResetSessionResponseSchema } from "../types/chat_pb.js";
+import type { DeleteSessionRequestSchema, DeleteSessionResponseSchema, GetSessionRequestSchema, GetSessionResponseSchema, ListCommandsRequestSchema, ListCommandsResponseSchema, ListSessionsRequestSchema, ListSessionsResponseSchema, ResetSessionRequestSchema, ResetSessionResponseSchema, UpdateSessionRequestSchema, UpdateSessionResponseSchema } from "../types/chat_pb.js";
 import { file_types_chat } from "../types/chat_pb.js";
 
 /**
  * Describes the file rpc/chat.proto.
  */
 export const file_rpc_chat: GenFile = /*@__PURE__*/
-  fileDesc("Cg5ycGMvY2hhdC5wcm90bxIOY3liZXIucnBjLmNoYXQy6wMKDlNlc3Npb25TZXJ2aWNlElEKDExpc3RTZXNzaW9ucxIfLmN5YmVyLmNoYXQuTGlzdFNlc3Npb25zUmVxdWVzdBogLmN5YmVyLmNoYXQuTGlzdFNlc3Npb25zUmVzcG9uc2USSwoKR2V0U2Vzc2lvbhIdLmN5YmVyLmNoYXQuR2V0U2Vzc2lvblJlcXVlc3QaHi5jeWJlci5jaGF0LkdldFNlc3Npb25SZXNwb25zZRJRCgxSZXNldFNlc3Npb24SHy5jeWJlci5jaGF0LlJlc2V0U2Vzc2lvblJlcXVlc3QaIC5jeWJlci5jaGF0LlJlc2V0U2Vzc2lvblJlc3BvbnNlElQKDURlbGV0ZVNlc3Npb24SIC5jeWJlci5jaGF0LkRlbGV0ZVNlc3Npb25SZXF1ZXN0GiEuY3liZXIuY2hhdC5EZWxldGVTZXNzaW9uUmVzcG9uc2USUQoMTGlzdENvbW1hbmRzEh8uY3liZXIuY2hhdC5MaXN0Q29tbWFuZHNSZXF1ZXN0GiAuY3liZXIuY2hhdC5MaXN0Q29tbWFuZHNSZXNwb25zZRI9CgpMaXN0RXZlbnRzEhYuYW9wLkxpc3RFdmVudHNSZXF1ZXN0GhcuYW9wLkxpc3RFdmVudHNSZXNwb25zZUIsWipnaXRodWIuY29tL2NoYWlucmVhY3RvcnMvY3liZXIvcGtnL3JwYztycGNiBnByb3RvMw", [file_aop_chat, file_types_chat]);
+  fileDesc("Cg5ycGMvY2hhdC5wcm90bxIOY3liZXIucnBjLmNoYXQywQQKDlNlc3Npb25TZXJ2aWNlElQKDVVwZGF0ZVNlc3Npb24SIC5jeWJlci5jaGF0LlVwZGF0ZVNlc3Npb25SZXF1ZXN0GiEuY3liZXIuY2hhdC5VcGRhdGVTZXNzaW9uUmVzcG9uc2USUQoMTGlzdFNlc3Npb25zEh8uY3liZXIuY2hhdC5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiAuY3liZXIuY2hhdC5MaXN0U2Vzc2lvbnNSZXNwb25zZRJLCgpHZXRTZXNzaW9uEh0uY3liZXIuY2hhdC5HZXRTZXNzaW9uUmVxdWVzdBoeLmN5YmVyLmNoYXQuR2V0U2Vzc2lvblJlc3BvbnNlElEKDFJlc2V0U2Vzc2lvbhIfLmN5YmVyLmNoYXQuUmVzZXRTZXNzaW9uUmVxdWVzdBogLmN5YmVyLmNoYXQuUmVzZXRTZXNzaW9uUmVzcG9uc2USVAoNRGVsZXRlU2Vzc2lvbhIgLmN5YmVyLmNoYXQuRGVsZXRlU2Vzc2lvblJlcXVlc3QaIS5jeWJlci5jaGF0LkRlbGV0ZVNlc3Npb25SZXNwb25zZRJRCgxMaXN0Q29tbWFuZHMSHy5jeWJlci5jaGF0Lkxpc3RDb21tYW5kc1JlcXVlc3QaIC5jeWJlci5jaGF0Lkxpc3RDb21tYW5kc1Jlc3BvbnNlEj0KCkxpc3RFdmVudHMSFi5hb3AuTGlzdEV2ZW50c1JlcXVlc3QaFy5hb3AuTGlzdEV2ZW50c1Jlc3BvbnNlQixaKmdpdGh1Yi5jb20vY2hhaW5yZWFjdG9ycy9jeWJlci9wa2cvcnBjO3JwY2IGcHJvdG8z", [file_aop_chat, file_types_chat]);
 
 /**
  * @generated from service cyber.rpc.chat.SessionService
  */
 export const SessionService: GenService<{
+  /**
+   * @generated from rpc cyber.rpc.chat.SessionService.UpdateSession
+   */
+  updateSession: {
+    methodKind: "unary";
+    input: typeof UpdateSessionRequestSchema;
+    output: typeof UpdateSessionResponseSchema;
+  },
   /**
    * @generated from rpc cyber.rpc.chat.SessionService.ListSessions
    */

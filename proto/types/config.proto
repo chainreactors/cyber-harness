@@ -7,12 +7,9 @@ import "google/protobuf/struct.proto";
 option go_package = "github.com/chainreactors/cyber/core/types;types";
 
 message DistributeConfig {
-	reserved 6;
-	reserved "ioa";
+  reserved 2, 3, 4, 6;
+  reserved "ioa";
   LLMConfig llm = 1;
-  CyberhubConfig cyberhub = 2;
-  ReconConfig recon = 3;
-  ScanConfig scan = 4;
   SearchConfig search = 5;
   AgentConfig agent = 7;
   map<string, google.protobuf.Struct> extensions = 8;
@@ -42,25 +39,6 @@ message LLMProviderConfig {
   int32 context_window = 9;
   int32 timeout = 10;
   optional bool images = 11;
-}
-
-message CyberhubConfig {
-  string url = 1;
-  string key = 2;
-  string mode = 3;
-  string proxy = 4;
-  optional bool mitm = 5;
-}
-
-message ReconConfig {
-  string fofa_key = 1;
-  string hunter_api_key = 2;
-  string proxy = 3;
-  int32 limit = 4;
-}
-
-message ScanConfig {
-  string verify = 1;
 }
 
 message SearchConfig {
@@ -104,32 +82,14 @@ message LLMView {
   repeated LLMProviderView providers = 3;
 }
 
-message CyberhubView {
-  optional bool mitm = 5;
-  string url = 1;
-  bool key_configured = 2;
-  string mode = 3;
-  string proxy = 4;
-}
-
-message ReconView {
-  bool fofa_key_configured = 1;
-  bool hunter_api_key_configured = 2;
-  string proxy = 3;
-  int32 limit = 4;
-}
-
 message SearchView { bool tavily_keys_configured = 1; }
 
 message ConfigView {
-	reserved 8;
-	reserved "ioa";
+  reserved 4, 5, 6, 8;
+  reserved "ioa";
   string path = 1;
   bool loaded = 2;
   LLMView llm = 3;
-  CyberhubView cyberhub = 4;
-  ReconView recon = 5;
-  ScanConfig scan = 6;
   SearchView search = 7;
   AgentConfig agent = 9;
   map<string, ExtensionView> extensions = 10;

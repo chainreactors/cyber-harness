@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/chainreactors/cyber/pkg/profile"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
@@ -35,8 +34,8 @@ type Config struct {
 	ConfigStore    webservice.ConfigStore
 	InitialProfile func(context.Context) (profile.Profile, error)
 	BuildProfile   func(context.Context, *webservice.PreparedConfig) (profile.Profile, error)
-	MaxConcurrent  int
-	ScanTimeout    time.Duration
+	// Scans mounts the scan console and its storage module; nil disables both.
+	Scans *webservice.ScanServiceConfig
 }
 type Extension struct {
 	config   Config
@@ -74,7 +73,11 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return fmt.Errorf("web database path is required")
 	}
 	var err error
-	e.database, err = webservice.NewSQLiteStore(e.config.Database)
+	var modules []webservice.SchemaModule
+	if e.config.Scans != nil {
+		modules = append(modules, webservice.ScanSchema)
+	}
+	e.database, err = webservice.NewSQLiteStore(e.config.Database, modules...)
 	if err != nil {
 		return err
 	}
@@ -90,7 +93,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	e.service = webservice.NewService(webservice.ServiceConfig{
 		Store: e.database, Profile: e.initial, AccessKey: e.config.AccessKey,
 		ConfigAPI: e.config.ConfigAPI, ConfigStore: e.config.ConfigStore, BuildProfile: e.config.BuildProfile,
-		MaxConcurrent: e.config.MaxConcurrent, ScanTimeout: e.config.ScanTimeout,
+		Scans: e.config.Scans,
 	})
 	e.initial = nil // Service owns initial and replacement profiles from here.
 	e.pool = webservice.NewAgentPool(e.service.Hub(), e.database, e.config.AllowedOrigins...)

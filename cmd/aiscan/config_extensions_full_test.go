@@ -5,6 +5,7 @@ package main
 import (
 	"github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +97,7 @@ func TestWebLayeredExtensionSavePreservesOwnership(t *testing.T) {
 // Runtime credentials must never be materialized by a settings save.
 func TestWebConfigStoreDoesNotPersistRuntimeCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, ScannerOptions: cfg.ScannerOptions{CyberhubKey: "hub-secret"}}
+	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, Extensions: cfg.Values{scannerext.CyberhubConfigKey: {"key": "hub-secret"}}}
 	store := &webConfigStore{explicit: path, runtime: option}
 	_, loaded, current, err := store.GetDistributeConfig(t.Context())
 	if err != nil {
@@ -250,5 +251,31 @@ func TestWebConfigExtensionSavePreservesOmittedSectionsAndSecrets(t *testing.T) 
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
 		t.Fatal("validation failure changed file")
+	}
+}
+
+func TestWebConfigScannerExtensionsPreserveSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyber.yaml")
+	original := []byte("extensions:\n  cyberhub:\n    url: https://hub.example\n    key: hub-secret\n  recon:\n    fofa_key: fofa-secret\n    hunter_api_key: hunter-secret\n  scan:\n    verify: off\n")
+	if err := os.WriteFile(path, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := &webConfigStore{explicit: path}
+	fields, err := cfg.ValuesToProto(cfg.Values{
+		"cyberhub": {"url": "https://hub.example", "key": ""},
+		"recon":    {"fofa_key": "", "hunter_api_key": ""},
+		"scan":     {"verify": "on"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := store.PrepareDistributeConfig(t.Context(), &types.DistributeConfig{Extensions: fields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DiscardDistributeConfig(prepared)
+	values := cfg.ValuesFromProto(prepared.Config.Extensions)
+	if values["cyberhub"]["key"] != "hub-secret" || values["recon"]["fofa_key"] != "fofa-secret" || values["recon"]["hunter_api_key"] != "hunter-secret" || values["scan"]["verify"] != "on" {
+		t.Fatalf("scanner extensions after edit: %#v", values)
 	}
 }

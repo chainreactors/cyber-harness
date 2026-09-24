@@ -7,84 +7,54 @@ import (
 	"testing"
 )
 
-var baseExpectedSkills = []string{"cyber"}
-
-func expectedEmbeddedSkillNames() []string {
-	return append([]string(nil), baseExpectedSkills...)
+// fixtureBundle is a stand-in extension contribution for store tests.
+func fixtureBundle() Bundle {
+	const location = "fixture://skills/fixture/SKILL.md"
+	return Bundle{
+		Skills: []Skill{{
+			Name: "fixture", Description: "Bundle fixture", Source: SourceBundle,
+			Location: location, BaseDir: "fixture://skills/fixture",
+		}},
+		ReadVirtual: func(uri string) (string, bool, error) {
+			if uri != location {
+				return "", false, nil
+			}
+			return "---\nname: fixture\ndescription: Bundle fixture\n---\n# Fixture\nBundle body", true, nil
+		},
+	}
 }
 
-func TestLoadEmbeddedSkills(t *testing.T) {
-	loaded, diagnostics := LoadEmbedded()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
+func TestBundleSkillLoadsAndReads(t *testing.T) {
+	store := NewStore(nil)
+	if _, ok := store.ByName("fixture"); ok {
+		t.Fatal("unselected bundle skill was loaded")
 	}
-	expected := expectedEmbeddedSkillNames()
-	if len(loaded) < len(expected) {
-		t.Fatalf("skills = %d, want at least %d: %#v", len(loaded), len(expected), loaded)
+	if _, err := store.Add(fixtureBundle()); err != nil {
+		t.Fatal(err)
 	}
-
-	store := NewStore(loaded)
-	for _, name := range expected {
-		if _, ok := store.ByName(name); !ok {
-			t.Fatalf("missing %s", name)
-		}
-	}
-	skill, ok := store.ByName("cyber")
+	skill, ok := store.ByName("fixture")
 	if !ok {
-		t.Fatal("missing cyber")
+		t.Fatal("missing fixture")
 	}
-	if skill.Description == "" {
-		t.Fatal("description is empty")
-	}
-	for _, want := range []string{"attack surface management", "penetration-testing"} {
-		if !strings.Contains(skill.Description, want) {
-			t.Fatalf("description missing %q: %q", want, skill.Description)
-		}
-	}
-	if skill.Location != "cyber://skills/cyber/SKILL.md" {
+	if skill.Location != "fixture://skills/fixture/SKILL.md" {
 		t.Fatalf("location = %q", skill.Location)
 	}
-	body := store.ReadBody("cyber")
-	if body == "" {
-		t.Fatal("ReadBody returned empty")
-	}
-	for _, want := range []string{
-		"# Cyber ASM and Penetration Testing",
-		"## General Execution Tools",
-		"## ASM and Penetration Tools",
-		"## Tool Invocation Rules",
-		"## Verification Standard",
-		"## Report Generation",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("ReadBody missing %q", want)
-		}
-	}
-	for _, unwanted := range []string{
-		"## Fingerprint → POC Workflow",
-		"## Asset Triage",
-		"## Post-Scan Analysis",
-	} {
-		if strings.Contains(body, unwanted) {
-			t.Fatalf("ReadBody contains SOP guidance %q", unwanted)
-		}
-	}
-	if strings.Contains(body, "---") {
-		t.Fatalf("ReadBody contains frontmatter: %q", body)
+	if body := store.ReadBody("fixture"); body != "# Fixture\nBundle body" {
+		t.Fatalf("body = %q", body)
 	}
 }
 
 func TestExpandCommand(t *testing.T) {
-	store, diagnostics := LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
+	store := NewStore(nil)
+	if _, err := store.Add(fixtureBundle()); err != nil {
+		t.Fatal(err)
 	}
 
-	expanded := ExpandCommand("/skill:cyber check this target", store)
+	expanded := ExpandCommand("/skill:fixture check this target", store)
 	for _, want := range []string{
-		`<skill name="cyber" location="cyber://skills/cyber/SKILL.md">`,
-		"References are relative to cyber://skills/cyber.",
-		"# Cyber ASM and Penetration Testing",
+		`<skill name="fixture" location="fixture://skills/fixture/SKILL.md">`,
+		"References are relative to fixture://skills/fixture.",
+		"# Fixture",
 		"check this target",
 	} {
 		if !strings.Contains(expanded, want) {
@@ -121,46 +91,40 @@ func TestApplySelectedAcceptsCLIFilePath(t *testing.T) {
 	}
 }
 
-func TestReadVirtual(t *testing.T) {
-	store, _ := LoadEmbeddedStore()
-	content, handled, err := store.ReadVirtual("cyber://skills/cyber/SKILL.md")
-	if err != nil {
-		t.Fatalf("ReadVirtual() error = %v", err)
-	}
-	if !handled {
-		t.Fatal("ReadVirtual() handled = false")
-	}
-	if !strings.Contains(content, "name: cyber") || !strings.Contains(content, "# Cyber ASM and Penetration Testing") {
-		t.Fatalf("unexpected content:\n%s", content)
-	}
-
-	_, handled, err = store.ReadVirtual("cyber://skills/missing/SKILL.md")
-	if !handled || err == nil {
-		t.Fatalf("missing handled=%v err=%v, want handled error", handled, err)
+func TestApplySelectedRejectsUnknownSkill(t *testing.T) {
+	store := NewStore(nil)
+	if _, err := store.ApplySelected("reply", []string{"missing"}); err == nil {
+		t.Fatal("unknown skill should fail")
 	}
 }
 
-func TestReadVirtualOKFConcept(t *testing.T) {
-	store, _ := LoadEmbeddedStore()
-	content, handled, err := store.ReadVirtual("cyber://skills/cyber/okf/easm/gogo.md")
-	if err != nil || !handled {
-		t.Fatalf("ReadVirtual(easm/gogo) handled=%v err=%v", handled, err)
+func TestApplySelectedPassesIntentThrough(t *testing.T) {
+	store := NewStore(nil)
+	intent, err := store.ApplySelected("focus on risky exposed services", nil)
+	if err != nil {
+		t.Fatalf("ApplySelected() error = %v", err)
 	}
-	if !strings.Contains(content, "type: Tool Playbook") || !strings.Contains(content, "# Gogo") {
-		t.Fatalf("unexpected concept content:\n%s", content)
+	if !strings.Contains(intent, "focus on risky exposed services") {
+		t.Fatalf("intent missing user text:\n%s", intent)
+	}
+}
+
+func TestReadVirtual(t *testing.T) {
+	store := NewStore(nil)
+	if _, err := store.Add(fixtureBundle()); err != nil {
+		t.Fatal(err)
+	}
+	content, handled, err := store.ReadVirtual("fixture://skills/fixture/SKILL.md")
+	if err != nil || !handled {
+		t.Fatalf("ReadVirtual() handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(content, "name: fixture") {
+		t.Fatalf("unexpected content:\n%s", content)
 	}
 
-	body, handled, err := store.ReadVirtualBody("cyber://skills/cyber/okf/easm/gogo.md")
-	if err != nil || !handled {
-		t.Fatalf("ReadVirtualBody(easm/gogo) handled=%v err=%v", handled, err)
-	}
-	if strings.Contains(body, "---") || !strings.Contains(body, "# Gogo") {
-		t.Fatalf("ReadVirtualBody should strip frontmatter:\n%s", body)
-	}
-
-	_, handled, err = store.ReadVirtual("cyber://skills/cyber/okf/easm/missing.md")
-	if !handled || err == nil {
-		t.Fatalf("missing concept handled=%v err=%v, want handled error", handled, err)
+	// Unknown virtual URIs are not handled: no source claims them.
+	if _, handled, err = store.ReadVirtual("cyber://skills/missing/SKILL.md"); handled || err != nil {
+		t.Fatalf("missing handled=%v err=%v, want unhandled", handled, err)
 	}
 }
 
@@ -291,33 +255,33 @@ func TestLoadFromFileDefaultsName(t *testing.T) {
 	}
 }
 
-func TestOverrideEmbeddedWithLocal(t *testing.T) {
+func TestOverrideBundleWithLocal(t *testing.T) {
 	dir := t.TempDir()
-	skillDir := filepath.Join(dir, "cyber")
+	skillDir := filepath.Join(dir, "fixture")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nname: cyber\ndescription: Overridden cyber skill\n---\n# Overridden\nLocal override body"
+	content := "---\nname: fixture\ndescription: Overridden fixture skill\n---\n# Overridden\nLocal override body"
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	embedded, _ := LoadEmbedded()
+	bundle := fixtureBundle()
 	local, _ := LoadFromDir(dir, SourceProject)
-	all := append(embedded, local...)
+	all := append(append([]Skill(nil), bundle.Skills...), local...)
 	store := newStoreWithOverride(all)
 
-	skill, ok := store.ByName("cyber")
+	skill, ok := store.ByName("fixture")
 	if !ok {
-		t.Fatal("missing cyber")
+		t.Fatal("missing fixture")
 	}
 	if skill.Source != SourceProject {
 		t.Fatalf("source = %q, want project (override)", skill.Source)
 	}
-	if skill.Description != "Overridden cyber skill" {
+	if skill.Description != "Overridden fixture skill" {
 		t.Fatalf("description = %q", skill.Description)
 	}
-	body := store.ReadBody("cyber")
+	body := store.ReadBody("fixture")
 	if !strings.Contains(body, "Local override body") {
 		t.Fatalf("body = %q, want local override", body)
 	}

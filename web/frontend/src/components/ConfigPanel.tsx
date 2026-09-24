@@ -12,8 +12,7 @@ import { ToolDrawer } from './layout/ToolDrawer'
 
 // ConfigFormState is the panel's editable form model (secrets as typed, blank =
 // keep the stored value). It converts to the proto DistributeConfig at the API
-// boundary — see formToDistributeConfig. Note the proto ScanConfig carries only
-// `verify`; there is no verify_timeout on the wire anymore.
+// boundary — see formToDistributeConfig. Scanner settings use extensions.
 interface LLMProfileForm {
   id: string
   name: string
@@ -58,17 +57,19 @@ function formToDistributeConfig(form: ConfigFormState): DistributeConfig {
         images: profile.images,
       })),
     },
-    cyberhub: { ...form.cyberhub },
-    recon: {
-      fofaKey: form.recon.fofa_key,
-      hunterApiKey: form.recon.hunter_api_key,
-      proxy: form.recon.proxy,
-      limit: form.recon.limit ?? 0,
-    },
-    scan: { verify: form.scan.verify },
     search: { tavilyKeys: form.search.tavily_keys },
     extensions: {
       ...form.extensions,
+      cyberhub: {
+        ...form.extensions.cyberhub,
+        url: form.cyberhub.url,
+        key: form.cyberhub.key,
+        mode: form.cyberhub.mode,
+        proxy: form.cyberhub.proxy,
+        ...(form.cyberhub.mitm === undefined ? {} : { mitm: form.cyberhub.mitm }),
+      },
+      recon: { ...form.extensions.recon, ...form.recon, limit: form.recon.limit ?? 0 },
+      scan: { ...form.extensions.scan, ...form.scan },
       'ioa.client': {
         ...form.extensions['ioa.client'],
         url: form.ioa.url,
@@ -135,6 +136,9 @@ function statusToForm(cs: ConfigView): ConfigFormState {
 	const active = cs.llm?.active
 	const ioa = cs.extensions['ioa.client']
 	const ioaValues = ioa?.values ?? {}
+  const cyberhub = cs.extensions.cyberhub?.values ?? {}
+  const recon = cs.extensions.recon?.values ?? {}
+  const scan = cs.extensions.scan?.values ?? {}
   const profiles: LLMProfileForm[] = cs.llm?.providers.length
     ? cs.llm.providers.map(profile => ({
         id: profile.id,
@@ -167,9 +171,9 @@ function statusToForm(cs: ConfigView): ConfigFormState {
       active_profile: cs.llm?.activeProfile || profiles[0].id,
       providers: profiles,
     },
-    cyberhub: { url: cs.cyberhub?.url || '', key: '', mode: cs.cyberhub?.mode || '', proxy: cs.cyberhub?.proxy || '', mitm: cs.cyberhub?.mitm },
-    recon: { fofa_key: '', hunter_api_key: '', proxy: cs.recon?.proxy || '', limit: positiveInteger(cs.recon?.limit) },
-    scan: { verify: cs.scan?.verify || '' },
+    cyberhub: { url: typeof cyberhub.url === 'string' ? cyberhub.url : '', key: '', mode: typeof cyberhub.mode === 'string' ? cyberhub.mode : '', proxy: typeof cyberhub.proxy === 'string' ? cyberhub.proxy : '', mitm: typeof cyberhub.mitm === 'boolean' ? cyberhub.mitm : undefined },
+    recon: { fofa_key: '', hunter_api_key: '', proxy: typeof recon.proxy === 'string' ? recon.proxy : '', limit: positiveInteger(typeof recon.limit === 'number' ? recon.limit : undefined) },
+    scan: { verify: typeof scan.verify === 'string' ? scan.verify : '' },
     search: { tavily_keys: '' },
     ioa: {
       url: typeof ioaValues.url === 'string' ? ioaValues.url : '',
@@ -221,11 +225,11 @@ function sectionStatus(
       const ok = llmConfigured(status)
       return [{ key: 'llm', label: ok ? t('llmConfigured') : t('llmNotConfigured'), ok }]
     case 'cyberhub':
-      return [tag('Cyberhub', !!(cs?.cyberhub?.url && cs?.cyberhub?.keyConfigured))]
+      return [tag('Cyberhub', !!(cs?.extensions.cyberhub?.values?.url && cs?.extensions.cyberhub?.configuredSecrets.includes('key')))]
     case 'recon':
       return [
-        tag('FOFA', !!cs?.recon?.fofaKeyConfigured),
-        tag('Hunter', !!cs?.recon?.hunterApiKeyConfigured),
+        tag('FOFA', !!cs?.extensions.recon?.configuredSecrets.includes('fofa_key')),
+        tag('Hunter', !!cs?.extensions.recon?.configuredSecrets.includes('hunter_api_key')),
       ]
     case 'search':
       return [tag('Tavily', !!cs?.search?.tavilyKeysConfigured)]
@@ -663,7 +667,7 @@ function CyberhubTab({ form, setForm, cs }: TabProps) {
       <Field label={t('proxy')}><Input value={form.cyberhub.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://127.0.0.1:1080" /></Field>
       <Field label={t('apiKey')}>
         <Input type="password" value={form.cyberhub.key} onChange={(e) => u('key', e.target.value)}
-		  placeholder={cs?.cyberhub?.keyConfigured ? t('configuredKeep') : t('cyberhubApiKey')} />
+		  placeholder={cs?.extensions.cyberhub?.configuredSecrets.includes('key') ? t('configuredKeep') : t('cyberhubApiKey')} />
       </Field>
       <ConnTest section="cyberhub" form={form} />
     </div>
@@ -675,8 +679,8 @@ function ReconTab({ form, setForm, cs }: TabProps) {
   const u = (k: string, v: string) => setForm((f) => ({ ...f, recon: { ...f.recon, [k]: v } }))
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.recon?.fofaKeyConfigured ? t('configuredKeep') : t('fofaApiKey')} /></Field>
-      <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.recon?.hunterApiKeyConfigured ? t('configuredKeep') : t('hex64')} /></Field>
+      <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.extensions.recon?.configuredSecrets.includes('fofa_key') ? t('configuredKeep') : t('fofaApiKey')} /></Field>
+      <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.extensions.recon?.configuredSecrets.includes('hunter_api_key') ? t('configuredKeep') : t('hex64')} /></Field>
       <Field label={t('reconProxy')}><Input value={form.recon.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://host:port" /></Field>
       <Field label={t('perQueryLimit')}>
         <Input type="number" value={form.recon.limit ?? ''} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, recon: { ...f.recon, limit: v === '' ? undefined : parseInt(v, 10) } })) }} placeholder={t('unlimited')} />
@@ -691,9 +695,9 @@ function ScanTab({ form, setForm }: Omit<TabProps, 'cs'>) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('defaultVerifyMode')}>
-        <Select value={form.scan.verify || 'auto'} onValueChange={(v) => setForm((f) => ({ ...f, scan: { ...f.scan, verify: v } }))}>
-          <SelectTrigger className="h-9 w-full"><SelectValue placeholder="auto" /></SelectTrigger>
-          <SelectContent>{['auto','off','low','high'].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+        <Select value={form.scan.verify || 'default'} onValueChange={(v) => setForm((f) => ({ ...f, scan: { ...f.scan, verify: v === 'default' ? '' : v } }))}>
+          <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>{['default','on','off'].map((v) => <SelectItem key={v} value={v}>{t(`verify_${v}`)}</SelectItem>)}</SelectContent>
         </Select>
       </Field>
       <p className="sm:col-span-2 text-xs text-muted-foreground">{t('localOnlyNote')}</p>

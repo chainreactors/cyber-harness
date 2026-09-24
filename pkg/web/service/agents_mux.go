@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	operationpb "github.com/chainreactors/cyber/aop/operation"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"log/slog"
 
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
@@ -217,10 +220,10 @@ func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result ta
 }
 
 func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, event *aop.Event) {
-	if event == nil || event.SessionId == "" || event.Payload == nil {
+	if event == nil || event.Payload == nil {
 		return
 	}
-	if p.sessions != nil {
+	if p.sessions != nil && event.SessionId != "" {
 		lookup := correlationID
 		if event.TurnId != "" {
 			lookup = event.TurnId
@@ -248,8 +251,32 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 			p.sessions.BroadcastAOPEvent(sessionID, event)
 		}
 	}
-	if extension := event.GetExtension(); extension != nil && p.store != nil && extension.MessageIs(new(toolpb.Artifact)) {
-		_ = p.store.archiveArtifactEvents(context.Background(), []*aop.Event{event})
+	if extension := event.GetExtension(); extension != nil && p.store != nil && (extension.MessageIs(new(toolpb.Artifact)) || extension.MessageIs(new(toolpb.Loot))) {
+		if err := p.store.archiveArtifactEvents(context.Background(), []*aop.Event{event}); err != nil {
+			message := fmt.Sprintf("result archive failed: %v", err)
+			slog.Error(message, "event_id", event.Id, "session_id", event.SessionId)
+			taskID := correlationID
+			ref := new(operationpb.Ref)
+			if found, err := aop.FindTypedExtension(event, ref); found && err == nil && ref.CallId != "" {
+				taskID = ref.CallId
+			}
+			// Keep the task busy until its real terminal; archival failure does
+			// not mean the node has stopped executing.
+			agent.mu.Lock()
+			for _, id := range []string{taskID, correlationID, event.TurnId} {
+				if _, pending := agent.tasks[id]; pending {
+					if agent.archiveErrors == nil {
+						agent.archiveErrors = make(map[string]string)
+					}
+					agent.archiveErrors[id] = message
+					break
+				}
+			}
+			agent.mu.Unlock()
+			if p.sessions != nil {
+				p.sessions.BroadcastAOPEvent(event.SessionId, &aop.Event{Id: generateID(), SessionId: event.SessionId, TurnId: event.TurnId, Emitter: "cyber.web", EmittedAt: timestamppb.Now(), Payload: &aop.Event_Error{Error: &aop.ProtocolError{Code: "RESULT_ARCHIVE_FAILED", Message: message}}})
+			}
+		}
 	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:

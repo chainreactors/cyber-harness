@@ -15,7 +15,7 @@ import (
 // Tool results feed the model context, so their budget is set by what the model
 // can usefully absorb, not by what the transport can carry. Artifact payloads are
 // already bounded separately (see tools/toolargs) for the transport; the inline
-// ToolResult channel had no budget at all, so one large scan result could be
+// ToolResult channel had no budget at all, so one large tool result could be
 // marshaled as a single WebSocket message big enough to trip the control plane's
 // read limit and sever the connection for every in-flight call.
 //

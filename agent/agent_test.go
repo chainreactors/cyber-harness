@@ -400,9 +400,21 @@ func TestAgentAutomaticWorkflowUsesScan(t *testing.T) {
 }
 
 func TestAgentUsesConfiguredPromptAndExpandsSkillCommand(t *testing.T) {
-	store, diagnostics := skills.LoadEmbeddedStore()
-	if len(diagnostics) != 0 {
-		t.Fatalf("diagnostics = %#v", diagnostics)
+	store := skills.NewStore(nil)
+	const skillLocation = "cyber://skills/cyber/SKILL.md"
+	if _, err := store.Add(skills.Bundle{
+		Skills: []skills.Skill{{
+			Name: "cyber", Description: "Security workflows", Source: skills.SourceBundle,
+			Location: skillLocation, BaseDir: "cyber://skills/cyber",
+		}},
+		ReadVirtual: func(uri string) (string, bool, error) {
+			if uri != skillLocation {
+				return "", false, nil
+			}
+			return "---\nname: cyber\ndescription: Security workflows\n---\n# Cyber ASM\nfixture body", true, nil
+		},
+	}); err != nil {
+		t.Fatal(err)
 	}
 	registry := newTestTools(t, &recordingTool{name: "read", output: "skill content"})
 

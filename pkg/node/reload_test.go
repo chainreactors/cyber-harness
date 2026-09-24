@@ -79,7 +79,7 @@ func TestSharedConfigRecognizesStartupReload(t *testing.T) {
 	if err := cfg.LoadConfigBytes([]byte("llm:\n  providers:\n    - id: vision\n      provider: anthropic\n      base_url: https://api.deepseek.com/anthropic\n      api_key: test-key\n      model: deepseek-flash\n"), option); err != nil {
 		t.Fatal(err)
 	}
-	distributed, err := cfg.DistributeFromOption(option)
+	distributed, err := cfg.SharedFromOption(option)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,11 @@ func TestSharedConfigRecognizesStartupReload(t *testing.T) {
 	if !sameSharedConfig(option, next) {
 		t.Fatal("startup sync should preserve the active connection")
 	}
-	next.Providers[0].Model = "deepseek-v4-pro"
+	distributed.Llm.Providers[0].Model = "deepseek-v4-pro"
+	next, err = cfg.ResolveDistributedRuntime(distributed, option)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if sameSharedConfig(option, next) {
 		t.Fatal("model change must reload")
 	}
@@ -116,6 +120,9 @@ func TestRemoteReloadKeepsFailedProfileAndDrainsSuccessfulSwitch(t *testing.T) {
 	var mu sync.Mutex
 	var built []*reloadTestProfile
 	build := func(request profile.Request) (profile.Profile, error) {
+		if request.ProviderMode != profile.ProviderDisabled {
+			return nil, fmt.Errorf("empty server LLM must disable the node provider")
+		}
 		h, err := harness.New(harness.Config{Base: harness.BaseConfig{Directory: directory, Provider: provider.StartupConfig{Mode: provider.StartupDisabled}}, Session: request.Session,
 			Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[coretool.Tool](scope, work) }}},
 		})

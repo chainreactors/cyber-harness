@@ -2,9 +2,12 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"strings"
+	"time"
 
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/eventbus"
@@ -19,9 +22,10 @@ import (
 type Command struct {
 	executionOnly bool
 	toolargs.Base
-	engines     *engine.Set
-	worker      Worker
-	deepBrowser func(context.Context, string) (string, error)
+	engines       *engine.Set
+	worker        Worker
+	verifyDefault string
+	hasModel      func(context.Context) bool
 }
 
 type flags struct {
@@ -30,7 +34,6 @@ type flags struct {
 	Mode            string   `long:"mode" description:"Scan profile: quick or full" default:"quick"`
 	Thread          int      `long:"thread" description:"Total concurrency budget distributed across engines" default:"1000"`
 	Sniper          bool     `long:"sniper" description:"Use AI to search public vulnerabilities for discovered fingerprints"`
-	Deep            bool     `long:"deep" description:"Run deep AI testing for discovered websites and fingerprinted assets"`
 	Trace           bool     `long:"trace" description:"Show internal scanner source and pipeline trace"`
 	Debug           bool     `long:"debug" description:"Enable trace and underlying scanner debug logs"`
 	JSON            bool     `short:"j" long:"json" description:"Output raw gogo and spray results as JSON Lines (direct gogo uses -o jl)"`
@@ -50,7 +53,7 @@ type flags struct {
 	Passwords       []string `long:"pwd" description:"Weakpass passwords. Can specify multiple."`
 	MaxNeutronPerFP int      `long:"max-neutron-per-finger" description:"Maximum neutron templates per fingerprint" default:"20"`
 	BroadPOC        bool     `long:"broad-poc" description:"Run POC templates even without matching fingerprints"`
-	Verify          string   `long:"verify" description:"Use AI to verify loots at priority threshold: auto, off, low, medium, high, or critical"`
+	Verify          string   `long:"verify" description:"Verify all vulnerabilities and weak passwords with AI: on or off (default: on when a model is configured)"`
 }
 
 func New(engineSet *engine.Set, opts ...Option) *Command {
@@ -75,12 +78,12 @@ func (c *Command) QuickReference() string {
   -i <target>          URL, IP, IP:port, or CIDR  (-l <file> for a list)
   --mode quick|full    Scan profile (default quick)
   --ports <preset>     gogo port preset; defaults to all in quick, - in full
-  --verify <level>     AI verification of loots: auto, off, low, medium, high, critical
-  --sniper / --deep    AI vulnerability search / deep AI testing on findings
+  --verify on|off      Verify all vulnerabilities and weak passwords
+  --sniper             AI vulnerability search for fingerprints
   -j                   Emit raw gogo and spray results as JSON Lines
   Examples:
     scan -i 10.0.0.0/24 --mode quick
-    scan -i https://target --mode full --verify high`
+    scan -i https://target --mode full --verify on`
 }
 
 func Usage() string {
@@ -98,16 +101,13 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 		args = append(slices.Clone(args), "--no-color")
 	}
 	out, _, err := c.execute(ctx, args, execution.Stdout)
-	if err != nil {
-		return nil, err
-	}
 	if out != "" {
 		fmt.Fprint(execution.Stdout, out)
 	}
 	// Structured scanner records are emitted through the artifact stream.
 	// Returning the collector's private aggregation here would leak a second
 	// result schema through AOP tool.result.
-	return nil, nil
+	return nil, err
 }
 
 func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) (string, *scanResult, error) {
@@ -119,7 +119,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		}
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
-	if c.executionOnly && (flags.Sniper || flags.Deep || (flags.Verify != "" && flags.Verify != "off")) {
+	if c.executionOnly && (flags.Sniper || (flags.Verify != "" && flags.Verify != "off")) {
 		return "", nil, fmt.Errorf("scan: AI modes are unavailable in execution-only mode")
 	}
 	if flags.Debug {
@@ -132,13 +132,26 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	if err != nil {
 		return "", nil, fmt.Errorf("scan: %w", err)
 	}
-	var verifyLevel priority
-	if flags.Verify != "" && flags.Verify != "off" {
-		vl, err := parsePriority(flags.Verify)
-		if err != nil {
-			return "", nil, fmt.Errorf("scan: %w", err)
+	if parser.FindOptionByLongName("verify").IsSet() && flags.Verify == "" {
+		return "", nil, fmt.Errorf("scan: --verify requires on or off")
+	}
+	verify := flags.Verify
+	if verify == "" {
+		verify = c.verifyDefault
+	}
+	if err := ValidateVerify(verify); err != nil {
+		return "", nil, err
+	}
+	available := !c.executionOnly && c.worker != nil && c.hasModel != nil && c.hasModel(ctx)
+	if verify == "" {
+		if available {
+			verify = "on"
+		} else {
+			verify = "off"
 		}
-		verifyLevel = vl
+	}
+	if (verify == "on" || flags.Sniper) && !available {
+		return "", nil, fmt.Errorf("scan: AI verification and sniper require a configured model provider")
 	}
 	options := resolveScanOptions(flags)
 
@@ -170,6 +183,32 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 
 	capabilities := c.buildCapabilities(flags, options, profile)
+	selected := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		selected = append(selected, capability.Name)
+	}
+	slices.Sort(selected)
+	var unavailable []string
+	for name := range profile.Capabilities {
+		if !slices.Contains(selected, name) {
+			unavailable = append(unavailable, name)
+		}
+	}
+	slices.Sort(unavailable)
+	if !flags.JSON {
+		line := "selected checks: " + strings.Join(selected, ", ") + "; conditional checks run only for matching inputs"
+		if len(unavailable) > 0 {
+			line += "\nunavailable or disabled checks: " + strings.Join(unavailable, ", ")
+		}
+		if stream != nil {
+			fmt.Fprintln(stream, line)
+		} else {
+			coll.fileLines = append(coll.fileLines, line)
+		}
+	}
+	if len(capabilities) == 0 {
+		return "", nil, fmt.Errorf("scan: no scanning capabilities available")
+	}
 	p, err := pipeline.New(ctx, pipeline.Config[event]{
 		Capabilities: capabilities,
 		Bus:          pipelineBus,
@@ -179,30 +218,37 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	}
 	p.Run(seeds)
 
-	if verifyLevel != "" {
-		runVerifyPass(ctx, c.worker, coll, verifyLevel, c.Logger)
+	if verify == "on" {
+		runVerifyPass(ctx, c.worker, coll, c.Logger)
 	}
 	if flags.Sniper {
 		runSniperPass(ctx, c.worker, coll, c.Logger)
 	}
 
-	if err := ctx.Err(); err != nil {
-		return "", nil, err
+	// Run has joined all workers. Preserve evidence after cancellation.
+	runErr := ctx.Err()
+	if runErr != nil {
+		coll.errors = append(coll.errors, runErr.Error())
+		coll.canceled = true
 	}
 	coll.Finish()
-
+	result := coll.StructuredResult()
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if emitErr := c.emitStructuredData(finishCtx, result); emitErr != nil {
+		coll.errors = append(coll.errors, emitErr.Error())
+		result = coll.StructuredResult()
+	}
+	if runErr == nil && len(coll.errors) > 0 {
+		runErr = errors.New(strings.Join(coll.errors, "; "))
+	}
 	var out string
 	if flags.JSON {
 		out, err = coll.JSONLines()
-		if err != nil {
-			return "", nil, fmt.Errorf("scan json output: %w", err)
-		}
 	} else {
 		out = coll.TerminalString(stream != nil && !flags.NoColor)
 	}
-	result := coll.StructuredResult()
-	c.emitStructuredData(ctx, result)
-	return out, result, nil
+	return out, result, errors.Join(runErr, err)
 }
 
 func subscribePipeline(bus *eventbus.Bus[pipeline.Observation[event]], coll *collector, debug bool, writer io.Writer) {
@@ -218,31 +264,31 @@ func subscribePipeline(bus *eventbus.Bus[pipeline.Observation[event]], coll *col
 	}
 }
 
-func (c *Command) emitStructuredData(ctx context.Context, result *scanResult) {
+func (c *Command) emitStructuredData(ctx context.Context, result *scanResult) (err error) {
 	if result == nil || c.Events == nil {
-		return
+		return nil
 	}
 	for _, service := range result.GOGO {
 		if service != nil {
 			resultID := toolargs.ArtifactResultID("gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
-			c.EmitArtifactResultCtx(ctx, resultID, "gogo", toolpb.ArtifactKindService, service.GetTarget(), service)
+			err = errors.Join(err, c.EmitArtifactResultCtx(ctx, resultID, "gogo", toolpb.ArtifactKindService, service.GetTarget(), service))
 		}
 	}
 	for _, probe := range result.Spray {
 		if probe != nil {
 			resultID := toolargs.ArtifactResultID("spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
-			c.EmitArtifactResultCtx(ctx, resultID, "spray", toolpb.ArtifactKindWeb, probe.UrlString, probe)
+			err = errors.Join(err, c.EmitArtifactResultCtx(ctx, resultID, "spray", toolpb.ArtifactKindWeb, probe.UrlString, probe))
 		}
 	}
 	for _, artifact := range result.Artifacts {
-		c.EmitArtifactResultCtx(
+		err = errors.Join(err, c.EmitArtifactResultCtx(
 			ctx,
 			artifact.ResultID,
 			artifact.Tool,
 			artifact.Kind,
 			artifact.Target,
 			artifact.Data,
-		)
+		))
 	}
 	for i := range result.Loots {
 		loot := result.Loots[i]
@@ -253,7 +299,7 @@ func (c *Command) emitStructuredData(ctx context.Context, result *scanResult) {
 			continue
 		}
 		verificationStatus, _ := loot.Data["verification_status"].(string)
-		c.EmitLootCtx(
+		err = errors.Join(err, c.EmitLootCtx(
 			ctx,
 			resultID,
 			tool,
@@ -263,8 +309,9 @@ func (c *Command) emitStructuredData(ctx context.Context, result *scanResult) {
 			loot.Description,
 			verificationStatus,
 			loot.Tags,
-		)
+		))
 	}
+	return err
 }
 
 var scanFileFlags = map[string]bool{

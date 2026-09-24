@@ -42,9 +42,7 @@ type webCommand struct {
 	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
 	NoAgent            bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
 	cfg.LLMOptions     `group:"LLM Options"`
-	cfg.ScannerOptions `group:"Scanner Options"`
 	cfg.NodeOptions    `group:"Server Options"`
-	cfg.ReconOptions   `group:"Recon Options"`
 }
 
 type cliOptions struct {
@@ -56,11 +54,9 @@ type cliOptions struct {
 }
 
 type agentCommand struct {
-	cfg.LLMOptions     `group:"LLM Options"`
-	cfg.ScannerOptions `group:"Scanner Options"`
-	cfg.AgentOptions   `no-flag:"true"`
-	cfg.NodeOptions    `group:"Server Options"`
-	cfg.ReconOptions   `group:"Recon Options"`
+	cfg.LLMOptions   `group:"LLM Options"`
+	cfg.AgentOptions `no-flag:"true"`
+	cfg.NodeOptions  `group:"Server Options"`
 }
 
 func (agentCommand) Usage() string { return "[OPTIONS]" }
@@ -114,7 +110,11 @@ func cyber() {
 		os.Exit(1)
 	}
 
-	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
+	resolveConfig := cfg.ResolveRuntimeConfig
+	if parsed.Mode == cfg.RunModeAgent {
+		resolveConfig = cfg.ResolveAgentRuntimeConfig
+	}
+	cfgPath, err := resolveConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
@@ -337,16 +337,19 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 	if manual.AI {
 		option.AI = true
 	}
-	option.CyberhubURL = cfg.ResolveString(manual.CyberhubURL, option.CyberhubURL)
-	option.CyberhubKey = cfg.ResolveString(manual.CyberhubKey, option.CyberhubKey)
-	option.CyberhubMode = cfg.ResolveString(manual.CyberhubMode, option.CyberhubMode)
-	option.FofaKey = cfg.ResolveString(manual.FofaKey, option.FofaKey)
-	option.HunterAPIKey = cfg.ResolveString(manual.HunterAPIKey, option.HunterAPIKey)
-	option.ReconProxy = cfg.ResolveString(manual.ReconProxy, option.ReconProxy)
-	if manual.ReconLimit != nil {
-		option.ReconLimit = manual.ReconLimit
+	for key, fields := range manual.Extensions {
+		if option.Extensions == nil {
+			option.Extensions = cfg.Values{}
+		}
+		target := option.Extensions[key]
+		if target == nil {
+			target = map[string]any{}
+			option.Extensions[key] = target
+		}
+		for name, value := range fields {
+			target[name] = value
+		}
 	}
-	option.Proxy = cfg.ResolveString(manual.Proxy, option.Proxy)
 	if manual.NoColor {
 		option.NoColor = true
 	}
@@ -370,15 +373,11 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 	switch active.Name {
 	case "agent":
 		opt.LLMOptions = cli.Agent.LLMOptions
-		opt.ScannerOptions = cli.Agent.ScannerOptions
 		opt.AgentOptions = cli.Agent.AgentOptions
 		opt.NodeOptions = cli.Agent.NodeOptions
-		opt.ReconOptions = cli.Agent.ReconOptions
 	case "web":
 		opt.LLMOptions = cli.Web.LLMOptions
-		opt.ScannerOptions = cli.Web.ScannerOptions
 		opt.NodeOptions = cli.Web.NodeOptions
-		opt.ReconOptions = cli.Web.ReconOptions
 	}
 
 	return opt
@@ -406,7 +405,7 @@ Commands:
   init           Initialize user configuration (--project for this directory)
   config         Inspect, validate and manage configuration
   doctor         Check configuration and dependencies
-  scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
+  scan           Scan a target, with optional AI skills (--verify, --sniper)
   agent          Run the natural-language agent
   web            Start the web UI server (includes embedded agent server)
   serve          Run the standalone agent server
@@ -416,7 +415,7 @@ Advanced scanners:
 
 Examples:
   aiscan scan -i 127.0.0.1
-  aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
+  aiscan scan -i http://target.com --verify=on --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan web --addr 0.0.0.0:8080
   aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(scannerext.UsageLines(), "\n"))
@@ -476,15 +475,38 @@ func firstCommandName(args []string, valueArity map[string]int) string {
 type knownFlag struct {
 	names []string
 	arity int
-	apply func(opt *cfg.Option, val string)
+	// extension flags carry their own presence in Option.Extensions; they are
+	// not marked in Option.Explicit.
+	extension bool
+	apply     func(opt *cfg.Option, val string)
+}
+
+// setExtension records a scanner-passthrough flag as a CLI-layer extension
+// value; section Environment hooks read CLI presence from there.
+func setExtension(o *cfg.Option, key, field string, value any) {
+	if o.Extensions == nil {
+		o.Extensions = cfg.Values{}
+	}
+	fields := o.Extensions[key]
+	if fields == nil {
+		fields = map[string]any{}
+		o.Extensions[key] = fields
+	}
+	fields[field] = value
 }
 
 var scannerKnownFlags = []knownFlag{
 	{names: []string{"--config", "-c"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ConfigFile = v }},
 	{names: []string{"--data-dir"}, arity: 1, apply: func(o *cfg.Option, v string) { o.DataDir = v }},
-	{names: []string{"--cyberhub-url"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubURL = v }},
-	{names: []string{"--cyberhub-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubKey = v }},
-	{names: []string{"--cyberhub-mode"}, arity: 1, apply: func(o *cfg.Option, v string) { o.CyberhubMode = v }},
+	{names: []string{"--cyberhub-url"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.CyberhubConfigKey, "url", v)
+	}},
+	{names: []string{"--cyberhub-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.CyberhubConfigKey, "key", v)
+	}},
+	{names: []string{"--cyberhub-mode"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.CyberhubConfigKey, "mode", v)
+	}},
 	{names: []string{"--no-color"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.NoColor = true }},
 	{names: []string{"--ai"}, arity: 0, apply: func(o *cfg.Option, v string) {
 		if v != "" {
@@ -511,15 +533,25 @@ var scannerKnownFlags = []knownFlag{
 			o.ContextWindow = n
 		}
 	}},
-	{names: []string{"--proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Proxy = v }},
+	{names: []string{"--proxy"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.CyberhubConfigKey, "proxy", v)
+	}},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.LLMProxy = v }},
-	{names: []string{"--fofa-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.FofaKey = v }},
-	{names: []string{"--hunter-api-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.HunterAPIKey = v }},
-	{names: []string{"--tavily-key"}, arity: 1, apply: func(o *cfg.Option, v string) { o.TavilyKey = v }},
-	{names: []string{"--recon-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.ReconProxy = v }},
-	{names: []string{"--recon-limit"}, arity: 1, apply: func(o *cfg.Option, v string) {
+	{names: []string{"--fofa-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.ReconConfigKey, "fofa_key", v)
+	}},
+	{names: []string{"--hunter-api-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.ReconConfigKey, "hunter_api_key", v)
+	}},
+	{names: []string{"--tavily-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.ReconConfigKey, "tavily_key", v)
+	}},
+	{names: []string{"--recon-proxy"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
+		setExtension(o, scannerext.ReconConfigKey, "proxy", v)
+	}},
+	{names: []string{"--recon-limit"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
 		if n, e := strconv.Atoi(v); e == nil {
-			o.ReconLimit = &n
+			setExtension(o, scannerext.ReconConfigKey, "limit", n)
 		}
 	}},
 	{names: []string{"--heartbeat"}, arity: 1, apply: func(o *cfg.Option, v string) {
@@ -629,7 +661,9 @@ func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Opti
 				break
 			}
 			matched = true
-			option.MarkExplicit(f.names[0])
+			if !f.extension {
+				option.MarkExplicit(f.names[0])
+			}
 			if f.arity == 0 {
 				if hasValue {
 					f.apply(option, value)

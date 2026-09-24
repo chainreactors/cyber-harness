@@ -6,23 +6,26 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/telemetry"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
+	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 )
 
 func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
-	disabled := false
+	t.Setenv("SHODAN_API_KEY", "shodan-key")
 	option := &cfg.Option{
 		LLMOptions: cfg.LLMOptions{Provider: "openai", Model: "gpt-4o"},
-		ScannerOptions: cfg.ScannerOptions{
-			CyberhubURL: "https://hub", CyberhubKey: "hub-key", CyberhubMode: "release",
-			Proxy: "http://proxy", Mitm: &disabled,
+		Extensions: cfg.Values{
+			scannerext.CyberhubConfigKey: {
+				"url": "https://hub", "key": "hub-key", "mode": "release",
+				"proxy": "http://proxy", "mitm": false,
+			},
+			scannerext.ReconConfigKey: {"fofa_key": "fofa", "hunter_api_key": "hk", "proxy": "http://recon-proxy"},
+			searchext.ConfigKey:       {"tavily_keys": "tv-1,tv-2"},
 		},
-		ReconOptions:       cfg.ReconOptions{FofaKey: "fofa", HunterAPIKey: "hk", ReconProxy: "http://recon-proxy"},
-		SearchConfig:       cfg.SearchConfigOptions{TavilyKeys: "tv-1,tv-2"},
-		AgentOptions:       cfg.AgentOptions{Tools: []string{"search", "browser"}},
-		PlaywrightSession:  "browser-1",
-		TrafficOptions:     cfg.TrafficOptions{BodyStorage: "disk"},
-		UncoverCredentials: map[string]string{"SHODAN_API_KEY": "shodan-key"},
+		AgentOptions:      cfg.AgentOptions{Tools: []string{"search", "browser"}},
+		PlaywrightSession: "browser-1",
+		TrafficOptions:    cfg.TrafficOptions{BodyStorage: "disk"},
 	}
 	config := appConfigFromOption(option, profilepkg.ProviderDisabled, telemetry.NopLogger())
 	if config.Provider.Config.Model != "gpt-4o" || config.Provider.Mode != provider.StartupDisabled {
@@ -46,24 +49,24 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 }
 
 func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
-	oldURL, oldKey, oldMode := cfg.DefaultCyberhubURL, cfg.DefaultCyberhubKey, cfg.DefaultCyberhubMode
-	oldTavily := cfg.DefaultTavilyKeys
+	oldURL, oldKey, oldMode := scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubMode
+	oldTavily := searchext.DefaultTavilyKeys
 	t.Cleanup(func() {
-		cfg.DefaultCyberhubURL, cfg.DefaultCyberhubKey, cfg.DefaultCyberhubMode = oldURL, oldKey, oldMode
-		cfg.DefaultTavilyKeys = oldTavily
+		scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubMode = oldURL, oldKey, oldMode
+		searchext.DefaultTavilyKeys = oldTavily
 	})
-	cfg.DefaultCyberhubURL = "http://hub:8080"
-	cfg.DefaultCyberhubKey = "HUBKEY"
-	cfg.DefaultCyberhubMode = "override"
-	cfg.DefaultTavilyKeys = "BUILTIN_TAVILY"
+	scannerext.DefaultCyberhubURL = "http://hub:8080"
+	scannerext.DefaultCyberhubKey = "HUBKEY"
+	scannerext.DefaultCyberhubMode = "override"
+	searchext.DefaultTavilyKeys = "BUILTIN_TAVILY"
 
 	option := &cfg.Option{}
 	cfg.ApplyDefaults(option)
 	config := appConfigFromOption(option, profilepkg.ProviderOptional, telemetry.NopLogger())
-	if config.Scanner.Resources.CyberhubURL != cfg.DefaultCyberhubURL || config.Scanner.Resources.APIKey != cfg.DefaultCyberhubKey || config.Scanner.Resources.Mode != cfg.DefaultCyberhubMode {
+	if config.Scanner.Resources.CyberhubURL != scannerext.DefaultCyberhubURL || config.Scanner.Resources.APIKey != scannerext.DefaultCyberhubKey || config.Scanner.Resources.Mode != scannerext.DefaultCyberhubMode {
 		t.Fatalf("scanner cyberhub config = %#v", config.Scanner)
 	}
-	if config.Tools.TavilyKeys != cfg.DefaultTavilyKeys {
+	if config.Tools.TavilyKeys != searchext.DefaultTavilyKeys {
 		t.Fatalf("tool search config = %#v", config.Tools)
 	}
 	if config.Provider.Mode != provider.StartupOptional {

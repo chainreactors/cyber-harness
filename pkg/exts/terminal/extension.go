@@ -70,8 +70,8 @@ func (m *Extension) Load(scope *extension.Scope) error {
 
 	bash := terminaltool.NewBashTool(m.config.Directory, m.config.Timeout, registry).
 		WithEnvironment(m.config.Environment).
-		WithScannerProxy(endpoint.ProxyURL()).
-		WithScannerProxyCA(endpoint.CAPath()).
+		WithEgressProxy(endpoint.ProxyURL()).
+		WithEgressProxyCA(endpoint.CAPath()).
 		WithProcessContainment(m.config.Containment).
 		WithForegroundTimeoutCeiling(m.config.MaximumTimeout)
 	bash.SetEgressResolver(endpoint.Egress)

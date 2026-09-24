@@ -3,19 +3,106 @@ package arsenal
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	crtm "github.com/chainreactors/crtm/pkg"
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
+type versionSource struct{}
+
+type waitingSource chan struct{}
+
+func (s waitingSource) Resolve(ctx context.Context, _ crtm.Request) (crtm.Artifact, error) {
+	close(s)
+	<-ctx.Done()
+	return crtm.Artifact{}, ctx.Err()
+}
+
+func TestInstallAndUpdateCancelDownload(t *testing.T) {
+	for _, action := range []string{"install", "update"} {
+		t.Run(action, func(t *testing.T) {
+			source := make(waitingSource)
+			manager, err := NewManager(t.TempDir(), crtm.ManagerOption{Sources: []crtm.Source{source}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				_, err := NewCommand(manager).Run(ctx, &coretool.Execution{Args: []string{action, "rg"}, Stdout: io.Discard})
+				result <- err
+			}()
+			select {
+			case <-source:
+			case <-time.After(5 * time.Second):
+				t.Fatal("download did not start")
+			}
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancel: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("download ignored cancellation")
+			}
+		})
+	}
+}
+
+func TestInstallRejectsMalformedArguments(t *testing.T) {
+	cmd := newTestCmd(t)
+	for _, args := range [][]string{
+		{"rg", "--version"}, {"rg", "--version", ""}, {"rg", "--typo"},
+		{"rg", "extra"}, {"rg", "--version", "1.0.0", "--version", "2.0.0"},
+	} {
+		for _, action := range []string{"install", "update"} {
+			runErr(t, cmd, append([]string{action}, args...)...)
+		}
+	}
+}
+
+func (versionSource) Resolve(_ context.Context, req crtm.Request) (crtm.Artifact, error) {
+	header := map[string]string{"windows": "MZxx", "linux": "\x7fELF", "darwin": "\xcf\xfa\xed\xfe"}[runtime.GOOS]
+	return crtm.Artifact{Tool: req.Tool, Version: req.Version, Target: req.Target, Source: "fixture",
+		Open: func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(header + req.Version)), nil
+		},
+	}, nil
+}
+
+func TestInstallHonorsExplicitVersion(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir, crtm.ManagerOption{Sources: []crtm.Source{versionSource{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.InstallVersion("gogo", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &command{mgr: mgr}
+	out := run(t, cmd, "install", "gogo", "--version", "2.0.0")
+	if !strings.Contains(out, "v2.0.0") || mgr.InstalledVersion("gogo") != "2.0.0" {
+		t.Fatal(out)
+	}
+	out = run(t, cmd, "install", "gogo", "--version", "v2.0.0")
+	if !strings.Contains(out, "already installed") {
+		t.Fatal(out)
+	}
+}
+
 // run executes arsenal as a Command and returns stdout.
-func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
+func run(t *testing.T, cmd *command, args ...string) string {
 	t.Helper()
 	var output bytes.Buffer
 	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
@@ -26,7 +113,7 @@ func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 }
 
 // runErr executes and expects an error.
-func runErr(t *testing.T, cmd *ArsenalCommand, args ...string) string {
+func runErr(t *testing.T, cmd *command, args ...string) string {
 	t.Helper()
 	var output bytes.Buffer
 	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output, Stderr: &output})
@@ -36,16 +123,11 @@ func runErr(t *testing.T, cmd *ArsenalCommand, args ...string) string {
 	return err.Error()
 }
 
-func newTestCmd(t *testing.T) *ArsenalCommand {
+func newTestCmd(t *testing.T) *command {
 	t.Helper()
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "bin")
-	configPath := filepath.Join(dir, "cyber.yaml")
-
-	mgr, err := crtm.NewManager(crtm.ManagerOption{
-		BinPath:    binPath,
-		ConfigPath: configPath,
-	})
+	mgr, err := NewManager(dir, crtm.ManagerOption{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +137,7 @@ func newTestCmd(t *testing.T) *ArsenalCommand {
 		os.Setenv("PATH", binPath+string(os.PathListSeparator)+path)
 	}
 
-	return &ArsenalCommand{mgr: mgr}
+	return &command{mgr: mgr}
 }
 
 // --- Unit tests (offline) ---

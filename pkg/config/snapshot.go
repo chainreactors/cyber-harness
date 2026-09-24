@@ -20,6 +20,9 @@ type Context struct {
 	Executable   string
 	LookupEnv    func(string) (string, bool)
 	Replacements map[string][]byte
+	// UserLLMOnly excludes automatically discovered project LLM settings.
+	// User configuration, environment, CLI flags and explicit files remain available.
+	UserLLMOnly bool
 }
 
 func (c *Context) defaults() Context {
@@ -74,7 +77,8 @@ func samePath(a, b string) bool {
 	return a == b || (filepath.Separator == '\\' && strings.EqualFold(a, b))
 }
 
-// Discover finds one project layer, bounded by the nearest Git root and home.
+// Discover overlays one configuration from the working directory on the user
+// configuration. An explicit path is loaded independently of both locations.
 func Discover(context *Context, explicit string) (*Snapshot, error) {
 	c := context.defaults()
 	s := &Snapshot{Context: c, Target: c.UserFile(), Sources: map[string]string{}, Document: map[string]any{}}
@@ -89,26 +93,15 @@ func Discover(context *Context, explicit string) (*Snapshot, error) {
 	if regularFile(c.UserFile()) {
 		s.Layers = append(s.Layers, Layer{Path: c.UserFile(), Scope: "user"})
 	}
-	for dir := c.Directory; ; dir = filepath.Dir(dir) {
-		p := filepath.Join(dir, DefaultConfigName)
+	// Prefer the established flat filename when both local layouts exist.
+	for _, p := range []string{
+		filepath.Join(c.Directory, DefaultConfigName),
+		filepath.Join(c.Directory, ".cyber", DefaultConfigName),
+	} {
 		if regularFile(p) && !samePath(p, c.UserFile()) {
 			s.Layers = append(s.Layers, Layer{Path: p, Scope: "project"})
 			s.Target = p
 			break
-		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			break
-		}
-		if samePath(dir, c.Home) || filepath.Dir(dir) == dir {
-			break
-		}
-	}
-	if len(s.Layers) == 0 || s.Layers[len(s.Layers)-1].Scope == "user" {
-		p := filepath.Join(filepath.Dir(c.Executable), DefaultConfigName)
-		if c.Executable != "" && regularFile(p) && !samePath(p, c.UserFile()) {
-			s.Layers = append(s.Layers, Layer{Path: p, Scope: "portable"})
-			s.Target = p
-			s.Diagnostics = append(s.Diagnostics, "using portable configuration: "+p)
 		}
 	}
 	return s, nil
@@ -174,6 +167,12 @@ func LoadSnapshot(context *Context, explicit string, sections *Sections) (*Snaps
 			}
 		}
 		layer.Document = CloneDocument(doc)
+		if s.Context.UserLLMOnly && layer.Scope == "project" {
+			if _, exists := doc["llm"]; exists {
+				delete(doc, "llm")
+				s.Diagnostics = append(s.Diagnostics, fmt.Sprintf("ignoring llm from %s configuration %s; use --config to select it explicitly", layer.Scope, layer.Path))
+			}
+		}
 		if err = normalizeProfileDocument(doc); err != nil {
 			return nil, fmt.Errorf("config file %s: %w", layer.Path, err)
 		}

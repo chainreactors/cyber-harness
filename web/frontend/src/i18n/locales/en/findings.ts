@@ -1,4 +1,11 @@
 export default {
+  rawEvidence: 'Request and response evidence',
+  evidenceRecords: '{{count}} original evidence records',
+  verification_confirmed: 'Confirmed',
+  verification_not_confirmed: 'Not confirmed this time',
+  verification_inconclusive: 'Inconclusive',
+  verification_unverified: 'Not verified',
+
   noFindings: 'No findings yet.',
   allCount: 'All ({{count}})',
   aiVerified: 'AI Verified',

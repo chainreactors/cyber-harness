@@ -12,6 +12,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -32,7 +33,7 @@ type RequestLedger interface {
 
 type SessionStore interface {
 	RequestLedger
-	ListSessionPage(context.Context, int, int, bool) ([]*types.SessionRecord, bool, error)
+	ListSessionPage(context.Context, int, int, *types.ListSessionsRequest) ([]*types.SessionRecord, bool, error)
 	GetSession(context.Context, string) (*types.SessionRecord, error)
 	CreateSession(context.Context, *types.SessionRecord) error
 	UpdateSession(context.Context, *types.SessionRecord) error
@@ -46,7 +47,7 @@ type SessionStore interface {
 // event delivery.
 type SessionRuntime interface {
 	AgentInfo(string) (string, bool)
-	GetScan(context.Context, string) (*types.Scan, error)
+	GetScan(context.Context, string) (*scanpb.Scan, error)
 	OpenAgentSession(context.Context, string, *aop.OpenSessionRequest) error
 	CloseAgentSession(context.Context, string, string, *aop.CloseSessionRequest) (bool, error)
 	StartAgentTurn(string, *aop.RunTurnRequest)
@@ -89,13 +90,62 @@ func (s *Sessions) ListSessions(ctx context.Context, request *types.ListSessions
 	if limit == 0 {
 		limit = 100
 	}
-	sessions, more, err := s.store.ListSessionPage(ctx, offset, limit, request.IncludeClosed)
+	sessions, more, err := s.store.ListSessionPage(ctx, offset, limit, request)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
 	response := &types.ListSessionsResponse{Sessions: sessions}
 	if more {
 		response.NextCursor = strconv.Itoa(offset + len(sessions))
+	}
+	return response, nil
+}
+
+// UpdateSession changes presentation metadata and works while the execution node is offline.
+func (s *Sessions) UpdateSession(ctx context.Context, request *types.UpdateSessionRequest) (*types.UpdateSessionResponse, error) {
+	if s == nil || s.store == nil {
+		return nil, Errorf(CodeFailedPrecondition, "session store is unavailable")
+	}
+	if request == nil || request.RequestId == "" || request.SessionId == "" {
+		return nil, Errorf(CodeInvalidArgument, "request_id and session_id are required")
+	}
+	s.applicationMu.Lock()
+	defer s.applicationMu.Unlock()
+	replay := new(types.UpdateSessionResponse)
+	hash, found, conflict, err := BeginRequest(ctx, s.store, "UpdateSession", request.RequestId, request, replay)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return replay, nil
+	}
+	if conflict {
+		return nil, Errorf(CodeAlreadyExists, "request_id conflicts with another request")
+	}
+	record, err := s.store.GetSession(ctx, request.SessionId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, Errorf(CodeNotFound, "session not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if request.Title != nil {
+		title := strings.TrimSpace(request.GetTitle())
+		if title == "" || len([]rune(title)) > 200 {
+			return nil, Errorf(CodeInvalidArgument, "title must contain 1 to 200 characters")
+		}
+		record.Session.Title = title
+	}
+	if request.Archived != nil {
+		record.Archived = request.GetArchived()
+	}
+	record.UpdatedAt = timestamppb.Now()
+	if err := s.store.UpdateSession(ctx, record); err != nil {
+		return nil, err
+	}
+	response := &types.UpdateSessionResponse{RequestId: request.RequestId, Outcome: &types.UpdateSessionResponse_Accepted{Accepted: record}}
+	if err := FinishRequest(ctx, s.store, "UpdateSession", request.RequestId, hash, response); err != nil {
+		return nil, err
 	}
 	return response, nil
 }
@@ -190,6 +240,9 @@ func (s *Sessions) OpenSession(ctx context.Context, requestID string, request *a
 	if scanID != "" {
 		if _, err := s.runtime.GetScan(ctx, scanID); err != nil {
 			cleanup()
+			if errors.Is(err, ErrScanConsoleDisabled) {
+				return finish(rejectedOpen(string(CodeFailedPrecondition), err.Error()))
+			}
 			return finish(rejectedOpen("NOT_FOUND", "scan not found"))
 		}
 		if err := s.store.LinkScanToSession(ctx, id, scanID); err != nil {
@@ -628,7 +681,7 @@ func openSessionScanID(request *aop.OpenSessionRequest) (string, error) {
 		return "", nil
 	}
 	for _, extension := range request.Extensions {
-		link := new(types.SessionBinding)
+		link := new(scanpb.SessionBinding)
 		if extension == nil || !extension.MessageIs(link) {
 			continue
 		}

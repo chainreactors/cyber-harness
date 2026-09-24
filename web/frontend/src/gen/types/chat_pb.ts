@@ -9,14 +9,14 @@ import { file_aop_chat } from "../../../cyber-ui/packages/aop/src/gen/aop/chat_p
 import type { CommandSpec } from "./command_pb.js";
 import { file_types_command } from "./command_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { Message } from "@bufbuild/protobuf";
+import { file_google_protobuf_struct, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file types/chat.proto.
  */
 export const file_types_chat: GenFile = /*@__PURE__*/
-  fileDesc("ChB0eXBlcy9jaGF0LnByb3RvEgpjeWJlci5jaGF0IoIBCg5TZXNzaW9uSGlzdG9yeRItCgRtb2RlGAEgASgOMh8uY3liZXIuY2hhdC5TZXNzaW9uSGlzdG9yeS5Nb2RlIkEKBE1vZGUSFAoQTU9ERV9VTlNQRUNJRklFRBAAEhAKDE1PREVfSU5IRVJJVBABEhEKDU1PREVfU05BUFNIT1QQAiK0AQoNU2Vzc2lvblJlY29yZBIdCgdzZXNzaW9uGAEgASgLMgwuYW9wLlNlc3Npb24SEgoKYWdlbnRfbmFtZRgCIAEoCRIQCghzY2FuX2lkcxgDIAMoCRIuCgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJSChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhQKDGFmdGVyX2N1cnNvchgBIAEoCRINCgVsaW1pdBgCIAEoDRIWCg5pbmNsdWRlX2Nsb3NlZBgDIAEoCCJYChRMaXN0U2Vzc2lvbnNSZXNwb25zZRIrCghzZXNzaW9ucxgBIAMoCzIZLmN5YmVyLmNoYXQuU2Vzc2lvblJlY29yZBITCgtuZXh0X2N1cnNvchgCIAEoCSInChFHZXRTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkAKEkdldFNlc3Npb25SZXNwb25zZRIqCgdzZXNzaW9uGAEgASgLMhkuY3liZXIuY2hhdC5TZXNzaW9uUmVjb3JkImQKE1Jlc2V0U2Vzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhYKDm5ld19zZXNzaW9uX2lkGAMgASgJEg0KBXRpdGxlGAQgASgJImEKE1Jlc2V0U2Vzc2lvblJlY2VpcHQSHgoIcHJldmlvdXMYASABKAsyDC5hb3AuU2Vzc2lvbhIqCgdjdXJyZW50GAIgASgLMhkuY3liZXIuY2hhdC5TZXNzaW9uUmVjb3JkIo4BChRSZXNldFNlc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjMKCGFjY2VwdGVkGAIgASgLMh8uY3liZXIuY2hhdC5SZXNldFNlc3Npb25SZWNlaXB0SAASIgoIcmVqZWN0ZWQYAyABKAsyDi5hb3AuUmVqZWN0aW9uSABCCQoHb3V0Y29tZSI+ChREZWxldGVTZXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkifAoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSIAoIYWNjZXB0ZWQYAiABKAsyDC5hb3AuU2Vzc2lvbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiKQoTTGlzdENvbW1hbmRzUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkQKFExpc3RDb21tYW5kc1Jlc3BvbnNlEiwKCGNvbW1hbmRzGAEgAygLMhouY3liZXIuY29tbWFuZC5Db21tYW5kU3BlY0IxWi9naXRodWIuY29tL2NoYWlucmVhY3RvcnMvY3liZXIvY29yZS90eXBlczt0eXBlc2IGcHJvdG8z", [file_aop_chat, file_types_command, file_google_protobuf_timestamp]);
+  fileDesc("ChB0eXBlcy9jaGF0LnByb3RvEgpjeWJlci5jaGF0IoIBCg5TZXNzaW9uSGlzdG9yeRItCgRtb2RlGAEgASgOMh8uY3liZXIuY2hhdC5TZXNzaW9uSGlzdG9yeS5Nb2RlIkEKBE1vZGUSFAoQTU9ERV9VTlNQRUNJRklFRBAAEhAKDE1PREVfSU5IRVJJVBABEhEKDU1PREVfU05BUFNIT1QQAiLFAgoNU2Vzc2lvblJlY29yZBIdCgdzZXNzaW9uGAEgASgLMgwuYW9wLlNlc3Npb24SEgoKYWdlbnRfbmFtZRgCIAEoCRIuCgpjcmVhdGVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI9CgpleHRlbnNpb25zGAYgAygLMikuY3liZXIuY2hhdC5TZXNzaW9uUmVjb3JkLkV4dGVuc2lvbnNFbnRyeRIQCghhcmNoaXZlZBgHIAEoCBpKCg9FeHRlbnNpb25zRW50cnkSCwoDa2V5GAEgASgJEiYKBXZhbHVlGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdDoCOAFKBAgDEAQipwEKE0xpc3RTZXNzaW9uc1JlcXVlc3QSFAoMYWZ0ZXJfY3Vyc29yGAEgASgJEg0KBWxpbWl0GAIgASgNEhYKDmluY2x1ZGVfY2xvc2VkGAMgASgIEg4KBnNlYXJjaBgEIAEoCRIPCgdub2RlX2lkGAUgASgJEhUKCGFyY2hpdmVkGAYgASgISACIAQESDgoGdGFyZ2V0GAcgASgJQgsKCV9hcmNoaXZlZCJYChRMaXN0U2Vzc2lvbnNSZXNwb25zZRIrCghzZXNzaW9ucxgBIAMoCzIZLmN5YmVyLmNoYXQuU2Vzc2lvblJlY29yZBITCgtuZXh0X2N1cnNvchgCIAEoCSInChFHZXRTZXNzaW9uUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkAKEkdldFNlc3Npb25SZXNwb25zZRIqCgdzZXNzaW9uGAEgASgLMhkuY3liZXIuY2hhdC5TZXNzaW9uUmVjb3JkImQKE1Jlc2V0U2Vzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhYKDm5ld19zZXNzaW9uX2lkGAMgASgJEg0KBXRpdGxlGAQgASgJImEKE1Jlc2V0U2Vzc2lvblJlY2VpcHQSHgoIcHJldmlvdXMYASABKAsyDC5hb3AuU2Vzc2lvbhIqCgdjdXJyZW50GAIgASgLMhkuY3liZXIuY2hhdC5TZXNzaW9uUmVjb3JkIo4BChRSZXNldFNlc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjMKCGFjY2VwdGVkGAIgASgLMh8uY3liZXIuY2hhdC5SZXNldFNlc3Npb25SZWNlaXB0SAASIgoIcmVqZWN0ZWQYAyABKAsyDi5hb3AuUmVqZWN0aW9uSABCCQoHb3V0Y29tZSI+ChREZWxldGVTZXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkifAoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSIAoIYWNjZXB0ZWQYAiABKAsyDC5hb3AuU2Vzc2lvbkgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWUiKQoTTGlzdENvbW1hbmRzUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJIkQKFExpc3RDb21tYW5kc1Jlc3BvbnNlEiwKCGNvbW1hbmRzGAEgAygLMhouY3liZXIuY29tbWFuZC5Db21tYW5kU3BlYyKAAQoUVXBkYXRlU2Vzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhIKBXRpdGxlGAMgASgJSACIAQESFQoIYXJjaGl2ZWQYBCABKAhIAYgBAUIICgZfdGl0bGVCCwoJX2FyY2hpdmVkIokBChVVcGRhdGVTZXNzaW9uUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRItCghhY2NlcHRlZBgCIAEoCzIZLmN5YmVyLmNoYXQuU2Vzc2lvblJlY29yZEgAEiIKCHJlamVjdGVkGAMgASgLMg4uYW9wLlJlamVjdGlvbkgAQgkKB291dGNvbWVCMVovZ2l0aHViLmNvbS9jaGFpbnJlYWN0b3JzL2N5YmVyL2NvcmUvdHlwZXM7dHlwZXNiBnByb3RvMw", [file_aop_chat, file_types_command, file_google_protobuf_timestamp, file_google_protobuf_struct]);
 
 /**
  * SessionHistory is persisted as an AOP event extension. It makes transcript
@@ -79,11 +79,6 @@ export type SessionRecord = Message<"cyber.chat.SessionRecord"> & {
   agentName: string;
 
   /**
-   * @generated from field: repeated string scan_ids = 3;
-   */
-  scanIds: string[];
-
-  /**
    * @generated from field: google.protobuf.Timestamp created_at = 4;
    */
   createdAt?: Timestamp | undefined;
@@ -92,6 +87,16 @@ export type SessionRecord = Message<"cyber.chat.SessionRecord"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 5;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: map<string, google.protobuf.Struct> extensions = 6;
+   */
+  extensions: { [key: string]: JsonObject };
+
+  /**
+   * @generated from field: bool archived = 7;
+   */
+  archived: boolean;
 };
 
 /**
@@ -119,6 +124,26 @@ export type ListSessionsRequest = Message<"cyber.chat.ListSessionsRequest"> & {
    * @generated from field: bool include_closed = 3;
    */
   includeClosed: boolean;
+
+  /**
+   * @generated from field: string search = 4;
+   */
+  search: string;
+
+  /**
+   * @generated from field: string node_id = 5;
+   */
+  nodeId: string;
+
+  /**
+   * @generated from field: optional bool archived = 6;
+   */
+  archived?: boolean | undefined;
+
+  /**
+   * @generated from field: string target = 7;
+   */
+  target: string;
 };
 
 /**
@@ -361,3 +386,71 @@ export type ListCommandsResponse = Message<"cyber.chat.ListCommandsResponse"> & 
  */
 export const ListCommandsResponseSchema: GenMessage<ListCommandsResponse> = /*@__PURE__*/
   messageDesc(file_types_chat, 12);
+
+/**
+ * Updates presentation metadata without changing execution or node binding.
+ *
+ * @generated from message cyber.chat.UpdateSessionRequest
+ */
+export type UpdateSessionRequest = Message<"cyber.chat.UpdateSessionRequest"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: optional string title = 3;
+   */
+  title?: string | undefined;
+
+  /**
+   * @generated from field: optional bool archived = 4;
+   */
+  archived?: boolean | undefined;
+};
+
+/**
+ * Describes the message cyber.chat.UpdateSessionRequest.
+ * Use `create(UpdateSessionRequestSchema)` to create a new message.
+ */
+export const UpdateSessionRequestSchema: GenMessage<UpdateSessionRequest> = /*@__PURE__*/
+  messageDesc(file_types_chat, 13);
+
+/**
+ * @generated from message cyber.chat.UpdateSessionResponse
+ */
+export type UpdateSessionResponse = Message<"cyber.chat.UpdateSessionResponse"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from oneof cyber.chat.UpdateSessionResponse.outcome
+   */
+  outcome: {
+    /**
+     * @generated from field: cyber.chat.SessionRecord accepted = 2;
+     */
+    value: SessionRecord;
+    case: "accepted";
+  } | {
+    /**
+     * @generated from field: aop.Rejection rejected = 3;
+     */
+    value: Rejection;
+    case: "rejected";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message cyber.chat.UpdateSessionResponse.
+ * Use `create(UpdateSessionResponseSchema)` to create a new message.
+ */
+export const UpdateSessionResponseSchema: GenMessage<UpdateSessionResponse> = /*@__PURE__*/
+  messageDesc(file_types_chat, 14);

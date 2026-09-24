@@ -7,6 +7,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	proto "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -208,6 +209,10 @@ func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, met
 // A session that binds after the scan already finished gets no live event and
 // rebuilds the card from its own scan ids on load instead.
 func (s *Service) broadcastScanComplete(scanID string) {
+	s.broadcastScanStatus(scanID, scanpb.ScanStatus_SCAN_STATUS_COMPLETED)
+}
+
+func (s *Service) broadcastScanStatus(scanID string, status scanpb.ScanStatus) {
 	if s.store == nil {
 		return
 	}
@@ -215,7 +220,7 @@ func (s *Service) broadcastScanComplete(scanID string) {
 	if err != nil || len(sessionIDs) == 0 {
 		return
 	}
-	value, err := anypb.New(&types.SessionScanEvent{ScanId: scanID, Status: types.ScanStatus_SCAN_STATUS_COMPLETED})
+	value, err := anypb.New(&scanpb.SessionScanEvent{ScanId: scanID, Status: status})
 	if err != nil {
 		return
 	}

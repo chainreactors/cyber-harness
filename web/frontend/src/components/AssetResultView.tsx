@@ -29,8 +29,7 @@ type AssetPanel = {
   render: () => ReactNode
 }
 
-// Scan results are SCO-native end to end: the hub persists a completed scan as
-// SCO nodes keyed by scan_id, and this view renders the model built from them.
+// The browser builds this model from the selected execution's CSTX observations.
 export default function AssetResultView({ model, anchorPrefix = '' }: AssetResultViewProps) {
   const { t } = useTranslation('findings')
   return (

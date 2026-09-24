@@ -47,7 +47,6 @@ func TestDefaultResolverCoversEveryPromptTarget(t *testing.T) {
 	resolver := loadResolver(t)
 	inputs := []agentprompt.Context{
 		{Target: agentprompt.MainSystem},
-		{Target: agentprompt.ScannerSystem, Agent: agentprompt.AgentContext{ScannerName: "gogo"}},
 		{Target: agentprompt.EvaluatorSystem},
 		{Target: agentprompt.EvaluatorRequest, Evaluation: agentprompt.EvaluationContext{Goal: "goal", Trace: "trace"}},
 		{Target: agentprompt.CompactSystem},
@@ -88,36 +87,28 @@ func TestExternalContributionCanRewriteBuiltInPrompt(t *testing.T) {
 func TestDefaultAgentPrompt(t *testing.T) {
 	result := buildDefaultPrompt(t, agentprompt.Context{Target: agentprompt.MainSystem})
 	for _, want := range []string{
-		"Cyber, a Cyber Harness for model companies",
-		"## Authorization Context",
+		"operating inside a cyber-harness runtime",
 		"## Environment",
-		"## Key Principles",
-		"Treat hypotheses as provisional",
-		"Distinguish observed facts, reasoned inferences, and unverified leads",
 	} {
 		if !strings.Contains(result, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, result)
 		}
 	}
+	// The neutral skeleton carries no scanner content; the scanner extension
+	// contributes identity, authorization, commands and principles itself.
+	for _, unwanted := range []string{
+		"Authorization Context",
+		"Pseudo-Commands",
+		"Key Principles",
+		"Scanner Agent Constraints",
+		"benchmark",
+	} {
+		if strings.Contains(result, unwanted) {
+			t.Fatalf("neutral prompt contains scanner content %q:\n%s", unwanted, result)
+		}
+	}
 	if strings.Contains(result, "## Available Tools") {
 		t.Fatal("prompt contains tools section without tools")
-	}
-}
-
-func TestDefaultScannerPrompt(t *testing.T) {
-	result := buildDefaultPrompt(t, agentprompt.Context{
-		Target: agentprompt.ScannerSystem,
-		Agent:  agentprompt.AgentContext{ScannerName: "gogo"},
-	})
-	for _, want := range []string{
-		"gogo analysis agent inside Cyber, a Cyber Harness",
-		"selected scanner's documented output flags",
-		"## Authorization Context",
-		"## Scanner Agent Constraints",
-	} {
-		if !strings.Contains(result, want) {
-			t.Fatalf("scanner prompt missing %q:\n%s", want, result)
-		}
 	}
 }
 
@@ -144,8 +135,8 @@ func TestDefaultPromptRendersSkills(t *testing.T) {
 			t.Fatalf("prompt missing %q:\n%s", want, result)
 		}
 	}
-	if strings.Index(result, "## Skill: scan/verify") > strings.Index(result, "## Key Principles") {
-		t.Fatal("loaded skills should appear before principles")
+	if strings.Index(result, "## Skill: scan/verify") < strings.Index(result, "</available_skills>") {
+		t.Fatal("loaded skills should appear after the available skills list")
 	}
 }
 

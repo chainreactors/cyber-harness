@@ -12,6 +12,10 @@ type LibraryConfig struct {
 	Directory string
 	Paths     []string
 	Exclude   []string
+	// ProjectDirs are the project-relative skill directories, in override
+	// order. Nil selects the harness convention: .cyber/skills then
+	// .agent/skills.
+	ProjectDirs []skills.SkillDir
 }
 type Library struct {
 	config LibraryConfig
@@ -34,7 +38,14 @@ func (e *Library) Load(scope *extension.Scope) error {
 	if err := extension.Provide[*skills.Store](scope, e.store); err != nil {
 		return err
 	}
-	loaded, diagnostics := skills.LoadFrom(e.config.Directory, e.config.Paths)
+	projectDirs := e.config.ProjectDirs
+	if projectDirs == nil {
+		projectDirs = []skills.SkillDir{
+			{Dir: ".cyber/skills", Source: skills.SourceProject},
+			{Dir: ".agent/skills", Source: skills.SourceAgent},
+		}
+	}
+	loaded, diagnostics := skills.LoadFrom(e.config.Directory, projectDirs, e.config.Paths)
 	values := loaded.All()
 	if len(e.config.Exclude) > 0 {
 		excluded := make(map[string]bool, len(e.config.Exclude))
@@ -51,6 +62,10 @@ func (e *Library) Load(scope *extension.Scope) error {
 	}
 	e.store.Replace(values, diagnostics)
 	if err := extension.Define[skills.Bundle](scope, e.store); err != nil {
+		return err
+	}
+	// Every distribution can read the neutral runtime tool documents.
+	if err := extension.Add(scope, runtimeDocsBundle()); err != nil {
 		return err
 	}
 	return scope.Init().Err()

@@ -245,7 +245,6 @@ func main() {
 			"port", "extract", "workflow", "neutron",
 			"spray_rule", "spray_dict", "spray_common",
 			"zombie_common", "zombie_default", "zombie_rule", "zombie_template",
-			"found_keys", "found_spray", "found_filter_ext", "found_filter_dir",
 		}
 	} else {
 		needs = strings.Split(*need, ",")

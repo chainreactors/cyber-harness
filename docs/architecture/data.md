@@ -66,10 +66,20 @@ WebSocket 使用 protobuf 二进制 Envelope，stdio 使用逐行 ProtoJSON Enve
 
 ## 产物归档与资产视图
 
-当前 Web 路径中，Go 服务端归档完整的 `aop.tool.Artifact` event 和递增 cursor；浏览器通过 `@cyber/cstx` WASM ABI 解析原生产物，生成规范化的 IP、Port、Web、Vulnerability 等节点，在 IndexedDB 保存节点、operation 关联和消费位置。
+当前 Web 路径中，Go 服务端归档完整的 `aop.tool.Artifact` 与 `aop.tool.Loot` event 和递增 cursor，并按 event ID 去重。Artifact 保存扫描器原始证据，Loot 保存发现与验证结论；同一 operation 内通过 `result_id` 关联，允许乱序到达。浏览器通过 `@cyber/cstx` WASM ABI 解析原生产物，生成规范化的 IP、Port、Web、Vulnerability 等节点。
+
+IndexedDB 分别保存全局资产、每次 operation 自己的节点观测、关联证据和消费位置。历史查询只合并所选 operation 及其显式子操作的观测，不读取全局最新值。关联来自 operation ref；缺少可信 ref 的记录独立保存，不按当前会话或最后一次调用推断归属。比较两个执行时，“本次未发现”只表示观测差异，不代表已修复。
+
+解析失败会保存原事件与错误，支持重试；存储失败不推进 cursor。失败和取消的扫描仍展示已经归档的证据，并保留真实执行状态。浏览器缓存可从原始归档重建。
 
 原始归档是重建视图的输入；CSTX 节点是解析结果。Go 不再维护另一套平行 CSTX 事实表。仓库里的可选原生 CSTX 扩展不表示参考发行版会在后端做同样的解析。
 
 因此，排查“扫描有输出但资产面板为空”，需要按原始 artifact 是否发出、是否归档、浏览器是否消费、格式是否支持、视图是否过滤的顺序检查；模型最终答案不能证明这条链路已经完成。
+
+## 会话与任务展示
+
+Session 就是用户持续处理的一项任务，沿用既有消息、执行与节点绑定。标题、归档状态、搜索和分组属于展示元数据；归档不会停止运行或删除历史。目标分组来自关联 Scan 的目标，不从模型总结猜测。首页与会话页使用同一个输入框；快捷卡片只填入可编辑草稿。发送失败保留草稿与附件，重试沿用会话、已成功上传的文件和请求 ID。
+
+本次开发版数据库结构新增 Session 的 `archived`，Scan 的 `verify` 改为可空值并移除 `deep`。未提供旧库迁移；启动新版时请使用新的数据库路径，或在自行备份后显式重建开发库。程序不会自动删除已有数据库。浏览器 IndexedDB 是派生缓存，版本升级时会重新消费服务端归档。
 
 实现：[事件流](../../core/events)、[telemetry 扩展](../../pkg/exts/telemetry/extension.go)、[会话 JSONL](../../agent/session/session_jsonl.go)、[Web 存储](../../pkg/web/service/store_sqlite.go)、[浏览器 CSTX](../../web/frontend/src/lib/cstx-runtime.ts)。验证入口：[历史记录测试](../../agent/session/session_jsonl_test.go)、[artifact API 测试](../../pkg/web/api/artifact_test.go)。

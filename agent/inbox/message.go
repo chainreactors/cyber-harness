@@ -27,7 +27,7 @@ const (
 
 type Attachment struct {
 	Type    string // "file", "skill", "raw"
-	Ref     string // e.g. "@/tmp/targets.txt", "@scan"
+	Ref     string // e.g. "@/tmp/input.txt", "@artifact"
 	Content string
 	Error   string
 }

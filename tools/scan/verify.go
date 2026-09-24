@@ -2,6 +2,8 @@ package scan
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -13,33 +15,34 @@ type indexedLoot struct {
 	loot  parsers.Loot
 }
 
-func runVerifyPass(ctx context.Context, worker Worker, coll *collector, level priority, logger telemetry.Logger) {
-	if worker == nil {
-		return
-	}
-
+func runVerifyPass(ctx context.Context, worker Worker, coll *collector, logger telemetry.Logger) {
 	coll.mu.Lock()
-	candidates := filterLootsByPriority(coll.loots, level)
-	coll.mu.Unlock()
-
-	if len(candidates) == 0 {
-		logger.Debugf("verify pass: no loots at or above %s", level)
-		return
+	var candidates []indexedLoot
+	for i, loot := range coll.loots {
+		if loot.Kind == parsers.LootVuln || loot.Kind == parsers.LootWeakpass {
+			candidates = append(candidates, indexedLoot{i, loot})
+		}
 	}
-
-	logger.Infof("verify pass: %d candidates at or above %s", len(candidates), level)
-
-	for _, c := range candidates {
+	coll.mu.Unlock()
+	for _, candidate := range candidates {
 		if ctx.Err() != nil {
 			break
 		}
-		result := runWorker(ctx, worker, "verify", c.loot, logger)
-		if result != nil {
-			coll.mu.Lock()
-			annotateLoot(&coll.loots[c.index], result.Status)
-			coll.mu.Unlock()
-			logger.Infof("verify: %s → %s", c.loot.Description, result.Status)
+		output, err := worker(ctx, "verify", candidate.loot)
+		status := parseStatus(output, "confirmed", "not_confirmed", "inconclusive")
+		if err == nil && status == "" {
+			err = fmt.Errorf("missing or invalid verification status")
 		}
+		if err != nil {
+			status = "inconclusive"
+		}
+		coll.mu.Lock()
+		annotateLoot(&coll.loots[candidate.index], status)
+		if err != nil {
+			coll.errors = append(coll.errors, fmt.Sprintf("verify %s: %v", candidate.loot.Target, err))
+		}
+		coll.mu.Unlock()
+		logger.Infof("verify: %s → %s", candidate.loot.Description, status)
 	}
 }
 
@@ -63,41 +66,25 @@ func runSniperPass(ctx context.Context, worker Worker, coll *collector, logger t
 		if ctx.Err() != nil {
 			break
 		}
-		result := runWorker(ctx, worker, "sniper", c.loot, logger)
-		if result != nil {
-			coll.mu.Lock()
-			annotateLoot(&coll.loots[c.index], result.Status)
-			coll.mu.Unlock()
-			logger.Infof("sniper: %s → %s", c.loot.Description, result.Status)
+		output, err := worker(ctx, "sniper", c.loot)
+		status := parseStatus(output, "info", "not_confirmed", "inconclusive")
+		if err == nil && status == "" {
+			err = fmt.Errorf("missing or invalid research status")
 		}
-	}
-}
-
-type verifyResult struct {
-	Status string
-}
-
-func runWorker(ctx context.Context, worker Worker, name string, loot parsers.Loot, logger telemetry.Logger) *verifyResult {
-	output, err := worker(ctx, name, loot)
-	if err != nil {
-		logger.Warnf("%s agent error: %s", name, err)
-		return nil
-	}
-	status := parseVerifyStatus(output)
-	if status == "" {
-		return nil
-	}
-	return &verifyResult{Status: status}
-}
-
-func filterLootsByPriority(loots []parsers.Loot, min priority) []indexedLoot {
-	var out []indexedLoot
-	for i, l := range loots {
-		if priority(l.Priority).atLeast(min) {
-			out = append(out, indexedLoot{index: i, loot: l})
+		if err != nil {
+			status = "inconclusive"
 		}
+		coll.mu.Lock()
+		if coll.loots[c.index].Data == nil {
+			coll.loots[c.index].Data = make(map[string]any)
+		}
+		coll.loots[c.index].Data["research_status"] = status
+		if err != nil {
+			coll.errors = append(coll.errors, fmt.Sprintf("sniper %s: %v", c.loot.Target, err))
+		}
+		coll.mu.Unlock()
+		logger.Infof("sniper: %s → %s", c.loot.Description, status)
 	}
-	return out
 }
 
 func filterFingerprintLoots(loots []parsers.Loot) []indexedLoot {
@@ -117,40 +104,24 @@ func annotateLoot(loot *parsers.Loot, status string) {
 	if loot.Data == nil {
 		loot.Data = make(map[string]any)
 	}
-	loot.Data["verification_status"] = normalizeStatus(status)
+	loot.Data["verification_status"] = status
 }
 
-func normalizeStatus(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "confirmed":
-		return "confirmed"
-	case "not_confirmed", "not confirmed", "false_positive":
-		return "not_confirmed"
-	case "info", "informational":
-		return "info"
-	case "inconclusive":
-		return "inconclusive"
-	default:
-		return ""
-	}
-}
-
-func parseVerifyStatus(output string) string {
-	if i := strings.Index(output, "status:"); i >= 0 {
-		rest := output[i+len("status:"):]
-		end := strings.IndexAny(rest, " |\t\n\r")
-		if end < 0 {
-			end = len(rest)
+func parseStatus(output string, allowed ...string) string {
+	var status string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "status:") {
+			continue
 		}
-		if s := normalizeStatus(rest[:end]); s != "" {
-			return s
+		if status != "" {
+			return ""
 		}
-	}
-	lower := strings.ToLower(output)
-	for _, candidate := range []string{"not_confirmed", "confirmed", "inconclusive", "info"} {
-		if strings.Contains(lower, candidate) {
-			return candidate
+		token := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(line, "status:"), "|", 2)[0])
+		if !slices.Contains(allowed, token) {
+			return ""
 		}
+		status = token
 	}
-	return ""
+	return status
 }

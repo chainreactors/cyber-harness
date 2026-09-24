@@ -24,6 +24,43 @@ func TestWithDefaultNoBarAppendsFlag(t *testing.T) {
 	}
 }
 
+func TestSprayHelpIsReadable(t *testing.T) {
+	help := New(nil).Usage()
+	for _, required := range []string{
+		"Usage:", "Input Options:", "Plugin Options:", "Request Options:",
+		"--poc", "--poc-config", "--client-fingerprint", "tls-random",
+		"custom poc template directory",
+	} {
+		if !strings.Contains(help, required) {
+			t.Errorf("help is missing %q", required)
+		}
+	}
+	for number, line := range strings.Split(help, "\n") {
+		if len(line) > helpWidth {
+			t.Errorf("help line %d is %d columns wide: %q", number+1, len(line), line)
+		}
+		if len(line)-len(strings.TrimLeft(line, " ")) > helpDescription {
+			t.Errorf("help line %d has excessive indentation: %q", number+1, line)
+		}
+	}
+}
+
+func TestSprayHelpExecutionMatchesUsage(t *testing.T) {
+	command := New(nil)
+	for _, flag := range []string{"-h", "--help"} {
+		t.Run(flag, func(t *testing.T) {
+			var output bytes.Buffer
+			_, err := command.Run(context.Background(), &coretool.Execution{Args: []string{flag}, Stdout: &output})
+			if err != nil {
+				t.Fatalf("Run(%q): %v", flag, err)
+			}
+			if got, want := output.String(), command.Usage(); got != want {
+				t.Fatalf("Run(%q) help differs from Usage()", flag)
+			}
+		})
+	}
+}
+
 func TestWithDefaultNoBarKeepsExplicitFlag(t *testing.T) {
 	args := []string{"-u", "http://127.0.0.1", "--no-bar=false"}
 	got := withDefaultNoBar(args)

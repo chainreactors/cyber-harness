@@ -38,7 +38,7 @@ func New(runtime *session.Runtime, executor subagent.Executor, lifetime context.
 
 func (t *Tool) Name() string { return "subagent" }
 func (t *Tool) Description() string {
-	return "Delegate an independent task. Omit name for an anonymous subagent, or use a registered name from catalog. Modes: sync (block), async (background), fork (background with parent conversation). Use ioa send for communication."
+	return "Delegate an independent task. Omit name for an anonymous subagent, or use a registered name from catalog. Modes: sync (block), async (background), fork (background with parent conversation)."
 }
 
 type Args struct {

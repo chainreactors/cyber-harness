@@ -13,8 +13,6 @@ func TestRuntimeFileConfigurationRetainsAllSections(t *testing.T) {
   eval_rounds: "3"
   heartbeat: 4
   capture_provider_frames: true
-cyberhub:
-  mitm: false
 traffic:
   body_storage: disk
   body_max_bytes: 1024
@@ -30,7 +28,7 @@ misc:
 	if option.Timeout != 77 || option.EvalCriteria != "audit-goal" || option.EvalModel != "evaluator" || option.EvalRounds != "3" || option.Heartbeat != 4 || !option.CaptureProviderFrames {
 		t.Fatalf("agent configuration lost: %+v", option.AgentOptions)
 	}
-	if option.Mitm == nil || *option.Mitm || option.BodyStorage != "disk" || option.BodyMaxBytes != 1024 || option.BodyRetentionBytes != 4096 || !option.Quiet {
+	if option.BodyStorage != "disk" || option.BodyMaxBytes != 1024 || option.BodyRetentionBytes != 4096 || !option.Quiet {
 		t.Fatalf("storage or boolean configuration lost: %+v", option)
 	}
 }

@@ -55,7 +55,9 @@ aiscan -c /path/to/cyber.yaml scan -i 192.168.1.0/24   # 指定配置文件
 
 配置属于 **cyber-harness 公共能力**，`aiscan` 与通用 `agent` CLI 共用相同的 `init`、`config`、`doctor` 命令。完整规则见 [配置与初始化](configuration.md)。
 
-自动加载 `~/.cyber/cyber.yaml`，再叠加最近的项目 `cyber.yaml`；当前目录优先，向上查找止于最近 Git 根目录、用户目录或文件系统根。没有项目配置时兼容二进制旁的 `cyber.yaml`。显式 `-c` 只加载指定文件，不继承用户配置。
+自动加载 `~/.cyber/cyber.yaml`，再叠加当前目录的 `cyber.yaml`（不存在时使用 `.cyber/cyber.yaml`）；同名配置项以当前目录为准。不向父目录或可执行文件目录查找配置。显式 `-c` 只加载指定文件，不继承用户配置。
+
+node 模式（`aiscan agent --server-url ...`，自动或 `web` transport）的 LLM 配置由远端 server 下发；node 本地文件、模型参数和环境变量不覆盖它。收到远端配置前不初始化模型，远端未配置模型时不回退到本地模型。
 
 ### 配置文件结构
 
@@ -113,7 +115,7 @@ output:
 
 # 扫描默认值
 scan:
-  verify: ""          # auto, off, low, medium, high, critical
+  verify: ""          # on / off；留空由执行节点按模型是否存在决定
 
 # 通用选项
 misc:
@@ -450,9 +452,8 @@ aiscan cyberhub id tomcat
 | `--zombie-top` | 默认弱口令组合数量 | 由引擎解析 |
 | `--max-neutron-per-finger` | 每个指纹的模板上限 | 20 |
 | `--broad-poc` | 无匹配指纹时也运行 POC | 关闭 |
-| `--verify` | off、low、medium、high、critical、auto | CLI 配置默认 auto，限制见正文 |
+| `--verify` | on、off | 未指定时采用节点配置，否则有模型开启、无模型关闭 |
 | `--sniper` | 指纹的后续漏洞情报搜索 | 关闭 |
-| `--deep` | 保留参数；当前没有接通 AI deep 执行阶段 | 关闭 |
 | `-j, --json` | 完成后输出 gogo/spray 原生 JSON Lines | 关闭 |
 | `--trace`、`--debug` | 调度观察、底层日志 | 关闭 |
 | `--no-color` | 关闭终端颜色 | 关闭 |
@@ -519,7 +520,7 @@ scan:
 | 快速资产发现和风险初筛 | `aiscan scan -i <target>` |
 | 完整扫描（含路径爆破） | `aiscan scan -i <target> --mode full` |
 | 搜索已知漏洞情报 | `aiscan scan -i <target> --sniper` |
-| AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=high --sniper` |
+| AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=on --sniper` |
 | 自动解释结果和生成结论 | `aiscan agent -p "<任务>" -i <target>` |
 | 目标驱动 + 自动评估 | `aiscan agent -e "<标准>" -p "<任务>" -i <target>` |
 | 由 Agent 调用扫描器并分析 | `aiscan --ai -p "<意图>" <scanner> ...` |
@@ -547,7 +548,7 @@ aiscan agent -p "检查目标" -i http://target.example
 
 1. 检查是否配置了 LLM provider
 2. 确认发现的风险优先级达到了 `--verify` 阈值
-3. 当前 `auto` 路径未转成 high 验证阈值；明确启用请传 `--verify=high`，详见[扫描限制](scan.md#ai-增强扫描)
+3. 查看验证错误与原始证据；`auto` 和严重性阈值已移除，明确启用请传 `--verify=on`。
 
 ### 输出太多或包含颜色
 

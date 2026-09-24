@@ -45,6 +45,10 @@ community.yaml
 /.playwright-cli/
 /.cache/
 /.buildcheck/
+/cmd/aiscan/assets/
+/cmd/aiscan/bundle_generated_*.go
+/audit/internal/toolchain/assets/
+/audit/internal/toolchain/bundle_generated_*.go
 # operator scan outputs dumped at repo root (screenshots, IP lists, app dumps, findings/reports)
 /*.png
 /*_ips.txt

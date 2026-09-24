@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -51,6 +52,19 @@ func TestRuntimeDependencies(t *testing.T) {
 		}
 		if !strings.HasSuffix(path, ".go") {
 			return nil
+		}
+		// The agent runtime is distribution-neutral: no product identity
+		// literals or virtual namespaces may appear in it.
+		if strings.HasPrefix(relative, "agent/") && !strings.HasSuffix(path, "_test.go") {
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			for _, forbidden := range []string{`"cyber"`, "cyber://"} {
+				if strings.Contains(string(content), forbidden) {
+					t.Errorf("%s embeds distribution identity %s in the neutral runtime", relative, forbidden)
+				}
+			}
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
@@ -123,7 +137,7 @@ var installationRules = map[string][]installationRule{
 	"agent/session":              {{"pkg/exts/session", []string{"NewResource", "Resource"}}},
 	"agent/provider":             {{"pkg/exts/provider", []string{"Initialize"}}},
 	"agent/prompt":               {{"pkg/exts/prompt", []string{"NewRegistry"}}},
-	"agent/skills":               {{"pkg/exts/skills", []string{"NewStore", "LoadAll", "LoadFrom"}}},
+	"agent/skills":               {{"pkg/exts/skills", []string{"NewStore", "LoadFrom"}}},
 	"tools/ioa":                  {{"pkg/exts/ioa/client/extension.go", []string{"New", "Resource"}}},
 	"tools/ioa/server":           {{"pkg/exts/ioa/server/extension.go", []string{"New", "Resource"}}},
 	"tools/terminal": {
@@ -140,7 +154,7 @@ var installationRules = map[string][]installationRule{
 	"tools/curl":        {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/gogo":        {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/neutron":     {{"pkg/exts/scanner", []string{"New*"}}},
-	"tools/proton":      {{"pkg/exts/scanner", []string{"New*"}}},
+	"tools/proton":      {{"pkg/exts/proton", []string{"New*"}}},
 	"tools/spray":       {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/zombie":      {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/katana":      {{"pkg/exts/scanner", []string{"New*"}}},
@@ -151,7 +165,7 @@ var installationRules = map[string][]installationRule{
 		{"pkg/exts/scanner", []string{"NewCyberhubSearch"}},
 		{"pkg/exts/search", []string{"NewTavilySearch", "NewWebSearchTool", "NewFetchCommand"}},
 	},
-	"pkg/web/service": {{"pkg/exts/web", []string{"NewService", "NewSQLiteStore", "NewAgentPool"}}},
+	"pkg/web/service": {{"pkg/exts/web", []string{"NewService", "NewSQLiteStore", "NewAgentPool", "ScanSchema"}}},
 	"pkg/web":         {{"pkg/exts/web", []string{"ManagementRoutes", "AOPRoute", "SessionRoute", "ScanRoute", "ConfigRoute", "AgentRoute", "SystemRoute", "ArtifactRoute"}}},
 }
 
@@ -230,6 +244,34 @@ func installationViolations(relative string, file *ast.File) []string {
 	})
 	return violations
 }
+
+// The core Option holds host-neutral configuration only. Scanner-domain
+// sections are extension declarations owned by pkg/exts/scanner and reach the
+// runtime through Option.Extensions.
+func TestCoreOptionHasNoScannerSections(t *testing.T) {
+	repository := root(t)
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repository, "pkg", "config", "options.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := map[string]bool{"cyberhub": true, "recon": true, "scan": true, "search": true}
+	ast.Inspect(file, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || field.Tag == nil {
+			return true
+		}
+		raw, err := strconv.Unquote(field.Tag.Value)
+		if err != nil {
+			return true
+		}
+		key := strings.Split(reflect.StructTag(raw).Get("config"), ",")[0]
+		if forbidden[key] {
+			t.Errorf("pkg/config Option carries scanner configuration key %q; register a config.Section instead", key)
+		}
+		return true
+	})
+}
+
 func TestExtensionsAreTheInstallationEntryPoints(t *testing.T) {
 	repository := root(t)
 	for _, tree := range []string{"cmd", "pkg", "examples", "internal/testutil"} {

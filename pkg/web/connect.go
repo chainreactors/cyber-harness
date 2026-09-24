@@ -11,6 +11,7 @@ import (
 	types "github.com/chainreactors/cyber/core/types"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 )
 
 // Protobuf JSON base64-encodes raw artifact bytes, so the 50 MiB business limit
@@ -119,6 +120,10 @@ func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[
 	return asConnectError(err)
 }
 
+func (s *connectServer) UpdateSession(ctx context.Context, req *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error) {
+	return connectCall(s.api.Sessions.UpdateSession(ctx, req.Msg))
+}
+
 func (s *connectServer) ListSessions(ctx context.Context, req *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error) {
 	return connectCall(s.api.Sessions.ListSessions(ctx, req.Msg))
 }
@@ -143,19 +148,19 @@ func (s *connectServer) ListEvents(ctx context.Context, req *connect.Request[aop
 	return connectCall(s.api.Sessions.ListEvents(ctx, req.Msg))
 }
 
-func (s *connectServer) SubmitScan(ctx context.Context, req *connect.Request[types.SubmitScanRequest]) (*connect.Response[types.SubmitScanResponse], error) {
+func (s *connectServer) SubmitScan(ctx context.Context, req *connect.Request[scanpb.SubmitScanRequest]) (*connect.Response[scanpb.SubmitScanResponse], error) {
 	return connectCall(s.api.Scans.SubmitScan(ctx, req.Msg))
 }
 
-func (s *connectServer) GetScan(ctx context.Context, req *connect.Request[types.GetScanRequest]) (*connect.Response[types.GetScanResponse], error) {
+func (s *connectServer) GetScan(ctx context.Context, req *connect.Request[scanpb.GetScanRequest]) (*connect.Response[scanpb.GetScanResponse], error) {
 	return connectCall(s.api.Scans.GetScan(ctx, req.Msg))
 }
 
-func (s *connectServer) ListScans(ctx context.Context, req *connect.Request[types.ListScansRequest]) (*connect.Response[types.ListScansResponse], error) {
+func (s *connectServer) ListScans(ctx context.Context, req *connect.Request[scanpb.ListScansRequest]) (*connect.Response[scanpb.ListScansResponse], error) {
 	return connectCall(s.api.Scans.ListScans(ctx, req.Msg))
 }
 
-func (s *connectServer) CancelScan(ctx context.Context, req *connect.Request[types.CancelScanRequest]) (*connect.Response[types.CancelScanResponse], error) {
+func (s *connectServer) CancelScan(ctx context.Context, req *connect.Request[scanpb.CancelScanRequest]) (*connect.Response[scanpb.CancelScanResponse], error) {
 	return connectCall(s.api.Scans.CancelScan(ctx, req.Msg))
 }
 

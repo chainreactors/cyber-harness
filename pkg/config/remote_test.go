@@ -11,8 +11,6 @@ import (
 
 func TestDistributedRuntimeDoesNotMutateHostFileState(t *testing.T) {
 	c := isolatedContext(t)
-	credential := "local-credential"
-	c.LookupEnv = func(key string) (string, bool) { return credential, key == "SHODAN_API_KEY" }
 	putConfig(t, c.UserFile(), "old_fixture:\n  name: local\nllm:\n  providers:\n    - id: local\n      provider: openai\n      model: local-model\n")
 	host := &Option{Context: c, Sections: fixtureSections(t), Explicit: map[string]bool{}}
 	if _, err := ResolveRuntimeConfig(host); err != nil {
@@ -20,7 +18,6 @@ func TestDistributedRuntimeDoesNotMutateHostFileState(t *testing.T) {
 	}
 	before := CloneDocument(host.Snapshot.Effective)
 	sources := maps.Clone(host.Snapshot.Sources)
-	credential = "replacement-credential"
 	exts, err := ValuesToProto(Values{"fixture": {"name": "remote"}})
 	if err != nil {
 		t.Fatal(err)
@@ -42,12 +39,67 @@ func TestDistributedRuntimeDoesNotMutateHostFileState(t *testing.T) {
 	if remote.Snapshot != nil {
 		t.Fatal("distributed configuration retained unrelated local file layers")
 	}
-	if host.UncoverCredentials["SHODAN_API_KEY"] != "local-credential" || remote.UncoverCredentials["SHODAN_API_KEY"] != "replacement-credential" {
-		t.Fatal("environment resolution shared mutable credential state")
-	}
 	local, err := Get[*fixtureOptions](host.Resolved, "fixture")
 	if err != nil || local.Name != "local" {
 		t.Fatal("distributed resolution mutated host extension options", err)
+	}
+}
+
+func TestDistributedLLMOverridesLocalFlagsEnvironmentAndDefaults(t *testing.T) {
+	withDefaults(t, func() {
+		DefaultModel, DefaultAPIKey, DefaultBaseURL = "compiled-model", "compiled-key", "https://compiled.invalid/v1"
+		c := isolatedContext(t)
+		c.LookupEnv = func(key string) (string, bool) {
+			value, ok := map[string]string{
+				"CYBER_MODEL": "env-model", "CYBER_API_KEY": "env-key", "CYBER_PROVIDER": "invalid-local-provider",
+				"CYBER_BASE_URL": "https://env.invalid/v1", "OPENAI_API_KEY": "fallback-key",
+			}[key]
+			return value, ok
+		}
+		host := &Option{Context: c, Explicit: map[string]bool{"profile": true, "model": true, "api-key": true},
+			LLMOptions:  LLMOptions{ActiveProfile: "stale-local-profile", Model: "cli-model", APIKey: "cli-key"},
+			NodeOptions: NodeOptions{NodeID: "local-node"},
+		}
+		remote, err := ResolveDistributedRuntime(&types.DistributeConfig{
+			Llm: &types.LLMConfig{ActiveProfile: "server", Providers: []*types.LLMProviderConfig{{
+				Id: "server", Provider: "openai", BaseUrl: "https://server.invalid/v1", Model: "server-model", ApiKey: "server-key",
+			}}},
+		}, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := ProviderConfig(remote)
+		if p.Model != "server-model" || p.APIKey != "server-key" || p.BaseURL != "https://server.invalid/v1" || remote.ActiveProfile != "server" {
+			t.Fatal("local settings overrode the server LLM")
+		}
+		if host.ActiveProfile != "stale-local-profile" || !host.Explicit["profile"] || remote.NodeID != "local-node" {
+			t.Fatal("remote resolution mutated host settings or identity")
+		}
+		cleared, err := ResolveDistributedRuntime(&types.DistributeConfig{}, remote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p = ProviderConfig(cleared)
+		if p.Model != "" || p.APIKey != "" || p.BaseURL != "" || len(FallbackProviderConfigs(cleared)) != 0 {
+			t.Fatal("empty server LLM fell back to local settings")
+		}
+	})
+}
+
+func TestDistributedLLMPreservesInferredNonModelOverrides(t *testing.T) {
+	host := &Option{Context: isolatedContext(t),
+		LLMOptions:   LLMOptions{ActiveProfile: "stale", APIKey: "local-key"},
+		AgentOptions: AgentOptions{Timeout: 77},
+	}
+	remote, err := ResolveDistributedRuntime(&types.DistributeConfig{
+		Agent: &types.AgentConfig{Timeout: proto.Int32(99)},
+		Llm:   &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "remote", Provider: "openai", Model: "remote-model", ApiKey: "remote-key"}}},
+	}, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote.Timeout != 77 || remote.APIKey != "remote-key" || remote.Model != "remote-model" || host.Explicit != nil {
+		t.Fatal("implicit host overrides or remote model ownership changed")
 	}
 }
 
@@ -56,9 +108,8 @@ func TestDistributedRuntimeMatchesFileAndReplacesOldValues(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	distributed := &types.DistributeConfig{
-		Agent:    &types.AgentConfig{Timeout: proto.Int32(0), Heartbeat: 3, EvalCriteria: "goal", EvalModel: "judge", EvalRounds: "4", CaptureProviderFrames: true},
-		Cyberhub: &types.CyberhubConfig{Mitm: proto.Bool(false)},
-		Traffic:  &types.TrafficConfig{BodyStorage: "disk", BodyMaxBytes: 1024, BodyRetentionBytes: 4096},
+		Agent:   &types.AgentConfig{Timeout: proto.Int32(0), Heartbeat: 3, EvalCriteria: "goal", EvalModel: "judge", EvalRounds: "4", CaptureProviderFrames: true},
+		Traffic: &types.TrafficConfig{BodyStorage: "disk", BodyMaxBytes: 1024, BodyRetentionBytes: 4096},
 	}
 	data, err := MarshalDistributeConfigYAML(distributed)
 	if err != nil {
@@ -74,7 +125,7 @@ func TestDistributedRuntimeMatchesFileAndReplacesOldValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if remote.Timeout != file.Timeout || remote.Timeout != 0 || remote.Heartbeat != 3 || remote.EvalCriteria != "goal" || remote.EvalModel != "judge" || remote.EvalRounds != "4" || !remote.CaptureProviderFrames || remote.Mitm == nil || *remote.Mitm || remote.TrafficOptions != file.TrafficOptions {
+	if remote.Timeout != file.Timeout || remote.Timeout != 0 || remote.Heartbeat != 3 || remote.EvalCriteria != "goal" || remote.EvalModel != "judge" || remote.EvalRounds != "4" || !remote.CaptureProviderFrames || remote.TrafficOptions != file.TrafficOptions {
 		t.Fatalf("lost distributed values: %+v", remote)
 	}
 	if remote.NodeID != "local" || remote.ServerURL != "http://hub" {

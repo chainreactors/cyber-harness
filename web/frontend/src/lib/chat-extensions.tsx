@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2 } from 'lucide-react'
+import { Bot, FileSearch } from 'lucide-react'
 import { registerTimelineRenderer } from '@/viewer'
 import i18n from '../i18n'
 import type { SCONode } from '../api'
@@ -8,15 +8,9 @@ export function registerChatExtensions() {
   registerTimelineRenderer('scan_complete', {
     renderer: ({ item, context }) => {
       const scanID = item.data.scanID as string
-      // The hub persists a completed scan as SCO nodes keyed by scan_id; a live
-      // scan_complete event carries them inline, a card rebuilt from a persisted
-      // marker (page reload / session switch) falls back to the scanResults map
-      // the session loads from its scan_ids. Until that map resolves the nodes
-      // are absent — render nothing rather than an empty card; the row
-      // re-renders and the card appears once the map fills.
+      // Render the status even while the browser is rebuilding archived results.
       const scanResults = context.scanResults as Map<string, SCONode[]> | undefined
       const nodes = (item.data.nodes as SCONode[]) ?? scanResults?.get(scanID)
-      if (!nodes) return null
       return (
         <ScanSummaryCard
           scanID={scanID}
@@ -25,9 +19,9 @@ export function registerChatExtensions() {
       )
     },
     mark: {
-      label: () => i18n.t('chat:complete'),
-      icon: CheckCircle2,
-      dotClass: 'border-emerald-400 bg-emerald-400',
+      label: () => i18n.t('scan:results'),
+      icon: FileSearch,
+      dotClass: 'border-muted-foreground bg-muted',
     },
   })
 

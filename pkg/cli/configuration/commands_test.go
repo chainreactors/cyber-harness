@@ -93,6 +93,33 @@ func TestShowSourcesRedactsCredentialsAndDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestInitHiddenProjectConfigLoadsWithoutExplicitPath(t *testing.T) {
+	host, out := commandHost(t)
+	host.Err = &bytes.Buffer{}
+	runCommand(t, host, "init", "--non-interactive", "--provider", "openai", "--model", "user-model")
+	path := filepath.Join(".cyber", cfg.DefaultConfigName)
+	runCommand(t, host, "-c", path, "init", "--non-interactive", "--provider", "openai", "--model", "local-model")
+	out.Reset()
+	runCommand(t, host, "config", "show", "--sources", "--json")
+	var view struct {
+		Config struct {
+			LLM struct {
+				Model string `json:"model"`
+			} `json:"llm"`
+		} `json:"config"`
+		Sources map[string]string `json:"sources"`
+		Target  string            `json:"target"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(host.Context.Directory, path)
+	if view.Config.LLM.Model != "local-model" || view.Sources["llm.model"] != want || view.Target != want {
+		t.Fatalf("local configuration was not selected: %+v", view)
+	}
+	runCommand(t, host, "config", "validate")
+}
+
 func TestConfigurationCommandDispatchDoesNotStealPrompts(t *testing.T) {
 	host, _ := commandHost(t)
 	for _, args := range [][]string{{"-p", "init"}, {"agent", "-p", "config"}, {"scan", "-i", "doctor"}, {"--version"}} {

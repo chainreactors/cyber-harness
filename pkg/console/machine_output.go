@@ -1,7 +1,9 @@
 package console
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -112,8 +114,13 @@ func (o *machineOutput) SetError(err error) {
 	if o.failure == nil {
 		o.failure = &aop.ProtocolError{Code: "execution_error", Message: err.Error()}
 	}
-	if o.stop == "" {
-		o.stop = string(agent.StopReasonError)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		o.stop = string(agent.StopReasonCanceled)
+	} else {
+		switch o.stop {
+		case "", string(agent.StopReasonCompleted), string(agent.StopReasonStopped), string(agent.StopReasonTerminated):
+			o.stop = string(agent.StopReasonError)
+		}
 	}
 }
 

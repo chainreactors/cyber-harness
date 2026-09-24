@@ -6,16 +6,19 @@ import (
 	"slices"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/core/extension"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	arsenalext "github.com/chainreactors/cyber/pkg/exts/arsenal"
 	okfext "github.com/chainreactors/cyber/pkg/exts/okf"
+	protonext "github.com/chainreactors/cyber/pkg/exts/proton"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	harness "github.com/chainreactors/cyber/pkg/harness"
+	"github.com/chainreactors/cyber/tools/scan"
 )
 
 // extensions returns the product's extensions in the order they must load. It
@@ -25,11 +28,15 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	config.DataDir = cfg.ResolveDataDir(config.DataDir)
 	config.Scanner.Resources.CacheDir = filepath.Join(config.DataDir, "cache")
 
-	arsenal, err := arsenalext.New(filepath.Join(config.DataDir, "arsenal"))
+	bundle, err := EmbeddedBundle()
 	if err != nil {
 		return nil, err
 	}
-	childEnv := map[string]string{"PATH": arsenal.BinDir() + string(os.PathListSeparator) + os.Getenv("PATH")}
+	manager, err := arsenalext.NewManager(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
+	if err != nil {
+		return nil, err
+	}
+	childEnv := map[string]string{"PATH": manager.BinPath() + string(os.PathListSeparator) + os.Getenv("PATH")}
 
 	extensions, err := harness.BaseExtensions(harness.BaseConfig{
 		Directory:  workDir,
@@ -44,10 +51,10 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	}
 	// The loop installation publishes agent.Loop, so it precedes every
 	// extension that runs against one.
-	extensions = append(extensions, okfext.New(), loopext.New(loop), subagentext.New(), arsenal)
+	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenalext.New(manager))
 
 	if !config.SkipEngines {
-		extensions = append(extensions, scannerext.New(config.Scanner, workDir))
+		extensions = append(extensions, scannerext.New(config.Scanner, workDir), protonext.New(protonext.Config{Directory: workDir}))
 	}
 	if optionalToolEnabled(config.Tools.OptionalTools, "search") {
 		extensions = append(extensions, searchext.New(searchext.Config{TavilyKeys: config.Tools.TavilyKeys}))

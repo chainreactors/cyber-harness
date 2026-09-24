@@ -44,6 +44,7 @@ STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
 FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
 RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
 AGENT_BIN ?= $(BIN_DIR)/agent$(EXE)
+AUDIT_BIN ?= $(BIN_DIR)/cyber-audit$(EXE)
 
 # The edition tag sets live in editions.env, which the CI workflows read too.
 include editions.env
@@ -64,6 +65,24 @@ FULL_TAGS := $(filter-out $(RESOURCE_TAGS),$(FULL_TAGS))
 RECORD_TAGS := $(filter-out $(RESOURCE_TAGS),$(RECORD_TAGS))
 else
 EMBED_PREREQ :=
+endif
+
+# Tool payloads are independent of scanner template embedding.
+ARSENAL_EMBED ?= 0
+ARSENAL_CONFIG ?= cmd/aiscan/bundle.yaml
+AUDIT_ARSENAL_CONFIG ?= audit/cmd/cyber-audit/bundle.yaml
+ARSENAL_GOOS := $(shell $(GO) env GOOS)
+ARSENAL_GOARCH := $(shell $(GO) env GOARCH)
+ifeq ($(ARSENAL_EMBED),1)
+EMBED_PREREQ += embed-arsenal
+STANDARD_TAGS += arsenal_embed
+FULL_TAGS += arsenal_embed
+RECORD_TAGS += arsenal_embed
+AUDIT_PREREQ := embed-audit
+AUDIT_TAGS := arsenal_embed
+else
+EMBED_PREREQ += arsenal-spec
+AUDIT_PREREQ := audit-arsenal-spec
 endif
 
 ifeq ($(WINDOWS),1)
@@ -98,10 +117,12 @@ help:
 	@echo "aiscan build targets:"
 	@echo "  make / make standard  Build the standard aiscan edition"
 	@echo "  make agent            Build the minimal local agent binary"
+	@echo "  make audit ARSENAL_EMBED=1  Build audit with all required external tools"
 	@echo "  make full             Build frontend, then build the full edition"
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
 	@echo "  make web              Build the full edition and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
+	@echo "  make embed-arsenal    Download tools and generate target-specific embedding"
 	@echo "  make record-native    Install the recorder SDK"
 	@echo "  make proto-gen        Regenerate all AOP and Cyber protobuf bindings"
 	@echo "  make harness          Run user scenarios against the real application process"
@@ -112,6 +133,7 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  EMBED=1               Generate and embed resources instead of loading them"
+	@echo "  ARSENAL_EMBED=1       Embed tools selected by ARSENAL_CONFIG"
 	@echo "  BIN_DIR=path          Binary output directory (default: $(BIN_DIR))"
 	@echo "  WEB_ADDR=host:port    Web listen address (default: $(WEB_ADDR))"
 	@echo "  WEB_TOKEN=token       Optional fixed Web access token"
@@ -139,7 +161,19 @@ prepare:
 # Only reachable through EMBED=1, which also strips the tags that would
 # otherwise keep these resources external.
 embed-resources:
-	$(GO) generate ./tools/resources
+	$(GO) generate ./tools/resources ./tools/proton/resources
+
+.PHONY: embed-arsenal arsenal-spec
+embed-arsenal arsenal-spec:
+	GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) $(GO) run github.com/chainreactors/crtm/cmd/crtm-bundle -config "$(ARSENAL_CONFIG)" -target "$(ARSENAL_GOOS)/$(ARSENAL_GOARCH)" -output cmd/aiscan -package main $(if $(filter arsenal-spec,$@),-metadata-only)
+
+.PHONY: audit embed-audit audit-arsenal-spec
+embed-audit audit-arsenal-spec:
+	GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) $(GO) run github.com/chainreactors/crtm/cmd/crtm-bundle -config "$(AUDIT_ARSENAL_CONFIG)" -target "$(ARSENAL_GOOS)/$(ARSENAL_GOARCH)" -output audit/internal/toolchain -package toolchain $(if $(filter audit-arsenal-spec,$@),-metadata-only)
+
+audit: $(AUDIT_PREREQ) prepare
+	CGO_ENABLED=0 GOWORK=off $(GO) -C audit build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(AUDIT_TAGS)" -o "$(abspath $(AUDIT_BIN))" ./cmd/cyber-audit
+	@echo "Built audit: $(AUDIT_BIN)"
 
 ldflags:
 	@echo "$(GO_LDFLAGS)"

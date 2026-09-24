@@ -56,6 +56,7 @@ type nodeState struct {
 	openSessions  map[string]struct{}
 	toolCalls     map[string]struct{}
 	childSessions map[string]map[string]struct{}
+	archiveErrors map[string]string
 }
 
 func newNodeState() *nodeState {
@@ -65,6 +66,7 @@ func newNodeState() *nodeState {
 		openSessions:  make(map[string]struct{}),
 		toolCalls:     make(map[string]struct{}),
 		childSessions: make(map[string]map[string]struct{}),
+		archiveErrors: make(map[string]string),
 	}
 }
 
@@ -91,6 +93,15 @@ func (s *nodeState) finishTask(taskID string, result taskResult) {
 	ch, ok := s.tasks[taskID]
 	result.Turn = s.turns[taskID]
 	if ok {
+		if message := s.archiveErrors[taskID]; message != "" {
+			if result.Err == "" {
+				result.Err = message
+			} else {
+				result.Err += "; " + message
+			}
+			result.Code = "RESULT_ARCHIVE_FAILED"
+		}
+		delete(s.archiveErrors, taskID)
 		delete(s.tasks, taskID)
 		delete(s.turns, taskID)
 		delete(s.toolCalls, taskID)
@@ -108,6 +119,7 @@ func (s *nodeState) dropTask(taskID string) (chan taskResult, bool) {
 	s.mu.Lock()
 	ch, pending := s.tasks[taskID]
 	if pending {
+		delete(s.archiveErrors, taskID)
 		delete(s.tasks, taskID)
 		delete(s.turns, taskID)
 		delete(s.toolCalls, taskID)
@@ -153,6 +165,7 @@ func (s *nodeState) closeAllTasks() {
 	s.tasks = nil
 	s.toolCalls = nil
 	s.childSessions = nil
+	s.archiveErrors = nil
 	s.mu.Unlock()
 }
 

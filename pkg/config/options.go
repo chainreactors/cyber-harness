@@ -16,36 +16,24 @@ type Option struct {
 	// Explicit records flags actually supplied by the caller, including zero values.
 	Explicit       map[string]bool `no-flag:"true" config:"-"`
 	present        map[string]bool
+	remoteLLM      bool      // Node models are owned by the server, including empty values.
 	Resolved       *Resolved `no-flag:"true" config:"-"`
 	Snapshot       *Snapshot `no-flag:"true" config:"-"`
 	Context        *Context  `no-flag:"true" config:"-"`
 	LLMOptions     `group:"LLM Options" config:"llm"`
-	ScannerOptions `group:"Scanner Options" config:"cyberhub"`
 	TrafficOptions `group:"Traffic Options" config:"traffic"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
 	NodeOptions    `group:"Node Options" config:"node" local:"true"`
 	Extensions     Values    `no-flag:"true" config:"extensions"`
 	Sections       *Sections `no-flag:"true" config:"-"`
-	ReconOptions   `group:"Recon Options" config:"recon"`
 	OutputOptions  `group:"Output Options" config:"output" local:"true"`
 	MiscOptions    `group:"Miscellaneous Options" config:"misc" local:"true"`
-	ScanConfig     ScanConfigOptions   `no-flag:"true" config:"scan"`
-	SearchConfig   SearchConfigOptions `no-flag:"true" config:"search"`
 
 	// Runtime-only environment settings. Business packages receive these values
 	// after ResolveRuntimeConfig instead of reading the process environment.
-	RenderMode         string            `no-flag:"true"`
-	REPLMode           string            `no-flag:"true"`
-	PlaywrightSession  string            `no-flag:"true"`
-	UncoverCredentials map[string]string `no-flag:"true"`
-}
-
-type ScanConfigOptions struct {
-	Verify string `config:"verify"`
-}
-
-type SearchConfigOptions struct {
-	TavilyKeys string `config:"tavily_keys" description:"Tavily API keys (comma-separated; empty falls back to DuckDuckGo)"`
+	RenderMode        string `no-flag:"true"`
+	REPLMode          string `no-flag:"true"`
+	PlaywrightSession string `no-flag:"true"`
 }
 
 type LLMOptions struct {
@@ -73,14 +61,6 @@ type LLMProviderEntry struct {
 	Images        *bool  `config:"images" yaml:"images,omitempty"`
 	MaxTokens     int    `config:"max_tokens" yaml:"max_tokens,omitempty"`
 	ContextWindow int    `config:"context_window" yaml:"context_window,omitempty"`
-}
-
-type ScannerOptions struct {
-	CyberhubURL  string `long:"cyberhub-url" config:"url" description:"Cyberhub server URL for loading fingers/templates"`
-	CyberhubKey  string `long:"cyberhub-key" config:"key" description:"Cyberhub API key"`
-	CyberhubMode string `long:"cyberhub-mode" config:"mode" description:"Cyberhub resource mode: merge or override"`
-	Proxy        string `long:"proxy" config:"proxy" description:"Proxy for scanner tools. Supports socks5://, trojan://, vless://, clash:// (subscription with load balancing)"`
-	Mitm         *bool  `long:"mitm" config:"mitm" init_default:"true" config_optional:"true" description:"Record tool traffic through the MITM hub (default: enabled). Disable for pure proxy routing without interception/capture"`
 }
 
 type TrafficOptions struct {

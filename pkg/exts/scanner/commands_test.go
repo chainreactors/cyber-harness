@@ -30,6 +30,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
+	protonext "github.com/chainreactors/cyber/pkg/exts/proton"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	"github.com/chainreactors/cyber/pkg/harness"
@@ -49,7 +50,7 @@ func installScanner(t *testing.T, directory string, config Config, extra ...exte
 	if err != nil {
 		t.Fatal(err)
 	}
-	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), searchext.New(searchext.Config{}))
+	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), protonext.New(protonext.Config{Directory: directory}), searchext.New(searchext.Config{}))
 	values = append(values, extra...)
 	var installed scannerInstallation
 	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {

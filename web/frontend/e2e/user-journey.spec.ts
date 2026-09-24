@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { createNodeTask } from './task-ui'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
 const E2E_MODEL = process.env.CYBER_E2E_LLM_MODEL || 'deepseek-flash'
@@ -42,7 +43,7 @@ async function login(page: Page) {
 }
 
 async function sendChat(page: Page, text: string) {
-  const input = page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })
+  const input = page.getByRole('textbox', { name: 'Your goal' })
   await input.fill(text)
   await page.getByRole('button', { name: 'Send message' }).click()
 }
@@ -76,11 +77,7 @@ test('operator completes a full Cyber Web journey', async ({ page, request }) =>
 
     // One durable Chat session, two LLM turns, then a real REPL command through
     // the same node channel.
-    const remoteNode = page.getByRole('button', { name: /e2e-node.*idle/ })
-    await expect(remoteNode).toBeVisible()
-    const remoteNodeGroup = remoteNode.locator('xpath=..')
-    await remoteNodeGroup.getByRole('button', { name: 'New', exact: true }).click()
-    await expect(page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })).toBeVisible()
+    const remoteNodeGroup = await createNodeTask(page)
     sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1) || ''
     expect(sessionID).not.toBe('')
 

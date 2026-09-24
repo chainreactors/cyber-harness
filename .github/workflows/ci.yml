@@ -178,7 +178,7 @@ jobs:
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Generate embedded resources
-        run: go generate ./tools/resources/...
+        run: go generate ./tools/resources/... ./tools/proton/resources/...
 
       - name: Run AOP module tests
         working-directory: aop
@@ -216,7 +216,7 @@ jobs:
           echo "Total coverage ${coverage}% meets the 50.0% floor"
 
       - name: Check generated resources are committed
-        run: git diff --exit-code -- tools/resources/template.go
+        run: git diff --exit-code -- tools/resources/template.go tools/proton/resources
 
       - name: Display coverage summary
         if: always()
@@ -462,8 +462,42 @@ jobs:
         run: go test -race -count=100 -timeout 2m ./pkg/web
 
   release-verify:
-    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e]
+    needs: [windows-test, scanner-functional, headless-record-replay-e2e, e2e, audit]
     uses: ./.github/workflows/release-build.yml
     with:
       tag: v0.0.0-ci.${{ github.run_id }}
       ref: ${{ github.sha }}
+
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: audit/go.mod
+          cache-dependency-path: audit/go.sum
+      - name: Check independent audit module
+        working-directory: audit
+        shell: bash
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go test -race -count=1 ./...
+          go vet ./...
+          CGO_ENABLED=0 go build ./cmd/cyber-audit
+      - name: Check six audit build targets
+        if: runner.os == 'Linux'
+        working-directory: audit
+        shell: bash
+        run: |
+          for system in linux darwin windows; do
+            for arch in amd64 arm64; do
+              GOOS="$system" GOARCH="$arch" CGO_ENABLED=0 go build -o "$RUNNER_TEMP/cyber-audit-$system-$arch" ./cmd/cyber-audit
+            done
+          done

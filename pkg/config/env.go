@@ -12,6 +12,16 @@ type envLookup func(string) (string, bool)
 
 // ResolveRuntimeConfig resolves parsed configuration with environment and defaults.
 func ResolveRuntimeConfig(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, false)
+}
+
+// ResolveAgentRuntimeConfig selects the transport before resolving models so a
+// node can enroll even when its local profile selection is stale or incomplete.
+func ResolveAgentRuntimeConfig(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, true)
+}
+
+func resolveRuntimeConfig(option *Option, agentMode bool) (string, error) {
 	if option.Sections == nil {
 		option.Sections = NewSections()
 	}
@@ -19,6 +29,17 @@ func ResolveRuntimeConfig(option *Option) (string, error) {
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
 		return configPath, err
+	}
+	if agentMode {
+		transport, err := ResolveAgentTransport(option)
+		if err != nil {
+			return configPath, err
+		}
+		if transport == AgentTransportWeb {
+			useRemoteLLM(option)
+			useRemoteLLM(&explicit)
+			option.Snapshot.Diagnostics = append(option.Snapshot.Diagnostics, "node mode: waiting for LLM configuration from the remote server")
+		}
 	}
 	if err := finishRuntimeConfig(option, &explicit); err != nil {
 		return configPath, err
@@ -56,9 +77,9 @@ func finishRuntimeConfig(option, explicit *Option) error {
 }
 
 func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
-	applyLLMEnvironment(option, explicit, lookup)
-	applyScannerEnvironment(option, explicit, lookup)
-	applyReconEnvironment(option, explicit, lookup)
+	if !option.remoteLLM {
+		applyLLMEnvironment(option, explicit, lookup)
+	}
 	applyRuntimeEnvironment(option, explicit, lookup)
 }
 
@@ -145,53 +166,6 @@ func applyLLMEnvironment(option *Option, explicit Option, lookup envLookup) {
 	}
 }
 
-func applyScannerEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if !explicit.hasExplicit("CyberhubURL") {
-		if v := firstEnv(lookup, "CYBER_CYBERHUB_URL"); v != "" {
-			option.CyberhubURL = v
-		}
-	}
-	if !explicit.hasExplicit("CyberhubKey") {
-		if v := firstEnv(lookup, "CYBER_CYBERHUB_KEY"); v != "" {
-			option.CyberhubKey = v
-		}
-	}
-	if !explicit.hasExplicit("CyberhubMode") {
-		if v := firstEnv(lookup, "CYBER_CYBERHUB_MODE"); v != "" {
-			option.CyberhubMode = v
-		}
-	}
-	if !explicit.hasExplicit("Proxy") {
-		if v := firstEnv(lookup, "CYBER_PROXY"); v != "" {
-			option.Proxy = v
-		}
-	}
-}
-
-func applyReconEnvironment(option *Option, explicit Option, lookup envLookup) {
-	if !explicit.hasExplicit("FofaKey") {
-		if v := firstEnv(lookup, "FOFA_KEY"); v != "" {
-			option.FofaKey = v
-		}
-	}
-	if !explicit.hasExplicit("HunterAPIKey") {
-		if v := firstEnv(lookup, "HUNTER_API_KEY"); v != "" {
-			option.HunterAPIKey = v
-		}
-	}
-	if !explicit.hasExplicit("TavilyKey") {
-		if v := firstEnv(lookup, "TAVILY_API_KEY"); v != "" {
-			option.TavilyKey = v
-		}
-	}
-	if !explicit.hasExplicit("ReconProxy") {
-		if v := firstEnv(lookup, "RECON_PROXY"); v != "" {
-			option.ReconProxy = v
-		}
-	}
-	applyUncoverEnvironment(option, lookup)
-}
-
 func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) {
 	if !explicit.hasExplicit("DataDir") {
 		if v := firstEnv(lookup, "CYBER_DATA_DIR"); v != "" {
@@ -206,41 +180,6 @@ func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) 
 	}
 	if !explicit.hasExplicit("PlaywrightSession") {
 		option.PlaywrightSession = firstEnv(lookup, "PLAYWRIGHT_CLI_SESSION")
-	}
-}
-
-var uncoverCredentialEnvNames = []string{
-	"SHODAN_API_KEY",
-	"QUAKE_TOKEN",
-	"NETLAS_API_KEY",
-	"CRIMINALIP_API_KEY",
-	"PUBLICWWW_API_KEY",
-	"HUNTERHOW_API_KEY",
-	"ZOOMEYE_API_KEY",
-	"DRIFTNET_API_KEY",
-	"DAYDAYMAP_API_KEY",
-	"CENSYS_API_TOKEN",
-	"CENSYS_ORGANIZATION_ID",
-	"GOOGLE_API_KEY",
-	"GOOGLE_API_CX",
-	"ODIN_API_KEY",
-	"BINARYEDGE_API_KEY",
-	"ONYPHE_API_KEY",
-	"GREYNOISE_API_KEY",
-	"NERDYDATA_API_KEY",
-}
-
-func applyUncoverEnvironment(option *Option, lookup envLookup) {
-	// These values are derived from the environment on every resolution. Do not
-	// retain or mutate a previous runtime's credential map during replacement.
-	option.UncoverCredentials = nil
-	for _, name := range uncoverCredentialEnvNames {
-		if value := firstEnv(lookup, name); value != "" {
-			if option.UncoverCredentials == nil {
-				option.UncoverCredentials = make(map[string]string)
-			}
-			option.UncoverCredentials[name] = value
-		}
 	}
 }
 
@@ -347,16 +286,22 @@ func firstEnv(lookup envLookup, names ...string) string {
 	return ""
 }
 
-// ResolveExecutionConfig resolves only scanner and execution configuration.
+// ResolveExecutionConfig resolves only extension and execution configuration.
 // It deliberately does not inspect or normalize model-provider credentials.
 func ResolveExecutionConfig(option *Option) (string, error) {
+	if option.Sections == nil {
+		option.Sections = NewSections()
+	}
 	explicit := explicitOptions(option)
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
 		return configPath, err
 	}
-	applyScannerEnvironment(option, explicit, os.LookupEnv)
-	applyReconEnvironment(option, explicit, os.LookupEnv)
+	option.Resolved, err = option.Sections.ResolveValues(option.Extensions, explicit.Extensions, os.LookupEnv)
+	if err != nil {
+		return configPath, err
+	}
+	option.Extensions = option.Resolved.Values()
 	applyRuntimeEnvironment(option, explicit, os.LookupEnv)
 	return configPath, nil
 }

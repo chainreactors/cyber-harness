@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	protobuf "google.golang.org/protobuf/proto"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -25,17 +26,18 @@ import (
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	rpc "github.com/chainreactors/cyber/pkg/rpc"
+	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 )
 
 func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
-	scan := &types.Scan{
+	scan := &scanpb.Scan{
 		Target:  "127.0.0.1",
 		Mode:    "full",
-		Options: &types.ScanOptions{Verify: true, Sniper: true, Deep: true},
+		Options: &scanpb.ScanOptions{Verify: protobuf.Bool(true), Sniper: true},
 	}
 
 	got := scanArgsForScan(scan)
-	want := []string{"-i", "127.0.0.1", "--mode", "full", "--verify=high", "--sniper", "--deep"}
+	want := []string{"-i", "127.0.0.1", "--mode", "full", "--verify=on", "--sniper"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("scan args = %#v, want %#v", got, want)
 	}
@@ -49,7 +51,7 @@ func TestServiceStatusReportsLLMAvailability(t *testing.T) {
 }
 
 func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +75,7 @@ func TestRunTurnRejectsMissingSessionBeforePersisting(t *testing.T) {
 }
 
 func TestRemovedChatAndScanRoutesReturnNotFoundBeforeSPAFallback(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "messages.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestParseCommand(t *testing.T) {
 
 func newMenuTestService(t *testing.T) *Service {
 	t.Helper()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "web.db"), ScanSchema)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
@@ -191,7 +193,7 @@ func TestSessionCommandsConnectRPC(t *testing.T) {
 // an empty context. The hub still holds the transcript, so it must say so
 // instead of letting the operator believe the agent remembers the conversation.
 func TestSessionRecreationBroadcastsContextResetNotice(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"))
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "recreate.db"), ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,3 +464,19 @@ func (p *recordingProfile) Events() (*events.Stream, error) {
 
 func (p *recordingProfile) Progress() (*eventbus.Bus[*toolpb.Progress], error) { return nil, nil }
 func (p *recordingProfile) Processes() (*procbus.Manager, error)               { return nil, nil }
+
+func TestScanVerifyPresenceSurvivesArgumentMapping(t *testing.T) {
+	for _, tc := range []struct {
+		value *bool
+		want  string
+	}{{nil, ""}, {protobuf.Bool(false), "--verify=off"}, {protobuf.Bool(true), "--verify=on"}} {
+		args := scanArgsForScan(&scanpb.Scan{Target: "localhost", Mode: "quick", Options: &scanpb.ScanOptions{Verify: tc.value}})
+		if tc.want == "" {
+			if len(args) != 4 {
+				t.Fatalf("missing option became explicit: %v", args)
+			}
+		} else if args[len(args)-1] != tc.want {
+			t.Fatalf("args=%v want %s", args, tc.want)
+		}
+	}
+}

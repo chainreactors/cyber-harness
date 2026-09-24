@@ -6,6 +6,9 @@ import (
 )
 
 const (
+	// ScannerSystemTarget is the system prompt target of a single-scanner
+	// worker session (e.g. `aiscan gogo --ai`).
+	ScannerSystemTarget prompt.Target = "scanner.system"
 	VerifySystemTarget  prompt.Target = "scanner.verify.system"
 	VerifyRequestTarget prompt.Target = "scanner.verify.request"
 	SniperSystemTarget  prompt.Target = "scanner.sniper.system"
