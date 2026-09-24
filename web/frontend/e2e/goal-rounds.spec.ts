@@ -16,12 +16,12 @@ async function login(page: Page) {
 
 async function openGoalSession(page: Page) {
   const newTask = page.locator('aside [data-node-id="e2e-node"]').getByRole('button', { name: 'New task on e2e-node' })
-  const remoteNode = page.getByRole('button', { name: /e2e-node.*idle/ })
-  await expect(newTask.or(remoteNode)).toBeVisible({ timeout: 20_000 })
+  const globalNewTask = page.getByRole('button', { name: 'New task', exact: true })
+  await expect(newTask.or(globalNewTask)).toBeVisible({ timeout: 20_000 })
   if (await newTask.count()) {
     await newTask.click()
   } else {
-    await remoteNode.locator('xpath=..').getByRole('button', { name: 'New', exact: true }).click()
+    await globalNewTask.click()
   }
   await expect(page.getByRole('textbox', { name: 'Your goal' })).toBeVisible()
   await page.getByRole('button', { name: 'Goal' }).click()

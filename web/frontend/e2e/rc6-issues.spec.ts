@@ -46,12 +46,12 @@ test('quick connect reports clipboard failures', async ({ page }) => {
 test('spray help renders as compact output in the web transcript', async ({ page }) => {
   await openApp(page)
   const newTask = page.locator('aside [data-node-id="e2e-node"]').getByRole('button', { name: 'New task on e2e-node' })
-  const remoteNode = page.getByRole('button', { name: /e2e-node.*idle/ })
-  await expect(newTask.or(remoteNode)).toBeVisible({ timeout: 20_000 })
+  const globalNewTask = page.getByRole('button', { name: 'New task', exact: true })
+  await expect(newTask.or(globalNewTask)).toBeVisible({ timeout: 20_000 })
   if (await newTask.count()) {
     await newTask.click()
   } else {
-    await remoteNode.locator('xpath=..').getByRole('button', { name: 'New', exact: true }).click()
+    await globalNewTask.click()
   }
   await page.getByRole('textbox', { name: /Your goal|Type a message/ }).fill('!spray -h')
   await page.getByRole('button', { name: 'Send message' }).click()
