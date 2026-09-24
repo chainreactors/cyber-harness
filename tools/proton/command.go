@@ -30,6 +30,7 @@ import (
 type Command struct {
 	toolargs.Base
 	resourceProvider func(string) []byte
+	excludePaths     []string
 }
 
 func New() *Command {
@@ -267,13 +268,20 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	c.Logger.Infof("proton action=scanning targets=%d rules=%d", len(inputs), scanner.Stats.Rules)
 
 	for _, input := range inputs {
-		info, statErr := os.Stat(input)
-		if statErr != nil {
-			c.Logger.Warnf("proton: skip %s: %v", input, statErr)
+		if excludedPath(input, c.excludePaths) {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		info, statErr := os.Stat(input)
+		if statErr != nil {
+			return nil, fmt.Errorf("proton: input %s: %w", input, statErr)
+		}
 		if info.IsDir() {
-			walkAndScan(ctx, execution.Stderr, scanner, input, callback)
+			if err := walkAndScan(ctx, execution.Stderr, scanner, input, callback, c.excludePaths...); err != nil {
+				return nil, err
+			}
 		} else {
 			scanSingleFile(scanner, input, callback)
 		}
@@ -449,7 +457,7 @@ func scanSingleFile(scanner *file.Scanner, path string, callback func(file.Findi
 	}
 }
 
-func walkAndScan(ctx context.Context, stderr io.Writer, scanner *file.Scanner, target string, callback func(file.Finding)) {
+func walkAndScan(ctx context.Context, stderr io.Writer, scanner *file.Scanner, target string, callback func(file.Finding), excludes ...string) error {
 	numWorkers := runtime.NumCPU()
 	if numWorkers > 8 {
 		numWorkers = 8
@@ -486,12 +494,18 @@ func walkAndScan(ctx context.Context, stderr io.Writer, scanner *file.Scanner, t
 		}()
 	}
 
-	if walkErr := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err != nil {
 			return err
+		}
+		if excludedPath(path, excludes) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			if file.ShouldSkipDir(d.Name()) {
@@ -513,14 +527,20 @@ func walkAndScan(ctx context.Context, stderr io.Writer, scanner *file.Scanner, t
 			if !group.MatchesFile(path, ext) {
 				continue
 			}
-			jobCh <- job{path: path, group: group}
+			select {
+			case jobCh <- job{path: path, group: group}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 		return nil
-	}); walkErr != nil && ctx.Err() == nil {
-		fmt.Fprintf(stderr, "proton: walk %s: %v\n", target, walkErr)
-	}
+	})
 	close(jobCh)
 	wg.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return walkErr
 }
 
 // --- helpers ---
@@ -610,4 +630,22 @@ var protonKnownFlags = map[string]struct{}{
 
 func normalizeShortFlags(args []string) []string {
 	return toolargs.NormalizeFlags(args, protonKnownFlags, toolargs.CommonAliases)
+}
+
+func excludedPath(path string, excludes []string) bool {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	for _, exclude := range excludes {
+		base, err := filepath.Abs(exclude)
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(base, absolute)
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

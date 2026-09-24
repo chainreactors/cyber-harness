@@ -235,7 +235,7 @@ func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agent
 		return err
 	}
 	prompt := scan.FormatAgentTaskPrompt(scannerArgs, intent)
-	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}})
+	return console.RunTask(ctx, runtime, option, "scanner", "scanner", strings.Join(scannerArgs, " "), agentsession.RunInput{Content: []*aop.Content{aop.Text(prompt)}}, nil)
 }
 
 func resolveScannerIntent(option *cfg.Option, store *skills.Store, command string) (string, error) {

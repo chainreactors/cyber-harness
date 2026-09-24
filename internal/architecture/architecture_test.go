@@ -154,7 +154,7 @@ var installationRules = map[string][]installationRule{
 	"tools/curl":        {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/gogo":        {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/neutron":     {{"pkg/exts/scanner", []string{"New*"}}},
-	"tools/proton":      {{"pkg/exts/scanner", []string{"New*"}}},
+	"tools/proton":      {{"pkg/exts/proton", []string{"New*"}}},
 	"tools/spray":       {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/zombie":      {{"pkg/exts/scanner", []string{"New*"}}},
 	"tools/katana":      {{"pkg/exts/scanner", []string{"New*"}}},
@@ -244,6 +244,7 @@ func installationViolations(relative string, file *ast.File) []string {
 	})
 	return violations
 }
+
 // The core Option holds host-neutral configuration only. Scanner-domain
 // sections are extension declarations owned by pkg/exts/scanner and reach the
 // runtime through Option.Extensions.

@@ -140,7 +140,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 	}
 	return console.RunTask(runCtx, profile.runtime, &option, "task", "task", task, agentsession.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalRounds: option.EvalRounds,
-	})
+	}, nil)
 }
 
 func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) {

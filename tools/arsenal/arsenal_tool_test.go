@@ -3,6 +3,7 @@ package arsenal
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,37 @@ import (
 	crtm "github.com/chainreactors/crtm/pkg"
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
+
+type versionSource struct{}
+
+func (versionSource) Resolve(_ context.Context, req crtm.Request) (crtm.Artifact, error) {
+	header := map[string]string{"windows": "MZxx", "linux": "\x7fELF", "darwin": "\xcf\xfa\xed\xfe"}[runtime.GOOS]
+	return crtm.Artifact{Tool: req.Tool, Version: req.Version, Target: req.Target, Source: "fixture",
+		Open: func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(header + req.Version)), nil
+		},
+	}, nil
+}
+
+func TestInstallHonorsExplicitVersion(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := crtm.NewManager(crtm.ManagerOption{BinPath: filepath.Join(dir, "bin"), ConfigPath: filepath.Join(dir, "config.yaml"), Sources: []crtm.Source{versionSource{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.InstallVersion("gogo", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &ArsenalCommand{mgr: mgr}
+	out := run(t, cmd, "install", "gogo", "--version", "2.0.0")
+	if !strings.Contains(out, "v2.0.0") || mgr.InstalledVersion("gogo") != "2.0.0" {
+		t.Fatal(out)
+	}
+	out = run(t, cmd, "install", "gogo", "--version", "v2.0.0")
+	if !strings.Contains(out, "already installed") {
+		t.Fatal(out)
+	}
+}
 
 // run executes arsenal as a Command and returns stdout.
 func run(t *testing.T, cmd *ArsenalCommand, args ...string) string {

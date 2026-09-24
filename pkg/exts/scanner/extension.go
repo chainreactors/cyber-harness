@@ -8,7 +8,6 @@ import (
 	curltools "github.com/chainreactors/cyber/tools/curl"
 	gotools "github.com/chainreactors/cyber/tools/gogo"
 	neutrontools "github.com/chainreactors/cyber/tools/neutron"
-	protontools "github.com/chainreactors/cyber/tools/proton"
 	"github.com/chainreactors/cyber/tools/scan"
 	searchtools "github.com/chainreactors/cyber/tools/search"
 	spraytools "github.com/chainreactors/cyber/tools/spray"
@@ -88,10 +87,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		e.engines = nil
 	} else {
 		e.engines.SetupUncover(e.config.Recon, logger)
-	}
-	var scannerResources *resources.Set
-	if e.engines != nil {
-		scannerResources = e.engines.Resources
 	}
 
 	var options []scan.Option
@@ -218,7 +213,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	} else {
 		values = append(values, command)
 	}
-	values = append(values, protontools.NewCommand(e.workDir, scannerResources, logger, proxyURL, stream))
 	// cyberhub searches the fingerprint and POC index this extension builds, so
 	// it is contributed by its owner. A nil index is not an empty one: the
 	// command says how to configure the resources instead of reporting no hits.

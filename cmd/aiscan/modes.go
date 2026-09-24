@@ -65,7 +65,7 @@ func runOneShotMode(ctx context.Context, newProfile func(profile.Request) (profi
 
 	return console.RunTask(ctx, rt, option, "task", "task", task, agentsession.RunInput{
 		Content: []*aop.Content{aop.Text(task)}, EvalCriteria: option.EvalCriteria, EvalRounds: option.EvalRounds,
-	})
+	}, nil)
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,9 @@ type Context struct {
 	Executable   string
 	LookupEnv    func(string) (string, bool)
 	Replacements map[string][]byte
+	// UserLLMOnly excludes automatically discovered project LLM settings.
+	// User configuration, environment, CLI flags and explicit files remain available.
+	UserLLMOnly bool
 }
 
 func (c *Context) defaults() Context {
@@ -164,6 +167,12 @@ func LoadSnapshot(context *Context, explicit string, sections *Sections) (*Snaps
 			}
 		}
 		layer.Document = CloneDocument(doc)
+		if s.Context.UserLLMOnly && layer.Scope == "project" {
+			if _, exists := doc["llm"]; exists {
+				delete(doc, "llm")
+				s.Diagnostics = append(s.Diagnostics, fmt.Sprintf("ignoring llm from %s configuration %s; use --config to select it explicitly", layer.Scope, layer.Path))
+			}
+		}
 		if err = normalizeProfileDocument(doc); err != nil {
 			return nil, fmt.Errorf("config file %s: %w", layer.Path, err)
 		}

@@ -73,6 +73,9 @@ jobs:
           - id: aiscan-full
             build: aiscan-full
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
+          - id: cyber-audit
+            build: cyber-audit
+            targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
 
     env:
       GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
@@ -100,7 +103,10 @@ jobs:
           path: web/static
 
       - name: Generate embedded resources
-        run: go generate ./tools/resources
+        run: go generate ./tools/resources ./tools/proton/resources
+
+      - name: Generate tool metadata
+        run: make arsenal-spec audit-arsenal-spec
 
       - name: Load the build editions
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
@@ -128,6 +134,10 @@ jobs:
             out="${OUTDIR}/${BUILD}_${goos}_${goarch}${suffix}"
             echo "  compiling ${goos}/${goarch} → ${out}"
 
+            if [[ "$BUILD" == "cyber-audit" ]]; then
+              make embed-audit ARSENAL_GOOS="$goos" ARSENAL_GOARCH="$goarch"
+            fi
+
             GOOS="$goos" GOARCH="$goarch" \
               goreleaser build --id "$BUILD" --single-target --clean --skip=validate -o "$out"
 
@@ -142,7 +152,14 @@ jobs:
           done
 
           if [[ -x "${OUTDIR}/${BUILD}_linux_amd64" ]]; then
-            test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "aiscan v${VERSION}"
+            expected="aiscan"; [[ "$BUILD" == "cyber-audit" ]] && expected="cyber-audit"
+            test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "$expected v${VERSION}"
+
+            if [[ "$BUILD" == "cyber-audit" ]]; then
+              AUDIT_SINGLEFILE_BINARY="$(realpath "${OUTDIR}/${BUILD}_linux_amd64")" \
+                CGO_ENABLED=0 GOWORK=off go -C audit test ./internal/app \
+                  -run '^TestSingleFileRelease$' -count=1 -v -timeout 3m
+            fi
           fi
 
           echo "=== Binaries ==="
@@ -218,8 +235,12 @@ jobs:
             if [[ "$base" != *.exe ]]; then
               chmod 755 "${tmpdir}/${inner_name}"
             fi
-            cp README.md "${tmpdir}/" 2>/dev/null || true
-            cp -r docs "${tmpdir}/" 2>/dev/null || true
+            if [[ "$binary" == "cyber-audit" ]]; then
+              cp audit/README.md "${tmpdir}/README.md"
+            else
+              cp README.md "${tmpdir}/" 2>/dev/null || true
+              cp -r docs "${tmpdir}/" 2>/dev/null || true
+            fi
             (cd "$tmpdir" && zip -r - .) > "${GITHUB_WORKSPACE}/dist/release/${archive_name}.zip"
             rm -rf "$tmpdir"
           done
@@ -263,12 +284,13 @@ jobs:
         run: |
           set -euo pipefail
           (cd dist/release && sha256sum -c aiscan_checksums.txt)
-          test "$(find dist/release -name '*.zip' | wc -l)" -eq 12
-          for binary in aiscan aiscan-full; do
+          test "$(find dist/release -name '*.zip' | wc -l)" -eq 18
+          for binary in aiscan aiscan-full cyber-audit; do
             destination="${RUNNER_TEMP}/${binary}"
             unzip -q "dist/release/${binary}_linux_${ARCH}.zip" -d "$destination"
             test -x "${destination}/${binary}"
-            test "$("${destination}/${binary}" --version)" = "aiscan ${TAG}"
+            expected="aiscan"; [[ "$binary" == "cyber-audit" ]] && expected="cyber-audit"
+            test "$("${destination}/${binary}" --version)" = "$expected ${TAG}"
             if [[ "$binary" == "aiscan-full" ]]; then
               "${destination}/${binary}" web --help >/dev/null
             fi
@@ -292,13 +314,14 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $expectedVersion = "aiscan $env:TAG"
           $cases = @(
             @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true }
+            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true },
+            @{ Archive = 'cyber-audit_windows_amd64.zip'; Binary = 'cyber-audit.exe'; Full = $false }
           )
 
           foreach ($case in $cases) {
+            $expectedVersion = if ($case.Binary -eq "cyber-audit.exe") { "cyber-audit $env:TAG" } else { "aiscan $env:TAG" }
             $destination = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($case.Archive))
             Expand-Archive -LiteralPath (Join-Path 'dist/release' $case.Archive) -DestinationPath $destination
             $binary = Join-Path $destination $case.Binary

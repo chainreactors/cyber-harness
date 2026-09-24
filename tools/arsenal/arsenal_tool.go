@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	crtm "github.com/chainreactors/crtm/pkg"
@@ -22,23 +20,8 @@ type ArsenalCommand struct {
 	mgr *crtm.Manager
 }
 
-func NewArsenalCommand(base string) (*ArsenalCommand, error) {
-	if !filepath.IsAbs(base) {
-		return nil, fmt.Errorf("arsenal directory must be absolute")
-	}
-
-	mgr, err := crtm.NewManager(crtm.ManagerOption{
-		BinPath:    filepath.Join(base, "bin"),
-		ConfigPath: filepath.Join(base, "cyber.yaml"),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("init arsenal: %w", err)
-	}
-
-	if err := os.MkdirAll(mgr.BinPath(), 0755); err != nil {
-		return nil, err
-	}
-	return &ArsenalCommand{mgr: mgr}, nil
+func NewArsenalCommand(mgr *crtm.Manager) *ArsenalCommand {
+	return &ArsenalCommand{mgr: mgr}
 }
 
 func (c *ArsenalCommand) Name() string { return "arsenal" }
@@ -56,7 +39,8 @@ Usage:
   arsenal releases <name>                  check latest release tag
   arsenal add <owner/repo> [--name NAME] [--pattern PAT]  register third-party repo
 
-Installed tools become immediately available via bash.`
+Installed tools become immediately available via bash.
+Bundled tools are restored automatically; install uses the bundled version when available.`
 }
 
 func (c *ArsenalCommand) Run(_ context.Context, execution *coretool.Execution) (any, error) {
@@ -135,7 +119,9 @@ func (c *ArsenalCommand) install(args []string) (string, error) {
 
 	if c.mgr.IsInstalled(name) {
 		ver := c.mgr.InstalledVersion(name)
-		return fmt.Sprintf("%s already installed (%s). Use 'arsenal update %s' to refresh.", name, displayVer(ver), name), nil
+		if version == "" || strings.TrimPrefix(version, "v") == strings.TrimPrefix(ver, "v") {
+			return fmt.Sprintf("%s already installed (%s). Use 'arsenal update %s' to refresh.", name, displayVer(ver), name), nil
+		}
 	}
 
 	var err error
@@ -277,7 +263,7 @@ func displayVer(v string) string {
 	if v == "" || v == "installed" {
 		return "installed"
 	}
-	return "v" + v
+	return "v" + strings.TrimPrefix(v, "v")
 }
 
 func formatEntryList(entries []registry.ToolEntry, mgr *crtm.Manager) string {

@@ -12,6 +12,7 @@ import (
 	loopext "github.com/chainreactors/cyber/pkg/exts/agent"
 	arsenalext "github.com/chainreactors/cyber/pkg/exts/arsenal"
 	okfext "github.com/chainreactors/cyber/pkg/exts/okf"
+	protonext "github.com/chainreactors/cyber/pkg/exts/proton"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	searchext "github.com/chainreactors/cyber/pkg/exts/search"
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
@@ -27,7 +28,11 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	config.DataDir = cfg.ResolveDataDir(config.DataDir)
 	config.Scanner.Resources.CacheDir = filepath.Join(config.DataDir, "cache")
 
-	arsenal, err := arsenalext.New(filepath.Join(config.DataDir, "arsenal"))
+	bundle, err := EmbeddedBundle()
+	if err != nil {
+		return nil, err
+	}
+	arsenal, err := arsenalext.New(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +54,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenal)
 
 	if !config.SkipEngines {
-		extensions = append(extensions, scannerext.New(config.Scanner, workDir))
+		extensions = append(extensions, scannerext.New(config.Scanner, workDir), protonext.New(protonext.Config{Directory: workDir}))
 	}
 	if optionalToolEnabled(config.Tools.OptionalTools, "search") {
 		extensions = append(extensions, searchext.New(searchext.Config{TavilyKeys: config.Tools.TavilyKeys}))

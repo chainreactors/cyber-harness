@@ -46,7 +46,9 @@ arsenal add ffuf/ffuf --pattern "{name}_{version}_{os}_{arch}.tar.gz"  # registe
 
 ## Key behaviors
 
-- **install is idempotent** — already-installed tools return success, not error. Use `arsenal update` to refresh.
+- **install is idempotent** — already-installed tools return success unless a different version is explicitly requested. Use `arsenal update` to refresh to the latest release.
+- **bundled tools work offline** — bundled builds restore tools at initialization. Install prefers matching bundled versions; update checks remote releases. User upgrades are preserved across application restarts.
+- **removing a bundled tool** deletes its disk installation; the next initialization restores it from the application.
 - **version from git tag** — versions come from GitHub release tags, not filename parsing.
 - **install output includes docs + hint** — follow the hint (e.g. "run nuclei -update-templates").
 - **gogo/spray/zombie are built-in pseudo-commands** — no install needed for those. Arsenal has them for standalone binary use only.

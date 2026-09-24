@@ -1,0 +1,2 @@
+id: cyber-audit
+tools: [rg, ast-grep, osv-scanner]

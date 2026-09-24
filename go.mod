@@ -12,7 +12,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
-	github.com/chainreactors/crtm v0.0.3-0.20260618163257-073207497076
+	github.com/chainreactors/crtm v0.0.3-0.20260924045435-079681bc1574
 	github.com/chainreactors/fingers v1.2.2-0.20260714063144-070758342f45
 	github.com/chainreactors/gogo/v2 v2.15.1-0.20260728051744-a278b33d8744
 	github.com/chainreactors/ioa v0.1.2-0.20260920053655-e9bc60bdd4f8

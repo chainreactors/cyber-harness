@@ -1,0 +1,7 @@
+{
+  "confirmed": [
+    {"location": "handlers.py:6", "reason": "Untrusted host reaches a shell command"},
+    {"location": "handlers.py:19", "reason": "Authenticated user can read another tenant's invoice"}
+  ],
+  "protected": ["safe_diagnostic", "get_own_invoice"]
+}

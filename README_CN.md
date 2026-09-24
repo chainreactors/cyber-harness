@@ -76,9 +76,10 @@ cd cyber-harness
 make          # 标准发行版
 make agent    # 最小本地 Agent
 make full     # 前端 + 完整发行版
+make ARSENAL_EMBED=1 # 下载工具并嵌入，运行时自动释放
 ```
 
-Go 版本见 [go.mod](go.mod)；full 还需要 Node.js/npm，standard 与 full 均使用 CGO_ENABLED=0。构建标签由 [editions.env](editions.env) 定义；原生录屏需要 CGO，另见 [record](docs/record.md)。
+Go 版本见 [go.mod](go.mod)；full 还需要 Node.js/npm，standard 与 full 均使用 CGO_ENABLED=0。构建标签由 [editions.env](editions.env) 定义；原生录屏需要 CGO，另见 [record](docs/record.md)。工具清单、离线分发和版本跟随见 [内嵌 Arsenal 工具](docs/arsenal-bundles.md)。
 
 自定义发行版使用 `harness.BaseExtensions(config)` 取得基础扩展，追加自己的扩展后交给 `extension.New`，由宿主持有 Load/Close；完整参考发行版的组装位于 [cmd/aiscan](cmd/aiscan)。嵌入方可用 [pkg/harness](pkg/harness) 构造通用宿主，或自行组合扩展；它不等价于完整 aiscan 发行版。可运行例子见 [examples/custom](examples/custom)，注册工具的最小示例见 [扩展开发](docs/development.md)。
 

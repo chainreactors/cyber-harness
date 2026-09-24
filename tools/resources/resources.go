@@ -170,7 +170,6 @@ func defaultConfigs() map[string]map[string][]byte {
 			"extract", "workflow", "neutron"),
 		"spray":  mergeConfigs(shared, "extract", "spray_rule", "spray_dict", "spray_common"),
 		"zombie": mergeConfigs(shared, "zombie_common", "zombie_default", "zombie_rule", "zombie_template"),
-		"proton": loadEngineConfigs("found_keys", "found_spray", "found_filter_ext", "found_filter_dir"),
 	}
 }
 
@@ -342,7 +341,6 @@ func (s *Set) Config(engine, name string) []byte {
 func (s *Set) GogoConfig(name string) []byte   { return s.Config("gogo", name) }
 func (s *Set) SprayConfig(name string) []byte  { return s.Config("spray", name) }
 func (s *Set) ZombieConfig(name string) []byte { return s.Config("zombie", name) }
-func (s *Set) ProtonConfig(name string) []byte { return s.Config("proton", name) }
 
 func cloneBytes(data []byte) []byte {
 	if len(data) == 0 {

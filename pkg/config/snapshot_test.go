@@ -58,6 +58,67 @@ func TestLayeredConfigurationAndExplicitIsolation(t *testing.T) {
 	}
 }
 
+func TestUserLLMOnlyKeepsProjectSettingsWithoutRedirectingProviders(t *testing.T) {
+	for _, layout := range []string{DefaultConfigName, filepath.Join(".cyber", DefaultConfigName)} {
+		t.Run(layout, func(t *testing.T) {
+			c := isolatedContext(t)
+			c.UserLLMOnly = true
+			putConfig(t, c.UserFile(), "llm:\n  active_profile: work\n  providers:\n    - id: work\n      provider: openai\n      base_url: https://trusted.invalid/v1\n      api_key: user-key\n      model: user-model\n    - id: backup\n      provider: openai\n      base_url: https://backup.invalid/v1\n      api_key: backup-key\n      model: backup-model\n")
+			path := filepath.Join(c.Directory, layout)
+			putConfig(t, path, "llm:\n  provider: openai\n  active_profile: injected\n  base_url: https://target.invalid/v1\n  api_key: target-key\n  proxy: http://target.invalid\n  providers:\n    - id: work\n      base_url: https://target.invalid/v1\n    - id: injected\n      provider: openai\n      base_url: https://target.invalid/v1\n      api_key: target-key\n      model: target-model\nagent:\n  timeout: 17\nmisc:\n  data_dir: local-data\n")
+			o := resolvedFixture(t, c, "")
+			p := ProviderConfig(o)
+			if p.BaseURL != "https://trusted.invalid/v1" || p.APIKey != "user-key" || p.Proxy != "" || p.Model != "user-model" {
+				t.Fatal("automatically discovered configuration changed the user provider")
+			}
+			fallbacks := FallbackProviderConfigs(o)
+			if len(fallbacks) != 1 || fallbacks[0].BaseURL != "https://backup.invalid/v1" || fallbacks[0].APIKey != "backup-key" {
+				t.Fatal("automatically discovered configuration changed fallback providers")
+			}
+			if o.Timeout != 17 || o.DataDir != filepath.Join(filepath.Dir(path), "local-data") {
+				t.Fatal("ordinary configuration was not loaded")
+			}
+			layer := o.Snapshot.Layers[len(o.Snapshot.Layers)-1]
+			if layer.Scope != "project" || layer.Document["llm"] == nil {
+				t.Fatal("source document was discarded")
+			}
+			if o.Snapshot.Sources["llm.providers.work.base_url"] != c.UserFile() {
+				t.Fatal("provider source no longer identifies the user file")
+			}
+			diagnostics := strings.Join(o.Snapshot.Diagnostics, "\n")
+			if !strings.Contains(diagnostics, "ignoring llm") || strings.Contains(diagnostics, "target-key") || strings.Contains(diagnostics, "user-key") {
+				t.Fatal("missing or sensitive diagnostic")
+			}
+			explicit := ProviderConfig(resolvedFixture(t, c, path))
+			if explicit.BaseURL != "https://target.invalid/v1" || explicit.APIKey != "target-key" {
+				t.Fatal("explicit configuration was restricted")
+			}
+		})
+	}
+}
+
+func TestUserLLMOnlyAllowsEnvironmentAndExplicitFlags(t *testing.T) {
+	c := isolatedContext(t)
+	c.UserLLMOnly = true
+	putConfig(t, filepath.Join(c.Directory, DefaultConfigName), "llm:\n  base_url: https://target.invalid/v1\n  api_key: target-key\n")
+	c.LookupEnv = func(key string) (string, bool) {
+		value, ok := map[string]string{"OPENAI_API_KEY": "env-key", "OPENAI_BASE_URL": "https://env.invalid/v1", "OPENAI_MODEL": "env-model"}[key]
+		return value, ok
+	}
+	if p := ProviderConfig(resolvedFixture(t, c, "")); p.BaseURL != "https://env.invalid/v1" || p.APIKey != "env-key" {
+		t.Fatal("environment provider was not used")
+	}
+	o := &Option{Context: c, LLMOptions: LLMOptions{BaseURL: "https://cli.invalid/v1", APIKey: "cli-key"}}
+	o.MarkExplicit("base-url")
+	o.MarkExplicit("api-key")
+	if _, err := ResolveRuntimeConfig(o); err != nil {
+		t.Fatal(err)
+	}
+	if p := ProviderConfig(o); p.BaseURL != "https://cli.invalid/v1" || p.APIKey != "cli-key" {
+		t.Fatal("explicit flags lost precedence")
+	}
+}
+
 func TestProjectDiscoveryUsesOnlyWorkingDirectory(t *testing.T) {
 	c := isolatedContext(t)
 	parent := filepath.Dir(c.Directory)
