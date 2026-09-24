@@ -74,7 +74,8 @@ func writeShellCommandBashEnv(dir string, names []string) error {
 	var scripts []string
 	for _, name := range names {
 		if bashIdentifier(name) {
-			fmt.Fprintf(&functions, "%s() {\n  %s='%s' \"$%s\" \"$@\"\n}\nexport -f %s\n",
+			// Only the framed-IO child is non-interactive, not the calling Bash.
+			fmt.Fprintf(&functions, "%s() {\n  TERM=dumb %s='%s' \"$%s\" \"$@\"\n}\nexport -f %s\n",
 				name, shellCommandAdapterCommandEnv, name, shellCommandAdapterExecutableEnv, name)
 			continue
 		}
@@ -111,7 +112,7 @@ func bashIdentifier(name string) bool {
 
 func writeBashShim(dir, name string) error {
 	path := filepath.Join(dir, name)
-	content := "#!/bin/sh\n" + shellCommandAdapterCommandEnv + "='" + name + "' exec \"$" + shellCommandAdapterExecutableEnv + "\" \"$@\"\n"
+	content := "#!/bin/sh\nTERM=dumb " + shellCommandAdapterCommandEnv + "='" + name + "' exec \"$" + shellCommandAdapterExecutableEnv + "\" \"$@\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		return err
 	}
