@@ -32,6 +32,7 @@ export default {
   quickConnectInstall: '安装 + 上线',
   quickConnectOnly: '仅上线',
   quickConnectCopy: '复制命令',
+  quickConnectCopyError: '无法复制命令，请手动选择并复制。',
   quickConnectDownloadSource: '下载源',
   quickConnectGlobal: '全球',
   quickConnectChina: '中国',

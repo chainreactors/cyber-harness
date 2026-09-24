@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, Copy, Link, Loader2, RefreshCw } from 'lucide-react'
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/ui'
 import { cn } from '@cyber/theme'
+import { copyToClipboard } from '../../cyber-ui/packages/template/src/clipboard'
 import { getAgentConnectToken } from '../api'
 
 type OS = 'linux' | 'darwin' | 'windows'
@@ -105,16 +106,20 @@ export default function QuickConnect({ serverURL, version, space }: Props) {
   const [platform, setPlatform] = useState<Platform>(detectPlatform)
   const [downloadSource, setDownloadSource] = useState<DownloadSource>('global')
   const [copied, setCopied] = useState<CopiedKey>(null)
+  const [copyError, setCopyError] = useState(false)
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [tokenError, setTokenError] = useState(false)
   const [tokenRequest, setTokenRequest] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
 
   const closePanel = useCallback(() => {
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current)
     setOpen(false)
     setAccessToken(null)
     setTokenError(false)
     setCopied(null)
+    setCopyError(false)
   }, [])
 
   const setOS = useCallback((os: OS) => {
@@ -124,17 +129,26 @@ export default function QuickConnect({ serverURL, version, space }: Props) {
       return { os, arch }
     })
     setCopied(null)
+    setCopyError(false)
   }, [])
 
   const setArch = useCallback((arch: Arch) => {
     setPlatform((prev) => ({ ...prev, arch }))
     setCopied(null)
+    setCopyError(false)
   }, [])
 
   const handleCopy = useCallback(async (key: string, text: string) => {
-    await navigator.clipboard.writeText(text)
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current)
+    const success = await copyToClipboard(text)
+    if (!success) {
+      setCopied(null)
+      setCopyError(true)
+      return
+    }
+    setCopyError(false)
     setCopied(key)
-    setTimeout(() => setCopied(null), 2000)
+    copyResetTimer.current = setTimeout(() => setCopied(null), 2000)
   }, [])
 
   useEffect(() => {
@@ -303,6 +317,7 @@ export default function QuickConnect({ serverURL, version, space }: Props) {
                       onClick={() => {
                         setDownloadSource(source.value)
                         setCopied(null)
+                        setCopyError(false)
                       }}
                       className={cn(
                         'rounded px-2 py-0.5 text-[10px] transition-colors',
@@ -337,6 +352,8 @@ export default function QuickConnect({ serverURL, version, space }: Props) {
                 onCopy={handleCopy}
                 className="mt-2"
               />
+
+              {copyError && <p role="alert" className="mt-2 text-xs text-destructive">{t('quickConnectCopyError')}</p>}
 
               <p className="mt-2 text-[10px] text-muted-foreground">
                 {t('quickConnectHint')}

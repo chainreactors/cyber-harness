@@ -32,6 +32,7 @@ export default {
   quickConnectInstall: 'Install + Connect',
   quickConnectOnly: 'Connect Only',
   quickConnectCopy: 'Copy command',
+  quickConnectCopyError: 'Could not copy the command. Select and copy it manually.',
   quickConnectDownloadSource: 'Download source',
   quickConnectGlobal: 'Global',
   quickConnectChina: 'China',

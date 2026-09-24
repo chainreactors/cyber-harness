@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.0-rc6
+
+- 修复 Web 中 `!spray -h` 输出大量空段落的问题；帮助内容现在按选项分组并控制行宽。
+- 修复非安全 HTTP 环境下快速接入 Agent 的复制按钮无反应；复制失败时显示明确提示。
+- Goal 模式直接使用当前消息输入框，入口收敛为带悬停说明的图标按钮。
+- 继续收敛 Arsenal、扫描器、节点配置与运行时的职责，并完善单文件审计和扫描证据链路。
+
 ## Unreleased
 
 - 合并 `pkg/base` 到 `pkg/harness`，以 `BaseConfig` 和 `BaseExtensions` 提供默认能力。

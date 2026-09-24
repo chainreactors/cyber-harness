@@ -47,8 +47,7 @@ func (c *Command) WithEvents(events aop.EventPublisher) *Command {
 func (c *Command) Name() string { return "spray" }
 
 func (c *Command) Usage() string {
-	var options spraycore.Option
-	return toolargs.GoFlagsHelp(c.Name(), &options)
+	return sprayHelp()
 }
 
 func (c *Command) QuickReference() string {
@@ -68,21 +67,27 @@ func (c *Command) QuickReference() string {
 
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("spray", &err)
-	release, err := scanengine.AcquireSpray(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
 	args := execution.Args
-	args = c.resolveRelativePaths(args)
-	var buf bytes.Buffer
 	debug := toolargs.BoolFlagEnabled(args, "--debug")
-	jsonOut := toolargs.BoolFlagEnabled(args, "-j") || toolargs.BoolFlagEnabled(args, "--json")
 	if debug {
 		restoreDebug := telemetry.ActivateDebug(c.Logger)
 		defer restoreDebug()
 		c.Logger.Debugf("spray debug enabled")
 	}
+	for _, arg := range execution.Args {
+		if arg == "-h" || arg == "--help" {
+			fmt.Fprint(execution.Stdout, c.Usage())
+			return nil, nil
+		}
+	}
+	release, err := scanengine.AcquireSpray(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	args = c.resolveRelativePaths(args)
+	var buf bytes.Buffer
+	jsonOut := toolargs.BoolFlagEnabled(args, "-j") || toolargs.BoolFlagEnabled(args, "--json")
 	if c.engine != nil {
 		c.engine.InstallResourceProvider()
 	}
