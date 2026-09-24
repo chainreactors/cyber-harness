@@ -14,8 +14,8 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
+	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
-	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/gorilla/websocket"
 )
 
@@ -51,22 +51,6 @@ func TestDescribeConnectionFailure(t *testing.T) {
 				Err: errors.New("x509: certificate signed by unknown authority"),
 			},
 			want: "TLS certificate verification failed",
-		},
-		{
-			name: "authentication handshake",
-			err: &websocketHandshakeError{
-				statusCode: http.StatusUnauthorized,
-				cause:      websocket.ErrBadHandshake,
-			},
-			want: "WebSocket authentication rejected (HTTP 401)",
-		},
-		{
-			name: "missing endpoint",
-			err: &websocketHandshakeError{
-				statusCode: http.StatusNotFound,
-				cause:      websocket.ErrBadHandshake,
-			},
-			want: "WebSocket endpoint not found (HTTP 404)",
 		},
 		{
 			name: "remote close",
@@ -120,9 +104,8 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- connectGenerated(ctx, connectionConfig{
+		errCh <- connect(ctx, connectionConfig{
 			ServerURL: server.URL,
-			Registry:  coretool.NewCommandRegistry(),
 			Logger:    logger,
 		})
 	}()
@@ -147,25 +130,35 @@ func TestConnectGeneratedDiagnosesTLSVerificationFailure(t *testing.T) {
 }
 
 func TestDialProtoWebSocketPreservesHandshakeStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "invalid runner token", http.StatusUnauthorized)
-	}))
-	defer server.Close()
-
-	_, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
-	if err == nil {
-		t.Fatal("dial unexpectedly succeeded")
-	}
-	diagnostic := describeConnectionFailure(err)
-	if !strings.Contains(diagnostic, "WebSocket authentication rejected (HTTP 401)") {
-		t.Fatalf("diagnostic = %q", diagnostic)
+	for _, test := range []struct {
+		status int
+		want   string
+	}{
+		{http.StatusUnauthorized, "WebSocket authentication rejected (HTTP 401)"},
+		{http.StatusForbidden, "WebSocket authentication rejected (HTTP 403)"},
+		{http.StatusNotFound, "WebSocket endpoint not found (HTTP 404)"},
+		{http.StatusServiceUnavailable, "WebSocket handshake rejected (HTTP 503)"},
+	} {
+		t.Run(http.StatusText(test.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "connection rejected", test.status)
+			}))
+			defer server.Close()
+			_, err := dialProtoWebSocket(context.Background(), connectionConfig{ServerURL: server.URL})
+			if err == nil || !errors.Is(err, websocket.ErrBadHandshake) {
+				t.Fatalf("dial error = %v, want bad handshake", err)
+			}
+			if diagnostic := describeConnectionFailure(err); !strings.Contains(diagnostic, test.want) {
+				t.Fatalf("diagnostic = %q, want %q", diagnostic, test.want)
+			}
+		})
 	}
 }
 
 func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Events: coreevents.New()},
 		telemetry.NopLogger(),
 		new(rejectingEnvelopeStream),
 	)
@@ -180,7 +173,7 @@ func TestServeAgentConnectionPreservesEnrollmentRejection(t *testing.T) {
 func TestServeAgentConnectionRejectsUncorrelatedEnrollmentError(t *testing.T) {
 	err := serveAgentConnection(
 		context.Background(),
-		connectionConfig{Name: "runner-1", NodeID: "runner-1", Registry: coretool.NewCommandRegistry(), Agent: newSilentAgentEndpoint()},
+		connectionConfig{Name: "runner-1", NodeID: "runner-1", Events: coreevents.New()},
 		telemetry.NopLogger(),
 		&rejectingEnvelopeStream{replyTo: "another-request"},
 	)

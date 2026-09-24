@@ -23,6 +23,7 @@ import (
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
 	ioaclient "github.com/chainreactors/cyber/pkg/exts/ioa/client"
 	nativeext "github.com/chainreactors/cyber/pkg/exts/native"
+	nodeext "github.com/chainreactors/cyber/pkg/exts/node"
 	observeext "github.com/chainreactors/cyber/pkg/exts/observe"
 	proxyext "github.com/chainreactors/cyber/pkg/exts/proxy"
 	ptyext "github.com/chainreactors/cyber/pkg/exts/pty"
@@ -137,8 +138,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	// The graph publishes the capabilities everything else borrows, so it comes
 	// first. The observers follow it: they subscribe to hooks and to the event
 	// stream, both of which fire at run time rather than during load.
-	namespaceRegistry := namespaces.New()
-	values := append([]extension.Extension{namespaceRegistry}, graph...)
+	values := append([]extension.Extension{nodeext.New()}, graph...)
 	if strings.TrimSpace(config.Output) != "" {
 		output, err := telemetryext.New(telemetryext.Options{Path: config.Output})
 		if err != nil {
@@ -214,6 +214,9 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		if p.bash, err = extension.Use[*terminaltool.BashTool](scope); err != nil {
 			return err
 		}
+		if p.namespaces, err = extension.Use[*namespaces.Registry](scope); err != nil {
+			return err
+		}
 		if config.Session == nil {
 			return nil
 		}
@@ -224,7 +227,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.extensions, p.namespaces = set, namespaceRegistry
+	p.extensions = set
 	return p, nil
 }
 

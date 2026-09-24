@@ -20,14 +20,8 @@ import (
 )
 
 func RunWebSocket(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
-	return runRemoteAgent(ctx, newProfile, option, logger)
-}
-
-// Reload prepares a complete candidate. The serving loop owns the current
-// profile and closes it before activating the candidate; no sessions migrate.
-func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger) error {
-	if err := resolveRemoteAgentURLs(option); err != nil {
-		return err
+	if err := cfg.ResolveAgentServerURLs(option); err != nil {
+		return fmt.Errorf("resolve remote agent URLs: %w", err)
 	}
 	nodeID, err := webNodeID(option)
 	if err != nil {
@@ -95,8 +89,12 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 			if err != nil {
 				return err
 			}
-			chat := &chatAgentHandler{}
-			chat.reload = func(distributed *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
+			events, err := current.Events()
+			if err != nil {
+				return err
+			}
+			// Reload prepares a complete candidate; sessions never migrate.
+			reload := func(distributed *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
 				if applied != nil && proto.Equal(applied, distributed) {
 					return reloadStatus(current)
 				}
@@ -124,7 +122,7 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 				candidate, candidateOption, candidateConfig = next, nextOption, proto.CloneOf(distributed)
 				return result, status
 			}
-			chat.commit = func() {
+			commit := func() {
 				if candidate != nil {
 					cancel()
 				}
@@ -151,8 +149,8 @@ func runRemoteAgent(ctx context.Context, newProfile func(profile.Request) (profi
 				}
 			}
 			return connect(connectionCtx, connectionConfig{
-				ServerURL: option.ServerURL, Name: rt.NodeName(), Registry: rt.CommandRegistry(), Executor: rt.Tools(), Agent: rt,
-				Progress: progress, Hooks: rt.Hooks(), Logger: logger, Chat: chat, NodeID: nodeID, Runtime: DefaultRuntimeInfo(),
+				ServerURL: option.ServerURL, Name: rt.NodeName(), Executor: rt.Tools(), Events: events,
+				Progress: progress, Logger: logger, Upload: uploadNodeFile, ReloadConfig: reload, CommitReload: commit, NodeID: nodeID, Runtime: DefaultRuntimeInfo(),
 				Status: current.AgentStatus, Menu: func() []*types.CommandSpec { return CommandSpecs(rt) }, RegisterNamespaces: current.RegisterNamespaces,
 			})
 		}()
@@ -183,27 +181,7 @@ func reloadStatus(p profile.Profile) (*types.ReloadResult, *aop.AgentStatus) {
 	return result, p.AgentStatus()
 }
 
-func resolveRemoteAgentURLs(option *cfg.Option) error {
-	if option == nil {
-		return fmt.Errorf("web node configuration is required")
-	}
-	if err := cfg.ResolveAgentServerURLs(option); err != nil {
-		return fmt.Errorf("resolve remote agent URLs: %w", err)
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// chatAgentHandler implements the connection's upload and config-reload hooks.
-// AOP core/command handlers are registered on the existing connection mux.
-// ---------------------------------------------------------------------------
-
-type chatAgentHandler struct {
-	reload func(*types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus)
-	commit func()
-}
-
-func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, error) {
+func uploadNodeFile(req *filepb.UploadRequest) (*filepb.Result, error) {
 	if req == nil {
 		return nil, fmt.Errorf("upload request is required")
 	}
@@ -220,13 +198,6 @@ func (h *chatAgentHandler) Upload(req *filepb.UploadRequest) (*filepb.Result, er
 		return nil, err
 	}
 	return &filepb.Result{Filename: filename, Path: dest, Size: int64(len(req.Data))}, nil
-}
-
-func (h *chatAgentHandler) ReloadConfig(config *types.DistributeConfig) (*types.ReloadResult, *aop.AgentStatus) {
-	if h.reload == nil {
-		return &types.ReloadResult{Error: "profile reload is unavailable"}, nil
-	}
-	return h.reload(config)
 }
 
 // ---------------------------------------------------------------------------

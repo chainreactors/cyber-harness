@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
@@ -18,6 +20,8 @@ import (
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
+	"github.com/chainreactors/cyber/pkg/node"
+	"github.com/chainreactors/cyber/pkg/profile"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -43,6 +47,8 @@ type options struct {
 	Format      string `long:"output-format" description:"One-shot output: text, json, or stream-json" default:"text"`
 	JSON        bool   `long:"json" description:"Alias for --output-format=json"`
 	NodeName    string `long:"node-name" description:"Agent node name"`
+	NodeID      string `long:"node-id" description:"Existing node ID"`
+	ServerURL   string `long:"server-url" description:"Cyber Web server URL for node enrollment"`
 	Debug       bool   `long:"debug" description:"Enable debug logging"`
 	Verbose     []bool `short:"v" long:"verbose" description:"Increase output detail"`
 	Quiet       bool   `short:"q" long:"quiet" description:"Only show the final result"`
@@ -68,7 +74,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 		fmt.Fprintf(stdout, "cyber-audit v%s\n", cfg.Version)
 		return nil
 	}
-	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
+	if _, err := cfg.ResolveAgentRuntimeConfig(&option); err != nil {
+		return err
+	}
+	transport, err := cfg.ResolveAgentTransport(&option)
+	if err != nil {
 		return err
 	}
 	if option.Snapshot != nil {
@@ -106,7 +116,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 	if err != nil {
 		return err
 	}
-	if option.Timeout > 0 {
+	if transport != cfg.AgentTransportWeb && option.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(option.Timeout)*time.Second)
 		defer cancel()
@@ -119,13 +129,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 	if err != nil {
 		return err
 	}
+	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: stderr, Color: !option.NoColor})
+	if transport == cfg.AgentTransportWeb {
+		if oneShot || option.Resume != "" {
+			return fmt.Errorf("node mode receives audit tasks from the server; omit --prompt, --input, --task-file and --resume")
+		}
+		build := func(request profile.Request) (profile.Profile, error) {
+			return newAuditProfile(request, workDir, parsed.BashTimeout, nil, manager.Manager, statuses)
+		}
+		return node.RunWebSocket(ctx, build, &option, logger)
+	}
 	report, err := newReport(ctx, workDir, parsed.ReportDir, task, option.Resume, statuses)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(stderr, "Audit report: %s\n", report.Directory)
-	logger := telemetry.GlobalLogger(telemetry.LogConfig{Debug: option.Debug, Quiet: option.Quiet, Output: stderr, Color: !option.NoColor})
-	profile, err := newAuditProfile(option, logger, workDir, parsed.BashTimeout, report, manager.Manager)
+	profile, err := newAuditProfile(profile.Request{Option: &option, ProviderMode: provider.StartupRequired, Logger: logger, Session: &agentsession.Config{PrimarySessionID: "main", Loop: agent.StandardLoop{}}}, workDir, parsed.BashTimeout, report, manager.Manager, report.Tools)
 	if err != nil {
 		return report.finish(ctx, err)
 	}
@@ -174,9 +193,9 @@ func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) 
 			Prompt: parsed.Prompt, Inputs: parsed.Inputs, Skills: parsed.Skills,
 			TaskFile: parsed.TaskFile, Heartbeat: parsed.Heartbeat, Timeout: parsed.Timeout,
 			EvalCriteria: parsed.EvalCriteria, EvalModel: parsed.EvalModel, EvalRounds: parsed.EvalRounds,
-			Resume: parsed.Resume, CaptureProviderFrames: parsed.CaptureFrames, Transport: string(cfg.AgentTransportLocal),
+			Resume: parsed.Resume, CaptureProviderFrames: parsed.CaptureFrames, Transport: string(cfg.AgentTransportAuto), ServerURL: parsed.ServerURL,
 		},
-		NodeOptions: cfg.NodeOptions{NodeName: parsed.NodeName},
+		NodeOptions: cfg.NodeOptions{NodeID: parsed.NodeID, NodeName: parsed.NodeName},
 		MiscOptions: cfg.MiscOptions{
 			ConfigFile: parsed.ConfigFile, DataDir: parsed.DataDir,
 			OutputFormat: parsed.Format, JSON: parsed.JSON, Debug: parsed.Debug,
@@ -184,7 +203,6 @@ func parseOptions(args []string, stderr io.Writer) (options, cfg.Option, error) 
 		},
 	}
 	cfg.CaptureExplicitFlags(&option, parser)
-	option.MarkExplicit("transport")
 	return parsed, option, nil
 }
 

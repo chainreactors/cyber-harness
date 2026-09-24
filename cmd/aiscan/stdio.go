@@ -25,6 +25,7 @@ func runStdio(ctx context.Context, newProfile func(profile.Request) (profile.Pro
 	}
 	mux := aop.NewNamespaceMux(ctx)
 	if err := p.RegisterNamespaces(mux); err != nil {
+		_ = mux.Close(context.Background())
 		_ = p.Close(context.Background())
 		return err
 	}

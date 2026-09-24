@@ -17,12 +17,15 @@ import (
 	"time"
 
 	"github.com/chainreactors/crtm/pkg/registry"
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/audit/internal/toolchain"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	"github.com/chainreactors/cyber/pkg/profile"
 )
 
 func testOption(t *testing.T, url string) cfg.Option {
@@ -130,7 +133,7 @@ func TestOneShotAuditToolReportAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, next, testManager(t, option.DataDir).Manager)
+	profile, err := newAuditProfile(profile.Request{Option: &option, ProviderMode: provider.StartupRequired, Logger: telemetry.NopLogger(), Session: &agentsession.Config{PrimarySessionID: "main", Loop: agent.StandardLoop{}}}, workspace, 10, next, testManager(t, option.DataDir).Manager, next.Tools)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +186,7 @@ func TestInteractiveProfileCommandsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := testManager(t, option.DataDir)
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report, manager.Manager)
+	profile, err := newAuditProfile(profile.Request{Option: &option, ProviderMode: provider.StartupRequired, Logger: telemetry.NopLogger(), Session: &agentsession.Config{PrimarySessionID: "main", Loop: agent.StandardLoop{}}}, workspace, 10, report, manager.Manager, report.Tools)
 	if err != nil {
 		t.Fatal(err)
 	}

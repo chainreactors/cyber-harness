@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/user"
 	"runtime"
@@ -36,24 +35,17 @@ const (
 	websocketPongTimeout = 90 * time.Second
 )
 
-// NamespaceSession owns connection-local work, never host resources.
-type NamespaceSession interface {
-	Cancel(string)
-	Close(context.Context) error
-}
-
 type Config struct {
-	Metadata       map[string]any
-	OpenNamespaces func(*aop.NamespaceMux) (NamespaceSession, error)
-	ServerURL      string
-	WSPath         string
-	ID             string
-	Token          string
-	Version        string
-	JSON           bool
-	Executor       coretool.Executor
-	Events         *coreevents.Stream
-	Progress       *eventbus.Bus[*toolpb.Progress]
+	Metadata  map[string]any
+	ServerURL string
+	WSPath    string
+	ID        string
+	Token     string
+	Version   string
+	JSON      bool
+	Executor  coretool.Executor
+	Events    *coreevents.Stream
+	Progress  *eventbus.Bus[*toolpb.Progress]
 	// RegisterNamespaces installs resource-control protocols on each new
 	// connection. The profile-owned extensions remain loaded across reconnects;
 	// the connection-owned mux only owns registration admission and draining.
@@ -125,7 +117,7 @@ func retryDelay(attempt int) time.Duration {
 }
 
 func runConnection(ctx context.Context, cfg Config, instanceID string) error {
-	dialURL, token, err := connectionURL(cfg.ServerURL, cfg.WSPath)
+	dialURL, token, err := aopws.DialURL(cfg.ServerURL, cfg.WSPath)
 	if err != nil {
 		return err
 	}
@@ -163,21 +155,12 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		_ = stream.Close()
 	}()
 	namespaces := aop.NewNamespaceMux(connectionCtx)
-	var namespaceSession NamespaceSession
-	if cfg.OpenNamespaces != nil {
-		namespaceSession, err = cfg.OpenNamespaces(namespaces)
-		if err != nil {
-			return err
-		}
-		defer func() { cancel(); _ = namespaceSession.Close(context.Background()) }()
-	}
+	defer func() { _ = namespaces.Close(context.Background()) }()
 	if cfg.RegisterNamespaces != nil {
 		if err := cfg.RegisterNamespaces(namespaces); err != nil {
 			return fmt.Errorf("register tool node namespaces: %w", err)
 		}
 	}
-	defer func() { _ = namespaces.Close(context.Background()) }()
-
 	hello, err := hello(cfg, instanceID)
 	if err != nil {
 		return err
@@ -221,19 +204,11 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		sub := cfg.Progress.Subscribe(calls.ForwardProgress)
 		defer sub.Cancel()
 	}
-	if cfg.Events != nil {
-		sub := cfg.Events.Observe(coreevents.ObserverFunc(calls.Forward))
-		defer sub.Cancel()
-	}
-	defer func() { cancel(); calls.Close(); _ = namespaces.Close(context.Background()) }()
+	sub := cfg.Events.Observe(coreevents.ObserverFunc(calls.Forward))
+	defer sub.Cancel()
+	defer func() { cancel(); calls.Close() }()
 	return connection.Run(func(_ context.Context, envelope *aop.Envelope, reply aop.SendFunc) error {
 		if calls.Cancel(envelope) {
-			if namespaceSession != nil {
-				value := new(aop.ProtocolMessage)
-				if envelope.Payload.UnmarshalTo(value) == nil {
-					namespaceSession.Cancel(value.GetCancelOperation().GetTargetId())
-				}
-			}
 			return nil
 		}
 		handled, err := namespaces.Dispatch(envelope, reply)
@@ -270,27 +245,4 @@ func hello(cfg Config, instanceID string) (*aop.AgentHello, error) {
 			Os: runtime.GOOS, Arch: runtime.GOARCH, Pid: int32(os.Getpid()), Metadata: metadata,
 		},
 	}, nil
-}
-
-func connectionURL(serverURL, path string) (string, string, error) {
-	u, err := url.Parse(strings.TrimRight(serverURL, "/"))
-	if err != nil || u.Host == "" {
-		return "", "", fmt.Errorf("invalid tool node server URL %q", serverURL)
-	}
-	token := ""
-	if u.User != nil {
-		token = u.User.Username()
-		u.User = nil
-	}
-	switch u.Scheme {
-	case "http":
-		u.Scheme = "ws"
-	case "https":
-		u.Scheme = "wss"
-	case "ws", "wss":
-	default:
-		return "", "", fmt.Errorf("unsupported tool node URL scheme %q", u.Scheme)
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + strings.TrimLeft(path, "/")
-	return u.String(), token, nil
 }

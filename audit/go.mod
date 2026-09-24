@@ -72,6 +72,7 @@ require (
 	github.com/gookit/config/v2 v2.2.8 // indirect
 	github.com/gookit/goutil v0.7.5 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

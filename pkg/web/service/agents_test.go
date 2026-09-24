@@ -1820,11 +1820,11 @@ func TestWSSessionBindingSurvivesReconnect(t *testing.T) {
 }
 
 func (p *AgentPool) handleAgentEnvelope(agent *remoteAgent, envelope *aop.Envelope) {
-	mux, err := p.newAgentNamespaceMux(context.Background(), agent)
-	if err != nil {
+	mux := aop.NewNamespaceMux(context.Background())
+	defer mux.Close(context.Background())
+	if err := p.registerAgentNamespaces(mux, agent); err != nil {
 		return
 	}
-	defer mux.Close(context.Background())
 	p.dispatchAgentEnvelope(context.Background(), mux, envelope)
 }
 

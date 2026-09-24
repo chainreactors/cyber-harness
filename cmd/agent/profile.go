@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
@@ -36,9 +35,9 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	// This build routes nothing, so it publishes the disabled endpoint and
 	// links no proxy at all.
 	values, err := harness.BaseExtensions(harness.BaseConfig{
-		Directory:    workDir,
-		SkillPaths:   agentSkillPaths(option.Skills),
-		Terminal:     terminalext.Config{Timeout: bashTimeout},
+		Directory:  workDir,
+		SkillPaths: cfg.LocalSkillPaths(option.Skills),
+		Terminal:   terminalext.Config{Timeout: bashTimeout},
 		Provider: provider.StartupConfig{
 			Mode: provider.StartupRequired, Config: cfg.ProviderConfig(&option),
 			Fallbacks: cfg.FallbackProviderConfigs(&option),
@@ -70,16 +69,6 @@ func newAgentProfile(option cfg.Option, logger telemetry.Logger, workDir string,
 	}
 	p.extensions = set
 	return p, nil
-}
-
-func agentSkillPaths(values []string) []string {
-	var paths []string
-	for _, value := range values {
-		if strings.ContainsAny(value, `/\`) || strings.HasPrefix(value, ".") {
-			paths = append(paths, value)
-		}
-	}
-	return paths
 }
 
 func (p *agentProfile) Load(ctx context.Context) error {

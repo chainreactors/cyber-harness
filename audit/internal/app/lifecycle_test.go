@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/audit/internal/toolchain"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/pkg/profile"
+	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
+	protobuf "google.golang.org/protobuf/proto"
 )
 
 func captureStdout(t *testing.T, run func() error) (string, error) {
@@ -65,7 +71,7 @@ func TestAuditWorkflowSurvivesProjectSkillCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := newAuditProfile(option, telemetry.NopLogger(), workspace, 10, report, testManager(t, option.DataDir).Manager)
+	profile, err := newAuditProfile(profile.Request{Option: &option, ProviderMode: provider.StartupRequired, Logger: telemetry.NopLogger(), Session: &agentsession.Config{PrimarySessionID: "main", Loop: agent.StandardLoop{}}}, workspace, 10, report, testManager(t, option.DataDir).Manager, report.Tools)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +110,137 @@ func TestAuditWorkflowSurvivesProjectSkillCollision(t *testing.T) {
 		if strings.Contains(body, marker) != selectSkill {
 			t.Fatal("project skill was not selected explicitly")
 		}
+	}
+}
+
+func TestAuditNodeProfileUsesTaskResponseWithoutLocalReport(t *testing.T) {
+	workspace := t.TempDir()
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "cyber-audit") {
+			textReply(w, "pong")
+			return
+		}
+		requests <- string(body)
+		streamReply(w, "done")
+	}))
+	defer server.Close()
+	option := testOption(t, server.URL)
+	p, err := newAuditProfile(profile.Request{Option: &option, ProviderMode: provider.StartupRequired, Logger: telemetry.NopLogger(), Session: &agentsession.Config{PrimarySessionID: "main", Loop: agent.StandardLoop{}}}, workspace, 10, nil, testManager(t, option.DataDir).Manager, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Load(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close(context.Background())
+	mux := aop.NewNamespaceMux(t.Context())
+	if err := p.RegisterNamespaces(mux); err != nil {
+		t.Fatal(err)
+	}
+	defer mux.Close(context.Background())
+	session, err := p.runtime.OpenSession(t.Context(), agentsession.SessionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := session.Run(t.Context(), agentsession.RunInput{Content: []*aop.Content{aop.Text("Review this repository")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	body := <-requests
+	if !strings.Contains(body, "No local report directory is assigned") || !strings.Contains(body, "Return findings, evidence, coverage") {
+		t.Fatal("node audit prompt lacks task-response evidence instructions")
+	}
+	if strings.Contains(body, "Store coverage.json") || strings.Contains(body, "Do not edit run.json") {
+		t.Fatal("node audit prompt still requires local report artifacts")
+	}
+}
+
+func TestAuditCLIEnrollsAsNodeWithoutLocalReport(t *testing.T) {
+	workspace := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	hellos := make(chan *aop.AgentHello, 1)
+	serverErrors := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/aop/node/ws" {
+			serverErrors <- fmt.Errorf("node path = %q", r.URL.Path)
+			cancel()
+			return
+		}
+		conn, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(w, r, nil)
+		if err != nil {
+			serverErrors <- err
+			cancel()
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			serverErrors <- err
+			cancel()
+			return
+		}
+		first := new(aop.Envelope)
+		if err := protobuf.Unmarshal(data, first); err != nil {
+			serverErrors <- err
+			cancel()
+			return
+		}
+		message, err := aop.Unwrap(first)
+		if err != nil {
+			serverErrors <- err
+			cancel()
+			return
+		}
+		core, ok := message.(*aop.ProtocolMessage)
+		if !ok || core.GetAgentHello() == nil {
+			serverErrors <- fmt.Errorf("first node message is %T", message)
+			cancel()
+			return
+		}
+		hellos <- core.GetAgentHello()
+		accepted := aop.Reply(first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: core.GetAgentHello().NodeId}}})
+		body, err := protobuf.Marshal(accepted)
+		if err == nil {
+			err = conn.WriteMessage(websocket.BinaryMessage, body)
+		}
+		if err != nil {
+			serverErrors <- err
+			cancel()
+			return
+		}
+		_, _, err = conn.ReadMessage()
+		if err != nil {
+			serverErrors <- err
+		}
+		cancel()
+	}))
+	defer server.Close()
+	err := run(ctx, []string{"--server-url", server.URL, "--node-id", "audit-worker", "--workdir", workspace, "--data-dir", t.TempDir()}, io.Discard, io.Discard, fakeTools)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("node run = %v", err)
+	}
+	select {
+	case err := <-serverErrors:
+		t.Fatal(err)
+	default:
+	}
+	select {
+	case hello := <-hellos:
+		if hello.NodeId != "audit-worker" {
+			t.Fatalf("node ID = %q", hello.NodeId)
+		}
+	default:
+		t.Fatal("audit node did not enroll")
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".cyber", "audit")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("node created a local report: %v", err)
 	}
 }
 

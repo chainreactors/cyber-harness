@@ -66,14 +66,11 @@ func (p *AgentPool) ServeNode(parent context.Context, stream aop.EnvelopeStream)
 		status:       &aop.AgentStatus{},
 		stats:        &aop.AgentStats{},
 	}
-	namespaceMux, err := p.newAgentNamespaceMux(ctx, agent)
-	if err != nil {
+	namespaceMux := aop.NewNamespaceMux(ctx)
+	defer func() { _ = namespaceMux.Close(context.Background()) }()
+	if err := p.registerAgentNamespaces(namespaceMux, agent); err != nil {
 		return fmt.Errorf("register node namespaces: %w", err)
 	}
-	defer func() {
-		connection.Close()
-		_ = namespaceMux.Close(context.Background())
-	}()
 	accepted, err := aop.Wrap(generateID(), first.Id, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{
 		AgentAccepted: &aop.AgentAccepted{NodeId: hello.NodeId, Capabilities: append([]string(nil), hello.Capabilities...)},
 	}})

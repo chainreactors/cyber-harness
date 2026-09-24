@@ -25,7 +25,6 @@ import (
 	filepb "github.com/chainreactors/cyber/aop/file"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
 	trafficpb "github.com/chainreactors/cyber/aop/traffic"
-	"github.com/chainreactors/cyber/core/eventbus"
 	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
@@ -65,45 +64,23 @@ func (singleDeliveryProbeTool) Execute(context.Context, string) (*coretool.Resul
 	return coretool.TextResult("probe result"), nil
 }
 
-type trackingAgentEndpoint struct {
-	bus        *eventbus.Bus[*aop.Event]
-	subscribed *bool
-}
-
-func (e *trackingAgentEndpoint) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
-	*e.subscribed = true
-	return e.bus.Subscribe(observer.ObserveEvent)
-}
-
-func (e *trackingAgentEndpoint) Publish(event *aop.Event) { e.bus.Emit(event) }
-
-type silentAgentEndpoint struct{ bus *eventbus.Bus[*aop.Event] }
-
-func newSilentAgentEndpoint() *silentAgentEndpoint {
-	return &silentAgentEndpoint{bus: eventbus.New[*aop.Event]()}
-}
-
-func (e *silentAgentEndpoint) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
-	return e.bus.Subscribe(observer.ObserveEvent)
-}
-
-func (e *silentAgentEndpoint) Publish(event *aop.Event) { e.bus.Emit(event) }
-
-type panicAgentEndpoint struct{}
-
-func (panicAgentEndpoint) Observe(coreevents.Observer) *eventbus.Subscription[*aop.Event] {
-	return nil
-}
-func (panicAgentEndpoint) Publish(*aop.Event) { panic("send event boom") }
-
 type handshakeThenEOFStream struct {
-	helloID string
-	recvs   int
+	helloID   string
+	recvs     int
+	eventSent chan struct{}
 }
 
 func (s *handshakeThenEOFStream) Send(envelope *aop.Envelope) error {
 	if s.helloID == "" {
 		s.helloID = envelope.GetId()
+	}
+	if s.eventSent != nil {
+		message, err := aop.Unwrap(envelope)
+		if err == nil {
+			if value, ok := message.(*aop.ProtocolMessage); ok && value.GetEvent() != nil {
+				close(s.eventSent)
+			}
+		}
 	}
 	return nil
 }
@@ -113,23 +90,27 @@ func (s *handshakeThenEOFStream) Recv() (*aop.Envelope, error) {
 	if s.recvs == 1 {
 		return aop.MustWrap("accepted", s.helloID, &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentAccepted{AgentAccepted: &aop.AgentAccepted{NodeId: "runner-1"}}}), nil
 	}
+	if s.eventSent != nil {
+		select {
+		case <-s.eventSent:
+		case <-time.After(time.Second):
+			return nil, errors.New("event published with command catalog was not forwarded")
+		}
+	}
 	return nil, io.EOF
 }
 
 func TestServeAgentConnectionSubscribesBeforePublishingMenu(t *testing.T) {
-	stream := new(handshakeThenEOFStream)
-	subscribed := false
+	stream := &handshakeThenEOFStream{eventSent: make(chan struct{})}
 	menuCalled := false
+	events := coreevents.New()
 	cc := connectionConfig{
-		Name:     "runner-1",
-		NodeID:   "runner-1",
-		Registry: coretool.NewCommandRegistry(),
-		Agent:    &trackingAgentEndpoint{bus: eventbus.New[*aop.Event](), subscribed: &subscribed},
+		Name:   "runner-1",
+		NodeID: "runner-1",
+		Events: events,
 		Menu: func() []*types.CommandSpec {
 			menuCalled = true
-			if !subscribed {
-				t.Error("command catalog was published before event subscription")
-			}
+			events.Publish(&aop.Event{SessionId: "test"})
 			return nil
 		},
 	}
@@ -156,7 +137,7 @@ func TestToolOperationPanicIsReportedAndCleanedUp(t *testing.T) {
 	}
 	arguments, _ := aop.JSONValue(map[string]any{})
 	request := &toolpb.Call{Call: &aop.ToolCall{Id: "op-panic", Name: "missing", Arguments: arguments}}
-	handler := &toolnode.CallHandler{Executor: coretool.EmptyExecutor(), Logger: logger, Publish: panicAgentEndpoint{}.Publish, Send: send}
+	handler := &toolnode.CallHandler{Executor: coretool.EmptyExecutor(), Logger: logger, Publish: func(*aop.Event) { panic("send event boom") }, Send: send}
 	handler.Handle(
 		context.Background(),
 		&aop.Envelope{Id: "op-panic"},
@@ -243,7 +224,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	}
 }
 
-func TestDefaultManagerDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
+func TestAgentHelloOmitsFileManagementCapabilities(t *testing.T) {
 	hello, err := BuildHello("agent", coretool.EmptyExecutor(), "agent", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -255,94 +236,17 @@ func TestDefaultManagerDoesNotAdvertiseRunnerFileRPCs(t *testing.T) {
 	}
 }
 
-func TestFileListReturnsStructuredEntries(t *testing.T) {
-	base := t.TempDir()
-	if err := os.WriteFile(filepath.Join(base, "note.txt"), []byte("body"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(base, "nested"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	value := fileList(&filepb.ListRequest{Path: "."}, base)
-	if value.err != nil {
-		t.Fatal(value.err)
-	}
-	if value.result.Path != "." || len(value.result.Entries) != 2 {
-		t.Fatalf("result = %+v", value.result)
-	}
-	byName := map[string]*filepb.Entry{}
-	for _, entry := range value.result.Entries {
-		byName[entry.Name] = entry
-	}
-	if byName["note.txt"].IsDirectory || byName["note.txt"].Size != 4 {
-		t.Fatalf("file entry = %+v", byName["note.txt"])
-	}
-	if !byName["nested"].IsDirectory {
-		t.Fatalf("directory entry = %+v", byName["nested"])
-	}
-}
-
-func TestNativeFileRPCsResolveRelativeToRuntimeWorkdir(t *testing.T) {
-	base := t.TempDir()
-	if value := fileMkdir(&filepb.MkdirRequest{Path: "nested"}, base); value.err != nil {
-		t.Fatal(value.err)
-	}
-	path := filepath.Join("nested", "proof.txt")
-	if value := fileWrite(&filepb.WriteRequest{Path: path, Data: []byte("hello")}, base); value.err != nil {
-		t.Fatal(value.err)
-	}
-	value := fileRead(&filepb.ReadRequest{Path: path}, base)
-	if value.err != nil || string(value.result.Data) != "hello" {
-		t.Fatalf("read data = %q, err = %v", value.result.Data, value.err)
-	}
-}
-
-func TestFileReadReturnsBoundedChunks(t *testing.T) {
-	base := t.TempDir()
-	path := filepath.Join(base, "capture.mp4")
-	data := bytes.Repeat([]byte("frame"), 300_000)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	first := fileRead(&filepb.ReadRequest{Path: path, Limit: 256 * 1024}, base)
-	if first.err != nil {
-		t.Fatal(first.err)
-	}
-	if first.result.Offset != 0 || first.result.Eof || len(first.result.Data) != 256*1024 || first.result.Size != int64(len(data)) {
-		t.Fatalf("first chunk = %+v, bytes=%d", first.result, len(first.result.Data))
-	}
-	if first.result.MediaType != "video/mp4" {
-		t.Fatalf("media type = %q, want video/mp4", first.result.MediaType)
-	}
-	joined := append([]byte(nil), first.result.Data...)
-	offset := int64(len(joined))
-	for {
-		next := fileRead(&filepb.ReadRequest{Path: path, Offset: offset, Limit: maxFileReadChunkBytes + 1}, base)
-		if next.err != nil {
-			t.Fatal(next.err)
+func TestAgentRejectsUnsupportedFileOperation(t *testing.T) {
+	envelope := aop.MustWrap("read-1", "", &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_ReadRequest{ReadRequest: &filepb.ReadRequest{Path: "proof.txt"}}})
+	var response *aop.ProtocolMessage
+	handleAgentFileMessage(connectionConfig{}, envelope, &filepb.ProtocolMessage{Message: &filepb.ProtocolMessage_ReadRequest{ReadRequest: &filepb.ReadRequest{Path: "proof.txt"}}}, func(replyTo string, message protobuf.Message) {
+		if replyTo != envelope.Id {
+			t.Fatalf("reply target = %q", replyTo)
 		}
-		if next.result.Offset != offset || len(next.result.Data) > int(maxFileReadChunkBytes) {
-			t.Fatalf("chunk offset=%d bytes=%d, want offset=%d max=%d", next.result.Offset, len(next.result.Data), offset, maxFileReadChunkBytes)
-		}
-		joined = append(joined, next.result.Data...)
-		offset += int64(len(next.result.Data))
-		if next.result.Eof {
-			break
-		}
-	}
-	if !bytes.Equal(joined, data) {
-		t.Fatalf("joined bytes = %d, want %d", len(joined), len(data))
-	}
-}
-
-func TestFileReadDoesNotDecodePathEncodedRanges(t *testing.T) {
-	encoded := "aop-range://read?path=proof.txt&offset=1&limit=2"
-	value := fileRead(&filepb.ReadRequest{Path: encoded}, t.TempDir())
-	if value.err == nil {
-		t.Fatal("path-encoded range unexpectedly succeeded")
-	}
-	if value.result.Path != encoded {
-		t.Fatalf("result path = %q, want original path %q", value.result.Path, encoded)
+		response, _ = message.(*aop.ProtocolMessage)
+	})
+	if response.GetProtocolError().GetCode() != "OPERATION_FAILED" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 
@@ -351,7 +255,7 @@ func TestUploadWritesAbsolutePath(t *testing.T) {
 	const body = "codex public proof\nkey=appImage/probe"
 	dest := filepath.Join(os.TempDir(), "cyber-uploads", filename)
 	t.Cleanup(func() { _ = os.Remove(dest) })
-	result, err := (&chatAgentHandler{}).Upload(&filepb.UploadRequest{SessionId: "sess-1", Filename: filename, Data: []byte(body)})
+	result, err := uploadNodeFile(&filepb.UploadRequest{SessionId: "sess-1", Filename: filename, Data: []byte(body)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,11 +325,10 @@ func TestServeAgentConnectionClosesStreamAfterWriteFailure(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- serveAgentConnection(context.Background(), connectionConfig{
-			Name:     "runner-1",
-			NodeID:   "runner-1",
-			Registry: coretool.NewCommandRegistry(),
-			Agent:    newSilentAgentEndpoint(),
-			Menu:     func() []*types.CommandSpec { return nil },
+			Name:   "runner-1",
+			NodeID: "runner-1",
+			Events: coreevents.New(),
+			Menu:   func() []*types.CommandSpec { return nil },
 		}, telemetry.NopLogger(), stream)
 	}()
 
@@ -497,7 +400,11 @@ func TestWebSocketStreamSetsReadAndWriteDeadlines(t *testing.T) {
 		recorded <- wrapped
 		return wrapped, nil
 	}
-	wsConn, response, err := dialer.DialContext(context.Background(), HTTPToWS(server.URL)+toolnode.DefaultWSPath, nil)
+	dialURL, _, err := aopws.DialURL(server.URL, toolnode.DefaultWSPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsConn, response, err := dialer.DialContext(context.Background(), dialURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +475,7 @@ func TestConcreteRuntimeControlRepliesReachNodeConnection(t *testing.T) {
 		}}),
 	}
 	err := serveAgentConnection(context.Background(), connectionConfig{
-		Name: "embedded", NodeID: "embedded", Registry: rt.Runtime().CommandRegistry(), Agent: rt.Runtime(),
+		Name: "embedded", NodeID: "embedded", Events: app.Stream,
 		RegisterNamespaces: ns.Bind,
 	}, telemetry.NopLogger(), stream)
 	if err != io.EOF {
@@ -635,7 +542,7 @@ func TestTrafficNamespaceRepliesReachTheWire(t *testing.T) {
 	registry := coretool.NewCommandRegistry()
 	hosttest.Load(t, t.Context(), extension.Provided(hooks.New()), ns, registry, proxyext.New(proxyext.Config{WorkDir: t.TempDir()}))
 	cc := connectionConfig{
-		Name: "runner-1", NodeID: "runner-1", Registry: registry, Agent: newSilentAgentEndpoint(), RegisterNamespaces: ns.Bind,
+		Name: "runner-1", NodeID: "runner-1", Events: coreevents.New(), RegisterNamespaces: ns.Bind,
 	}
 
 	if err := serveAgentConnection(context.Background(), cc, telemetry.NopLogger(), stream); err != io.EOF {

@@ -2,8 +2,9 @@
 
 Use your own understanding of the code to discover flaws. The required tools
 supply observations and navigation; no SAST finding list substitutes for review.
-Read [tools.md](cyber://skills/audit/tools.md) for supported commands and
-[report.md](cyber://skills/audit/report.md) for outputs. Project skills supplement
+Read [tools.md](cyber://skills/audit/tools.md) for supported commands. When a
+report directory is assigned, read [report.md](cyber://skills/audit/report.md)
+for its file contract. Project skills supplement
 this workflow; they do not replace its audit and evidence requirements.
 
 1. Establish scope: local repository/revision, user constraints, entry points,
@@ -30,14 +31,15 @@ this workflow; they do not replace its audit and evidence requirements.
 5. For each candidate, construct the input/preconditions and inspect the full
    path to impact. Try a counterexample that should be rejected by a protection.
    Use local reproduction when practical; record command, environment, output
-   and exit status. Keep test artifacts inside the report directory. Mark static
+   and exit status. Keep test artifacts outside the target code. Mark static
    confirmation separately from an actually executed successful reproduction.
-6. Update findings.json and coverage.json as you investigate. Close candidates
-   as confirmed, dismissed or inconclusive with evidence. Do not drop negative
-   results. Produce index.md and log.md as an OKF bundle and run `okf validate`
-   before completing. The final response names confirmed findings, limits and
-   the report location. A run with no confirmed findings can still be incomplete.
+6. Close candidates as confirmed, dismissed or inconclusive with evidence. Do
+   not drop negative results. Track examined scope, excluded and unsupported
+   areas, incomplete checks and unresolved limits. When a report directory is
+   assigned, update its findings and coverage files, produce the OKF bundle and
+   validate it. Otherwise return the findings, evidence and coverage in the task
+   response. A run with no confirmed findings can still be incomplete.
 
 Use subagents for bounded investigations when useful, with explicit scope,
-report paths and evidence requirements. The parent reconciles contradictions
+evidence requirements. The parent reconciles contradictions
 and owns the final conclusions. Avoid running duplicate full scans.
