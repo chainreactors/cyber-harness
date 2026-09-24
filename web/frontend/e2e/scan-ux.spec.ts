@@ -8,6 +8,7 @@ import { SyncArtifactsRequestSchema, SyncArtifactsResponseSchema } from '../src/
 import { ListAgentsResponseSchema } from '../src/gen/types/agent_pb'
 
 const preamble = `<script type="module">import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;</script>`
+const fixtureURL = `http://127.0.0.1:${process.env.CYBER_E2E_FIXTURE_PORT || '38082'}`
 
 function artifact(id: string, operationId: string, data: unknown, tool = 'gogo', resultId = id): AOPEvent {
   return create(EventSchema, { id, emittedAt: timestampNow(), sessionId: 'session',
@@ -29,7 +30,7 @@ async function archive(page: Page, entries: AOPEvent[]) {
     await route.fulfill({ contentType: 'application/proto', body: Buffer.from(toBinary(SyncArtifactsResponseSchema, response)) })
   })
   await page.route('**/cstx-test', (route) => route.fulfill({ contentType: 'text/html', body: `<html><head>${preamble}</head><body>Asset test</body></html>` }))
-  await page.goto('/cstx-test')
+  await page.goto(`${fixtureURL}/cstx-test`)
   await page.evaluate(async () => { (window as any).runtime = await import('/src/lib/cstx-runtime.ts') })
 }
 
@@ -98,7 +99,7 @@ test('pagination remains complete beyond 5000 assets', async ({ page }) => {
 
 test('composer preserves failed drafts, attachments and edits during submission', async ({ page }) => {
   await page.route('**/composer-test', (route) => route.fulfill({ contentType: 'text/html', body: `<html><head>${preamble}</head><body><div id="root"></div><script type="module" src="/e2e/fixtures/composer.tsx"></script></body></html>` }))
-  await page.goto('/composer-test')
+  await page.goto(`${fixtureURL}/composer-test`)
   const input = page.locator('textarea').first()
   await input.fill('first draft')
   await page.locator('input[type=file]').setInputFiles({ name: 'context.txt', mimeType: 'text/plain', buffer: Buffer.from('evidence') })
@@ -122,7 +123,7 @@ test('failed scanner card retains findings and shows verification with parse ret
   ]
   await archive(page, entries)
   await page.route('**/scan-result-test', (route) => route.fulfill({ contentType: 'text/html', body: `<html><head>${preamble}</head><body><div id="root"></div><script type="module" src="/e2e/fixtures/scan-result.tsx"></script></body></html>` }))
-  await page.goto('/scan-result-test')
+  await page.goto(`${fixtureURL}/scan-result-test`)
   await page.locator('button[aria-expanded]').first().click()
   await expect(page.getByRole('alert')).toContainText('unsupported CSTX artifact')
   await page.getByRole('tab').nth(1).click()
@@ -140,7 +141,7 @@ test('uncertain session creation retries the same session and request identity',
     body: Buffer.from(toBinary(ListAgentsResponseSchema, create(ListAgentsResponseSchema, { agents: [{ hello: { nodeId: 'execution-node' } }] }))),
   }))
   await page.route('**/session-retry-test', (route) => route.fulfill({ contentType: 'text/html', body: `<html><head>${preamble}</head><body><div id="root"></div><script type="module" src="/e2e/fixtures/session-retry.tsx"></script></body></html>` }))
-  await page.goto('/session-retry-test')
+  await page.goto(`${fixtureURL}/session-retry-test`)
   await expect(page.getByText('1 nodes', { exact: true })).toBeVisible()
   expect(await page.evaluate(() => (window as any).session.ensureSession())).toBeNull()
   expect(await page.evaluate(() => (window as any).session.ensureSession())).toBeNull()
