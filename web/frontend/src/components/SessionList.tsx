@@ -4,7 +4,7 @@ import {
   PanelLeftClose, PanelLeft,
   MessageSquare, Plus, Trash2,
   ChevronDown, ChevronRight, Monitor, Terminal,
-  Unplug,
+  Unplug, Archive, ArchiveRestore, Pencil, Check, X,
 } from 'lucide-react'
 import {
   Button, Tooltip, TooltipTrigger, TooltipContent,
@@ -12,7 +12,7 @@ import {
 } from '@cyber/ui'
 import { cn, useTheme } from '@cyber/theme'
 import LanguageToggle from './LanguageToggle'
-import type { AgentView, SessionRecord } from '../api'
+import type { AgentView, SessionRecord, SessionFilters } from '../api'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { agentActivity } from '../lib/agentActivity'
 import { agentMatchesSession } from '../lib/session-agent'
@@ -27,6 +27,9 @@ interface Props {
   onToggle: () => void
   agents?: AgentView[]
   sessions?: SessionRecord[]
+  filters: SessionFilters
+  onFilter: (patch: Partial<SessionFilters>) => void
+  onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
   activeSessionID: string | null
   selectedNodeID: string | null
   terminalNodeID: string | null
@@ -34,13 +37,14 @@ interface Props {
   onSelectSession: (id: string) => void
   onCreateSession: (nodeID: string) => void
   onDeleteSession: (id: string) => void
+
   onOpenTerminal: (nodeID: string) => void
 }
 
 export default function SessionList({
-  open, onToggle, agents = [], sessions = [],
+  open, onToggle, agents = [], sessions = [], filters, onFilter,
   activeSessionID, selectedNodeID, terminalNodeID,
-  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
+  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal, onUpdateSession,
 }: Props) {
   const { t } = useTranslation('sidebar')
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -87,6 +91,16 @@ export default function SessionList({
       .sort((a, b) => a.name.localeCompare(b.name))
     return { groups, orphanGroups }
   }, [agents, sessions])
+
+  const targetGroups = useMemo(() => {
+    const groups = new Map<string, SessionRecord[]>()
+    for (const session of sessions) {
+      const values = session.extensions.scan?.targets
+      const targets = Array.isArray(values) ? values.filter((v): v is string => typeof v === 'string') : []
+      for (const target of new Set(targets.length ? targets.map(normalizeTarget) : [''])) groups.set(target, [...(groups.get(target) || []), session])
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [sessions])
 
   // Live node count for the roster header — connected agents only (orphaned
   // sessions belong to nodes that are no longer online).
@@ -139,10 +153,33 @@ export default function SessionList({
           )}
         </div>
 
+        {open && <div className="space-y-2 border-b border-border/60 p-2.5">
+          <input aria-label={t('searchTasks')} placeholder={t('searchTasks')} value={filters.search} onChange={(event) => onFilter({ search: event.target.value })} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs" />
+          <div className="flex gap-1">
+            <Button size="xs" variant="ghost" aria-label={t('newTask')} title={t('newTask')} disabled={!agents.length} onClick={() => onCreateSession(agents.find((agent) => agent.hello?.nodeId === selectedNodeID)?.hello?.nodeId || agents[0]?.hello?.nodeId || '')}><Plus className="h-3 w-3" /></Button>
+            {(['tasks', 'nodes', 'targets'] as const).map((view) => <Button key={view} size="xs" variant={filters.view === view ? 'secondary' : 'ghost'} onClick={() => onFilter({ view })}>{t(view)}</Button>)}
+            <Button size="xs" variant={filters.archived ? 'secondary' : 'ghost'} aria-label={t('archived')} title={t('archived')} onClick={() => onFilter({ archived: !filters.archived })}><Archive className="h-3 w-3" /></Button>
+          </div>
+          <select aria-label={t('filterNode')} value={filters.nodeId} onChange={(event) => onFilter({ nodeId: event.target.value })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs">
+            <option value="">{t('allNodes')}</option>
+            {[...new Map([...agents.map((a) => [a.hello?.nodeId || '', a.hello?.name || a.hello?.nodeId || ''] as const), ...sessions.map((r) => [r.session?.nodeId || '', r.agentName || r.session?.nodeId || ''] as const)]).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        </div>}
+
         {/* Content */}
         {open ? (
           <div className="flex-1 overflow-auto p-2.5 animate-fade-in">
-            {agents.length === 0 && orphanGroups.length === 0 ? (
+            {filters.view !== 'nodes' ? (
+              <div className="space-y-2">
+                {(filters.view === 'targets' ? targetGroups : [['', sessions] as [string, SessionRecord[]]]).map(([target, records]) => (
+                  <div key={target}>
+                    {filters.view === 'targets' && <div className="truncate px-2 py-1 text-xs font-medium" title={target}>{target || t('unlinkedTarget')}</div>}
+                    {records.map((session) => <SessionItem key={recordID(session)} session={session} active={recordID(session) === activeSessionID} onSelect={() => onSelectSession(recordID(session))} onDelete={() => onDeleteSession(recordID(session))} onUpdate={(patch) => onUpdateSession(recordID(session), patch)} />)}
+                  </div>
+                ))}
+                {sessions.length === 0 && <p className="p-3 text-xs text-muted-foreground">{t('noMatchingTasks')}</p>}
+              </div>
+            ) : agents.length === 0 && orphanGroups.length === 0 ? (
               <EmptyState icon={Monitor} title={t('noAgentsConnected')} description={t('startAgentToBegin')} compact />
             ) : (
               <div className="space-y-1">
@@ -167,6 +204,7 @@ export default function SessionList({
                     onSelectSession={onSelectSession}
                     onCreateSession={() => onCreateSession(agent.hello?.nodeId || '')}
                     onDeleteSession={onDeleteSession}
+                    onUpdateSession={onUpdateSession}
                     onOpenTerminal={() => onOpenTerminal(agent.hello?.nodeId || '')}
                   />
                 ))}
@@ -185,6 +223,7 @@ export default function SessionList({
                         defaultOpen={agents.length === 0 || g.sessions.some((s) => recordID(s) === activeSessionID)}
                         onSelectSession={onSelectSession}
                         onDeleteSession={onDeleteSession}
+                        onUpdateSession={onUpdateSession}
                       />
                     ))}
                   </div>
@@ -250,7 +289,7 @@ function SidebarPreferences({ expanded }: { expanded: boolean }) {
 
 function AgentGroup({
   agent, sessions, isSelected, activeSessionID, terminalActive,
-  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal,
+  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal, onUpdateSession,
 }: {
   agent: AgentView
   sessions: SessionRecord[]
@@ -261,6 +300,7 @@ function AgentGroup({
   onSelectSession: (id: string) => void
   onCreateSession: () => void
   onDeleteSession: (id: string) => void
+  onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
   onOpenTerminal: () => void
 }) {
   const { t } = useTranslation('sidebar')
@@ -349,6 +389,7 @@ function AgentGroup({
               active={recordID(session) === activeSessionID}
               onSelect={() => onSelectSession(recordID(session))}
               onDelete={() => onDeleteSession(recordID(session))}
+              onUpdate={(patch) => onUpdateSession(recordID(session), patch)}
             />
           ))}
         </div>
@@ -358,14 +399,25 @@ function AgentGroup({
 }
 
 function SessionItem({
-  session, active, onSelect, onDelete,
+  session, active, onSelect, onDelete, onUpdate,
 }: {
   session: SessionRecord
   active: boolean
   onSelect: () => void
   onDelete: () => void
+  onUpdate: (patch: { title?: string; archived?: boolean }) => Promise<void>
 }) {
   const { t } = useTranslation('sidebar')
+  const [editing, setEditing] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const save = async (patch: { title?: string; archived?: boolean }) => {
+    if (saving) return
+    setSaving(true)
+    try { await onUpdate(patch); setEditing(false) } catch { /* parent displays error */ }
+    finally { setSaving(false) }
+  }
+
   const title = session.session?.title || t('newSession')
   const updatedAt = session.updatedAt ? timestampDate(session.updatedAt) : null
   const time = (updatedAt || new Date(0)).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })
@@ -377,6 +429,11 @@ function SessionItem({
         active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
       )}
     >
+      {editing ? <form className="flex min-w-0 flex-1 items-center" onSubmit={(event) => { event.preventDefault(); void save({ title: titleDraft }) }}>
+        <input autoFocus aria-label={t('renameTask')} maxLength={200} value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} className="min-w-0 flex-1 rounded border border-border bg-background px-1 text-xs" />
+        <button disabled={saving || !titleDraft.trim()} aria-label={t('saveTitle')}><Check className="h-3 w-3" /></button>
+        <button type="button" onClick={() => setEditing(false)} aria-label={t('cancelEdit')}><X className="h-3 w-3" /></button>
+      </form> : <>
       <button type="button" onClick={onSelect} className="flex-1 min-w-0 text-left">
         <div className="flex items-center gap-1.5">
           <MessageSquare className="h-2.5 w-2.5 shrink-0" />
@@ -384,6 +441,9 @@ function SessionItem({
         </div>
         <div className="mt-0.5 text-[9px] text-muted-foreground">{time}</div>
       </button>
+      <Button size="icon-xs" variant="ghost" aria-label={t('renameTask')} onClick={() => { setTitleDraft(title); setEditing(true) }}><Pencil className="h-3 w-3" /></Button>
+      <Button size="icon-xs" variant="ghost" disabled={saving} aria-label={t(session.archived ? 'restoreTask' : 'archiveTask')} onClick={() => void save({ archived: !session.archived })}>{session.archived ? <ArchiveRestore className="h-3 w-3" /> : <Archive className="h-3 w-3" />}</Button>
+      </>}
       <Button
         variant="ghost"
         size="icon-xs"
@@ -410,7 +470,7 @@ function SessionItem({
 // start a new turn on, so the terminal / new-session actions are omitted. A
 // banner in the chat panel spells out that a reconnect is needed to continue.
 function OfflineAgentGroup({
-  name, sessions, activeSessionID, defaultOpen, onSelectSession, onDeleteSession,
+  name, sessions, activeSessionID, defaultOpen, onSelectSession, onDeleteSession, onUpdateSession,
 }: {
   name: string
   sessions: SessionRecord[]
@@ -418,6 +478,7 @@ function OfflineAgentGroup({
   defaultOpen: boolean
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
+  onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
 }) {
   const { t } = useTranslation('sidebar')
   const [expanded, setExpanded] = useState(defaultOpen)
@@ -455,10 +516,15 @@ function OfflineAgentGroup({
               active={recordID(session) === activeSessionID}
               onSelect={() => onSelectSession(recordID(session))}
               onDelete={() => onDeleteSession(recordID(session))}
+              onUpdate={(patch) => onUpdateSession(recordID(session), patch)}
             />
           ))}
         </div>
       )}
     </div>
   )
+}
+
+function normalizeTarget(target: string): string {
+  try { return new URL(target).href } catch { return target.trim().toLowerCase() }
 }

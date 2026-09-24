@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, Import, RefreshCw, Upload } from 'lucide-react'
-import { getSupportedCSTXArtifacts, importCSTXArtifact, listSCONodes } from '../lib/cstx-runtime'
+import { getSupportedCSTXArtifacts, importCSTXArtifact, listSCONodes, listCSTXOperations, cstxFailures, retryCSTXFailures, syncCSTXArtifacts, compareSCONodes, type ObservedOperation } from '../lib/cstx-runtime'
 import type { SCONode } from '@cyber/cstx-easm'
 import { CSTXTable } from '@cyber/cstx'
 import { CstxImportDialog, type ImportFileEntry, type ArtifactOption } from '@cyber/cstx'
@@ -135,6 +135,11 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
     submitting: t('importDialog.submitting'),
     submitFailed: t('importDialog.submitFailed', { message: '{{message}}' }),
   }), [t])
+  const [operations, setOperations] = useState<ObservedOperation[]>([])
+  const [operationID, setOperationID] = useState('')
+  const [compareID, setCompareID] = useState('')
+  const [baseNodes, setBaseNodes] = useState<SCONode[]>([])
+  const [parseErrors, setParseErrors] = useState<string[]>([])
   const [nodes, setNodes] = useState<SCONode[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -144,6 +149,7 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
   const [dragOver, setDragOver] = useState(false)
   const [droppedFiles, setDroppedFiles] = useState<File[]>([])
   const [activeType, setActiveType] = useState('all')
+  const loadVersion = useRef(0)
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -160,17 +166,29 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
   }, [])
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current
     setLoading(true)
     setError(null)
+    setNodes([])
+    setBaseNodes([])
+    setParseErrors([])
     try {
-      const data = await listSCONodes({ limit: 5000 })
-      setNodes(data)
+      await syncCSTXArtifacts()
+      const [page, history, failures, base] = await Promise.all([
+        listSCONodes({ scanId: operationID || undefined }), listCSTXOperations(), cstxFailures(operationID || undefined),
+        compareID ? listSCONodes({ scanId: compareID }) : Promise.resolve({ items: [] as SCONode[] }),
+      ])
+      if (version !== loadVersion.current) return
+      setNodes(page.items)
+      setBaseNodes(base.items)
+      setOperations(history)
+      setParseErrors(failures.map((failure) => failure.error))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (version === loadVersion.current) setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (version === loadVersion.current) setLoading(false)
     }
-  }, [])
+  }, [operationID, compareID])
 
   const loadArtifacts = useCallback(async () => {
     setArtifactsLoading(true)
@@ -183,6 +201,7 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
 
   useEffect(() => {
     if (open) void load()
+    return () => { loadVersion.current++ }
   }, [open, load])
 
   useEffect(() => {
@@ -197,7 +216,9 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
     [t],
   )
 
-  const rows = useMemo(() => nodes.map(flattenSCO), [nodes])
+  const rows = useMemo(() => operationID && compareID
+    ? compareSCONodes(baseNodes, nodes).map(({ node, before, change }) => ({ ...flattenSCO(node), change: t(`change_${change}`), ...(before ? { before: JSON.stringify(before) } : {}) }))
+    : nodes.map(flattenSCO), [nodes, baseNodes, operationID, compareID, t])
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>()
     for (const node of nodes) {
@@ -291,6 +312,22 @@ export default function AssetPanel({ open, onClose, onSendToChat, onChanged }: A
         }}
         bodyClassName="flex flex-col"
       >
+          <div className="flex flex-wrap gap-2 border-b border-border p-3">
+            <select aria-label={t('observation')} className="min-w-0 flex-1 rounded border border-border bg-background p-1.5 text-xs" value={operationID} onChange={(event) => { setOperationID(event.target.value); setCompareID('') }}>
+              <option value="">{t('allObservations')}</option>
+              {operations.map((op) => <option key={op.id} value={op.id}>{op.target || op.tool} · {op.timestamp} · {op.id.slice(0, 8)}</option>)}
+            </select>
+            {operationID && <select aria-label={t('compareWith')} className="min-w-0 flex-1 rounded border border-border bg-background p-1.5 text-xs" value={compareID} onChange={(event) => setCompareID(event.target.value)}>
+              <option value="">{t('compareWith')}</option>
+              {operations.filter((op) => op.id !== operationID).map((op) => <option key={op.id} value={op.id}>{op.target || op.tool} · {op.timestamp} · {op.id.slice(0, 8)}</option>)}
+            </select>}
+            {operationID && compareID && <p className="w-full text-xs text-muted-foreground">{t('comparisonHint')}</p>}
+          </div>
+          {parseErrors.length > 0 && <div role="alert" className="border-b border-warning/30 bg-warning/5 p-3 text-xs">
+            <p>{t('parseFailures', { count: parseErrors.length })}</p>
+            <details><summary>{t('failureDetails')}</summary>{parseErrors.map((error, index) => <p key={index}>{error}</p>)}</details>
+            <Button size="xs" variant="ghost" onClick={() => { setLoading(true); void retryCSTXFailures().then(load).catch((error) => setError(String(error))).finally(() => setLoading(false)) }}>{t('retryParsing')}</Button>
+          </div>}
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/5 backdrop-blur-[1px]">
               <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-primary bg-card/90 px-6 py-4 text-sm font-medium text-primary shadow-lg">

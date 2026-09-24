@@ -1,4 +1,5 @@
 export default {
+  connectNodeHint: 'Enter a target to begin. Connect an execution node in the node panel first.',
   chat: 'Chat',
   terminal: 'Terminal',
   llmConfig: 'LLM Config',

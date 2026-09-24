@@ -126,6 +126,7 @@ type SessionRecord struct {
 	CreatedAt     *timestamppb.Timestamp      `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     *timestamppb.Timestamp      `protobuf:"bytes,5,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	Extensions    map[string]*structpb.Struct `protobuf:"bytes,6,rep,name=extensions,proto3" json:"extensions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Archived      bool                        `protobuf:"varint,7,opt,name=archived,proto3" json:"archived,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -195,11 +196,22 @@ func (x *SessionRecord) GetExtensions() map[string]*structpb.Struct {
 	return nil
 }
 
+func (x *SessionRecord) GetArchived() bool {
+	if x != nil {
+		return x.Archived
+	}
+	return false
+}
+
 type ListSessionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AfterCursor   string                 `protobuf:"bytes,1,opt,name=after_cursor,json=afterCursor,proto3" json:"after_cursor,omitempty"`
 	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
 	IncludeClosed bool                   `protobuf:"varint,3,opt,name=include_closed,json=includeClosed,proto3" json:"include_closed,omitempty"`
+	Search        string                 `protobuf:"bytes,4,opt,name=search,proto3" json:"search,omitempty"`
+	NodeId        string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Archived      *bool                  `protobuf:"varint,6,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	Target        string                 `protobuf:"bytes,7,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -253,6 +265,34 @@ func (x *ListSessionsRequest) GetIncludeClosed() bool {
 		return x.IncludeClosed
 	}
 	return false
+}
+
+func (x *ListSessionsRequest) GetSearch() string {
+	if x != nil {
+		return x.Search
+	}
+	return ""
+}
+
+func (x *ListSessionsRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ListSessionsRequest) GetArchived() bool {
+	if x != nil && x.Archived != nil {
+		return *x.Archived
+	}
+	return false
+}
+
+func (x *ListSessionsRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
 }
 
 type ListSessionsResponse struct {
@@ -835,6 +875,165 @@ func (x *ListCommandsResponse) GetCommands() []*CommandSpec {
 	return nil
 }
 
+// Updates presentation metadata without changing execution or node binding.
+type UpdateSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Title         *string                `protobuf:"bytes,3,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	Archived      *bool                  `protobuf:"varint,4,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateSessionRequest) Reset() {
+	*x = UpdateSessionRequest{}
+	mi := &file_types_chat_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateSessionRequest) ProtoMessage() {}
+
+func (x *UpdateSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_types_chat_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateSessionRequest.ProtoReflect.Descriptor instead.
+func (*UpdateSessionRequest) Descriptor() ([]byte, []int) {
+	return file_types_chat_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *UpdateSessionRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *UpdateSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *UpdateSessionRequest) GetTitle() string {
+	if x != nil && x.Title != nil {
+		return *x.Title
+	}
+	return ""
+}
+
+func (x *UpdateSessionRequest) GetArchived() bool {
+	if x != nil && x.Archived != nil {
+		return *x.Archived
+	}
+	return false
+}
+
+type UpdateSessionResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*UpdateSessionResponse_Accepted
+	//	*UpdateSessionResponse_Rejected
+	Outcome       isUpdateSessionResponse_Outcome `protobuf_oneof:"outcome"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateSessionResponse) Reset() {
+	*x = UpdateSessionResponse{}
+	mi := &file_types_chat_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateSessionResponse) ProtoMessage() {}
+
+func (x *UpdateSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_types_chat_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateSessionResponse.ProtoReflect.Descriptor instead.
+func (*UpdateSessionResponse) Descriptor() ([]byte, []int) {
+	return file_types_chat_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *UpdateSessionResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *UpdateSessionResponse) GetOutcome() isUpdateSessionResponse_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *UpdateSessionResponse) GetAccepted() *SessionRecord {
+	if x != nil {
+		if x, ok := x.Outcome.(*UpdateSessionResponse_Accepted); ok {
+			return x.Accepted
+		}
+	}
+	return nil
+}
+
+func (x *UpdateSessionResponse) GetRejected() *aop.Rejection {
+	if x != nil {
+		if x, ok := x.Outcome.(*UpdateSessionResponse_Rejected); ok {
+			return x.Rejected
+		}
+	}
+	return nil
+}
+
+type isUpdateSessionResponse_Outcome interface {
+	isUpdateSessionResponse_Outcome()
+}
+
+type UpdateSessionResponse_Accepted struct {
+	Accepted *SessionRecord `protobuf:"bytes,2,opt,name=accepted,proto3,oneof"`
+}
+
+type UpdateSessionResponse_Rejected struct {
+	Rejected *aop.Rejection `protobuf:"bytes,3,opt,name=rejected,proto3,oneof"`
+}
+
+func (*UpdateSessionResponse_Accepted) isUpdateSessionResponse_Outcome() {}
+
+func (*UpdateSessionResponse_Rejected) isUpdateSessionResponse_Outcome() {}
+
 var File_types_chat_proto protoreflect.FileDescriptor
 
 const file_types_chat_proto_rawDesc = "" +
@@ -846,7 +1045,7 @@ const file_types_chat_proto_rawDesc = "" +
 	"\x04Mode\x12\x14\n" +
 	"\x10MODE_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fMODE_INHERIT\x10\x01\x12\x11\n" +
-	"\rMODE_SNAPSHOT\x10\x02\"\xf5\x02\n" +
+	"\rMODE_SNAPSHOT\x10\x02\"\x91\x03\n" +
 	"\rSessionRecord\x12&\n" +
 	"\asession\x18\x01 \x01(\v2\f.aop.SessionR\asession\x12\x1d\n" +
 	"\n" +
@@ -857,14 +1056,20 @@ const file_types_chat_proto_rawDesc = "" +
 	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12I\n" +
 	"\n" +
 	"extensions\x18\x06 \x03(\v2).cyber.chat.SessionRecord.ExtensionsEntryR\n" +
-	"extensions\x1aV\n" +
+	"extensions\x12\x1a\n" +
+	"\barchived\x18\a \x01(\bR\barchived\x1aV\n" +
 	"\x0fExtensionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
-	"\x05value\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x05value:\x028\x01J\x04\b\x03\x10\x04\"u\n" +
+	"\x05value\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x05value:\x028\x01J\x04\b\x03\x10\x04\"\xec\x01\n" +
 	"\x13ListSessionsRequest\x12!\n" +
 	"\fafter_cursor\x18\x01 \x01(\tR\vafterCursor\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\rR\x05limit\x12%\n" +
-	"\x0einclude_closed\x18\x03 \x01(\bR\rincludeClosed\"n\n" +
+	"\x0einclude_closed\x18\x03 \x01(\bR\rincludeClosed\x12\x16\n" +
+	"\x06search\x18\x04 \x01(\tR\x06search\x12\x17\n" +
+	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x12\x1f\n" +
+	"\barchived\x18\x06 \x01(\bH\x00R\barchived\x88\x01\x01\x12\x16\n" +
+	"\x06target\x18\a \x01(\tR\x06targetB\v\n" +
+	"\t_archived\"n\n" +
 	"\x14ListSessionsResponse\x125\n" +
 	"\bsessions\x18\x01 \x03(\v2\x19.cyber.chat.SessionRecordR\bsessions\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -905,7 +1110,22 @@ const file_types_chat_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"N\n" +
 	"\x14ListCommandsResponse\x126\n" +
-	"\bcommands\x18\x01 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommandsB1Z/github.com/chainreactors/cyber/core/types;typesb\x06proto3"
+	"\bcommands\x18\x01 \x03(\v2\x1a.cyber.command.CommandSpecR\bcommands\"\xa7\x01\n" +
+	"\x14UpdateSessionRequest\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x19\n" +
+	"\x05title\x18\x03 \x01(\tH\x00R\x05title\x88\x01\x01\x12\x1f\n" +
+	"\barchived\x18\x04 \x01(\bH\x01R\barchived\x88\x01\x01B\b\n" +
+	"\x06_titleB\v\n" +
+	"\t_archived\"\xa8\x01\n" +
+	"\x15UpdateSessionResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x127\n" +
+	"\baccepted\x18\x02 \x01(\v2\x19.cyber.chat.SessionRecordH\x00R\baccepted\x12,\n" +
+	"\brejected\x18\x03 \x01(\v2\x0e.aop.RejectionH\x00R\brejectedB\t\n" +
+	"\aoutcomeB1Z/github.com/chainreactors/cyber/core/types;typesb\x06proto3"
 
 var (
 	file_types_chat_proto_rawDescOnce sync.Once
@@ -920,7 +1140,7 @@ func file_types_chat_proto_rawDescGZIP() []byte {
 }
 
 var file_types_chat_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_types_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_types_chat_proto_goTypes = []any{
 	(SessionHistory_Mode)(0),      // 0: cyber.chat.SessionHistory.Mode
 	(*SessionHistory)(nil),        // 1: cyber.chat.SessionHistory
@@ -936,34 +1156,38 @@ var file_types_chat_proto_goTypes = []any{
 	(*DeleteSessionResponse)(nil), // 11: cyber.chat.DeleteSessionResponse
 	(*ListCommandsRequest)(nil),   // 12: cyber.chat.ListCommandsRequest
 	(*ListCommandsResponse)(nil),  // 13: cyber.chat.ListCommandsResponse
-	nil,                           // 14: cyber.chat.SessionRecord.ExtensionsEntry
-	(*aop.Session)(nil),           // 15: aop.Session
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(*aop.Rejection)(nil),         // 17: aop.Rejection
-	(*CommandSpec)(nil),           // 18: cyber.command.CommandSpec
-	(*structpb.Struct)(nil),       // 19: google.protobuf.Struct
+	(*UpdateSessionRequest)(nil),  // 14: cyber.chat.UpdateSessionRequest
+	(*UpdateSessionResponse)(nil), // 15: cyber.chat.UpdateSessionResponse
+	nil,                           // 16: cyber.chat.SessionRecord.ExtensionsEntry
+	(*aop.Session)(nil),           // 17: aop.Session
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*aop.Rejection)(nil),         // 19: aop.Rejection
+	(*CommandSpec)(nil),           // 20: cyber.command.CommandSpec
+	(*structpb.Struct)(nil),       // 21: google.protobuf.Struct
 }
 var file_types_chat_proto_depIdxs = []int32{
 	0,  // 0: cyber.chat.SessionHistory.mode:type_name -> cyber.chat.SessionHistory.Mode
-	15, // 1: cyber.chat.SessionRecord.session:type_name -> aop.Session
-	16, // 2: cyber.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
-	16, // 3: cyber.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
-	14, // 4: cyber.chat.SessionRecord.extensions:type_name -> cyber.chat.SessionRecord.ExtensionsEntry
+	17, // 1: cyber.chat.SessionRecord.session:type_name -> aop.Session
+	18, // 2: cyber.chat.SessionRecord.created_at:type_name -> google.protobuf.Timestamp
+	18, // 3: cyber.chat.SessionRecord.updated_at:type_name -> google.protobuf.Timestamp
+	16, // 4: cyber.chat.SessionRecord.extensions:type_name -> cyber.chat.SessionRecord.ExtensionsEntry
 	2,  // 5: cyber.chat.ListSessionsResponse.sessions:type_name -> cyber.chat.SessionRecord
 	2,  // 6: cyber.chat.GetSessionResponse.session:type_name -> cyber.chat.SessionRecord
-	15, // 7: cyber.chat.ResetSessionReceipt.previous:type_name -> aop.Session
+	17, // 7: cyber.chat.ResetSessionReceipt.previous:type_name -> aop.Session
 	2,  // 8: cyber.chat.ResetSessionReceipt.current:type_name -> cyber.chat.SessionRecord
 	8,  // 9: cyber.chat.ResetSessionResponse.accepted:type_name -> cyber.chat.ResetSessionReceipt
-	17, // 10: cyber.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
-	15, // 11: cyber.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
-	17, // 12: cyber.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
-	18, // 13: cyber.chat.ListCommandsResponse.commands:type_name -> cyber.command.CommandSpec
-	19, // 14: cyber.chat.SessionRecord.ExtensionsEntry.value:type_name -> google.protobuf.Struct
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	19, // 10: cyber.chat.ResetSessionResponse.rejected:type_name -> aop.Rejection
+	17, // 11: cyber.chat.DeleteSessionResponse.accepted:type_name -> aop.Session
+	19, // 12: cyber.chat.DeleteSessionResponse.rejected:type_name -> aop.Rejection
+	20, // 13: cyber.chat.ListCommandsResponse.commands:type_name -> cyber.command.CommandSpec
+	2,  // 14: cyber.chat.UpdateSessionResponse.accepted:type_name -> cyber.chat.SessionRecord
+	19, // 15: cyber.chat.UpdateSessionResponse.rejected:type_name -> aop.Rejection
+	21, // 16: cyber.chat.SessionRecord.ExtensionsEntry.value:type_name -> google.protobuf.Struct
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_types_chat_proto_init() }
@@ -972,6 +1196,7 @@ func file_types_chat_proto_init() {
 		return
 	}
 	file_types_command_proto_init()
+	file_types_chat_proto_msgTypes[2].OneofWrappers = []any{}
 	file_types_chat_proto_msgTypes[8].OneofWrappers = []any{
 		(*ResetSessionResponse_Accepted)(nil),
 		(*ResetSessionResponse_Rejected)(nil),
@@ -980,13 +1205,18 @@ func file_types_chat_proto_init() {
 		(*DeleteSessionResponse_Accepted)(nil),
 		(*DeleteSessionResponse_Rejected)(nil),
 	}
+	file_types_chat_proto_msgTypes[13].OneofWrappers = []any{}
+	file_types_chat_proto_msgTypes[14].OneofWrappers = []any{
+		(*UpdateSessionResponse_Accepted)(nil),
+		(*UpdateSessionResponse_Rejected)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_types_chat_proto_rawDesc), len(file_types_chat_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

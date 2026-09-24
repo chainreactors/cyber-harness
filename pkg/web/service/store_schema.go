@@ -56,7 +56,7 @@ var coreSchema = SchemaModule{
 	Tables: map[string][]string{
 		"aop_request_ledger": {"request_id", "method", "request_hash", "response_json", "created_at"},
 		"chat_aop_events":    {"id", "session_id", "event_id", "cursor", "turn_id", "emitter", "sequence", "event_json", "created_at"},
-		"chat_sessions":      {"id", "node_id", "status", "title", "agent_name", "session_json", "created_at", "updated_at"},
+		"chat_sessions":      {"id", "node_id", "status", "archived", "title", "agent_name", "session_json", "created_at", "updated_at"},
 		"raw_artifacts":      {"cursor", "event_id", "event_proto", "created_at"},
 	},
 }

@@ -120,6 +120,10 @@ func (s *connectServer) Connect(ctx context.Context, stream *connect.BidiStream[
 	return asConnectError(err)
 }
 
+func (s *connectServer) UpdateSession(ctx context.Context, req *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error) {
+	return connectCall(s.api.Sessions.UpdateSession(ctx, req.Msg))
+}
+
 func (s *connectServer) ListSessions(ctx context.Context, req *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error) {
 	return connectCall(s.api.Sessions.ListSessions(ctx, req.Msg))
 }

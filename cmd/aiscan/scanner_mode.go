@@ -30,43 +30,24 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 		return scannerMode{}, rest, nil
 	}
 	verifyMode, explicit := scannerVerifyMode(rest[1:], defaultVerify)
-	sniperEnabled := hasScannerFlag(rest[1:], "--sniper")
-	deepEnabled := hasScannerFlag(rest[1:], "--deep")
-	aiSkillRequested := sniperEnabled || deepEnabled
-
-	mode := scannerMode{}
-
-	if aiSkillRequested {
+	if hasScannerFlag(rest[1:], "--deep") {
+		return scannerMode{}, nil, fmt.Errorf("--deep is no longer supported; use --mode full for full scanning")
+	}
+	if err := scan.ValidateVerify(verifyMode); err != nil {
+		return scannerMode{}, nil, err
+	}
+	if explicit && verifyMode == "" {
+		return scannerMode{}, nil, fmt.Errorf("--verify requires on or off")
+	}
+	mode := scannerMode{Provider: profile.ProviderOptional}
+	if verifyMode == "on" || scannerBoolFlagEnabled(rest[1:], "--sniper") {
 		mode.Provider = profile.ProviderRequired
 		mode.Agent = true
 	}
-
-	switch verifyMode {
-	case "auto":
-		if !aiSkillRequested {
-			mode.Provider = profile.ProviderOptional
-		}
-		mode.Agent = explicit || aiSkillRequested
-		return mode, removeScannerFlag(rest, "--verify"), nil
-	case "off":
-		if explicit {
-			return mode, replaceOrAppendScannerFlag(rest, "--verify", "off"), nil
-		}
-		return mode, rest, nil
-	case "low", "medium", "high", "critical":
-		if aiSkillRequested || explicit {
-			mode.Provider = profile.ProviderRequired
-		} else {
-			mode.Provider = profile.ProviderOptional
-		}
-		mode.Agent = explicit || aiSkillRequested
-		return mode, rest, nil
-	default:
-		if explicit {
-			return scannerMode{}, nil, fmt.Errorf("invalid --verify value %q: expected auto, off, low, medium, high, or critical", verifyMode)
-		}
-		return mode, rest, nil
+	if verifyMode != "" {
+		rest = replaceOrAppendScannerFlag(rest, "--verify", verifyMode)
 	}
+	return mode, rest, nil
 }
 
 func hasScannerFlag(args []string, long string) bool {
@@ -196,7 +177,7 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 func defaultVerifyMode(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
-		return "off"
+		return ""
 	}
 	return value
 }

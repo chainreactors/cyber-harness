@@ -405,7 +405,7 @@ Commands:
   init           Initialize user configuration (--project for this directory)
   config         Inspect, validate and manage configuration
   doctor         Check configuration and dependencies
-  scan           Scan a target, with optional AI skills (--verify, --sniper, --deep)
+  scan           Scan a target, with optional AI skills (--verify, --sniper)
   agent          Run the natural-language agent
   web            Start the web UI server (includes embedded agent server)
   serve          Run the standalone agent server
@@ -415,7 +415,7 @@ Advanced scanners:
 
 Examples:
   aiscan scan -i 127.0.0.1
-  aiscan scan -i http://target.com --verify=high --sniper --model gpt-4o
+  aiscan scan -i http://target.com --verify=on --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
   aiscan web --addr 0.0.0.0:8080
   aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(scannerext.UsageLines(), "\n"))

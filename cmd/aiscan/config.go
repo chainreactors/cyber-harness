@@ -42,6 +42,7 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 	hub, _ := scannerext.ReadCyberhub(option)
 	recon, _ := scannerext.ReadRecon(option)
 	searchKeys, _ := searchext.ReadKeys(option)
+	scanOptions, _ := scannerext.ReadScan(option)
 	return appConfig{
 		DataDir: dataDir, Resolved: option.Resolved,
 		Provider: provider.StartupConfig{
@@ -50,6 +51,7 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 		},
 		Scanner: scannerext.Config{
 			AgentName: "cyber",
+			Verify:    scanOptions.Verify,
 			Resources: resources.Options{
 				CyberhubURL: hub.URL, APIKey: hub.Key,
 				Mode: hub.Mode, Proxy: hub.Proxy,

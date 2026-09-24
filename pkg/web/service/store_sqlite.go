@@ -193,7 +193,7 @@ func (s *SQLiteStore) ListSessions(ctx context.Context, limit int) ([]*types.Ses
 	return sessions, nil
 }
 
-func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, includeClosed bool) ([]*types.SessionRecord, bool, error) {
+func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, filters *types.ListSessionsRequest) ([]*types.SessionRecord, bool, error) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -203,9 +203,29 @@ func (s *SQLiteStore) ListSessionPage(ctx context.Context, offset, limit int, in
 	if limit > 500 {
 		limit = 500
 	}
-	query := s.orm.NewSelect().Model((*sessionModel)(nil)).Column("session_json").OrderExpr("updated_at DESC").Limit(limit + 1).Offset(offset)
-	if !includeClosed {
+	query := s.orm.NewSelect().Model((*sessionModel)(nil)).Column("session_json").OrderExpr("updated_at DESC, id DESC").Limit(limit + 1).Offset(offset)
+	if filters == nil {
+		filters = &types.ListSessionsRequest{}
+	}
+	if !filters.IncludeClosed {
 		query = query.Where("status = ?", SessionStateOpen)
+	}
+	query = query.Where("archived = ?", filters.GetArchived())
+	if filters.NodeId != "" {
+		query = query.Where("node_id = ?", filters.NodeId)
+	}
+	if filters.Search != "" {
+		if s.hasModule(ScanSchema.Name) {
+			query = query.Where("(instr(lower(title), lower(?)) > 0 OR EXISTS (SELECT 1 FROM session_scans ss JOIN scans sc ON sc.id = ss.scan_id WHERE ss.session_id = session.id AND instr(lower(sc.target), lower(?)) > 0))", filters.Search, filters.Search)
+		} else {
+			query = query.Where("instr(lower(title), lower(?)) > 0", filters.Search)
+		}
+	}
+	if filters.Target != "" {
+		if !s.hasModule(ScanSchema.Name) {
+			return nil, false, nil
+		}
+		query = query.Where("EXISTS (SELECT 1 FROM session_scans ss JOIN scans sc ON sc.id = ss.scan_id WHERE ss.session_id = session.id AND sc.target = ?)", filters.Target)
 	}
 	var models []sessionModel
 	if err := query.Model(&models).Scan(ctx); err != nil {
@@ -272,7 +292,7 @@ func sessionToModel(session *types.SessionRecord) (*sessionModel, error) {
 	domain := session.GetSession()
 	return &sessionModel{
 		ID: domain.GetId(), NodeID: domain.GetNodeId(), Status: domain.GetState(),
-		Title: domain.GetTitle(), AgentName: session.GetAgentName(), SessionJSON: raw,
+		Archived: session.GetArchived(), Title: domain.GetTitle(), AgentName: session.GetAgentName(), SessionJSON: raw,
 		CreatedAt: formatProtoTime(session.GetCreatedAt()), UpdatedAt: formatProtoTime(session.GetUpdatedAt()),
 	}, nil
 }
@@ -283,7 +303,7 @@ func (s *SQLiteStore) UpdateSession(ctx context.Context, session *types.SessionR
 		return err
 	}
 	_, err = s.orm.NewUpdate().Model(model).
-		Column("node_id", "status", "title", "agent_name", "session_json", "updated_at").WherePK().Exec(ctx)
+		Column("node_id", "status", "title", "archived", "agent_name", "session_json", "updated_at").WherePK().Exec(ctx)
 	return err
 }
 
@@ -302,7 +322,15 @@ func (s *SQLiteStore) attachSessionScans(ctx context.Context, session *types.Ses
 	for index, id := range ids {
 		values[index] = id
 	}
-	section, err := structpb.NewStruct(map[string]any{"ids": values})
+	var targets []string
+	if err := s.orm.NewSelect().Model((*scanModel)(nil)).Column("target").Where("id IN (?)", bun.List(ids)).Distinct().OrderExpr("target ASC").Scan(ctx, &targets); err != nil {
+		return err
+	}
+	targetValues := make([]any, len(targets))
+	for i, target := range targets {
+		targetValues[i] = target
+	}
+	section, err := structpb.NewStruct(map[string]any{"ids": values, "targets": targetValues})
 	if err != nil {
 		return err
 	}
@@ -517,8 +545,8 @@ func artifactEventModels(appended []*aop.Event) ([]*rawArtifactModel, error) {
 		}
 		if _, _, found, err := toolpb.FromEvent(event); err != nil {
 			return nil, fmt.Errorf("artifact event %d: %w", index, err)
-		} else if !found {
-			return nil, fmt.Errorf("artifact event %d does not contain an aop.tool.Artifact payload", index)
+		} else if !found && !event.GetExtension().MessageIs(new(toolpb.Loot)) {
+			return nil, fmt.Errorf("artifact event %d does not contain an aop.tool.Artifact or Loot payload", index)
 		}
 		eventID := strings.TrimSpace(event.GetId())
 		if eventID == "" {

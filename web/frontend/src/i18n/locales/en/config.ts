@@ -1,4 +1,8 @@
 export default {
+  verify_default: 'Follow execution node model configuration',
+  verify_on: 'On',
+  verify_off: 'Off',
+
   configurationLayersHint: 'Saving changes only the edited settings in the file above. Project settings override user settings; startup arguments and environment variables may override file settings. Personal credentials are not automatically copied into project configuration.',
   settings: 'Settings',
   llmConfigured: 'LLM configured',

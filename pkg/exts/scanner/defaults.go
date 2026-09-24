@@ -8,5 +8,4 @@ var (
 	DefaultCyberhubKey  = ""
 	DefaultCyberhubMode = "merge"
 	DefaultScannerProxy = ""
-	DefaultVerify       = "auto"
 )

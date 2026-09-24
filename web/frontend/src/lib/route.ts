@@ -28,7 +28,7 @@ export function sessionRoutePath(id: string) {
 }
 
 export function setSessionRoute(id: string, mode: RouteMode) {
-  setBrowserRoute(sessionRoutePath(id), mode)
+  setBrowserRoute(sessionRoutePath(id) + window.location.search, mode)
 }
 
 function setBrowserRoute(path: string, mode: RouteMode) {

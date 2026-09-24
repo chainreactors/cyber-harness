@@ -8,6 +8,7 @@ import "types/chat.proto";
 option go_package = "github.com/chainreactors/cyber/pkg/rpc;rpc";
 
 service SessionService {
+  rpc UpdateSession(cyber.chat.UpdateSessionRequest) returns (cyber.chat.UpdateSessionResponse);
   rpc ListSessions(cyber.chat.ListSessionsRequest) returns (cyber.chat.ListSessionsResponse);
   rpc GetSession(cyber.chat.GetSessionRequest) returns (cyber.chat.GetSessionResponse);
   rpc ResetSession(cyber.chat.ResetSessionRequest) returns (cyber.chat.ResetSessionResponse);

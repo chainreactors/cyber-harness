@@ -1,4 +1,8 @@
 export default {
+  verify_default: '跟随执行节点模型配置',
+  verify_on: '开启',
+  verify_off: '关闭',
+
   configurationLayersHint: '保存只修改上述文件中编辑过的设置。项目配置优先于用户配置；启动参数和环境变量可能覆盖文件设置，个人凭据不会自动写入项目配置。',
   settings: '设置',
   llmConfigured: 'LLM 已配置',

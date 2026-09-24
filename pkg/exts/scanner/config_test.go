@@ -81,17 +81,18 @@ func TestReconSectionEnvironmentAndExplicitLimit(t *testing.T) {
 	}
 }
 
-func TestScanSectionVerifyStaysEmptyUnlessConfigured(t *testing.T) {	resolved := resolveSections(t, nil, nil, nil)
+func TestScanSectionVerifyStaysEmptyUnlessConfigured(t *testing.T) {
+	resolved := resolveSections(t, nil, nil, nil)
 	value, err := cfg.Get[*ScanOptions](resolved, ScanConfigKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if value.Verify != "" {
-		t.Fatalf("verify = %q, want empty (consumer resolves DefaultVerify)", value.Verify)
+		t.Fatalf("verify = %q, want empty until the execution node resolves it", value.Verify)
 	}
-	resolved = resolveSections(t, cfg.Values{ScanConfigKey: map[string]any{"verify": "high"}}, nil, nil)
+	resolved = resolveSections(t, cfg.Values{ScanConfigKey: map[string]any{"verify": "on"}}, nil, nil)
 	value, _ = cfg.Get[*ScanOptions](resolved, ScanConfigKey)
-	if value.Verify != "high" {
+	if value.Verify != "on" {
 		t.Fatalf("verify = %q", value.Verify)
 	}
 }

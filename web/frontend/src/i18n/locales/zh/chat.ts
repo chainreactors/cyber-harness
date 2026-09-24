@@ -1,4 +1,5 @@
 export default {
+  connectNodeHint: '输入目标即可开始；请先在节点面板连接执行节点。',
   chat: '对话',
   terminal: '终端',
   llmConfig: 'LLM 配置',

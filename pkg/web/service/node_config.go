@@ -30,7 +30,7 @@ func (s *Service) nodeConfig(ctx context.Context) (*types.DistributeConfig, erro
 func (s *Service) configWithRuntimeLLM(stored *types.DistributeConfig) *types.DistributeConfig {
 	distributed := proto.CloneOf(stored)
 	effective := s.runtimeLLMConfig()
-	if effective == (provider.ProviderConfig{}) {
+	if effective.Provider == "" && effective.Model == "" && effective.BaseURL == "" && effective.APIKey == "" {
 		return distributed
 	}
 	if distributed == nil {

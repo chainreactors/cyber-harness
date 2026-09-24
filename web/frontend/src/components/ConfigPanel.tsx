@@ -695,9 +695,9 @@ function ScanTab({ form, setForm }: Omit<TabProps, 'cs'>) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('defaultVerifyMode')}>
-        <Select value={form.scan.verify || 'auto'} onValueChange={(v) => setForm((f) => ({ ...f, scan: { ...f.scan, verify: v } }))}>
-          <SelectTrigger className="h-9 w-full"><SelectValue placeholder="auto" /></SelectTrigger>
-          <SelectContent>{['auto','off','low','high'].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+        <Select value={form.scan.verify || 'default'} onValueChange={(v) => setForm((f) => ({ ...f, scan: { ...f.scan, verify: v === 'default' ? '' : v } }))}>
+          <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>{['default','on','off'].map((v) => <SelectItem key={v} value={v}>{t(`verify_${v}`)}</SelectItem>)}</SelectContent>
         </Select>
       </Field>
       <p className="sm:col-span-2 text-xs text-muted-foreground">{t('localOnlyNote')}</p>

@@ -12,6 +12,7 @@ type sessionModel struct {
 	ID          string `bun:"id,pk"`
 	NodeID      string `bun:"node_id,notnull"`
 	Status      string `bun:"status,notnull"`
+	Archived    bool   `bun:"archived,notnull"`
 	Title       string `bun:"title,notnull"`
 	AgentName   string `bun:"agent_name,notnull"`
 	SessionJSON string `bun:"session_json,type:text,notnull"`

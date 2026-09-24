@@ -115,7 +115,7 @@ output:
 
 # 扫描默认值
 scan:
-  verify: ""          # auto, off, low, medium, high, critical
+  verify: ""          # on / off；留空由执行节点按模型是否存在决定
 
 # 通用选项
 misc:
@@ -452,9 +452,8 @@ aiscan cyberhub id tomcat
 | `--zombie-top` | 默认弱口令组合数量 | 由引擎解析 |
 | `--max-neutron-per-finger` | 每个指纹的模板上限 | 20 |
 | `--broad-poc` | 无匹配指纹时也运行 POC | 关闭 |
-| `--verify` | off、low、medium、high、critical、auto | CLI 配置默认 auto，限制见正文 |
+| `--verify` | on、off | 未指定时采用节点配置，否则有模型开启、无模型关闭 |
 | `--sniper` | 指纹的后续漏洞情报搜索 | 关闭 |
-| `--deep` | 保留参数；当前没有接通 AI deep 执行阶段 | 关闭 |
 | `-j, --json` | 完成后输出 gogo/spray 原生 JSON Lines | 关闭 |
 | `--trace`、`--debug` | 调度观察、底层日志 | 关闭 |
 | `--no-color` | 关闭终端颜色 | 关闭 |
@@ -521,7 +520,7 @@ scan:
 | 快速资产发现和风险初筛 | `aiscan scan -i <target>` |
 | 完整扫描（含路径爆破） | `aiscan scan -i <target> --mode full` |
 | 搜索已知漏洞情报 | `aiscan scan -i <target> --sniper` |
-| AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=high --sniper` |
+| AI 主动验证 + 漏洞搜索 | `aiscan scan -i <target> --verify=on --sniper` |
 | 自动解释结果和生成结论 | `aiscan agent -p "<任务>" -i <target>` |
 | 目标驱动 + 自动评估 | `aiscan agent -e "<标准>" -p "<任务>" -i <target>` |
 | 由 Agent 调用扫描器并分析 | `aiscan --ai -p "<意图>" <scanner> ...` |
@@ -549,7 +548,7 @@ aiscan agent -p "检查目标" -i http://target.example
 
 1. 检查是否配置了 LLM provider
 2. 确认发现的风险优先级达到了 `--verify` 阈值
-3. 当前 `auto` 路径未转成 high 验证阈值；明确启用请传 `--verify=high`，详见[扫描限制](scan.md#ai-增强扫描)
+3. 查看验证错误与原始证据；`auto` 和严重性阈值已移除，明确启用请传 `--verify=on`。
 
 ### 输出太多或包含颜色
 

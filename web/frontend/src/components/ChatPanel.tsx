@@ -50,7 +50,6 @@ import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDeta
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
 import type { ChatMessage, TimelineItem } from '../hooks/useChatSession'
-import InstrumentIdle from './InstrumentIdle'
 import ScannerToolCall from './chat/ScannerToolCall'
 import SubagentRunCard from './chat/SubagentRunCard'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
@@ -416,7 +415,8 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) => void
+  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string; sessionID?: string }) => Promise<boolean>
+  ensureSession: () => Promise<string | null>
   onPause: () => void
   onClearError: () => void
 }
@@ -437,10 +437,9 @@ export default function ChatPanel({
   agentOffline,
   agentName,
   agents = [],
-  onCreateSession,
-  onOpenTerminal,
   onOpenIOA,
   onSend,
+  ensureSession,
   onPause,
   onClearError,
 }: Props) {
@@ -652,30 +651,28 @@ export default function ChatPanel({
     [isThinking, viewerTimeline],
   )
 
+  const uploadedFiles = useRef(new WeakMap<File, Set<string>>())
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
+    const sessionID = await ensureSession()
+    if (!sessionID) return false
     const opts = sendOpts()
-    const hadGoal = persist
-    if (!attachments?.length) {
-      onSend(content, opts)
-      if (hadGoal) resetGoal()
-      return
-    }
     const contextParts: string[] = []
-    for (const a of attachments) {
-      if (a.mode === 'context') {
-        const text = await a.file.text()
-        contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
-      } else if (a.mode === 'upload' && activeSessionID) {
-        try {
-          await uploadChatFile(activeSessionID, a.file)
-        } catch { /* upload error is surfaced by the Connect call */ }
+    for (const attachment of attachments || []) {
+      if (attachment.mode === 'context') {
+        contextParts.push(`<file name="${attachment.file.name}">\n${await attachment.file.text()}\n</file>`)
+      } else {
+        const uploaded = uploadedFiles.current.get(attachment.file) || new Set<string>()
+        if (!uploaded.has(sessionID)) {
+          await uploadChatFile(sessionID, attachment.file)
+          uploaded.add(sessionID)
+          uploadedFiles.current.set(attachment.file, uploaded)
+        }
       }
     }
-    const fullContent = contextParts.length > 0
-      ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}`
-      : content
-    if (fullContent.trim()) onSend(fullContent, opts)
-    if (hadGoal) resetGoal()
+    const fullContent = contextParts.length ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}` : content
+    const accepted = await onSend(fullContent.trim() || (attachments || []).map((a) => a.file.name).join(', '), { ...opts, sessionID })
+    if (accepted && persist) resetGoal()
+    return accepted
   }
 
   const renderViewerItem = useCallback(
@@ -728,59 +725,13 @@ export default function ChatPanel({
     [ioaRailItems, onOpenIOA],
   )
 
-  const emptyState = !hasActiveSession ? (
+  const emptyState = !isThinking ? (
     <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-center py-4')}>
       <div className={inputFormClass}>
-        <InstrumentIdle
-          eyebrow={t('consoleReady')}
-          title={t('startConversation')}
-        >
-          {agents.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2">
-              {agents.map((agent) => (
-                // Chat + Terminal read as one segmented control: a shared bordered
-                // surface with a hairline divider, so the pair no longer looks like
-                // a solid chip next to a stray bare link.
-                <div
-                  key={agent.nodeID}
-                  className="inline-flex items-stretch divide-x divide-border overflow-hidden rounded-md border border-border bg-card shadow-soft"
-                >
-                  {onCreateSession && (
-                    <Button size="sm" variant="ghost" onClick={() => onCreateSession(agent.nodeID)} className="gap-1.5 rounded-none shadow-none">
-                      <MessageSquare className="h-3.5 w-3.5 text-primary" />
-                      {agent.name || t('chat')}
-                    </Button>
-                  )}
-                  {onOpenTerminal && (
-                    <Button size="sm" variant="ghost" onClick={() => onOpenTerminal(agent.nodeID)} className="gap-1.5 rounded-none text-muted-foreground shadow-none hover:text-foreground">
-                      <Terminal className="h-3.5 w-3.5" />
-                      {t('terminal')}
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </InstrumentIdle>
-      </div>
-    </div>
-  ) : !isThinking ? (
-    // Desktop centers the "Ready" instrument in the empty thread; mobile keeps the
-    // greeting top-anchored (it's a full-height card grid, not a centered glyph).
-    <div className={cn(workspaceClass, 'flex min-h-full flex-col justify-start py-4 md:justify-center')}>
-      <div className={inputFormClass}>
-        <div className="hidden md:block">
-          <EmptyState
-            eyebrow={t('readyEyebrow')}
-            title={t('ready')}
-            subtitle={
-              <>{t('readyHintBefore')}<code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">!scan -i &lt;target&gt;</code>{t('readyHintAfter')}</>
-            }
-          />
-        </div>
-        <div className="md:hidden">
-          <MobileChatGreeting onSeed={seedComposer} />
-        </div>
+        <ChatGreeting onSeed={seedComposer} />
+        {!hasActiveSession && agents.length === 0 && (
+          <p className="px-1 py-3 text-sm text-muted-foreground">{t('connectNodeHint')}</p>
+        )}
       </div>
     </div>
   ) : null
@@ -822,7 +773,7 @@ export default function ChatPanel({
         scrollResetKey={activeSessionID}
       />
 
-      {hasActiveSession && (
+      {(
         <div className="bg-background/95 pb-safe backdrop-blur-sm">
             {agentOffline && (
               <div className={cn(workspaceClass, 'pt-2')}>
@@ -909,7 +860,7 @@ export default function ChatPanel({
                     injectAsContext: t('injectAsContext'),
                     uploadToRemote: t('uploadToRemote'),
                   }}
-                  enableAttachments={!!activeSessionID}
+                  enableAttachments
                 />
               </div>
             </div>
@@ -1414,22 +1365,12 @@ function mergeIOAPayload(primary: IOAMessagePayload, fallback: IOAMessagePayload
   }
 }
 
-function EmptyState({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: ReactNode }) {
-  return <InstrumentIdle eyebrow={eyebrow} title={title} subtitle={subtitle} />
-}
-
-// Phone-only greeting for a fresh, empty session: an Cyber hello + a 2×2 grid of
-// capability cards, each seeding the composer with a starter prompt (Doubao's
-// home pattern). Kept in Cyber's own skin — blue accent, warm reserved for
-// severity, no mascot. The scan card seeds the real "!scan " command; the others
-// seed editable natural-language templates the operator completes.
-function MobileChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
+function ChatGreeting({ onSeed }: { onSeed: (text: string) => void }) {
   const { t } = useTranslation('chat')
   const cards: { key: string; Icon: typeof Radar; seed?: string; seedKey?: string; titleKey: string; subKey: string }[] = [
-    { key: 'scan', Icon: Radar, seed: '!scan ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
+    { key: 'scan', Icon: Radar, seed: '!scan -i ', titleKey: 'cardScanTitle', subKey: 'cardScanSub' },
     { key: 'verify', Icon: RefreshCw, seedKey: 'cardVerifySeed', titleKey: 'cardVerifyTitle', subKey: 'cardVerifySub' },
     { key: 'assets', Icon: Layers, seedKey: 'cardAssetsSeed', titleKey: 'cardAssetsTitle', subKey: 'cardAssetsSub' },
-    { key: 'swarm', Icon: Network, seedKey: 'cardSwarmSeed', titleKey: 'cardSwarmTitle', subKey: 'cardSwarmSub' },
   ]
   return (
     <div className="px-1 pb-2 pt-8">

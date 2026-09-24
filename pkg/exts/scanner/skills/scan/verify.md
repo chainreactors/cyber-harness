@@ -61,7 +61,6 @@ Do not report these as confirmed vulnerabilities unless there is an impact chain
 ## Status
 
 - `confirmed`: active probing directly supports a security issue with reproducible impact evidence
-- `info`: useful exposure or fingerprint is real, but exploitability or impact was not demonstrated
 - `not_confirmed`: probing completed and did not support the claim
 - `inconclusive`: probing could not complete or evidence is contradictory, unstable, or tool-limited
 
@@ -75,7 +74,7 @@ status:<status> | target:<host:port or URL> | <one-sentence title>
 
 Followed by concise markdown with the exact evidence used for the decision.
 
-- **status**: confirmed, not_confirmed, info, or inconclusive
+- **status**: confirmed, not_confirmed, or inconclusive
 - **target**: host:port or URL verified
 
 Selected collaboration skills may contribute additional reporting instructions.

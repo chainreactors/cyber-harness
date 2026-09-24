@@ -34,6 +34,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// SessionServiceUpdateSessionProcedure is the fully-qualified name of the SessionService's
+	// UpdateSession RPC.
+	SessionServiceUpdateSessionProcedure = "/cyber.rpc.chat.SessionService/UpdateSession"
 	// SessionServiceListSessionsProcedure is the fully-qualified name of the SessionService's
 	// ListSessions RPC.
 	SessionServiceListSessionsProcedure = "/cyber.rpc.chat.SessionService/ListSessions"
@@ -56,6 +59,7 @@ const (
 
 // SessionServiceClient is a client for the cyber.rpc.chat.SessionService service.
 type SessionServiceClient interface {
+	UpdateSession(context.Context, *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error)
 	ListSessions(context.Context, *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error)
 	GetSession(context.Context, *connect.Request[types.GetSessionRequest]) (*connect.Response[types.GetSessionResponse], error)
 	ResetSession(context.Context, *connect.Request[types.ResetSessionRequest]) (*connect.Response[types.ResetSessionResponse], error)
@@ -75,6 +79,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 	baseURL = strings.TrimRight(baseURL, "/")
 	sessionServiceMethods := File_rpc_chat_proto.Services().ByName("SessionService").Methods()
 	return &sessionServiceClient{
+		updateSession: connect.NewClient[types.UpdateSessionRequest, types.UpdateSessionResponse](
+			httpClient,
+			baseURL+SessionServiceUpdateSessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("UpdateSession")),
+			connect.WithClientOptions(opts...),
+		),
 		listSessions: connect.NewClient[types.ListSessionsRequest, types.ListSessionsResponse](
 			httpClient,
 			baseURL+SessionServiceListSessionsProcedure,
@@ -116,12 +126,18 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
+	updateSession *connect.Client[types.UpdateSessionRequest, types.UpdateSessionResponse]
 	listSessions  *connect.Client[types.ListSessionsRequest, types.ListSessionsResponse]
 	getSession    *connect.Client[types.GetSessionRequest, types.GetSessionResponse]
 	resetSession  *connect.Client[types.ResetSessionRequest, types.ResetSessionResponse]
 	deleteSession *connect.Client[types.DeleteSessionRequest, types.DeleteSessionResponse]
 	listCommands  *connect.Client[types.ListCommandsRequest, types.ListCommandsResponse]
 	listEvents    *connect.Client[aop.ListEventsRequest, aop.ListEventsResponse]
+}
+
+// UpdateSession calls cyber.rpc.chat.SessionService.UpdateSession.
+func (c *sessionServiceClient) UpdateSession(ctx context.Context, req *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error) {
+	return c.updateSession.CallUnary(ctx, req)
 }
 
 // ListSessions calls cyber.rpc.chat.SessionService.ListSessions.
@@ -156,6 +172,7 @@ func (c *sessionServiceClient) ListEvents(ctx context.Context, req *connect.Requ
 
 // SessionServiceHandler is an implementation of the cyber.rpc.chat.SessionService service.
 type SessionServiceHandler interface {
+	UpdateSession(context.Context, *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error)
 	ListSessions(context.Context, *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error)
 	GetSession(context.Context, *connect.Request[types.GetSessionRequest]) (*connect.Response[types.GetSessionResponse], error)
 	ResetSession(context.Context, *connect.Request[types.ResetSessionRequest]) (*connect.Response[types.ResetSessionResponse], error)
@@ -171,6 +188,12 @@ type SessionServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	sessionServiceMethods := File_rpc_chat_proto.Services().ByName("SessionService").Methods()
+	sessionServiceUpdateSessionHandler := connect.NewUnaryHandler(
+		SessionServiceUpdateSessionProcedure,
+		svc.UpdateSession,
+		connect.WithSchema(sessionServiceMethods.ByName("UpdateSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceListSessionsHandler := connect.NewUnaryHandler(
 		SessionServiceListSessionsProcedure,
 		svc.ListSessions,
@@ -209,6 +232,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 	)
 	return "/cyber.rpc.chat.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case SessionServiceUpdateSessionProcedure:
+			sessionServiceUpdateSessionHandler.ServeHTTP(w, r)
 		case SessionServiceListSessionsProcedure:
 			sessionServiceListSessionsHandler.ServeHTTP(w, r)
 		case SessionServiceGetSessionProcedure:
@@ -229,6 +254,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 
 // UnimplementedSessionServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedSessionServiceHandler struct{}
+
+func (UnimplementedSessionServiceHandler) UpdateSession(context.Context, *connect.Request[types.UpdateSessionRequest]) (*connect.Response[types.UpdateSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.chat.SessionService.UpdateSession is not implemented"))
+}
 
 func (UnimplementedSessionServiceHandler) ListSessions(context.Context, *connect.Request[types.ListSessionsRequest]) (*connect.Response[types.ListSessionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("cyber.rpc.chat.SessionService.ListSessions is not implemented"))

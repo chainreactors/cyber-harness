@@ -1,4 +1,11 @@
 export default {
+  results: '扫描结果',
+  resultsLoading: '正在同步结果',
+  resultsIncomplete: '结果不完整',
+  scanCanceled: '扫描已取消',
+  scanFailed: '扫描失败，已保留现有结果',
+  retryParsing: '重试解析',
+
   // ScanForm
   targetPlaceholder: '目标 — IP / 主机名 / URL，逗号或换行分隔多个',
   scanTarget: '扫描目标',

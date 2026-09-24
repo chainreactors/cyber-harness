@@ -48,7 +48,7 @@ aiscan scan -i 127.0.0.1 --ports 80,443,3000 --verify=off
 aiscan scan -i http://127.0.0.1:3000 --mode full --verify=off
 ```
 
-扫描模式 full 和发行版 aiscan-full 是两个选择。完整发行版另外编译 Katana：quick 加入普通爬取，full 再加入浏览器深度爬取。浏览器爬取仍依赖可用的浏览器运行环境，不能等同于 `--deep` 的 AI 动态测试。
+扫描模式 full 和发行版 aiscan-full 是两个选择。完整发行版另外编译 Katana：quick 加入普通爬取，full 再加入浏览器深度爬取。浏览器爬取仍依赖可用的浏览器运行环境。
 
 ## 规则与资源
 
@@ -66,18 +66,18 @@ neutron 默认根据识别到的指纹选择模板，并受每个指纹的模板
 
 ## AI 增强扫描
 
-显式使用 `--verify=low|medium|high|critical` 时，CLI 要求可用的模型，规则流水线完成后对达到阈值的发现运行验证。验证结果应与原始发现一起阅读；模型判断无法替代证据。
+`--verify` 仅接受 `on` 或 `off`。本次参数优先于执行节点的 `scan.verify`；两者都未指定时，有模型默认开启，无模型默认关闭。Web 的默认值由实际执行节点解析。
 
 ```sh
-aiscan scan -i http://127.0.0.1:3000 --verify=high
-aiscan scan -i http://127.0.0.1:3000 --verify=off --sniper
+aiscan scan -i http://127.0.0.1:3000 --verify=on
+aiscan scan -i http://127.0.0.1:3000 --verify=off
 ```
 
-`--sniper` 在流水线之后针对已识别指纹搜索公开漏洞情报，也要求模型。已知 CVE 与目标实际受影响是两个判断，需要结合版本、配置和验证结果。
+开启后，验证所有漏洞与弱口令发现，不按严重性过滤；指纹不属于漏洞验证候选。显式开启但无模型会在探测前报错。模型认证、网络或解析失败会保留原始证据并标注验证未得出结论，不会悄悄关闭验证。`confirmed` 表示已确认，`not_confirmed` 表示本次未确认，`inconclusive` 表示未能完成判断；未验证不等于安全。
 
-当前源码有几个与旧文档不同的边界。默认配置中的 `auto` 允许 Provider 不可用，但 CLI 会移除这个参数，扫描命令没有进一步将其转换为 high 阈值；因此目前不能承诺“默认自动验证 high”。显式传 `--verify=auto` 还会进入要求模型的启动路径。需要确定性地启用或关闭验证，请明确指定级别或 off。
+`--sniper` 研究指纹相关的公开漏洞，不将情报当成漏洞确认。已删除没有执行阶段的 `--deep`；完整发行版的 Katana 浏览器爬取继续由 `--mode full` 控制。
 
-`--deep` 仍在帮助和启动选项中，但当前 scan 执行路径没有调用 AI deep 阶段；不应将传入该参数当作已经完成动态测试。它也不控制完整发行版的 Katana 深度爬取。实现依据是[模式选择](../cmd/aiscan/scanner_mode.go)、[启动入口](../cmd/aiscan/modes.go)和[扫描执行](../tools/scan/command.go)。
+失败或取消保留已经收集的证据。执行摘要列出实际选择的检查及未启用的检查；条件检查仅在输入匹配时执行，不能理解为全部 POC 均已运行。
 
 ## 输出格式
 

@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, CircleX, Loader2, Wrench } from 'lucide-react'
-import { EasmResultFromNodes, type SCONode } from '@cyber/cstx-easm'
-import { Badge, DisclosureCard } from '@cyber/ui'
+import { buildSCOModel, type SCONode } from '@cyber/cstx-easm'
+import { Badge, DisclosureCard, Tabs, TabsContent, TabsList, TabsTrigger } from '@cyber/ui'
 import { cn } from '@cyber/theme'
 import { ToolCallDisplay, formatArgs, stripAnsiControl, summarizeArgs } from '@/viewer'
-import { listSCONodes, subscribeCSTXChanges } from '../../lib/cstx-runtime'
+import { cstxFailures, listSCONodes, retryCSTXFailures, subscribeCSTXChanges, syncCSTXArtifacts } from '../../lib/cstx-runtime'
+import { buildFindingsFromSCO } from '../../lib/scan-result'
+import AssetResultView from '../AssetResultView'
+import FindingsPanel from '../FindingsPanel'
 
 export interface ScannerToolCallProps {
   id: string
@@ -26,27 +29,33 @@ export default function ScannerToolCall({
 }: ScannerToolCallProps) {
   const { t } = useTranslation('scan')
   const { t: tChat } = useTranslation('chat')
+  const { t: tf } = useTranslation('findings')
   const [nodes, setNodes] = useState<SCONode[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [failure, setFailure] = useState('')
+  const model = useMemo(() => buildSCOModel(nodes || []), [nodes])
+  const findings = useMemo(() => buildFindingsFromSCO(model), [model])
 
   useEffect(() => {
-    if (!id || pending || error) {
+    if (!id) {
       setNodes(null)
       return
     }
     let disposed = false
     const load = () => {
       setLoading(true)
-      void listSCONodes({ scanId: id }).then((value) => {
-        if (!disposed) setNodes(value.length > 0 ? value : null)
-      }).catch(() => {
-        if (!disposed) setNodes(null)
+      return Promise.all([listSCONodes({ scanId: id }), cstxFailures(id)]).then(([{ items }, errors]) => {
+        if (!disposed) { setNodes(items); setFailure(errors.map((error) => error.error).join('; ')) }
+      }).catch((error) => {
+        if (!disposed) setFailure(String(error))
       }).finally(() => {
         if (!disposed) setLoading(false)
       })
     }
-    const unsubscribe = subscribeCSTXChanges(load)
-    load()
+    const unsubscribe = subscribeCSTXChanges(() => void load())
+    void syncCSTXArtifacts().then(load).catch((error) => {
+      if (!disposed) { setFailure(String(error)); setLoading(false) }
+    })
     return () => {
       disposed = true
       unsubscribe()
@@ -60,9 +69,16 @@ export default function ScannerToolCall({
     running: tChat('toolCard.running'),
     completed: tChat('toolCard.completed'),
   }
+  const failureNotice = failure && (
+    <div role="alert" className="px-3 py-2 text-xs text-warning">
+      {t('resultsIncomplete')}: {failure}
+      <button className="ml-2 underline" onClick={() => void syncCSTXArtifacts().then(() => retryCSTXFailures()).catch((error) => setFailure(String(error)))}>{t('retryParsing')}</button>
+    </div>
+  )
 
   if (!nodes || nodes.length === 0) {
     return (
+      <div>
       <ToolCallDisplay
         toolName={toolName}
         toolArgs={toolArgs}
@@ -71,6 +87,8 @@ export default function ScannerToolCall({
         error={error}
         labels={labels}
       />
+      {failureNotice}
+      </div>
     )
   }
 
@@ -113,10 +131,16 @@ export default function ScannerToolCall({
       }
     >
       <div className="border-t border-border">
+        {failureNotice}
         {nodes && nodes.length > 0 && (
-          <div className="p-3">
-            <EasmResultFromNodes nodes={nodes} />
-          </div>
+          <Tabs defaultValue="assets" className="p-3">
+            <TabsList>
+              <TabsTrigger value="assets">{tf('assets')}</TabsTrigger>
+              <TabsTrigger value="findings">{tf('findings')} {findings.length}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="assets"><AssetResultView model={model} anchorPrefix={id} /></TabsContent>
+            <TabsContent value="findings"><FindingsPanel findings={findings} /></TabsContent>
+          </Tabs>
         )}
         {loading && (
           <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">

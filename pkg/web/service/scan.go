@@ -46,7 +46,7 @@ func scanStatusToDB(value scanpb.ScanStatus) string {
 	}
 }
 
-func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, sniper, deep bool) (*scanpb.Scan, error) {
+func (s *Service) SubmitScan(ctx context.Context, target, mode string, options *scanpb.ScanOptions) (*scanpb.Scan, error) {
 	if !s.scansEnabled() {
 		return nil, ErrScanConsoleDisabled
 	}
@@ -63,9 +63,6 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 	if err != nil {
 		return nil, err
 	}
-	if (verify || sniper || deep) && !s.aiAvailable() {
-		return nil, fmt.Errorf("selected analysis options require an LLM provider")
-	}
 
 	if s.agents == nil || s.agents.Count() == 0 {
 		return nil, ErrScanUnavailable
@@ -76,7 +73,7 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, verify, s
 		Id:        generateID(),
 		Target:    target,
 		Mode:      mode,
-		Options:   &scanpb.ScanOptions{Verify: verify, Sniper: sniper, Deep: deep},
+		Options:   proto.CloneOf(options),
 		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -165,6 +162,7 @@ func (s *Service) CancelScan(id string) error {
 		cancel()
 	}
 	s.hub.BroadcastScan(managementapi.ScanFailedEvent(id, "scan canceled", true), true)
+	s.broadcastScanStatus(id, scanpb.ScanStatus_SCAN_STATUS_CANCELED)
 	if nodeID != "" && s.agents != nil {
 		_ = s.agents.CancelTask(nodeID, id, "")
 	}
@@ -284,7 +282,9 @@ func (s *Service) finishScanContext(scan *scanpb.Scan, err error) {
 	next := proto.CloneOf(scan)
 	next.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
 	next.UpdatedAt = nowProto()
-	_, _ = s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
+	if changed, _ := s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING); changed {
+		s.broadcastScanStatus(scan.Id, next.Status)
+	}
 }
 
 func (s *Service) completeScan(ctx context.Context, scan *scanpb.Scan) (bool, error) {
@@ -313,20 +313,22 @@ func (s *Service) failScan(scan *scanpb.Scan, errMsg string) (bool, error) {
 	}
 	proto.Merge(scan, next)
 	s.hub.BroadcastScan(managementapi.ScanFailedEvent(scan.Id, errMsg, false), true)
+	s.broadcastScanStatus(scan.Id, scanpb.ScanStatus_SCAN_STATUS_FAILED)
 	return true, nil
 }
 
 func scanArgsForScan(scan *scanpb.Scan) []string {
 	args := []string{"-i", scan.Target, "--mode", scan.Mode}
 	options := scan.GetOptions()
-	if options.GetVerify() {
-		args = append(args, "--verify=high")
+	if options != nil && options.Verify != nil {
+		if options.GetVerify() {
+			args = append(args, "--verify=on")
+		} else {
+			args = append(args, "--verify=off")
+		}
 	}
 	if options.GetSniper() {
 		args = append(args, "--sniper")
-	}
-	if options.GetDeep() {
-		args = append(args, "--deep")
 	}
 	return args
 }

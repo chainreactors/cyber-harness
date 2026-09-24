@@ -27,12 +27,17 @@ message SessionRecord {
   google.protobuf.Timestamp created_at = 4;
   google.protobuf.Timestamp updated_at = 5;
   map<string, google.protobuf.Struct> extensions = 6;
+  bool archived = 7;
 }
 
 message ListSessionsRequest {
   string after_cursor = 1;
   uint32 limit = 2;
   bool include_closed = 3;
+  string search = 4;
+  string node_id = 5;
+  optional bool archived = 6;
+  string target = 7;
 }
 
 message ListSessionsResponse {
@@ -87,4 +92,19 @@ message ListCommandsRequest {
 
 message ListCommandsResponse {
   repeated cyber.command.CommandSpec commands = 1;
+}
+
+// Updates presentation metadata without changing execution or node binding.
+message UpdateSessionRequest {
+  string request_id = 1;
+  string session_id = 2;
+  optional string title = 3;
+  optional bool archived = 4;
+}
+message UpdateSessionResponse {
+  string request_id = 1;
+  oneof outcome {
+    SessionRecord accepted = 2;
+    aop.Rejection rejected = 3;
+  }
 }

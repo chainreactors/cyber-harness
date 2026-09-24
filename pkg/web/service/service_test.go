@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	protobuf "google.golang.org/protobuf/proto"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,11 +33,11 @@ func TestScanArgsForSelectedAnalysisOptions(t *testing.T) {
 	scan := &scanpb.Scan{
 		Target:  "127.0.0.1",
 		Mode:    "full",
-		Options: &scanpb.ScanOptions{Verify: true, Sniper: true, Deep: true},
+		Options: &scanpb.ScanOptions{Verify: protobuf.Bool(true), Sniper: true},
 	}
 
 	got := scanArgsForScan(scan)
-	want := []string{"-i", "127.0.0.1", "--mode", "full", "--verify=high", "--sniper", "--deep"}
+	want := []string{"-i", "127.0.0.1", "--mode", "full", "--verify=on", "--sniper"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("scan args = %#v, want %#v", got, want)
 	}
@@ -463,3 +464,19 @@ func (p *recordingProfile) Events() (*events.Stream, error) {
 
 func (p *recordingProfile) Progress() (*eventbus.Bus[*toolpb.Progress], error) { return nil, nil }
 func (p *recordingProfile) Processes() (*procbus.Manager, error)               { return nil, nil }
+
+func TestScanVerifyPresenceSurvivesArgumentMapping(t *testing.T) {
+	for _, tc := range []struct {
+		value *bool
+		want  string
+	}{{nil, ""}, {protobuf.Bool(false), "--verify=off"}, {protobuf.Bool(true), "--verify=on"}} {
+		args := scanArgsForScan(&scanpb.Scan{Target: "localhost", Mode: "quick", Options: &scanpb.ScanOptions{Verify: tc.value}})
+		if tc.want == "" {
+			if len(args) != 4 {
+				t.Fatalf("missing option became explicit: %v", args)
+			}
+		} else if args[len(args)-1] != tc.want {
+			t.Fatalf("args=%v want %s", args, tc.want)
+		}
+	}
+}

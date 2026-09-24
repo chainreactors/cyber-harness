@@ -22,7 +22,7 @@ var (
 )
 
 type ScanBackend interface {
-	SubmitScan(context.Context, string, string, bool, bool, bool) (*scanpb.Scan, error)
+	SubmitScan(context.Context, string, string, *scanpb.ScanOptions) (*scanpb.Scan, error)
 	GetScan(context.Context, string) (*scanpb.Scan, error)
 	ListScans(context.Context) ([]*scanpb.Scan, error)
 	CancelScan(string) error
@@ -46,7 +46,7 @@ func (s *Scans) SubmitScan(ctx context.Context, request *scanpb.SubmitScanReques
 		return rejectedSubmitScan(request, "INVALID_ARGUMENT", "request_id is required"), nil
 	}
 	options := request.GetOptions()
-	scan, err := s.backend.SubmitScan(ctx, request.Target, request.Mode, options.GetVerify(), options.GetSniper(), options.GetDeep())
+	scan, err := s.backend.SubmitScan(ctx, request.Target, request.Mode, options)
 	if err != nil {
 		code := "INVALID_ARGUMENT"
 		if errors.Is(err, ErrScanUnavailable) || errors.Is(err, ErrScanConsoleDisabled) {

@@ -152,6 +152,37 @@ func TestAgentPoolForwardsObservedToolArtifact(t *testing.T) {
 	}
 }
 
+func TestArchiveFailureWaitsForExecutionTerminal(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"), ScanSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close() // Simulate storage failure after dispatch.
+	pool := NewAgentPool(NewHub(), store)
+	agent := &remoteAgent{nodeState: newNodeState()}
+	result := make(chan taskResult, 1)
+	agent.tasks["scan-call"] = result
+	agent.toolCalls["scan-call"] = struct{}{}
+	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: toolpb.ArtifactKindService, Data: []byte(`{"ip":"127.0.0.1","port":"80"}`), MediaType: aop.JSONMediaType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.forwardAOPFrame(agent, "scan-call", &aop.Event{Id: "failed-artifact", EmittedAt: timestamppb.Now(), Payload: &aop.Event_Extension{Extension: extension}})
+	if !agent.busy() {
+		t.Fatal("archive error released a still executing task")
+	}
+	select {
+	case <-result:
+		t.Fatal("task completed before its terminal")
+	default:
+	}
+	pool.forwardAOPFrame(agent, "scan-call", &aop.Event{Payload: &aop.Event_ToolResult{ToolResult: &aop.ToolResult{}}})
+	got := <-result
+	if got.Code != "RESULT_ARCHIVE_FAILED" || got.Err == "" || agent.busy() {
+		t.Fatalf("terminal lost archive failure: %+v", got)
+	}
+}
+
 // dialAOPWebSocket opens the Application Endpoint.
 func dialAOPWebSocket(t *testing.T, srv *httptest.Server) *websocket.Conn {
 	t.Helper()
@@ -1394,7 +1425,7 @@ func TestTaskConvergesOnceWhenTurnEndAndCompleteArrive(t *testing.T) {
 }
 
 func TestDisconnectedAcceptedTurnEmitsOneTerminalEvent(t *testing.T) {
-	store, err := NewSQLiteStore(t.TempDir() + "/chat.db", ScanSchema)
+	store, err := NewSQLiteStore(t.TempDir()+"/chat.db", ScanSchema)
 	if err != nil {
 		t.Fatal(err)
 	}

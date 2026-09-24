@@ -258,12 +258,12 @@ export async function getIOAOverview(): Promise<IOAOverview> {
 
 // --- Chat session API ---
 
-export async function createChatSession(nodeID: string, title?: string, scanID?: string): Promise<Session> {
+export async function createChatSession(nodeID: string, title?: string, scanID?: string, opts?: { sessionID: string; requestID: string }): Promise<Session> {
   try {
 	const extensions = scanID
 		? [anyPack(SessionBindingSchema, create(SessionBindingSchema, { scanId: scanID }))]
 		: []
-	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'openSessionRequest', value: { sessionId: newRPCID(), nodeId: nodeID, title: title || '', extensions } } }), 'openSessionResponse')
+	const response = await requestCore(create(AOPProtocolMessageSchema, { message: { case: 'openSessionRequest', value: { sessionId: opts?.sessionID || newRPCID(), nodeId: nodeID, title: title || '', extensions } } }), 'openSessionResponse', opts?.requestID)
     if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to create session')
     return response.outcome.value
   } catch (error) {
@@ -271,13 +271,22 @@ export async function createChatSession(nodeID: string, title?: string, scanID?:
   }
 }
 
-export async function listChatSessions(): Promise<SessionRecord[]> {
-  try {
-    const response = await cyberRPC.sessions.listSessions({ limit: 100, includeClosed: true })
-    return response.sessions
-  } catch (error) {
-    throw connectFailure(error, 'Failed to list sessions')
-  }
+export type SessionFilters = { search: string; nodeId: string; archived: boolean; target: string; view: 'tasks' | 'nodes' | 'targets' }
+export async function listChatSessions(filters?: Partial<SessionFilters>): Promise<SessionRecord[]> {
+  const sessions: SessionRecord[] = []
+  let afterCursor = ''
+  do {
+    const response = await cyberRPC.sessions.listSessions({ ...filters, afterCursor, limit: 100, includeClosed: true })
+    sessions.push(...response.sessions)
+    afterCursor = response.nextCursor
+  } while (afterCursor)
+  return [...new Map(sessions.map((record) => [record.session?.id, record])).values()]
+}
+
+export async function updateChatSession(sessionId: string, patch: { title?: string; archived?: boolean }): Promise<SessionRecord> {
+  const response = await cyberRPC.sessions.updateSession({ requestId: newRPCID(), sessionId, ...patch })
+  if (response.outcome.case !== 'accepted') throw rejectionError(response.outcome.value, 'Failed to update session')
+  return response.outcome.value
 }
 
 export async function getChatSession(id: string): Promise<SessionRecord> {
@@ -358,10 +367,10 @@ export async function sendChatMessage(
   }
 }
 
-export async function executeChatCommand(sessionID: string, line: string): Promise<void> {
+export async function executeChatCommand(sessionID: string, line: string, requestID?: string): Promise<void> {
   try {
 	const request = create(CommandProtocolMessageSchema, { message: { case: 'request', value: { sessionId: sessionID, line } } })
-	const response = await aopClient.request(CommandProtocolMessageSchema, request)
+	const response = await aopClient.request(CommandProtocolMessageSchema, request, { id: requestID })
 	if (response.$typeName === 'aop.ProtocolMessage') {
 		const core = response as AOPProtocolMessage
 		if (core.message.case === 'protocolError') throw new Error(core.message.value.message)
@@ -435,10 +444,11 @@ export function subscribeAOPEvents(
 }
 
 function rejectionError(value: { code?: string; message?: string } | undefined, fallback: string): Error {
-  return new Error(value?.message || value?.code || fallback)
+  return Object.assign(new Error(value?.message || value?.code || fallback), { rejected: true })
 }
 
 function connectFailure(error: unknown, fallback: string): Error {
+  if ((error as { rejected?: boolean })?.rejected && error instanceof Error) return error
   const failure = ConnectError.from(error)
   if (failure.code === Code.Unauthenticated) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT))
   return new Error(failure.rawMessage || failure.message || fallback)
@@ -509,4 +519,10 @@ async function errorMessage(res: Response, fallback: string) {
   } catch {
     return fallback;
   }
+}
+
+export async function getScan(id: string): Promise<Scan> {
+  const response = await cyberRPC.scans.getScan({ scanId: id })
+  if (!response.scan) throw new Error('Scan not found')
+  return response.scan
 }

@@ -8,12 +8,13 @@ import "aop/event.proto";
 option go_package = "github.com/chainreactors/cyber/core/types;types";
 
 // SyncArtifactsRequest appends browser-originated raw artifacts and resumes
-// the same archive by cursor. Artifact payloads remain aop.tool.Artifact events.
+// the same archive by cursor. Browser uploads accept aop.tool.Artifact events.
 message SyncArtifactsRequest {
   string after_cursor = 1;
   repeated aop.Event artifacts = 2;
 }
 
 message SyncArtifactsResponse {
+  // Original Artifact and associated Loot events, including operation refs.
   repeated aop.EventDelivery artifacts = 1;
 }

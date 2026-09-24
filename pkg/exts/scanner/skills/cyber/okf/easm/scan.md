@@ -16,7 +16,7 @@ Capabilities:
 - combine discovery, web probing, weak credential checks, and POC execution
 - produce discovered targets, services, web endpoints, fingerprints, weak credentials, POC matches, errors, and final stats
 - expose pipeline capability names such as gogo portscan, spray web probing, zombie weakpass, and neutron POC
-- optionally hand scanner output to an LLM agent for verification, sniper, or deep sub-skills when requested
+- hand vulnerabilities and weak passwords to an LLM agent for verification when enabled, or fingerprints for sniper research when requested
 - run quick or full profiles depending on depth needs
 
 Common usage:
@@ -35,9 +35,9 @@ scan -l /tmp/targets.txt --mode quick
 scan -l /tmp/targets.txt --mode full --thread 4 --timeout 10
 
 # AI features
-scan -i 10.0.0.1 --verify=high
+scan -i 10.0.0.1 --verify=on
 scan -i 10.0.0.1 --sniper
-scan -i 10.0.0.1 --mode full --deep
+scan -i 10.0.0.1 --mode full
 scan -i 10.0.0.1 -j
 ```
 
@@ -64,9 +64,8 @@ Notes:
 - Full builds additionally add Katana crawling: `katana_crawl` in quick/full uses the standard HTTP engine, while `katana_deep` in full uses pure headless rendering and emits browser-only requests and SPA navigation.
 - `katana_deep` shares Cyber's browser discovery order: `CYBER_BROWSER_PATH`, installed Chrome/Chromium/Edge, then Rod's cache/download fallback.
 - Spray web capabilities run with recon enabled in both profiles.
-- `--verify=<level>` triggers in-pipeline AI verification for loots at or above the specified priority threshold (low, medium, high, critical). Only loots meeting the threshold are sent to a verify sub-agent.
+- `--verify=on|off` controls AI verification of all vulnerability and weak-password findings. The execution node defaults to on when it has a model, otherwise off. Fingerprints are excluded.
 - `--sniper` asks an LLM agent to perform fingerprint vulnerability intelligence.
-- `--deep` asks an LLM agent to perform browser-backed testing for discovered websites and fingerprint-based deep assessment.
 - User intent decides whether scan output should be summarized, analyzed, validated, reported, or used to choose follow-up commands.
 
 ## AI Sub-Skills

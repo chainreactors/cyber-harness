@@ -1,3 +1,4 @@
+import type { ResultEvidence } from './cstx-runtime'
 import type { SCOResultModel } from '@cyber/cstx-easm'
 
 export type { SCOResultModel, SCOHostGroup, SCOPortNode, SCOMetrics } from '@cyber/cstx-easm'
@@ -29,6 +30,7 @@ export type FindingItem = {
   description?: string
   source?: string
   status?: string
+  evidence?: ResultEvidence[]
   tags: string[]
   detail?: string
 }
@@ -46,9 +48,7 @@ export function findingTargetURL(target?: string): string | null {
   return parsed.href
 }
 
-// Scan results no longer travel as an inline output.Result — the hub persists
-// them as SCO nodes keyed by scan_id. Findings are derived from the vuln nodes
-// in the SCO model the scan's nodes build.
+// Findings use the selected CSTX observations and their associated Loot evidence.
 export function buildFindingsFromSCO(model: SCOResultModel): FindingItem[] {
   const findings: FindingItem[] = []
   const seen = new Set<string>()
@@ -61,7 +61,12 @@ export function buildFindingsFromSCO(model: SCOResultModel): FindingItem[] {
         const id = `vuln:${vuln.cstx_id || `${target}:${title}`}`
         if (seen.has(id)) continue
         seen.add(id)
+        const evidence = (vuln as unknown as { _evidence?: ResultEvidence[] })._evidence || []
+        const statuses = new Set(evidence.map((e) => e.status))
         findings.push({
+          evidence,
+          source: [...new Set(evidence.map((e) => e.source))].join(', ') || undefined,
+          status: statuses.size === 1 ? evidence[0]?.status : evidence.some((e) => e.status) ? 'inconclusive' : undefined,
           id,
           kind: vuln.username ? 'weakpass' : 'vuln',
           priority: normalizePriority(vuln.severity),

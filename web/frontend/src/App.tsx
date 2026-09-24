@@ -104,7 +104,7 @@ export default function App() {
 
   const refreshSCONodes = useCallback(async () => {
     try {
-      const data = await listSCONodes({ limit: 2000 })
+      const { items: data } = await listSCONodes()
       setScoNodes(data)
     } catch { /* non-critical */ }
   }, [])
@@ -145,7 +145,7 @@ export default function App() {
     [scoNodes, ioaNodes, ioaMessages],
   )
 
-  const model = serverStatus?.llmModel || chat.agents.find((a) => a.status?.model)?.status?.model || 'cortex'
+  const model = serverStatus?.llmModel || ''
   // Agents that already joined a collaboration space are where a newly connected
   // node belongs; with none connected there is nothing to align to.
   const agentSpace = chat.agents.find((a) => a.status?.space)?.status?.space
@@ -169,7 +169,8 @@ export default function App() {
       setSwitchingLLM(false)
     }
   }, [activeLLMProfile, refreshStatus])
-  const activeSession = chat.sessions.find((s) => s.session?.id === chat.activeSessionID) || null
+  const activeSession = chat.activeSessionRecord?.session?.id === chat.activeSessionID ? chat.activeSessionRecord : chat.sessions.find((s) => s.session?.id === chat.activeSessionID) || null
+  const executionNode = chat.agents.find((a) => a.hello?.nodeId === (activeSession?.session?.nodeId || chat.selectedNodeID))
   // The open session's bound agent has dropped off the live roster (its node
   // exited / the hub restarted). The transcript still shows, but a new turn
   // can't be dispatched until it reconnects — surface that in the chat panel.
@@ -241,6 +242,8 @@ export default function App() {
             </Button>
             <BrandLogo size={22} className="hidden shrink-0 sm:block" />
             <span className="shrink-0 text-sm font-semibold tracking-tight text-foreground">Cyber</span>
+            <span className="max-w-48 truncate text-xs text-muted-foreground" title={activeSession?.session?.nodeId || chat.selectedNodeID || ''}>{executionNode?.hello?.name || activeSession?.agentName || 'Node'} · {executionNode?.status?.model || '—'}</span>
+            <span className="text-[10px] text-muted-foreground">Hub</span>
             <LLMProfileSwitcher
               profiles={llmProfiles}
               activeProfileID={activeLLMProfile}
@@ -279,6 +282,9 @@ export default function App() {
             onToggle={() => setSidebarOpen(!sidebarOpen)}
             agents={chat.agents}
             sessions={chat.sessions}
+            filters={chat.sessionFilters}
+            onFilter={chat.filterSessions}
+            onUpdateSession={chat.updateSession}
             activeSessionID={chat.activeSessionID}
             selectedNodeID={chat.selectedNodeID}
             terminalNodeID={activeToolPanel === 'agents' ? agentPanelFocusNodeID : null}
@@ -309,6 +315,7 @@ export default function App() {
             renderMentionPopup={renderMentionPopup}
             injectText={composerSeed}
             onSend={chat.sendMessage}
+            ensureSession={chat.ensureSession}
             onPause={chat.cancelMessage}
             onClearError={chat.clearError}
           />

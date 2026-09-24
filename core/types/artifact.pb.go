@@ -23,7 +23,7 @@ const (
 )
 
 // SyncArtifactsRequest appends browser-originated raw artifacts and resumes
-// the same archive by cursor. Artifact payloads remain aop.tool.Artifact events.
+// the same archive by cursor. Browser uploads accept aop.tool.Artifact events.
 type SyncArtifactsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AfterCursor   string                 `protobuf:"bytes,1,opt,name=after_cursor,json=afterCursor,proto3" json:"after_cursor,omitempty"`
@@ -77,8 +77,9 @@ func (x *SyncArtifactsRequest) GetArtifacts() []*aop.Event {
 }
 
 type SyncArtifactsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Artifacts     []*aop.EventDelivery   `protobuf:"bytes,1,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Original Artifact and associated Loot events, including operation refs.
+	Artifacts     []*aop.EventDelivery `protobuf:"bytes,1,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

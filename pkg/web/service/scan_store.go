@@ -15,7 +15,7 @@ var ScanSchema = SchemaModule{
 	Models:  []any{(*scanModel)(nil), (*sessionScanModel)(nil)},
 	Indexes: []SchemaIndex{{Model: (*scanModel)(nil), Name: "idx_scans_created", Expr: "created_at DESC"}},
 	Tables: map[string][]string{
-		"scans":         {"id", "target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "created_at", "updated_at"},
+		"scans":         {"id", "target", "mode", "verify", "sniper", "status", "progress", "error", "scan_json", "created_at", "updated_at"},
 		"session_scans": {"session_id", "scan_id"},
 	},
 }
@@ -26,9 +26,8 @@ type scanModel struct {
 	ID        string `bun:"id,pk"`
 	Target    string `bun:"target,notnull"`
 	Mode      string `bun:"mode,notnull"`
-	Verify    bool   `bun:"verify,notnull"`
+	Verify    *bool  `bun:"verify"`
 	Sniper    bool   `bun:"sniper,notnull"`
-	Deep      bool   `bun:"deep,notnull"`
 	Status    string `bun:"status,notnull"`
 	Progress  string `bun:"progress,notnull"`
 	Error     string `bun:"error,notnull"`
@@ -98,7 +97,7 @@ func (s *SQLiteStore) Update(ctx context.Context, scan *scanpb.Scan) error {
 		return err
 	}
 	_, err = s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
+		Column("target", "mode", "verify", "sniper", "status", "progress", "error", "scan_json", "updated_at").
 		WherePK().Exec(ctx)
 	return err
 }
@@ -119,7 +118,7 @@ func (s *SQLiteStore) TransitionScan(ctx context.Context, scan *scanpb.Scan, exp
 		statuses[i] = scanStatusToDB(status)
 	}
 	result, err := s.orm.NewUpdate().Model(model).
-		Column("target", "mode", "verify", "sniper", "deep", "status", "progress", "error", "scan_json", "updated_at").
+		Column("target", "mode", "verify", "sniper", "status", "progress", "error", "scan_json", "updated_at").
 		Where("id = ?", model.ID).Where("status IN (?)", bun.List(statuses)).Exec(ctx)
 	if err != nil {
 		return false, err
@@ -142,9 +141,12 @@ func scanToModel(scan *scanpb.Scan) (*scanModel, error) {
 		return nil, err
 	}
 	options := scan.GetOptions()
+	if options == nil {
+		options = &scanpb.ScanOptions{}
+	}
 	return &scanModel{
 		ID: scan.GetId(), Target: scan.GetTarget(), Mode: scan.GetMode(),
-		Verify: options.GetVerify(), Sniper: options.GetSniper(), Deep: options.GetDeep(),
+		Verify: options.Verify, Sniper: options.GetSniper(),
 		Status: scanStatusToDB(scan.GetStatus()), Progress: scan.GetProgress(),
 		Error: scan.GetError(), ScanJSON: raw,
 		CreatedAt: formatProtoTime(scan.GetCreatedAt()), UpdatedAt: formatProtoTime(scan.GetUpdatedAt()),

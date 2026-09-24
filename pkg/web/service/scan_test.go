@@ -87,7 +87,7 @@ func TestQueuedScanLosingNodeFailsWithoutLocalFallback(t *testing.T) {
 
 	// Hold the execution slot until the only node has disconnected.
 	svc.sem <- struct{}{}
-	scan, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false)
+	scan, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", nil)
 	pool.unregister(agent)
 	<-svc.sem
 	if err != nil {
@@ -115,7 +115,7 @@ func TestCancelRemoteScanStopsAgentAndPreservesCanceledStatus(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	waitAgents(t, pool, 1)
 
-	scan, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false)
+	scan, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,14 +172,14 @@ func TestCancelQueuedScanDoesNotWaitForConcurrencySlot(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	waitAgents(t, pool, 1)
 
-	running, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false)
+	running, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = readHubEnvelope(t, conn)
 	waitScanStatus(t, store, running.Id, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 
-	queued, err := svc.SubmitScan(context.Background(), "127.0.0.2", "quick", false, false, false)
+	queued, err := svc.SubmitScan(context.Background(), "127.0.0.2", "quick", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +556,7 @@ func TestScanConsoleDisabledContract(t *testing.T) {
 			t.Fatalf("scan route mounted without the scan console: %s", route.Pattern)
 		}
 	}
-	if _, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", false, false, false); !errors.Is(err, ErrScanConsoleDisabled) {
+	if _, err := svc.SubmitScan(context.Background(), "127.0.0.1", "quick", nil); !errors.Is(err, ErrScanConsoleDisabled) {
 		t.Fatalf("SubmitScan = %v", err)
 	}
 	if _, err := svc.GetScan(context.Background(), "scan-1"); !errors.Is(err, ErrScanConsoleDisabled) {

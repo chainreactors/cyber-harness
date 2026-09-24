@@ -2,6 +2,7 @@ package scanner
 
 import (
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	"github.com/chainreactors/cyber/tools/scan"
 )
 
 // ScanConfigKey is the scan-pipeline configuration section owned by this
@@ -9,8 +10,7 @@ import (
 const ScanConfigKey = "scan"
 
 // ScanOptions holds scan pipeline settings. Verify stays empty when
-// unconfigured; the consumption site resolves DefaultVerify, so the
-// distributed configuration never invents a value.
+// unconfigured so each execution node can resolve model availability.
 type ScanOptions struct {
 	Verify string `config:"verify" json:"verify"`
 }
@@ -19,12 +19,12 @@ type ScanOptions struct {
 func ScanSection() cfg.Section {
 	return cfg.Section{
 		Key: ScanConfigKey, Aliases: []string{ScanConfigKey},
-		New: func() any { return &ScanOptions{} },
+		New:      func() any { return &ScanOptions{} },
+		Validate: func(value any) error { return scan.ValidateVerify(value.(*ScanOptions).Verify) },
 	}
 }
 
-// ReadScan decodes the scan section exactly as configured: Verify stays empty
-// when unconfigured so distributed configuration never invents a value.
+// ReadScan decodes the scan section exactly as configured.
 func ReadScan(option *cfg.Option) (ScanOptions, error) {
 	if option == nil {
 		return ScanOptions{}, nil
@@ -47,20 +47,11 @@ func ReadScan(option *cfg.Option) (ScanOptions, error) {
 	return *raw.(*ScanOptions), nil
 }
 
-// ReadVerify returns the configured verification level or DefaultVerify.
-func ReadVerify(option *cfg.Option) string {
-	if option == nil {
-		return DefaultVerify
+// ReadVerify returns the configured value without inventing a default.
+func ReadVerify(option *cfg.Option) (string, error) {
+	value, err := ReadScan(option)
+	if err != nil {
+		return "", err
 	}
-	if option.Resolved != nil {
-		if decoded, err := cfg.Get[*ScanOptions](option.Resolved, ScanConfigKey); err == nil {
-			return cfg.ResolveString(decoded.Verify, DefaultVerify)
-		}
-	}
-	if fields := option.Extensions[ScanConfigKey]; fields != nil {
-		if verify, ok := fields["verify"].(string); ok {
-			return cfg.ResolveString(verify, DefaultVerify)
-		}
-	}
-	return DefaultVerify
+	return value.Verify, scan.ValidateVerify(value.Verify)
 }

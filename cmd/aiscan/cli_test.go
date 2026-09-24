@@ -745,49 +745,44 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 
 func TestResolveScannerModeForVerifyModes(t *testing.T) {
 	withDefaults(t, func() {
-		scannerext.DefaultVerify = "off"
-		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, scannerext.DefaultVerify)
+		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, "")
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if mode.Provider != profile.ProviderDisabled {
+		if mode.Provider != profile.ProviderOptional {
 			t.Fatalf("mode = %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1"}) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, scannerext.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, "")
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if mode.Provider != profile.ProviderDisabled {
+		if mode.Provider != profile.ProviderOptional {
 			t.Fatalf("mode = %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=off"}) {
 			t.Fatalf("args = %#v", args)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, scannerext.DefaultVerify)
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != profile.ProviderRequired || !mode.Agent {
-			t.Fatalf("deep mode = %#v", mode)
-		}
-		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--deep"}) {
-			t.Fatalf("args = %#v", args)
+		if _, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, ""); err == nil {
+			t.Fatal("removed --deep flag was accepted")
 		}
 
-		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify", "critical"}, scannerext.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=on"}, "")
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
 		if mode.Provider != profile.ProviderRequired || !mode.Agent {
 			t.Fatalf("mode = %#v", mode)
 		}
+		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=on"}) {
+			t.Fatalf("args = %#v", args)
+		}
 
-		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, scannerext.DefaultVerify)
+		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, "")
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
@@ -795,11 +790,11 @@ func TestResolveScannerModeForVerifyModes(t *testing.T) {
 			t.Fatalf("sniper mode = %#v", mode)
 		}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, scannerext.DefaultVerify)
+		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, "")
 		if err != nil {
 			t.Fatalf("ResolveScannerMode() error = %v", err)
 		}
-		if mode.Provider != profile.ProviderDisabled || mode.Agent {
+		if mode.Provider != profile.ProviderOptional || mode.Agent {
 			t.Fatalf("scan-local --ai should not enable AI features: %#v", mode)
 		}
 		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--ai"}) {
@@ -858,7 +853,6 @@ func withDefaults(t *testing.T, fn func()) {
 		{&scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubURL},
 		{&scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubKey},
 		{&scannerext.DefaultCyberhubMode, scannerext.DefaultCyberhubMode},
-		{&scannerext.DefaultVerify, scannerext.DefaultVerify},
 		{&searchext.DefaultTavilyKeys, searchext.DefaultTavilyKeys},
 		{&cfg.DefaultNodeID, cfg.DefaultNodeID},
 		{&cfg.DefaultNodeName, cfg.DefaultNodeName},

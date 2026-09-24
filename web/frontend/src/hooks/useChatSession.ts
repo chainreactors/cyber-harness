@@ -13,6 +13,8 @@ import {
   listAgents,
   listChatMessages,
   listChatSessions,
+  updateChatSession,
+  type SessionFilters,
   resetChatSession,
   sendChatMessage,
   subscribeAOPEvents,
@@ -157,11 +159,20 @@ function messagesDiffer(a: ChatMessage[], b: ChatMessage[]): boolean {
   return la.id !== lb.id || la.content !== lb.content
 }
 
+function readSessionFilters(): SessionFilters {
+  const params = new URLSearchParams(window.location.search)
+  const view = params.get('view')
+  return { search: params.get('search') || '', nodeId: params.get('node') || '', archived: params.get('archived') === 'true', target: params.get('target') || '', view: view === 'nodes' || view === 'targets' ? view : 'tasks' }
+}
+
 export function useChatSession() {
   const { t } = useTranslation('chat')
   const [agents, setAgents] = useState<AgentView[]>([])
   const [selectedNodeID, setSelectedNodeID] = useState<string | null>(null)
+  const [sessionFilters, setSessionFilters] = useState(readSessionFilters)
+  const sessionQueryVersion = useRef(0)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
+  const [activeSessionRecord, setActiveSessionRecord] = useState<SessionRecord | null>(null)
   const [activeSessionID, setActiveSessionID] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
@@ -172,6 +183,10 @@ export function useChatSession() {
   const [runRequestPending, setRunRequestPending] = useState(false)
   const [activeTurnID, setActiveTurnID] = useState('')
   const [error, setError] = useState('')
+  const creatingSession = useRef<Promise<string | null> | null>(null)
+  const retrySessionCreation = useRef<{ nodeID: string; sessionID: string; requestID: string } | null>(null)
+  const retrySubmission = useRef<{ signature: string; messageID: string; requestID: string; turnID: string } | null>(null)
+  const submittingRef = useRef(false)
   const unsubRef = useRef<(() => void) | null>(null)
   const activationRef = useRef(0)
   const activeSessionRef = useRef<string | null>(null)
@@ -214,9 +229,32 @@ export function useChatSession() {
   }, [])
 
   const refreshSessions = useCallback(async () => {
+    const version = ++sessionQueryVersion.current
     try {
-      setSessions(await listChatSessions())
-    } catch {}
+      const records = await listChatSessions(sessionFilters)
+      if (version === sessionQueryVersion.current) setSessions(records)
+    } catch (error) { if (version === sessionQueryVersion.current) setError(String(error)) }
+  }, [sessionFilters])
+
+  function filterSessions(patch: Partial<SessionFilters>) {
+    const next = { ...sessionFilters, ...patch }
+    const url = new URL(window.location.href)
+    for (const [key, value] of Object.entries({ search: next.search, node: next.nodeId, archived: next.archived ? 'true' : '', target: next.target, view: next.view })) {
+      if (value) url.searchParams.set(key, value); else url.searchParams.delete(key)
+    }
+    window.history.replaceState({}, '', url)
+    setSessionFilters(next)
+  }
+
+  async function updateSession(id: string, patch: { title?: string; archived?: boolean }) {
+    try { const record = await updateChatSession(id, patch); if (activeSessionRef.current === id) setActiveSessionRecord(record); await refreshSessions() }
+    catch (error) { setError(String(error)); throw error }
+  }
+
+  useEffect(() => {
+    const restore = () => setSessionFilters(readSessionFilters())
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
   }, [])
 
   useEffect(() => {
@@ -347,17 +385,17 @@ export function useChatSession() {
         try {
           const scan = anyUnpack(extension, SessionScanEventSchema)
           if (!scan) break
-          if (!scan.scanId || scan.status !== ScanStatus.COMPLETED) break
+          if (!scan.scanId || ![ScanStatus.COMPLETED, ScanStatus.FAILED, ScanStatus.CANCELED].includes(scan.status)) break
           const timelineID = `scanres-${scan.scanId}`
           setTimelineItems((previous) => previous.some((item) => item.id === timelineID)
             ? previous
             : [...previous, { id: timelineID, kind: 'scan_complete', timestamp: Date.now(), scanID: scan.scanId }])
-          // A completed scan's result is the local CSTX node set associated
-          // with its scan id; load it so the timeline card can render.
-          void syncCSTXArtifacts().then(() => listSCONodes({ scanId: scan.scanId, limit: 2000 })).then((nodes) => {
+          const sessionID = activeSessionRef.current
+          void syncCSTXArtifacts().then(() => listSCONodes({ scanId: scan.scanId })).then(({ items: nodes }) => {
+            if (activeSessionRef.current !== sessionID) return
             setScanResults((previous) => new Map(previous).set(scan.scanId, nodes))
             updateTimelineItem(timelineID, (item) => ({ ...item, scanNodes: nodes }))
-          }).catch(() => {})
+          }).catch((error) => { if (activeSessionRef.current === sessionID) setError(String(error)) })
         } catch {
           // Ignore malformed application extensions; the AOP stream remains usable.
         }
@@ -445,19 +483,30 @@ export function useChatSession() {
 
       const session = await getChatSession(id)
       if (activation !== activationRef.current) return
+      setActiveSessionRecord(session)
       const scanIDs = Array.isArray(session.extensions.scan?.ids)
         ? session.extensions.scan.ids.filter((id): id is string => typeof id === 'string')
         : []
       if (scanIDs.length) {
-		await syncCSTXArtifacts()
-		if (activation !== activationRef.current) return
+        // Keep status cards visible even if archive sync or parsing fails.
+        setTimelineItems((previous) => {
+          const next = [...previous]
+          for (const scanID of scanIDs) {
+            const id = `scanres-${scanID}`
+            if (!next.some((item) => item.id === id)) next.push({ id, kind: 'scan_complete', timestamp: Date.now(), scanID })
+          }
+          return next
+        })
+        await syncCSTXArtifacts()
+        if (activation !== activationRef.current) return
         // Read every linked scan's CSTX nodes together after the archive sync.
         const loaded = await Promise.all(
           scanIDs.map(async (scanID) => {
             try {
-              const nodes = await listSCONodes({ scanId: scanID, limit: 2000 })
+              const { items: nodes } = await listSCONodes({ scanId: scanID })
               return { scanID, nodes }
-            } catch {
+            } catch (error) {
+              if (activation === activationRef.current) setError(String(error))
               return { scanID, nodes: undefined as SCONode[] | undefined }
             }
           }),
@@ -466,7 +515,7 @@ export function useChatSession() {
         // these stale results instead of writing them into the new session's
         // scanResults map.
         if (activation !== activationRef.current) return
-        const withResult = loaded.filter((e) => e.nodes?.length)
+        const withResult = loaded.filter((e) => e.nodes !== undefined)
         if (withResult.length) {
           setScanResults((prev) => {
             const next = new Map(prev)
@@ -490,7 +539,9 @@ export function useChatSession() {
           })
         }
       }
-    } catch {}
+    } catch (error) {
+      if (activation === activationRef.current) setError(String(error))
+    }
 
     if (activation !== activationRef.current) return
     unsubRef.current = subscribeAOPEvents(
@@ -528,79 +579,54 @@ export function useChatSession() {
     }
   }
 
-  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string }) {
-    const sessionID = activeSessionRef.current
-    if (!sessionID) return
-    const trimmed = content.trim()
-    if (!trimmed) return
-	const lower = trimmed.toLowerCase()
-	if (lower === '/clear') {
-		try {
-			const next = await resetChatSession(sessionID)
-			await refreshSessions()
-			const nextID = next.session?.id
-			if (nextID) await activateSession(nextID, 'push')
-		} catch (err: any) {
-			setError(err.message || 'Failed to reset session')
-		}
-		return
-	}
-	if (lower === '/stop') {
-		await handleCancelMessage()
-		return
-	}
-	if (lower === '/exit' || lower === '/quit') {
-		try {
-			await closeChatSession(sessionID)
-			await refreshSessions()
-		} catch (err: any) {
-			setError(err.message || 'Failed to close session')
-		}
-		return
-	}
-	const continueSession = lower === '/continue'
-	let runContent = trimmed
-	if (lower.startsWith('/followup ')) runContent = trimmed.slice(trimmed.indexOf(' ') + 1).trim()
-	const command = !continueSession
-		&& (runContent.startsWith('!') || (runContent.startsWith('/') && !runContent.startsWith('/skill:') && !lower.startsWith('/followup ')))
-	if (command) {
-		const msgID = safeUUID()
-		const optimistic: ChatMessage = { id: msgID, session_id: sessionID, role: 'user', content: runContent, created_at: new Date().toISOString() }
-		setMessages((prev) => [...prev, optimistic])
-		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
-		try {
-			await executeChatCommand(sessionID, runContent)
-		} catch (err: any) {
-			setError(err.message || 'Failed to execute command')
-		}
-		return
-	}
-
-    const msgID = safeUUID()
-
-	const optimistic: ChatMessage = {
-      id: msgID,
-      session_id: sessionID,
-      role: 'user',
-		content: runContent,
-      created_at: new Date().toISOString(),
-    }
-	if (!continueSession) {
-		setMessages((prev) => [...prev, optimistic])
-		appendTimeline({ id: msgID, kind: 'message', timestamp: Date.now(), message: optimistic })
-	}
-    setError('')
-    setRunRequestPending(true)
-
+  async function handleSendMessage(content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string; sessionID?: string }): Promise<boolean> {
+    if (!content.trim() || submittingRef.current) return false
+    submittingRef.current = true
+    let optimisticID = ''
+    let sessionID: string | null = null
     try {
-		const sent = await sendChatMessage(sessionID, runContent, { ...opts, messageID: msgID, continueSession })
-      setRunRequestPending(false)
-      if (sent.turnId && !endedTurnIDsRef.current.has(sent.turnId)) activateTurn(sent.turnId)
+      sessionID = opts?.sessionID || await ensureSession()
+      if (!sessionID) return false
+      const trimmed = content.trim()
+      const lower = trimmed.toLowerCase()
+      if (lower === '/clear') {
+        const next = await resetChatSession(sessionID)
+        if (next.session?.id) await activateSession(next.session.id, 'push')
+        await refreshSessions()
+        return true
+      }
+      if (lower === '/stop') { await handleCancelMessage(); return true }
+      if (lower === '/exit' || lower === '/quit') { await closeChatSession(sessionID); await refreshSessions(); return true }
+      const continueSession = lower === '/continue'
+      const runContent = lower.startsWith('/followup ') ? trimmed.slice(trimmed.indexOf(' ') + 1).trim() : trimmed
+      const command = !continueSession && (runContent.startsWith('!') || (runContent.startsWith('/') && !runContent.startsWith('/skill:') && !lower.startsWith('/followup ')))
+      const signature = JSON.stringify([sessionID, runContent, opts])
+      if (retrySubmission.current?.signature !== signature) retrySubmission.current = { signature, messageID: safeUUID(), requestID: safeUUID(), turnID: safeUUID() }
+      const submission = retrySubmission.current
+      optimisticID = submission.messageID
+      if (!continueSession && activeSessionRef.current === sessionID) {
+        const message: ChatMessage = { id: optimisticID, session_id: sessionID, role: 'user', content: runContent, created_at: new Date().toISOString() }
+        setMessages((previous) => previous.some((m) => m.id === message.id) ? previous : [...previous, message])
+        setTimelineItems((previous) => previous.some((m) => m.id === message.id) ? previous : [...previous, { id: message.id, kind: 'message', timestamp: Date.now(), message }])
+      }
+      if (activeSessionRef.current === sessionID) { setError(''); setRunRequestPending(true) }
+      if (command) await executeChatCommand(sessionID, runContent, submission.requestID)
+      else {
+        const sent = await sendChatMessage(sessionID, runContent, { ...opts, ...submission, continueSession })
+        if (activeSessionRef.current === sessionID && sent.turnId && !endedTurnIDsRef.current.has(sent.turnId)) activateTurn(sent.turnId)
+      }
+      retrySubmission.current = null
       await refreshSessions()
-    } catch (err: any) {
-      setRunRequestPending(false)
-      setError(err.message || 'Failed to send message')
-    }
+      return true
+    } catch (error) {
+      if ((error as { rejected?: boolean }).rejected) retrySubmission.current = null
+      if (activeSessionRef.current === sessionID) {
+        setMessages((previous) => previous.filter((m) => m.id !== optimisticID))
+        setTimelineItems((previous) => previous.filter((m) => m.id !== optimisticID))
+      }
+      setError(error instanceof Error ? error.message : 'Failed to send message')
+      return false
+    } finally { submittingRef.current = false; if (activeSessionRef.current === sessionID) setRunRequestPending(false) }
   }
 
   // Make sure a chat session is active, lazily creating one on the selected (or
@@ -610,6 +636,12 @@ export function useChatSession() {
   // draft into a guaranteed-live session without also sending a message.
   async function ensureSession(): Promise<string | null> {
     if (activeSessionRef.current) return activeSessionRef.current
+    if (creatingSession.current) return creatingSession.current
+    creatingSession.current = createSessionForInput().finally(() => { creatingSession.current = null })
+    return creatingSession.current
+  }
+
+  async function createSessionForInput(): Promise<string | null> {
     // Prefer the selected node only while it's actually connected; a selection
     // left dangling by a node that went away falls back to the first agent.
     const connected = agents.find((a) => a.hello?.nodeId === selectedNodeID)
@@ -619,12 +651,16 @@ export function useChatSession() {
       return null
     }
     try {
-      const session = await createChatSession(nodeID)
+      if (retrySessionCreation.current?.nodeID !== nodeID) retrySessionCreation.current = { nodeID, sessionID: safeUUID(), requestID: safeUUID() }
+      const session = await createChatSession(nodeID, undefined, undefined, retrySessionCreation.current)
+      retrySessionCreation.current = null
       setSelectedNodeID(nodeID)
-      await refreshSessions()
+      activeSessionRef.current = session.id
       await activateSession(session.id, 'push')
+      await refreshSessions()
       return session.id
     } catch (err: any) {
+      if (err.rejected) retrySessionCreation.current = null
       setError(err.message || 'Failed to start session')
       return null
     }
@@ -767,7 +803,9 @@ export function useChatSession() {
     agents,
     selectedNodeID,
     sessions,
+    sessionFilters, filterSessions, updateSession,
     activeSessionID,
+    activeSessionRecord,
     timeline,
     aopEvents,
     scanResults,

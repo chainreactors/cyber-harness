@@ -38,7 +38,7 @@ func TestListSessionPageDoesNotDeadlockOnNonEmptyStore(t *testing.T) {
 	createStoredSession(t, store, "session-1")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	sessions, more, err := store.ListSessionPage(ctx, 0, 100, true)
+	sessions, more, err := store.ListSessionPage(ctx, 0, 100, &types.ListSessionsRequest{IncludeClosed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSQLiteStoreCoreSchemaOnly(t *testing.T) {
 	if session.Extensions["scan"] != nil {
 		t.Fatalf("core-only store backfilled scan ids: %v", session.Extensions["scan"])
 	}
-	if _, _, err := store.ListSessionPage(context.Background(), 0, 100, true); err != nil {
+	if _, _, err := store.ListSessionPage(context.Background(), 0, 100, &types.ListSessionsRequest{IncludeClosed: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpdateSession(context.Background(), session); err != nil {
@@ -131,7 +131,7 @@ func TestSessionScanAssociationsAreReadOnlyExtensions(t *testing.T) {
 		t.Fatalf("ListSessions = %v, %v", listed, err)
 	}
 	assertLinked(listed[0])
-	paged, _, err := store.ListSessionPage(ctx, 0, 10, true)
+	paged, _, err := store.ListSessionPage(ctx, 0, 10, &types.ListSessionsRequest{IncludeClosed: true})
 	if err != nil || len(paged) != 1 {
 		t.Fatalf("ListSessionPage = %v, %v", paged, err)
 	}
@@ -315,7 +315,7 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 		Id:        "scan-1",
 		Target:    "127.0.0.1",
 		Mode:      "quick",
-		Options:   &scanpb.ScanOptions{Verify: true, Deep: true},
+		Options:   &scanpb.ScanOptions{Verify: proto.Bool(true)},
 		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
 		CreatedAt: nowProto(),
 		UpdatedAt: nowProto(),
@@ -329,8 +329,8 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 		t.Fatalf("Get() error = %v", err)
 	}
 	options := got.GetOptions()
-	if !options.GetVerify() || options.GetSniper() || !options.GetDeep() {
-		t.Fatalf("stored options = verify:%v sniper:%v deep:%v", options.GetVerify(), options.GetSniper(), options.GetDeep())
+	if !options.GetVerify() || options.GetSniper() {
+		t.Fatalf("stored options = verify:%v sniper:%v", options.GetVerify(), options.GetSniper())
 	}
 }
 
@@ -342,8 +342,8 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	defer store.Close()
 
 	scan := &scanpb.Scan{
-		Id: "scan-json", Target: "example.com", Mode: "deep",
-		Options: &scanpb.ScanOptions{Verify: true, Sniper: true},
+		Id: "scan-json", Target: "example.com", Mode: "full",
+		Options: &scanpb.ScanOptions{Verify: proto.Bool(true), Sniper: true},
 		Status:  scanpb.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
 		Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
 	}
@@ -352,11 +352,11 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	}
 
 	var raw, target, mode, status, progress string
-	var verify, sniper, deep bool
+	var verify, sniper bool
 	if err := store.db.QueryRow(`
-		SELECT scan_json, target, mode, verify, sniper, deep, status, progress
+		SELECT scan_json, target, mode, verify, sniper, status, progress
 		FROM scans WHERE id = ?`, scan.Id,
-	).Scan(&raw, &target, &mode, &verify, &sniper, &deep, &status, &progress); err != nil {
+	).Scan(&raw, &target, &mode, &verify, &sniper, &status, &progress); err != nil {
 		t.Fatal(err)
 	}
 	if !json.Valid([]byte(raw)) {
@@ -365,8 +365,8 @@ func TestSQLiteStoreUsesProtoJSONAndRelationalScanColumns(t *testing.T) {
 	if target != scan.Target || mode != scan.Mode || status != scanStatusToDB(scan.Status) || progress != scan.Progress {
 		t.Fatalf("relational projection = target:%q mode:%q status:%q progress:%q", target, mode, status, progress)
 	}
-	if !verify || !sniper || deep {
-		t.Fatalf("relational options = verify:%v sniper:%v deep:%v", verify, sniper, deep)
+	if !verify || !sniper {
+		t.Fatalf("relational options = verify:%v sniper:%v", verify, sniper)
 	}
 	var obsoleteColumns int
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('scans') WHERE name = 'scan_proto'`).Scan(&obsoleteColumns); err != nil {
@@ -542,5 +542,77 @@ func TestSQLiteStoreRejectsAOPEventForMissingSession(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("AddAOPEvent() created an orphan event")
+	}
+}
+
+func TestSessionFiltersApplyBeforePagination(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "session-filters.db"), ScanSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := t.Context()
+	for i := 0; i < 125; i++ {
+		record := &types.SessionRecord{Session: &aop.Session{Id: fmt.Sprintf("s-%03d", i), NodeId: "offline", State: SessionStateOpen, Title: fmt.Sprintf("Task %03d", i)}, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+		if err := store.CreateSession(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan := &scanpb.Scan{Id: "scan-target", Target: "https://target.test/path", Mode: "full", CreatedAt: nowProto(), UpdatedAt: nowProto()}
+	if err := store.Create(ctx, scan); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkScanToSession(ctx, "s-000", scan.Id); err != nil {
+		t.Fatal(err)
+	}
+	page, more, err := store.ListSessionPage(ctx, 0, 100, &types.ListSessionsRequest{IncludeClosed: true})
+	if err != nil || len(page) != 100 || !more {
+		t.Fatalf("first page %d more=%v err=%v", len(page), more, err)
+	}
+	page, more, err = store.ListSessionPage(ctx, 100, 100, &types.ListSessionsRequest{IncludeClosed: true})
+	if err != nil || len(page) != 25 || more {
+		t.Fatalf("second page %d more=%v err=%v", len(page), more, err)
+	}
+	page, _, err = store.ListSessionPage(ctx, 0, 10, &types.ListSessionsRequest{Search: "target.test", NodeId: "offline"})
+	if err != nil || len(page) != 1 || page[0].Session.Id != "s-000" {
+		t.Fatalf("target search: %v %v", page, err)
+	}
+	record := page[0]
+	record.Archived = true
+	if err := store.UpdateSession(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	page, _, err = store.ListSessionPage(ctx, 0, 10, &types.ListSessionsRequest{Archived: proto.Bool(true)})
+	if err != nil || len(page) != 1 || !page[0].Archived {
+		t.Fatalf("archived: %v %v", page, err)
+	}
+}
+
+func TestArtifactArchiveRetainsLootInEitherArrivalOrder(t *testing.T) {
+	for _, lootFirst := range []bool{false, true} {
+		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "evidence.db"), ScanSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact := testArtifactEvent(t, "artifact")
+		payload, err := anypb.New(&toolpb.Loot{ResultId: "result-1", Tool: "gogo", VerificationStatus: "confirmed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		loot := &aop.Event{Id: "loot", EmittedAt: nowProto(), Payload: &aop.Event_Extension{Extension: payload}}
+		events := []*aop.Event{artifact, loot}
+		if lootFirst {
+			events = []*aop.Event{loot, artifact}
+		}
+		deliveries, err := store.SyncArtifactEvents(t.Context(), append(events, events...), 0)
+		if err != nil || len(deliveries) != 2 {
+			t.Fatalf("archive: %v %v", deliveries, err)
+		}
+		for i, event := range events {
+			if !proto.Equal(event, deliveries[i].Event) {
+				t.Fatal("canonical event changed")
+			}
+		}
+		store.Close()
 	}
 }

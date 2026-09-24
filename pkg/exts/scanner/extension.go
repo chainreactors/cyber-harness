@@ -30,7 +30,7 @@ import (
 	"github.com/chainreactors/cyber/tools/files"
 	"github.com/chainreactors/cyber/tools/resources"
 	"github.com/chainreactors/cyber/tools/scan/engine"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	"github.com/chainreactors/utils/parsers"
 )
 
 // Config contains only scanner inputs selected by the Profile.
@@ -40,6 +40,7 @@ type Config struct {
 	// AgentName tags the scanner worker's AOP events; the composition root
 	// sets it (aiscan passes "cyber").
 	AgentName string
+	Verify    string
 }
 
 type Extension struct {
@@ -77,6 +78,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	if err != nil {
 		return err
 	}
+	if err := scan.ValidateVerify(e.config.Verify); err != nil {
+		return err
+	}
 	proxyURL := endpoint.ProxyURL()
 	if proxyURL == "" {
 		proxyURL = e.config.Resources.Proxy
@@ -96,14 +100,6 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			return err
 		}
 		tools, err := extension.Use[coretool.Executor](scope)
-		if err != nil {
-			return err
-		}
-		commandRegistry, err := extension.Use[coretool.CommandExecutor](scope)
-		if err != nil {
-			return err
-		}
-		bash, err := extension.Use[*terminaltool.BashTool](scope)
 		if err != nil {
 			return err
 		}
@@ -178,16 +174,24 @@ func (e *Extension) Load(scope *extension.Scope) error {
 			Bus:            stream,
 			PromptResolver: promptResolver,
 		}
-		options = append(options, scan.WithWorker(scannerWorker(executor, config)))
-		if model != nil {
-			options = append(options,
-				scan.WithDeepBrowserFunc(func(ctx context.Context, targetURL string) (string, error) {
-					return collectDeepBrowserArtifacts(ctx, commandRegistry, bash, targetURL, logger)
-				}),
-			)
+		currentConfig := func(ctx context.Context) agent.Config {
+			if caller, ok := agent.ToolAgentConfig(ctx); ok {
+				return caller
+			}
+			current := config
+			model, pc := providers.Current()
+			current.Provider = model
+			current.Model, current.MaxTokens, current.ContextWindow = pc.Model, pc.MaxTokens, pc.ContextWindow
+			return current
 		}
+		options = append(options,
+			scan.WithVerification(e.config.Verify, func(ctx context.Context) bool { return currentConfig(ctx).Provider != nil }),
+			scan.WithWorker(func(ctx context.Context, name string, loot parsers.Loot) (string, error) {
+				return scannerWorker(executor, currentConfig(ctx))(ctx, name, loot)
+			}),
+		)
 	} else {
-		options = append(options, scan.WithExecutionOnly())
+		options = append(options, scan.WithExecutionOnly(), scan.WithVerification(e.config.Verify, nil))
 	}
 	options = append(options, scan.WithLogger(logger))
 

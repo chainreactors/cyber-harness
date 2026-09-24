@@ -17,9 +17,10 @@ enum ScanStatus {
 }
 
 message ScanOptions {
-  bool verify = 1;
+  optional bool verify = 1;
   bool sniper = 2;
-  bool deep = 3;
+  reserved 3;
+  reserved "deep";
 }
 
 message Scan {
