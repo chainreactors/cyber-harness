@@ -45,6 +45,64 @@ func TestDistributedRuntimeDoesNotMutateHostFileState(t *testing.T) {
 	}
 }
 
+func TestDistributedLLMOverridesLocalFlagsEnvironmentAndDefaults(t *testing.T) {
+	withDefaults(t, func() {
+		DefaultModel, DefaultAPIKey, DefaultBaseURL = "compiled-model", "compiled-key", "https://compiled.invalid/v1"
+		c := isolatedContext(t)
+		c.LookupEnv = func(key string) (string, bool) {
+			value, ok := map[string]string{
+				"CYBER_MODEL": "env-model", "CYBER_API_KEY": "env-key", "CYBER_PROVIDER": "invalid-local-provider",
+				"CYBER_BASE_URL": "https://env.invalid/v1", "OPENAI_API_KEY": "fallback-key",
+			}[key]
+			return value, ok
+		}
+		host := &Option{Context: c, Explicit: map[string]bool{"profile": true, "model": true, "api-key": true},
+			LLMOptions:  LLMOptions{ActiveProfile: "stale-local-profile", Model: "cli-model", APIKey: "cli-key"},
+			NodeOptions: NodeOptions{NodeID: "local-node"},
+		}
+		remote, err := ResolveDistributedRuntime(&types.DistributeConfig{
+			Llm: &types.LLMConfig{ActiveProfile: "server", Providers: []*types.LLMProviderConfig{{
+				Id: "server", Provider: "openai", BaseUrl: "https://server.invalid/v1", Model: "server-model", ApiKey: "server-key",
+			}}},
+		}, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := ProviderConfig(remote)
+		if p.Model != "server-model" || p.APIKey != "server-key" || p.BaseURL != "https://server.invalid/v1" || remote.ActiveProfile != "server" {
+			t.Fatal("local settings overrode the server LLM")
+		}
+		if host.ActiveProfile != "stale-local-profile" || !host.Explicit["profile"] || remote.NodeID != "local-node" {
+			t.Fatal("remote resolution mutated host settings or identity")
+		}
+		cleared, err := ResolveDistributedRuntime(&types.DistributeConfig{}, remote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p = ProviderConfig(cleared)
+		if p.Model != "" || p.APIKey != "" || p.BaseURL != "" || len(FallbackProviderConfigs(cleared)) != 0 {
+			t.Fatal("empty server LLM fell back to local settings")
+		}
+	})
+}
+
+func TestDistributedLLMPreservesInferredNonModelOverrides(t *testing.T) {
+	host := &Option{Context: isolatedContext(t),
+		LLMOptions:   LLMOptions{ActiveProfile: "stale", APIKey: "local-key"},
+		AgentOptions: AgentOptions{Timeout: 77},
+	}
+	remote, err := ResolveDistributedRuntime(&types.DistributeConfig{
+		Agent: &types.AgentConfig{Timeout: proto.Int32(99)},
+		Llm:   &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "remote", Provider: "openai", Model: "remote-model", ApiKey: "remote-key"}}},
+	}, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remote.Timeout != 77 || remote.APIKey != "remote-key" || remote.Model != "remote-model" || host.Explicit != nil {
+		t.Fatal("implicit host overrides or remote model ownership changed")
+	}
+}
+
 func TestDistributedRuntimeMatchesFileAndReplacesOldValues(t *testing.T) {
 	for _, key := range []string{"CYBER_MODEL", "CYBER_PROVIDER", "CYBER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"} {
 		t.Setenv(key, "")

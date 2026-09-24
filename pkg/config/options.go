@@ -16,6 +16,7 @@ type Option struct {
 	// Explicit records flags actually supplied by the caller, including zero values.
 	Explicit       map[string]bool `no-flag:"true" config:"-"`
 	present        map[string]bool
+	remoteLLM      bool      // Node models are owned by the server, including empty values.
 	Resolved       *Resolved `no-flag:"true" config:"-"`
 	Snapshot       *Snapshot `no-flag:"true" config:"-"`
 	Context        *Context  `no-flag:"true" config:"-"`

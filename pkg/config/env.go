@@ -12,6 +12,16 @@ type envLookup func(string) (string, bool)
 
 // ResolveRuntimeConfig resolves parsed configuration with environment and defaults.
 func ResolveRuntimeConfig(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, false)
+}
+
+// ResolveAgentRuntimeConfig selects the transport before resolving models so a
+// node can enroll even when its local profile selection is stale or incomplete.
+func ResolveAgentRuntimeConfig(option *Option) (string, error) {
+	return resolveRuntimeConfig(option, true)
+}
+
+func resolveRuntimeConfig(option *Option, agentMode bool) (string, error) {
 	if option.Sections == nil {
 		option.Sections = NewSections()
 	}
@@ -19,6 +29,17 @@ func ResolveRuntimeConfig(option *Option) (string, error) {
 	configPath, err := LoadAndApplyConfig(option)
 	if err != nil {
 		return configPath, err
+	}
+	if agentMode {
+		transport, err := ResolveAgentTransport(option)
+		if err != nil {
+			return configPath, err
+		}
+		if transport == AgentTransportWeb {
+			useRemoteLLM(option)
+			useRemoteLLM(&explicit)
+			option.Snapshot.Diagnostics = append(option.Snapshot.Diagnostics, "node mode: waiting for LLM configuration from the remote server")
+		}
 	}
 	if err := finishRuntimeConfig(option, &explicit); err != nil {
 		return configPath, err
@@ -56,7 +77,9 @@ func finishRuntimeConfig(option, explicit *Option) error {
 }
 
 func applyEnvironment(option *Option, explicit Option, lookup envLookup) {
-	applyLLMEnvironment(option, explicit, lookup)
+	if !option.remoteLLM {
+		applyLLMEnvironment(option, explicit, lookup)
+	}
 	applyRuntimeEnvironment(option, explicit, lookup)
 }
 

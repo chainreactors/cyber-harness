@@ -43,6 +43,15 @@ func (p *serverConfigTestProfile) AgentStatus() *aop.AgentStatus {
 }
 
 func TestRemoteNodeUsesServerKeyWithoutLocalLLMConfig(t *testing.T) {
+	testRemoteNodeUsesServerLLM(t, false)
+}
+
+func TestRemoteNodeUsesServerLLMDespiteLocalOverrides(t *testing.T) {
+	testRemoteNodeUsesServerLLM(t, true)
+}
+
+func testRemoteNodeUsesServerLLM(t *testing.T, localOverrides bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	completion := make(chan struct{}, 1)
@@ -101,7 +110,12 @@ func TestRemoteNodeUsesServerKeyWithoutLocalLLMConfig(t *testing.T) {
 	defer server.Close()
 
 	directory := t.TempDir()
+	builds := 0
 	build := func(request profile.Request) (profile.Profile, error) {
+		if builds == 0 && request.ProviderMode != profile.ProviderDisabled {
+			return nil, fmt.Errorf("node initialized a model before receiving server configuration")
+		}
+		builds++
 		h, err := harness.New(harness.Config{
 			Base: harness.BaseConfig{
 				Directory: directory,
@@ -116,17 +130,28 @@ func TestRemoteNodeUsesServerKeyWithoutLocalLLMConfig(t *testing.T) {
 	}
 	done := make(chan struct{})
 	var nodeErr error
+	option := &cfg.Option{
+		Explicit: map[string]bool{},
+		Context: &cfg.Context{
+			Directory: directory, Home: directory, Executable: filepath.Join(directory, "node.exe"),
+			LookupEnv: func(string) (string, bool) { return "", false },
+		},
+		NodeOptions:  cfg.NodeOptions{NodeID: "server-key-node"},
+		AgentOptions: cfg.AgentOptions{ServerURL: server.URL, Prompt: "Say pong"},
+	}
+	if localOverrides {
+		option.LLMOptions = cfg.LLMOptions{ActiveProfile: "stale-local", Provider: "openai", APIKey: "local-key", Model: "local-model", BaseURL: llm.URL + "/v1"}
+		for _, flag := range []string{"profile", "provider", "api-key", "model", "base-url"} {
+			option.MarkExplicit(flag)
+		}
+		option.Context.LookupEnv = func(key string) (string, bool) {
+			value, ok := map[string]string{"CYBER_API_KEY": "env-key", "CYBER_MODEL": "env-model", "CYBER_PROVIDER": "invalid-local"}[key]
+			return value, ok
+		}
+	}
 	go func() {
 		defer close(done)
-		nodeErr = RunWebSocket(ctx, build, &cfg.Option{
-			Explicit: map[string]bool{},
-			Context: &cfg.Context{
-				Directory: directory, Home: directory, Executable: filepath.Join(directory, "node.exe"),
-				LookupEnv: func(string) (string, bool) { return "", false },
-			},
-			NodeOptions:  cfg.NodeOptions{NodeID: "server-key-node"},
-			AgentOptions: cfg.AgentOptions{ServerURL: server.URL, Prompt: "Say pong"},
-		}, telemetry.NopLogger())
+		nodeErr = RunWebSocket(ctx, build, option, telemetry.NopLogger())
 	}()
 	defer func() {
 		cancel()

@@ -69,7 +69,10 @@ func applyProviderLimits(providerConfig *provider.ProviderConfig, option *Option
 }
 
 func ProviderConfig(option *Option) provider.ProviderConfig {
-	cfg := defaultProviderConfig()
+	var cfg provider.ProviderConfig
+	if !option.remoteLLM {
+		cfg = defaultProviderConfig()
+	}
 	if len(option.Providers) > 0 {
 		cfg = entryToProviderConfig(option.Providers[activeProviderIndex(option)])
 	}

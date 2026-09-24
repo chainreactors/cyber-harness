@@ -7,7 +7,8 @@ import (
 )
 
 const configFileHeader = `# cyber-harness configuration; shared by Cyber-based applications.
-# CLI > CYBER_* > project cyber.yaml > ~/.cyber/cyber.yaml > protocol env > defaults.
+# CLI > CYBER_* > current directory config > ~/.cyber/cyber.yaml > protocol env > defaults.
+# Current directory: cyber.yaml, falling back to .cyber/cyber.yaml.
 # Unspecified LLM values may come from OPENAI_* or ANTHROPIC_* environment variables.
 # Example (uncomment and choose a model supported by your endpoint):
 # llm:

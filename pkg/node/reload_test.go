@@ -94,6 +94,9 @@ func TestRemoteReloadKeepsFailedProfileAndDrainsSuccessfulSwitch(t *testing.T) {
 	var mu sync.Mutex
 	var built []*reloadTestProfile
 	build := func(request profile.Request) (profile.Profile, error) {
+		if request.ProviderMode != profile.ProviderDisabled {
+			return nil, fmt.Errorf("empty server LLM must disable the node provider")
+		}
 		h, err := harness.New(harness.Config{Base: harness.BaseConfig{Directory: directory, Provider: provider.StartupConfig{Mode: provider.StartupDisabled}}, Session: request.Session,
 			Extensions: []extension.Extension{extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Add[coretool.Tool](scope, work) }}},
 		})

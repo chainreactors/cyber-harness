@@ -110,7 +110,11 @@ func cyber() {
 		os.Exit(1)
 	}
 
-	cfgPath, err := cfg.ResolveRuntimeConfig(&option)
+	resolveConfig := cfg.ResolveRuntimeConfig
+	if parsed.Mode == cfg.RunModeAgent {
+		resolveConfig = cfg.ResolveAgentRuntimeConfig
+	}
+	cfgPath, err := resolveConfig(&option)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)

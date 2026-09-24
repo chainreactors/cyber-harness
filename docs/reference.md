@@ -55,7 +55,9 @@ aiscan -c /path/to/cyber.yaml scan -i 192.168.1.0/24   # 指定配置文件
 
 配置属于 **cyber-harness 公共能力**，`aiscan` 与通用 `agent` CLI 共用相同的 `init`、`config`、`doctor` 命令。完整规则见 [配置与初始化](configuration.md)。
 
-自动加载 `~/.cyber/cyber.yaml`，再叠加最近的项目 `cyber.yaml`；当前目录优先，向上查找止于最近 Git 根目录、用户目录或文件系统根。没有项目配置时兼容二进制旁的 `cyber.yaml`。显式 `-c` 只加载指定文件，不继承用户配置。
+自动加载 `~/.cyber/cyber.yaml`，再叠加当前目录的 `cyber.yaml`（不存在时使用 `.cyber/cyber.yaml`）；同名配置项以当前目录为准。不向父目录或可执行文件目录查找配置。显式 `-c` 只加载指定文件，不继承用户配置。
+
+node 模式（`aiscan agent --server-url ...`，自动或 `web` transport）的 LLM 配置由远端 server 下发；node 本地文件、模型参数和环境变量不覆盖它。收到远端配置前不初始化模型，远端未配置模型时不回退到本地模型。
 
 ### 配置文件结构
 

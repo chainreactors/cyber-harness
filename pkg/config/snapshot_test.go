@@ -58,7 +58,7 @@ func TestLayeredConfigurationAndExplicitIsolation(t *testing.T) {
 	}
 }
 
-func TestProjectDiscoveryStopsAtGitRoot(t *testing.T) {
+func TestProjectDiscoveryUsesOnlyWorkingDirectory(t *testing.T) {
 	c := isolatedContext(t)
 	parent := filepath.Dir(c.Directory)
 	putConfig(t, filepath.Join(parent, DefaultConfigName), "llm:\n  model: outside\n")
@@ -72,9 +72,13 @@ func TestProjectDiscoveryStopsAtGitRoot(t *testing.T) {
 	if o.Model == "outside" {
 		t.Fatal("escaped git boundary")
 	}
-	putConfig(t, filepath.Join(root, DefaultConfigName), "llm:\n  model: inside\n")
-	if o = resolvedFixture(t, c, ""); o.Model != "inside" {
-		t.Fatal("did not discover project from child")
+	putConfig(t, filepath.Join(root, DefaultConfigName), "llm:\n  model: parent\n")
+	if o = resolvedFixture(t, c, ""); o.Model == "parent" {
+		t.Fatal("loaded parent configuration")
+	}
+	putConfig(t, filepath.Join(c.Directory, DefaultConfigName), "llm:\n  model: local\n")
+	if o = resolvedFixture(t, c, ""); o.Model != "local" {
+		t.Fatal("did not discover working directory configuration")
 	}
 }
 
