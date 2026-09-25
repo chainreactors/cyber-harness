@@ -22,12 +22,9 @@ type Config struct {
 	Environment    map[string]string
 	Directory      string
 	Timeout        int
-	Containment    terminaltool.ProcessContainment
 	MaximumTimeout time.Duration
-	// HiddenCommands are control-only registry commands omitted from the Bash
-	// description and shell aliases.
-	HiddenCommands     []string
-	StandaloneCommands []string
+	// HiddenCommands are control-only registry commands omitted from Bash discovery.
+	HiddenCommands []string
 }
 type Extension struct {
 	mu     sync.Mutex
@@ -72,12 +69,10 @@ func (m *Extension) Load(scope *extension.Scope) error {
 		WithEnvironment(m.config.Environment).
 		WithEgressProxy(endpoint.ProxyURL()).
 		WithEgressProxyCA(endpoint.CAPath()).
-		WithProcessContainment(m.config.Containment).
 		WithForegroundTimeoutCeiling(m.config.MaximumTimeout)
 	bash.SetEgressResolver(endpoint.Egress)
-	bash.EnableShellCommands(executor)
+	bash.SetCommandRegistry(executor)
 	bash.HideCommands(m.config.HiddenCommands...)
-	bash.StandaloneCommands(m.config.StandaloneCommands...)
 
 	m.bash = bash
 

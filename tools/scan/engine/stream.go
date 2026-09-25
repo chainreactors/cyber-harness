@@ -8,7 +8,9 @@ func forwardResults[T, R any](ctx context.Context, input <-chan T, convert func(
 	output := make(chan R)
 	go func() {
 		defer close(output)
-		defer release()
+		if release != nil {
+			defer release()
+		}
 		for value := range input {
 			if ctx.Err() != nil {
 				continue

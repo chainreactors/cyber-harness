@@ -91,8 +91,8 @@ type Config struct {
 	CommandName string
 	// SkipBaseSkills disables BaseSkills injection for focused worker sessions
 	// that receive their skills explicitly.
-	SkipBaseSkills       bool
-	MaxPending           int
+	SkipBaseSkills bool
+	MaxPending     int
 	// Loop supplies the installed reasoning algorithm.
 	Loop agent.Loop
 }

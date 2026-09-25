@@ -42,8 +42,8 @@ func TestKatanaProfiles(t *testing.T) {
 
 func TestRunKatanaCrawlEmitsTargets(t *testing.T) {
 	cmd := &Command{}
-	wt := newWebTarget("", "https://www.example.com", "")
-	e := targetEvent(capSprayCheck, "", wt)
+	wt := newWebTarget("https://www.example.com", "")
+	e := targetEvent(capSprayCheck, wt)
 
 	var emitted []event
 	emit := func(ev event) {
@@ -79,7 +79,7 @@ func TestRunKatanaCrawlHonorsContextCancellation(t *testing.T) {
 	defer srv.Close()
 
 	cmd := &Command{}
-	e := targetEvent(capSprayCheck, srv.URL, newWebTarget(srv.URL, srv.URL, ""))
+	e := targetEvent(capSprayCheck, newWebTarget(srv.URL, ""))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -183,7 +183,7 @@ func TestE2EKatanaDeepRendersAuthenticatedSPA(t *testing.T) {
 	defer srv.Close()
 
 	cmd := &Command{}
-	e := targetEvent(capSprayCheck, srv.URL, newWebTarget(srv.URL, srv.URL, ""))
+	e := targetEvent(capSprayCheck, newWebTarget(srv.URL, ""))
 	var emitted []event
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
@@ -193,7 +193,7 @@ func TestE2EKatanaDeepRendersAuthenticatedSPA(t *testing.T) {
 
 	for _, ev := range emitted {
 		if ev.Kind == eventError {
-			t.Fatalf("katana_deep emitted error: %s", ev.Error.Message)
+			t.Fatalf("katana_deep emitted error: %s", ev.Error)
 		}
 	}
 	if authenticatedWorkspaceHits.Load() == 0 {

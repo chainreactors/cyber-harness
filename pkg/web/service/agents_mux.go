@@ -26,8 +26,7 @@ func namespaceMessage[T protobuf.Message](message protobuf.Message) (T, error) {
 	return value, nil
 }
 
-func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent) (*aop.NamespaceMux, error) {
-	mux := aop.NewNamespaceMux(ctx)
+func (p *AgentPool) registerAgentNamespaces(mux *aop.NamespaceMux, agent *remoteAgent) error {
 	if err := mux.Register(&aop.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*aop.ProtocolMessage](message)
 		if err != nil {
@@ -36,7 +35,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		p.handleAgentCoreMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := mux.Register(&types.CommandProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.CommandProtocolMessage](message)
@@ -46,7 +45,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		p.handleAgentCommandMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := mux.Register(&filepb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*filepb.ProtocolMessage](message)
@@ -56,7 +55,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		p.handleAgentFileMessage(agent, envelope, value)
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := mux.Register(&types.ReloadProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*types.ReloadProtocolMessage](message)
@@ -66,7 +65,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		p.handleAgentReloadMessage(agent, value)
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := mux.Register(&ptypb.ProtocolMessage{}, func(_ context.Context, _ *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*ptypb.ProtocolMessage](message)
@@ -76,7 +75,7 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		p.forwardPTYMessage(value)
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 	if err := mux.Register(&toolpb.ProtocolMessage{}, func(_ context.Context, envelope *aop.Envelope, message protobuf.Message, _ aop.SendFunc) error {
 		value, err := namespaceMessage[*toolpb.ProtocolMessage](message)
@@ -88,9 +87,9 @@ func (p *AgentPool) newAgentNamespaceMux(ctx context.Context, agent *remoteAgent
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
-	return mux, nil
+	return nil
 }
 
 func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Envelope, value *aop.ProtocolMessage) {

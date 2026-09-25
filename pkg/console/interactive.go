@@ -20,7 +20,6 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/eventbus"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	types "github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -156,7 +155,7 @@ func newAgentConsole(ctx context.Context, rt *agentsession.Runtime, session *age
 		return agentComposerPrompt(output, repl.readlineBridge)
 	}
 	repl.workMu.Lock()
-	repl.subscription = rt.Observe(coreevents.ObserverFunc(repl.handleEvent))
+	repl.subscription = rt.Observe(repl.handleEvent)
 	repl.workMu.Unlock()
 	repl.configureCompletionKey()
 	repl.configureInterruptKey()

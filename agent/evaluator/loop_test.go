@@ -80,7 +80,7 @@ func TestRunWithEvalPreservesInitialInputAndEmitsCanonicalUserMessage(t *testing
 
 	bus := coreevents.New()
 	var events []*aop.Event
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	bus.Observe(func(event *aop.Event) { events = append(events, event) })
 	ag := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider:  agentProvider,
 		Model:     "test",

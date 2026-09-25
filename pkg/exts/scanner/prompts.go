@@ -7,6 +7,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/utils/parsers"
 )
 
 func scannerPromptContribution() prompt.Contribution {
@@ -36,11 +37,10 @@ func scannerPromptContribution() prompt.Contribution {
 }
 
 func renderVerifyRequest(_ context.Context, input prompt.Context) (string, error) {
-	payload, err := scannerPromptPayload(input)
+	loot, err := scannerPromptPayload(input)
 	if err != nil {
 		return "", err
 	}
-	loot := payload.Loot
 	var out strings.Builder
 	fmt.Fprintf(&out, "Verify this loot on target %s:\n\n", loot.Target)
 	fmt.Fprintf(&out, "- Kind: %s\n", loot.Kind)
@@ -59,11 +59,10 @@ func renderVerifyRequest(_ context.Context, input prompt.Context) (string, error
 }
 
 func renderSniperRequest(_ context.Context, input prompt.Context) (string, error) {
-	payload, err := scannerPromptPayload(input)
+	loot, err := scannerPromptPayload(input)
 	if err != nil {
 		return "", err
 	}
-	loot := payload.Loot
 	var out strings.Builder
 	fmt.Fprintf(&out, "Analyze fingerprint on target %s:\n\n", loot.Target)
 	fmt.Fprintf(&out, "- Fingerprints: %s\n", loot.Description)
@@ -73,10 +72,10 @@ func renderSniperRequest(_ context.Context, input prompt.Context) (string, error
 	return out.String(), nil
 }
 
-func scannerPromptPayload(input prompt.Context) (scan.WorkerPromptPayload, error) {
-	payload, ok := input.Payload.(scan.WorkerPromptPayload)
+func scannerPromptPayload(input prompt.Context) (parsers.Loot, error) {
+	payload, ok := input.Payload.(parsers.Loot)
 	if !ok {
-		return scan.WorkerPromptPayload{}, fmt.Errorf("scanner prompt target %q requires scan.WorkerPromptPayload", input.Target)
+		return parsers.Loot{}, fmt.Errorf("scanner prompt target %q requires parsers.Loot", input.Target)
 	}
 	return payload, nil
 }

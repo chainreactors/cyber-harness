@@ -15,6 +15,7 @@ import (
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
 	"github.com/chainreactors/cyber/pkg/profile"
 	"github.com/chainreactors/cyber/tools/scan"
+	"github.com/chainreactors/cyber/tools/toolargs"
 )
 
 type scannerMode struct {
@@ -29,8 +30,12 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 	if rest[0] != "scan" {
 		return scannerMode{}, rest, nil
 	}
-	verifyMode, explicit := scannerVerifyMode(rest[1:], defaultVerify)
-	if hasScannerFlag(rest[1:], "--deep") {
+	verifyMode, explicit := scannerFlagValue(rest[1:], "--verify")
+	if !explicit {
+		verifyMode = defaultVerify
+	}
+	verifyMode = strings.ToLower(strings.TrimSpace(verifyMode))
+	if toolargs.HasFlag(rest[1:], "--deep") {
 		return scannerMode{}, nil, fmt.Errorf("--deep is no longer supported; use --mode full for full scanning")
 	}
 	if err := scan.ValidateVerify(verifyMode); err != nil {
@@ -48,15 +53,6 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 		rest = replaceOrAppendScannerFlag(rest, "--verify", verifyMode)
 	}
 	return mode, rest, nil
-}
-
-func hasScannerFlag(args []string, long string) bool {
-	for _, arg := range args {
-		if arg == long || strings.HasPrefix(arg, long+"=") {
-			return true
-		}
-	}
-	return false
 }
 
 func shouldStreamScannerOutput(rest []string) bool {
@@ -134,24 +130,6 @@ func scannerFlagValue(args []string, names ...string) (string, bool) {
 	return "", false
 }
 
-func scannerVerifyMode(args []string, defaultVerify string) (string, bool) {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		key, value, hasValue := strings.Cut(arg, "=")
-		if key != "--verify" {
-			continue
-		}
-		if hasValue {
-			return strings.ToLower(strings.TrimSpace(value)), true
-		}
-		if i+1 < len(args) {
-			return strings.ToLower(strings.TrimSpace(args[i+1])), true
-		}
-		return "", true
-	}
-	return defaultVerifyMode(defaultVerify), false
-}
-
 func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 	out := append([]string(nil), args...)
 	for i := 1; i < len(out); i++ {
@@ -172,14 +150,6 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 		return out
 	}
 	return append(out, flag+"="+value)
-}
-
-func defaultVerifyMode(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return ""
-	}
-	return value
 }
 
 func runScannerWithAgent(ctx context.Context, option *cfg.Option, runtime *agentsession.Runtime, scannerArgs []string, logger telemetry.Logger) error {

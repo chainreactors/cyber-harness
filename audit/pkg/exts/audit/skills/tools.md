@@ -4,7 +4,7 @@ type: reference
 
 # Minimal tools
 
-`read`, `ls`, `glob` and `bash` provide code access. Use `write` for audit artifacts.
+`read`, `ls`, `glob` and `bash` provide code access. Use `write` for assigned audit artifacts.
 Always quote paths. Shell syntax depends on the runtime environment; on Windows
 Git Bash is preferred. Consult each CLI's `--help` before unfamiliar options.
 
@@ -16,8 +16,9 @@ rg --json --hidden -g '!.git/**' -g '!.cyber/**' -g '*.go' 'Authorize|CommandCon
 rg -n -F 'FunctionName' src
 ```
 
-Ripgrep's report exclusions are also set in RIPGREP_CONFIG_PATH. Honor the
-additional report exclusion shown in the system prompt. `--no-config` bypasses
+When a report directory is assigned, its exclusions are also set in
+RIPGREP_CONFIG_PATH. Honor the search exclusions shown in the system prompt.
+`--no-config` bypasses
 these defaults. rg exit 0 means matches, 1 means none, 2 means an error. Limit
 large searches by path/language, then read surrounding code with line numbers.
 This works on text in any language, without claiming semantic references.
@@ -29,7 +30,7 @@ ast-grep run --lang ts --pattern 'console.log($$$ARGS)' --json --globs '!.cyber/
 ast-grep run --lang go --pattern 'exec.Command($CMD, $$$ARGS)' --json --globs '!.cyber/**' .
 ```
 
-Add the report exclusion from the system prompt with `--globs` when it is inside
+Add the assigned report exclusion with `--globs` when it is inside
 the repository. Supported parsers vary by language. JSON coordinates are zero
 based; convert to one based lines in reports. A parse failure is not a zero-match
 result. Simplify an ambiguous pattern and validate it on a small positive example.
@@ -42,14 +43,14 @@ other nonzero results need diagnosis and must remain visible in coverage.
 ## Dependency evidence
 
 ```sh
-osv-scanner scan source --recursive --format json --no-call-analysis=go --no-call-analysis=rust --output-file <report>/raw/osv.json .
-osv-scanner scan source --lockfile <path> --format json --no-call-analysis=go --no-call-analysis=rust --output-file <report>/raw/osv.json
+osv-scanner scan source --recursive --format json --no-call-analysis=go --no-call-analysis=rust --output-file <output>/osv.json .
+osv-scanner scan source --lockfile <path> --format json --no-call-analysis=go --no-call-analysis=rust --output-file <output>/osv.json
 ```
 
-For directory scans add `--experimental-exclude .cyber` and an explicit report
-directory exclusion. Disable call analysis as shown to avoid build-script execution.
+For directory scans add `--experimental-exclude .cyber` and exclude an assigned
+report directory. Disable call analysis as shown to avoid build-script execution.
 Prefer explicit discovered lockfiles/manifests when the repository contains
-report output or generated fixtures. `--help` lists supported inputs/options.
+generated output or fixtures. `--help` lists supported inputs/options.
 Version 2: exit 0 means a completed scan with no vulnerabilities; exit 1 means
 vulnerabilities were found; exit 128 means no supported packages were found.
 Other nonzero statuses are failures. Capture stderr and exit status even when
@@ -60,13 +61,13 @@ multiple lockfiles, dev dependencies and actual reachable vulnerable code.
 ## Content leak evidence
 
 ```sh
-proton -i . -c keys -j --no-stats -o <report>/raw/proton.jsonl
+proton -i . -c keys -j --no-stats -o <output>/proton.jsonl
 proton --template-list -c keys
 ```
 
 Read [proton documentation](cyber://proton/proton.md). Results aggregate by rule
-and path; inspect all events to preserve multiple occurrences. Report directories
-and .git are excluded by the audit extension. No full Git-history scan or Gitleaks
+and path; inspect all events to preserve multiple occurrences. The assigned
+report directory and .git are excluded when applicable. No full Git-history scan or Gitleaks
 parity is implied. Redact secret values in written findings and verify context.
 
 ## Binary inspection
@@ -84,18 +85,18 @@ arsenal install 7zz           # archive extraction on Windows amd64
 ```
 
 After installation, verify the command and preserve its version output in the
-report. These tools are optional and are not part of the required-tool preflight.
+evidence. These tools are optional and are not part of the required-tool preflight.
 
 Use only the tools listed in the current Tool versions for commands that are
 already installed. The optional reverse plugins above are not guaranteed to be
 available until the model installs them. Invoke executable names directly.
 
 ```sh
-radare2 -N -q -c ij sample.exe > <report>/raw/binary-info.json
-radare2 -N -q -c 'aaa;aflj' sample.exe > <report>/raw/functions.json
-radare2 -N -q -c 'aaa;s entry0;pdfj' sample.exe > <report>/raw/entry-disassembly.json
-capa -q -j sample.exe > <report>/raw/capa.json
-floss -q -j sample.exe > <report>/raw/floss.json
+radare2 -N -q -c ij sample.exe > <output>/binary-info.json
+radare2 -N -q -c 'aaa;aflj' sample.exe > <output>/functions.json
+radare2 -N -q -c 'aaa;s entry0;pdfj' sample.exe > <output>/entry-disassembly.json
+capa -q -j sample.exe > <output>/capa.json
+floss -q -j sample.exe > <output>/floss.json
 ```
 
 Capture stderr and exit status too. radare2 uses `-v` for its version; `-N`
@@ -112,6 +113,7 @@ tools do not provide Java/Android/.NET decompilation or firmware unpacking.
 
 Git is supplied by the environment. Use `git status`, `git diff`, `git show` and
 `git log` for repository context when available; report the limit if it is absent.
-Do not print credential-bearing remote URLs. Tool versions are in run.json.
+Do not print credential-bearing remote URLs. Tool versions appear in the system
+prompt and, for local report runs, in run.json.
 `arsenal add owner/repo --name NAME --pattern PATTERN` retains third-party GitHub
 release support; this is not a general go/npm/pip/source build installer.

@@ -14,7 +14,7 @@ test('chat session switching keeps an active run isolated from the new composer'
   await page.getByRole('button', { name: 'Send message' }).click()
   await expect(page.getByRole('button', { name: 'Pause response' })).toBeVisible()
 
-  await nodeGroup.getByRole('button', { name: 'New', exact: true }).click()
+  await nodeGroup.getByRole('button', { name: 'New task on e2e-node' }).click()
   await expect(page).not.toHaveURL(firstURL)
   await expect(page.getByRole('button', { name: 'Pause response' })).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: 'Your goal' })).toBeEnabled()
@@ -111,6 +111,8 @@ for (const width of [1280, 520]) {
     await page.locator('input[type="file"]').setInputFiles({
       name: 'regression-context.txt', mimeType: 'text/plain', buffer: Buffer.from('local regression context\n'.repeat(3600)),
     })
+    await page.getByRole('button', { name: 'UP', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'CTX', exact: true })).toBeVisible()
     await page.getByRole('textbox', { name: 'Your goal' }).fill('ISSUE-143-145: complete both regression rounds using local checks only')
     await page.getByRole('button', { name: 'Send message' }).click()
 
@@ -137,13 +139,12 @@ for (const width of [1280, 520]) {
       .toBeLessThan(order.findIndex(text => text.includes('Round two complete.')))
     expect(order.filter(text => text.includes('Run a second regression round'))).toHaveLength(1)
     const compact = page.getByRole('status').filter({ hasText: 'Context compacted' })
-    if (await compact.count()) {
-      await expect(compact).not.toContainText('?')
-      const compactBox = (await compact.boundingBox())!
-      const nextRoundBox = (await page.getByTestId('assistant-response').nth(1).boundingBox())!
-      expect(nextRoundBox.y - compactBox.y - compactBox.height).toBeGreaterThanOrEqual(0)
-      expect(nextRoundBox.y - compactBox.y - compactBox.height).toBeLessThan(50)
-    }
+    await expect(compact).toBeVisible()
+    await expect(compact).not.toContainText('?')
+    const compactBox = (await compact.boundingBox())!
+    const nextRoundBox = (await page.getByTestId('assistant-response').nth(1).boundingBox())!
+    expect(nextRoundBox.y - compactBox.y - compactBox.height).toBeGreaterThanOrEqual(0)
+    expect(nextRoundBox.y - compactBox.y - compactBox.height).toBeLessThan(50)
 
     const firstCard = page.getByTestId('assistant-response').first()
     await firstCard.getByRole('button', { name: 'Thinking', exact: true }).click()
@@ -164,6 +165,7 @@ for (const width of [1280, 520]) {
     expect(results.every((result: any) => !result.isError)).toBeTruthy()
     expect(JSON.stringify(results)).toContain('ISSUE-143-145-shell-ok')
     expect(JSON.stringify(results)).not.toContain('unknown flag')
+    expect(body.events.some((delivery: any) => delivery.event?.status?.state === 'compact_end')).toBeTruthy()
     await firstCard.getByRole('button', { name: 'Thinking', exact: true }).click()
     await firstCard.getByRole('button', { name: /2 tools/i }).click()
     await page.screenshot({ path: testInfo.outputPath('goal-completed.png'), fullPage: true })

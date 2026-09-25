@@ -51,7 +51,7 @@ func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *assoc
 
 		value, ok := result.(*neutron.ExecuteResult)
 		return value, ok && value != nil
-	}, func() {}), nil
+	}, nil), nil
 }
 
 // FingerAllowedIDs builds the set of template IDs allowed by the given

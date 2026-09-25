@@ -187,7 +187,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		options = append(options,
 			scan.WithVerification(e.config.Verify, func(ctx context.Context) bool { return currentConfig(ctx).Provider != nil }),
 			scan.WithWorker(func(ctx context.Context, name string, loot parsers.Loot) (string, error) {
-				return scannerWorker(executor, currentConfig(ctx))(ctx, name, loot)
+				config := currentConfig(ctx)
+				if config.Provider == nil {
+					return "", fmt.Errorf("scanner subagent %q requires a model provider", name)
+				}
+				result, err := executor.Execute(ctx, config, subagent.Request{Name: name, Input: subagent.Input{Payload: loot}})
+				if err != nil {
+					return "", err
+				}
+				if result == nil {
+					return "", nil
+				}
+				return result.Output, nil
 			}),
 		)
 	} else {
@@ -230,10 +241,21 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		DescriptionPath: "cyber://skills/runtime/search.md",
 		Run:             cyberhub.Run,
 	})
-	if command, err := newScanCommand(e.engines, options, proxyURL, stream); err != nil {
-		logger.Warnf("scan unavailable: %v", err)
+	if e.engines == nil || e.engines.Gogo == nil || e.engines.Spray == nil {
+		logger.Warnf("scan unavailable: scan engines are unavailable")
 	} else {
-		values = append(values, command)
+		if proxyURL != "" {
+			options = append(options, scan.WithProxy(proxyURL))
+		}
+		if stream != nil {
+			options = append(options, scan.WithEvents(stream))
+		}
+		impl := scan.New(e.engines, options...)
+		values = append(values, coretool.Command{
+			Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
+			DescriptionPath: "cyber://skills/cyber/okf/easm/scan.md",
+			Run:             impl.Run,
+		})
 	}
 	values = append(values, manifestScannerCommands(stream, e.engines, logger, proxyURL)...)
 	if err := extension.Add(scope, values...); err != nil {

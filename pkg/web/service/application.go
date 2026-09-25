@@ -58,7 +58,7 @@ func (s *Service) swapProfile(next profile.Profile) error {
 // ServeApplication performs Application Endpoint initialization and dispatches
 // application business messages through the unified Connection.
 func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStream) error {
-	if s == nil || s.api == nil || stream == nil {
+	if s == nil || s.api == nil || s.api.Sessions == nil || stream == nil {
 		return fmt.Errorf("application AOP stream is unavailable")
 	}
 	workCtx, admitted := s.beginWork()
@@ -70,7 +70,6 @@ func (s *Service) ServeApplication(ctx context.Context, stream aop.EnvelopeStrea
 	if err != nil {
 		return err
 	}
-	defer connection.Close()
 	stopRequest := context.AfterFunc(ctx, connection.Close)
 	defer stopRequest()
 	s.appMu.Lock()

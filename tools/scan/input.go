@@ -17,7 +17,7 @@ import (
 const inputSource = "input"
 
 func buildSeedEvents(rawInputs []string, onError func(string)) []event {
-	var targets []target
+	var events []event
 	for _, raw := range rawInputs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -30,9 +30,11 @@ func buildSeedEvents(rawInputs []string, onError func(string)) []event {
 			}
 			continue
 		}
-		targets = append(targets, parsed...)
+		for _, target := range parsed {
+			events = append(events, targetEvent(inputSource, target))
+		}
 	}
-	return targetEvents(inputSource, targets)
+	return events
 }
 
 func seedTargetsFromInput(raw string) []target {
@@ -48,29 +50,15 @@ func seedTargetsFromInput(raw string) []target {
 		return nil
 	}
 	if strings.Contains(raw, "/") {
-		if isCIDRInput(raw) {
-			return []target{newScanTarget(raw, raw, "")}
+		if _, _, err := net.ParseCIDR(raw); err == nil {
+			return []target{newScanTarget(raw, "")}
 		}
 		return nil
 	}
 	if host, port, ok := utils.SplitHostPort(raw); ok {
-		return seedTargetsFromHostPort(host, port, raw)
+		return seedTargetsFromHostPort(host, port)
 	}
-	return []target{newScanTarget(raw, raw, "")}
-}
-
-func targetEvents(source string, targets []target) []event {
-	if len(targets) == 0 {
-		return nil
-	}
-	events := make([]event, 0, len(targets))
-	for _, target := range targets {
-		if target == nil {
-			continue
-		}
-		events = append(events, targetEvent(source, "", target))
-	}
-	return events
+	return []target{newScanTarget(raw, "")}
 }
 
 func parseInputURL(raw string) (*url.URL, bool) {
@@ -85,36 +73,34 @@ func parseInputURL(raw string) (*url.URL, bool) {
 	return parsed, true
 }
 
-func isCIDRInput(raw string) bool {
-	_, _, err := net.ParseCIDR(strings.TrimSpace(raw))
-	return err == nil
-}
-
 func seedTargetsFromURL(raw string, parsed *url.URL) []target {
-	if parsed == nil {
-		return nil
-	}
 	var targets []target
 	if utils.IsWebScheme(parsed.Scheme) {
-		targets = append(targets, newWebTarget(raw, raw, ""))
+		targets = append(targets, newWebTarget(raw, ""))
 	}
-	if target, ok := zombieTargetFromParsedURL(parsed, ""); ok {
+	if target, ok := zombieTargetFromParsedURL(parsed); ok {
 		if !isGenericWebZombieService(target.Service) {
-			targets = append(targets, newWeakpassTarget(raw, target))
+			targets = append(targets, newWeakpassTarget(target))
 		}
 	}
 	return targets
 }
 
-func seedTargetsFromHostPort(host, port, raw string) []target {
-	targets := []target{newScanTarget(raw, host, port)}
+func seedTargetsFromHostPort(host, port string) []target {
+	targets := []target{newScanTarget(host, port)}
 	if utils.IsWebPort(port) {
-		targets = append(targets, newWebTarget(raw, utils.URLFromHostPort(webSchemeFromPort(port), host, port), ""))
+		targets = append(targets, newWebTarget(utils.URLFromHostPort(webSchemeFromPort(port), host, port), ""))
 		return targets
 	}
-	if target, ok := zombieTargetFromHostPort(host, port, ""); ok {
+	service := zombiepkg.GetDefault(port)
+	if target, ok := normalizeZombieTarget(sdkzombie.Target{
+		IP:      strings.TrimSpace(host),
+		Port:    strings.TrimSpace(port),
+		Service: service,
+		Scheme:  service,
+	}); ok {
 		if !isGenericWebZombieService(target.Service) {
-			targets = append(targets, newWeakpassTarget(raw, target))
+			targets = append(targets, newWeakpassTarget(target))
 		}
 	}
 	return targets
@@ -149,7 +135,7 @@ func readInputs(inputs []string, listFile string) ([]string, error) {
 	return out, scanner.Err()
 }
 
-func zombieTargetFromParsedURL(parsed *url.URL, serviceOverride string) (sdkzombie.Target, bool) {
+func zombieTargetFromParsedURL(parsed *url.URL) (sdkzombie.Target, bool) {
 	if parsed == nil || parsed.Hostname() == "" {
 		return sdkzombie.Target{}, false
 	}
@@ -166,28 +152,10 @@ func zombieTargetFromParsedURL(parsed *url.URL, serviceOverride string) (sdkzomb
 		target.Username = parsed.User.Username()
 		target.Password, _ = parsed.User.Password()
 	}
-	return normalizeZombieTarget(target, serviceOverride)
+	return normalizeZombieTarget(target)
 }
 
-func zombieTargetFromHostPort(host, port, serviceOverride string) (sdkzombie.Target, bool) {
-	service := zombiepkg.GetDefault(port)
-	return normalizeZombieTarget(sdkzombie.Target{
-		IP:      strings.TrimSpace(host),
-		Port:    strings.TrimSpace(port),
-		Service: service,
-		Scheme:  service,
-	}, serviceOverride)
-}
-
-func normalizeZombieTarget(target sdkzombie.Target, serviceOverride string) (sdkzombie.Target, bool) {
-	if serviceOverride != "" {
-		service := strings.ToLower(serviceOverride)
-		if mapped, ok := parsers.ZombieServiceFromName(service); ok {
-			service = mapped
-		}
-		target.Service = service
-		target.Scheme = target.Service
-	}
+func normalizeZombieTarget(target sdkzombie.Target) (sdkzombie.Target, bool) {
 	if target.Port == "" && target.Service != "" {
 		target.Port = zombiepkg.Services.DefaultPort(target.Service)
 	}

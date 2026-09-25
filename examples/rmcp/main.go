@@ -15,7 +15,6 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	toolnode "github.com/chainreactors/cyber/pkg/node/tool"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 
 	"github.com/chainreactors/cyber/core/hooks"
 )
@@ -39,9 +38,6 @@ func newRegistry(workDir string) (coretool.Executor, *extension.Set) {
 }
 
 func main() {
-	if code, handled := terminaltool.RunShellCommandProxy(); handled {
-		os.Exit(code)
-	}
 	var (
 		serverURL string
 		token     string

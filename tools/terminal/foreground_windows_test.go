@@ -56,8 +56,5 @@ func TestForegroundCancelDoesNotRunRemainingCommands(t *testing.T) {
 }
 
 func blockingCommand() string {
-	if posixShellAvailable() {
-		return "echo started > started.txt; sleep 30; echo leaked > leaked.txt"
-	}
-	return "echo started > started.txt & ping -n 30 127.0.0.1 > nul & echo leaked > leaked.txt"
+	return "echo started > started.txt; sleep 30; echo leaked > leaked.txt"
 }

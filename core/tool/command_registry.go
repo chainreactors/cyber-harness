@@ -206,6 +206,7 @@ func (r *CommandRegistry) Run(ctx context.Context, tokens []string, parent *Exec
 	child := &Execution{
 		ID: parent.ID, Command: name, Args: args, Dir: parent.Dir, Env: parent.Env,
 		Stdin: parent.Stdin, Stdout: parent.Stdout, Stderr: parent.Stderr,
+		Route: parent.Route, OnBackground: parent.OnBackground,
 		manager: parent.manager,
 	}
 	parent.mu.RUnlock()

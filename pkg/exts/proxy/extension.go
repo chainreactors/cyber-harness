@@ -57,7 +57,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	// The proxy commands read the hub's own state, so they belong to the hub's
 	// owner rather than to whichever extension happened to hold a reference.
-	if err := extension.Add(scope, proxytool.NewCommands(executor.Run, hub, e.config.Proxy)...); err != nil {
+	if err := extension.Add(scope, proxytool.NewCommands(func(ctx context.Context, argv []string, parent *coretool.Execution) (any, error) {
+		return coretool.RunCommand(ctx, executor, argv, parent)
+	}, hub, e.config.Proxy)...); err != nil {
 		return err
 	}
 	if err := extension.Provide[egress.Endpoint](scope, hub); err != nil {

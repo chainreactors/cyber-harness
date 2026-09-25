@@ -54,5 +54,5 @@ func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts Zombi
 		}
 		value, ok := result.Data().(*parsers.ZombieResult)
 		return value, ok && value != nil
-	}, func() {}), nil
+	}, nil), nil
 }

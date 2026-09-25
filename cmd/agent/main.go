@@ -19,7 +19,6 @@ import (
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/console"
-	terminaltool "github.com/chainreactors/cyber/tools/terminal"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -52,9 +51,6 @@ type options struct {
 }
 
 func main() {
-	if code, handled := terminaltool.RunShellCommandProxy(); handled {
-		os.Exit(code)
-	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {

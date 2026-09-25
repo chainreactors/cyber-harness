@@ -129,16 +129,38 @@ func (c *Command) execPassthrough(ctx context.Context, proxyURL string, cmdArgs 
 	if c.execCommand == nil {
 		return nil, fmt.Errorf("proxy passthrough not available (no command executor)")
 	}
-	// Route this one command through proxyURL by temporarily swapping the hub's
-	// upstream. Children keep pointing at the stable hub address; only the
-	// egress chain changes for the duration of the wrapped command.
-	restore, err := c.state.WithOverrideDial(proxyURL)
+	if c.hub == nil {
+		return nil, fmt.Errorf("proxy passthrough requires a running proxy hub")
+	}
+	parsed, err := url.Parse(proxyURL)
 	if err != nil {
 		return nil, err
 	}
-	defer restore()
-
-	return c.execCommand(ctx, cmdArgs, execution)
+	dial, err := proxyclient.NewClient(parsed)
+	if err != nil {
+		return nil, err
+	}
+	route, ca, release := c.hub.egress(ctx, dial)
+	background := false
+	defer func() {
+		if !background {
+			release()
+		}
+	}()
+	child := &coretool.Execution{
+		ID: execution.ID, Dir: execution.Dir,
+		Env:   append(append([]string(nil), execution.Env...), coretool.EgressEnvironment(route, ca)...),
+		Stdin: execution.Stdin, Stdout: execution.Stdout, Stderr: execution.Stderr,
+		Route: coretool.Egress{ProxyURL: route, CAPath: ca},
+		OnBackground: func(session *coretool.Execution) {
+			background = true
+			go func() {
+				_ = session.WaitProcessCompletion(context.Background())
+				release()
+			}()
+		},
+	}
+	return c.execCommand(ctx, cmdArgs, child)
 }
 
 // ---------------------------------------------------------------------------

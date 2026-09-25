@@ -42,7 +42,7 @@ func TestCallsRejectDuplicateCancelArtifactsAndDrainBeforeClose(t *testing.T) {
 		defer mu.Unlock()
 		sent = append(sent, message)
 	}}
-	sub := events.Observe(coreevents.ObserverFunc(h.Forward))
+	sub := events.Observe(h.Forward)
 	defer sub.Cancel()
 	args, _ := aop.JSONValue(map[string]any{})
 	request := &toolpb.ProtocolMessage{Message: &toolpb.ProtocolMessage_Call{Call: &toolpb.Call{Call: &aop.ToolCall{Id: "call", Name: d.Name(), Arguments: args}}}}

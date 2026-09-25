@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/cyber/core/telemetry"
 )
 
@@ -39,20 +38,7 @@ type Capability[T Event] struct {
 	Name   string
 	Routes []Route[T]
 	Worker int
-	RunKey func(T) string
 	Run    func(ctx context.Context, event T, emit func(T))
-}
-
-func (c Capability[T]) KeyFor(e T) string {
-	if c.RunKey != nil {
-		return c.RunKey(e)
-	}
-	return c.Name + "|" + e.Key()
-}
-
-type Config[T Event] struct {
-	Capabilities []Capability[T]
-	Bus          *eventbus.Bus[Observation[T]]
 }
 
 type routedEvent[T Event] struct {
@@ -61,17 +47,15 @@ type routedEvent[T Event] struct {
 }
 
 type routeEntry[T Event] struct {
-	from   string
 	cap    *Capability[T]
 	accept func(T) bool
-	mu     sync.Mutex
 	seen   map[string]struct{}
 }
 
 type Pipeline[T Event] struct {
 	ctx            context.Context
 	capabilities   []Capability[T]
-	bus            *eventbus.Bus[Observation[T]]
+	observe        func(Observation[T])
 	events         chan routedEvent[T]
 	queues         map[string]chan T
 	routes         map[string][]*routeEntry[T]
@@ -82,53 +66,28 @@ type Pipeline[T Event] struct {
 	pending        int
 }
 
-// RouteStats returns per-route dedup map sizes. Keyed by "from->cap".
-// A value of -1 means the map has been freed. For testing only.
-func (p *Pipeline[T]) RouteStats() map[string]int {
-	stats := make(map[string]int)
-	for source, entries := range p.routes {
-		for _, entry := range entries {
-			key := source + "->" + entry.cap.Name
-			entry.mu.Lock()
-			if entry.seen != nil {
-				stats[key] = len(entry.seen)
-			} else {
-				stats[key] = -1
-			}
-			entry.mu.Unlock()
-		}
-	}
-	return stats
-}
-
 const seedSource = ""
 
-func New[T Event](ctx context.Context, cfg Config[T]) (*Pipeline[T], error) {
-	bus := cfg.Bus
-	if bus == nil {
-		bus = eventbus.New[Observation[T]]()
-	}
-
-	if err := validateDAG(cfg.Capabilities); err != nil {
+func New[T Event](ctx context.Context, capabilities []Capability[T], observe func(Observation[T])) (*Pipeline[T], error) {
+	if err := validateDAG(capabilities); err != nil {
 		return nil, err
 	}
 
 	p := &Pipeline[T]{
 		ctx:            ctx,
-		capabilities:   cfg.Capabilities,
-		bus:            bus,
+		capabilities:   capabilities,
+		observe:        observe,
 		events:         make(chan routedEvent[T], 1024),
-		queues:         make(map[string]chan T, len(cfg.Capabilities)),
+		queues:         make(map[string]chan T, len(capabilities)),
 		routes:         make(map[string][]*routeEntry[T]),
 		dispatcherDone: make(chan struct{}),
 	}
 	p.cond = sync.NewCond(&p.mu)
 
-	for i := range cfg.Capabilities {
-		cap := &cfg.Capabilities[i]
+	for i := range capabilities {
+		cap := &p.capabilities[i]
 		for _, route := range cap.Routes {
 			entry := &routeEntry[T]{
-				from:   route.From,
 				cap:    cap,
 				accept: route.Accept,
 				seen:   make(map[string]struct{}),
@@ -152,22 +111,6 @@ func (p *Pipeline[T]) Run(seeds []T) {
 		close(queue)
 	}
 	p.workersDone.Wait()
-	p.cleanup()
-}
-
-func (p *Pipeline[T]) Submit(e T) {
-	p.submit(e, seedSource)
-}
-
-func (p *Pipeline[T]) cleanup() {
-	for _, entries := range p.routes {
-		for _, entry := range entries {
-			entry.mu.Lock()
-			clear(entry.seen)
-			entry.seen = nil
-			entry.mu.Unlock()
-		}
-	}
 	p.routes = nil
 	p.queues = nil
 }
@@ -238,19 +181,11 @@ func (p *Pipeline[T]) dispatch(re routedEvent[T]) {
 		}
 		matched = true
 
-		dedupKey := entry.cap.KeyFor(re.event)
-		if dedupKey == "" {
-			continue
-		}
-
-		entry.mu.Lock()
-		if _, seen := entry.seen[dedupKey]; seen {
-			entry.mu.Unlock()
+		if _, seen := entry.seen[key]; seen {
 			p.emit(ActionDedupRoute, entry.cap.Name, re.event)
 			continue
 		}
-		entry.seen[dedupKey] = struct{}{}
-		entry.mu.Unlock()
+		entry.seen[key] = struct{}{}
 
 		if !dispatched {
 			p.emit(ActionAccept, re.source, re.event)
@@ -294,7 +229,9 @@ func (p *Pipeline[T]) waitIdle() {
 }
 
 func (p *Pipeline[T]) emit(action ActionKind, capability string, e T) {
-	p.bus.Emit(Observation[T]{Action: action, Capability: capability, Event: e})
+	if p.observe != nil {
+		p.observe(Observation[T]{Action: action, Capability: capability, Event: e})
+	}
 }
 
 func validateDAG[T Event](capabilities []Capability[T]) error {

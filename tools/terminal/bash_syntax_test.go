@@ -13,20 +13,6 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-type routingContainment struct {
-	commands []string
-	cleaned  chan struct{}
-}
-
-func (c *routingContainment) Prepare(command string, options BashExecOptions) (BashExecOptions, func(), error) {
-	c.commands = append(c.commands, command)
-	return options, func() {
-		if c.cleaned != nil {
-			close(c.cleaned)
-		}
-	}, nil
-}
-
 func shellOutput(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -35,9 +21,6 @@ func shellOutput(s string) string {
 
 func requirePOSIXShell(t *testing.T) {
 	t.Helper()
-	if !posixShellAvailable() {
-		t.Skip("POSIX shell syntax needs a Win32 bash")
-	}
 }
 
 func TestBashShellSyntaxRouting(t *testing.T) {
@@ -47,12 +30,12 @@ func TestBashShellSyntaxRouting(t *testing.T) {
 	}{
 		{"semicolon", "memory_echo one;memory_echo two", "one\ntwo"},
 		{"and", "memory_echo one&&memory_echo two", "one\ntwo"},
-		{"or", "memory_fail ignored||memory_echo recovered", "adapter test exit 7\nrecovered"},
+		{"or", "memory_fail ignored||memory_echo recovered", "recovered"},
 		{"short circuit", "memory_echo one||memory_echo unreachable", "one"},
 		{"newline", "memory_echo one\nmemory_echo two", "one\ntwo"},
 		{"pipeline", "memory_echo one|memory_upper", "ONE"},
 		{"background", "memory_echo one& wait", "one"},
-		{"negation", "! memory_fail ignored", "adapter test exit 7"},
+		{"negation", "! memory_fail ignored", ""},
 		{"environment", `memory_echo "$ROUTING_VALUE"`, "expanded"},
 		{"substitution", `memory_echo "$(printf substituted)"`, "substituted"},
 		{"braces", "memory_echo {one,two}", "one two"},
@@ -67,8 +50,6 @@ func TestBashShellSyntaxRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			bash, _, _ := newAdapterTestBash(t)
 			bash.WithEnvironment(map[string]string{"ROUTING_VALUE": "expanded"})
-			containment := &routingContainment{}
-			bash.WithProcessContainment(containment)
 			dir := t.TempDir()
 			for _, name := range []string{"one.txt", "two.txt"} {
 				if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
@@ -79,13 +60,6 @@ func TestBashShellSyntaxRouting(t *testing.T) {
 			output = shellOutput(output)
 			if info.ExitStatus() != 0 || output != tt.want {
 				t.Fatalf("exit=%d output=%q, want %q", info.ExitStatus(), output, tt.want)
-			}
-			wantShell := tt.name != "multiline quote"
-			if wantShell && !reflect.DeepEqual(containment.commands, []string{tt.command}) {
-				t.Fatalf("supervised scripts = %q, want original script %q", containment.commands, tt.command)
-			}
-			if !wantShell && (len(containment.commands) != 0 || bash.shellAdapter != nil) {
-				t.Fatal("literal command unnecessarily started a shell")
 			}
 		})
 	}
@@ -113,36 +87,22 @@ func TestBashLiteralArguments(t *testing.T) {
 				},
 			}))
 			bash := NewBashTool(t.TempDir(), 5, nil)
-			bash.EnableShellCommands(registry)
+			bash.SetCommandRegistry(registry)
 			t.Cleanup(bash.Close)
-			containment := &routingContainment{}
-			bash.WithProcessContainment(containment)
 			info, _ := runAdapterCommand(t, bash, t.Context(), tt.command, "")
 			if info.ExitStatus() != 0 || !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("exit=%d args=%q, want %q", info.ExitStatus(), got, tt.want)
-			}
-			if bash.shellAdapter != nil || len(containment.commands) != 0 {
-				t.Fatal("literal arguments should use the direct command path")
 			}
 		})
 	}
 }
 
 func TestBashCompoundCommandWithoutAdapter(t *testing.T) {
-	for _, command := range []string{
-		"sample value;echo extra", "sample value&&echo extra", "sample value||echo extra",
-		"sample value\necho extra", "sample value&", "sample $VALUE", "sample value|&cat",
-		"sample value|cat;echo extra", "sample value|cat&&echo extra",
-		"sample one|sample two", "sample one|cat|sample two", "! sample value|cat",
-		"cat <<'EOF'|sample\nbody\nEOF\n", "sample 'unterminated",
-	} {
-		t.Run(command, func(t *testing.T) {
-			bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "wrong"})
-			t.Cleanup(bash.Close)
-			if _, err := bash.RunForeground(t.Context(), command, BashExecOptions{}); err == nil {
-				t.Fatal("unsupported composition must not execute as a direct command")
-			}
-		})
+	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "value\n"})
+	t.Cleanup(bash.Close)
+	info, output := runAdapterCommand(t, bash, t.Context(), "sample | cat", "")
+	if info.ExitStatus() != 0 || shellOutput(output) != "value" {
+		t.Fatalf("composition without setup: exit=%d output=%q", info.ExitStatus(), output)
 	}
 }
 
@@ -159,7 +119,7 @@ func TestBashBuiltinDownloadThenCount(t *testing.T) {
 		},
 	}))
 	bash := NewBashTool(t.TempDir(), 5, nil)
-	bash.EnableShellCommands(registry)
+	bash.SetCommandRegistry(registry)
 	t.Cleanup(bash.Close)
 	dir := t.TempDir()
 	info, output := runAdapterCommand(t, bash, t.Context(), "curl https://example.invalid/data -o file.json; wc -c < file.json", dir)
@@ -175,8 +135,6 @@ func TestBashBuiltinDownloadThenCount(t *testing.T) {
 func TestBashGluedCommandCancellation(t *testing.T) {
 	requirePOSIXShell(t)
 	bash, _, state := newAdapterTestBash(t)
-	containment := &routingContainment{cleaned: make(chan struct{})}
-	bash.WithProcessContainment(containment)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	execution, err := bash.Start(ctx, "memory_wait ignored;memory_echo unreachable", BashExecOptions{})
@@ -191,7 +149,6 @@ func TestBashGluedCommandCancellation(t *testing.T) {
 	cancel()
 	for name, done := range map[string]<-chan struct{}{
 		"registered command cancellation": state.canceled,
-		"shell containment cleanup":       containment.cleaned,
 		"session completion":              bash.tasks.Done(execution.ID),
 	} {
 		select {
@@ -199,9 +156,6 @@ func TestBashGluedCommandCancellation(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("timed out waiting for %s", name)
 		}
-	}
-	if len(containment.commands) != 1 {
-		t.Fatalf("supervised scripts=%q", containment.commands)
 	}
 }
 

@@ -41,11 +41,11 @@ func scannerSubagent(name, description string, systemTarget, requestTarget promp
 				}
 				return cfg, input.Prompt, nil
 			}
-			payload, ok := input.Payload.(scan.WorkerPromptPayload)
+			payload, ok := input.Payload.(parsers.Loot)
 			if !ok {
-				return cfg, "", fmt.Errorf("scanner subagent %q requires scan.WorkerPromptPayload", name)
+				return cfg, "", fmt.Errorf("scanner subagent %q requires parsers.Loot", name)
 			}
-			if strings.TrimSpace(payload.Loot.Target) == "" {
+			if strings.TrimSpace(payload.Target) == "" {
 				return cfg, "", fmt.Errorf("scanner subagent %q requires a loot target", name)
 			}
 			request, err := resolveWorkerPrompt(ctx, cfg.PromptResolver, prompt.Context{
@@ -56,26 +56,6 @@ func scannerSubagent(name, description string, systemTarget, requestTarget promp
 			}
 			return cfg, request, err
 		},
-	}
-}
-
-func scannerWorker(executor subagent.Executor, defaults agent.Config) scan.Worker {
-	return func(ctx context.Context, name string, loot parsers.Loot) (string, error) {
-		cfg := defaults
-		if caller, ok := agent.ToolAgentConfig(ctx); ok {
-			cfg = caller
-		}
-		if cfg.Provider == nil {
-			return "", fmt.Errorf("scanner subagent %q requires a model provider", name)
-		}
-		result, err := executor.Execute(ctx, cfg, subagent.Request{Name: name, Input: subagent.Input{Payload: scan.WorkerPromptPayload{Loot: loot}}})
-		if err != nil {
-			return "", err
-		}
-		if result == nil {
-			return "", nil
-		}
-		return result.Output, nil
 	}
 }
 

@@ -82,8 +82,6 @@ github.com/M09ic/go-ntlmssp v0.0.0-20230312133735-dcccd454dfe0 h1:9Y+BdzDIHfpKy0
 github.com/M09ic/go-ntlmssp v0.0.0-20230312133735-dcccd454dfe0/go.mod h1:yMNEF6ulbFipt3CakMhcmcNVACshPRG4Ap4l00V+mMs=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
-github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/Mzack9999/gcache v0.0.0-20230410081825-519e28eab057 h1:KFac3SiGbId8ub47e7kd2PLZeACxc1LkiiNoDOFRClE=
 github.com/Mzack9999/gcache v0.0.0-20230410081825-519e28eab057/go.mod h1:iLB2pivrPICvLOuROKmlqURtFIEsoJZaMidQfCG1+D4=
 github.com/Mzack9999/go-http-digest-auth-client v0.6.1-0.20220414142836-eb8883508809 h1:ZbFL+BDfBqegi+/Ssh7im5+aQfBRx6it+kHnC7jaDU8=
@@ -254,12 +252,8 @@ github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d h1:wlJ6oMbVLKr
 github.com/chainreactors/utils v0.0.0-20260711153742-f3d210a5fa9d/go.mod h1:xwbUlFoSSxLHujyb8D48o1s2DqmEAxUNfxIy0DVUmcg=
 github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721 h1:mtC+2UKpXO5Yel5JL2Ah6Z2r/X6wx4Fbii/36MmKcLI=
 github.com/chainreactors/utils/cert v0.0.0-20260722180147-5b1816060721/go.mod h1:xvvWMcU9Fcht6GR1cc9ceAZ3/Hl2HrkoRzpeyOzx1rQ=
-github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873 h1:eHf3SvltivxOoEsvQHQUSk7jywVN/C6AqTwKI6WtuRM=
-github.com/chainreactors/utils/mitmproxy v0.0.0-20260909040842-68732c4ef873/go.mod h1:2O3/Vw66VnbzhwsHGFJ2Ge98RuSh6XzMMFGZmMmlZ9M=
 github.com/chainreactors/utils/parsers v0.0.3 h1:3ld7xG5TSvzikVOCkQHjqjHO3otjODwSwHQDkMKbu5o=
 github.com/chainreactors/utils/parsers v0.0.3/go.mod h1:bE/znJWt08n9QOORWsWu0ggB8GWfOg3+dfUMMITmwV4=
-github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2 h1:gqvdOz6JuP3ciqsQQ8IETJRvK7OT0Qnm6368pGjhg0I=
-github.com/chainreactors/utils/proc v0.0.0-20260917082019-d9b6bc48f7e2/go.mod h1:fwBG9qg5mG7LARtlh7Lhz3n1+90CGXW08kX3Vf7nyWA=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4 h1:lvnDYEkatmZFHP5i321qQXK9L4vKRfso/uUfr5tOeC8=
 github.com/chainreactors/words v0.0.0-20260520145736-270600e60fb4/go.mod h1:zfz367PUmyaX6oAqV9SktVqyRXKlEh0sel9Wsq9dd2c=
 github.com/chainreactors/zombie v1.3.1-0.20260809133033-0d0df6fa50f5 h1:GB3a4+i5Yb1yO8eg9bTXtQUcttHOEs9KF75yq2a9EU4=

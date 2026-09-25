@@ -21,22 +21,20 @@ func TestWorkerPanic(t *testing.T) {
 	var mu sync.Mutex
 	var results []string
 
-	p, err := New(context.Background(), Config[testEvent]{
-		Capabilities: []Capability[testEvent]{
-			{
-				Name:   "crasher",
-				Routes: []Route[testEvent]{{From: ""}},
-				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
-					if e.Key() == "panic" {
-						panic("boom")
-					}
-					mu.Lock()
-					results = append(results, e.Key())
-					mu.Unlock()
-				},
+	p, err := New(context.Background(), []Capability[testEvent]{
+		{
+			Name:   "crasher",
+			Routes: []Route[testEvent]{{From: ""}},
+			Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
+				if e.Key() == "panic" {
+					panic("boom")
+				}
+				mu.Lock()
+				results = append(results, e.Key())
+				mu.Unlock()
 			},
 		},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,33 +71,31 @@ func TestDispatcherPanic(t *testing.T) {
 	var count int
 	var mu sync.Mutex
 
-	p, err := New(context.Background(), Config[testEvent]{
-		Capabilities: []Capability[testEvent]{
-			{
-				Name:   "counter",
-				Routes: []Route[testEvent]{{From: ""}},
-				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
-					// Emit an event that routes to "sinker".
-					emit(testEvent{fmt.Sprintf("out:%s", e.Key())})
-					mu.Lock()
-					count++
-					mu.Unlock()
-				},
-			},
-			{
-				Name: "sinker",
-				Routes: []Route[testEvent]{{
-					From: "counter",
-					Accept: func(e testEvent) bool {
-						return true
-					},
-				}},
-				Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
-					// just consume
-				},
+	p, err := New(context.Background(), []Capability[testEvent]{
+		{
+			Name:   "counter",
+			Routes: []Route[testEvent]{{From: ""}},
+			Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
+				// Emit an event that routes to "sinker".
+				emit(testEvent{fmt.Sprintf("out:%s", e.Key())})
+				mu.Lock()
+				count++
+				mu.Unlock()
 			},
 		},
-	})
+		{
+			Name: "sinker",
+			Routes: []Route[testEvent]{{
+				From: "counter",
+				Accept: func(e testEvent) bool {
+					return true
+				},
+			}},
+			Run: func(_ context.Context, e testEvent, emit func(testEvent)) {
+				// just consume
+			},
+		},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

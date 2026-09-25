@@ -23,12 +23,12 @@ import (
 func TestExecutionOnlyRejectsAIModesBeforeExecuting(t *testing.T) {
 	command := New(nil, WithExecutionOnly())
 	for _, args := range [][]string{{"--sniper"}, {"--verify", "on"}} {
-		_, _, err := command.execute(context.Background(), args, io.Discard)
+		_, err := command.execute(context.Background(), args, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "AI modes are unavailable") {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
-	_, _, err := New(nil, WithExecutionOnly(), WithVerification("on", nil)).execute(t.Context(), nil, io.Discard)
+	_, err := New(nil, WithExecutionOnly(), WithVerification("on", nil)).execute(t.Context(), nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "require a configured model") {
 		t.Fatalf("execution-only node ignored configured verification: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 			ctx = operation.ContextWithInvocation(ctx, operation.Invocation{CallID: "evidence-call", SessionID: "evidence-session", Emitter: "scan"})
 			stream := coreevents.New()
 			var events []*aop.Event
-			sub := stream.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+			sub := stream.Observe(func(event *aop.Event) { events = append(events, event) })
 			defer sub.Cancel()
 			calls := 0
 			command := New(engines, WithEvents(stream), WithVerification(test.node, func(context.Context) bool { return test.model }), WithWorker(func(ctx context.Context, _ string, loot parsers.Loot) (string, error) {
@@ -84,7 +84,7 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 			if test.explicit != "" {
 				args = append(args, "--verify="+test.explicit)
 			}
-			out, result, err := command.execute(ctx, args, io.Discard)
+			out, err := command.execute(ctx, args, io.Discard)
 			if test.failure == "" && err != nil {
 				t.Fatal(err)
 			}
@@ -99,9 +99,6 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 			}
 			if (calls > 0) != test.verify {
 				t.Fatalf("verification calls=%d, want verification=%v", calls, test.verify)
-			}
-			if result == nil || len(result.Artifacts) == 0 {
-				t.Fatal("local template produced no evidence")
 			}
 			artifacts := map[string]bool{}
 			var loots []*toolpb.Loot
@@ -119,6 +116,9 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 						loots = append(loots, loot)
 					}
 				}
+			}
+			if len(artifacts) == 0 {
+				t.Fatal("local template produced no evidence")
 			}
 			if len(loots) == 0 {
 				t.Fatal("vulnerability evidence was not published")
@@ -145,13 +145,13 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 func TestVerificationRejectsMissingModelAndRetiredValuesBeforeInput(t *testing.T) {
 	for _, value := range []string{"", "auto", "low", "medium", "high", "critical", "on"} {
 		command := New(nil)
-		_, _, err := command.execute(t.Context(), []string{"--verify=" + value}, io.Discard)
+		_, err := command.execute(t.Context(), []string{"--verify=" + value}, io.Discard)
 		if err == nil || strings.Contains(err.Error(), "no input") {
 			t.Fatalf("%s reached input processing: %v", value, err)
 		}
 	}
 	for _, value := range []string{"off"} {
-		_, _, err := New(nil).execute(t.Context(), []string{"--verify=" + value}, io.Discard)
+		_, err := New(nil).execute(t.Context(), []string{"--verify=" + value}, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "no input") {
 			t.Fatalf("%q: %v", value, err)
 		}

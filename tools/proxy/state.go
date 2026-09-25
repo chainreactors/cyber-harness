@@ -116,8 +116,7 @@ func (s *State) SetAutoDial(clashURL string, dial proxyclient.Dial) {
 }
 
 // SetProxyURL routes egress through a single persistent proxy URL (socks5://,
-// trojan://, …). Unlike WithOverrideDial it is not scoped to one command; it
-// stays the active egress until changed or cleared.
+// trojan://, …). It stays the active egress until changed or cleared.
 func (s *State) SetProxyURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {

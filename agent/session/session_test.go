@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/chainreactors/cyber/core/events"
-
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
@@ -259,7 +257,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, provider)
 	var all []*aop.Event
-	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { all = append(all, event) }))
+	unsubscribe := rt.Observe(func(event *aop.Event) { all = append(all, event) })
 	defer unsubscribe.Cancel()
 
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
@@ -320,7 +318,7 @@ func TestSessionRunHasOneReliableTurnLifecycle(t *testing.T) {
 func TestRunAOPTurnPreservesClientMessageIdentity(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
 	events := make(chan *aop.Event, 16)
-	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) }))
+	unsubscribe := rt.Observe(func(event *aop.Event) { events <- proto.Clone(event).(*aop.Event) })
 	defer unsubscribe.Cancel()
 
 	opened := rt.OpenAOPSession(&aop.OpenSessionRequest{SessionId: "session-1"})
@@ -397,11 +395,11 @@ func TestCommandAddsAOPHistoryWithoutChangingTranscript(t *testing.T) {
 	}
 	before := session.MessagesSnapshot()
 	var commandEvent *aop.Event
-	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	rt.Observe(func(event *aop.Event) {
 		if event.GetMessage() != nil && event.TurnId == "" {
 			commandEvent = event
 		}
-	}))
+	})
 	result, err := session.Command(context.Background(), "!printf COMMAND_OK")
 	if err != nil {
 		t.Fatal(err)
@@ -435,11 +433,11 @@ func TestCommandResultIDsSurviveNodeRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		var commandEvent *aop.Event
-		rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+		rt.Observe(func(event *aop.Event) {
 			if event.GetMessage() != nil && event.TurnId == "" {
 				commandEvent = event
 			}
-		}))
+		})
 		if _, err := session.Command(context.Background(), "!printf "+marker); err != nil {
 			t.Fatal(err)
 		}
@@ -501,7 +499,7 @@ func TestActiveRunSteersAsyncInputWithoutSecondLifecycle(t *testing.T) {
 	provider := &runtimeSemanticProvider{started: make(chan struct{}), release: make(chan struct{})}
 	rt := newBareRuntime(t, nil, provider)
 	var events []*aop.Event
-	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	rt.Observe(func(event *aop.Event) { events = append(events, event) })
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -550,11 +548,11 @@ func TestIdleAsyncInputCreatesAutomaticRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended := make(chan *aop.Event, 1)
-	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	rt.Observe(func(event *aop.Event) {
 		if event.SessionId == "session-1" && event.GetTurnEnded() != nil {
 			ended <- event
 		}
-	}))
+	})
 	if err := rt.Deliver(t.Context(), inbox.NewSystemMessage("automatic work")); err != nil {
 		t.Fatal(err)
 	}
@@ -575,11 +573,11 @@ func TestNilProviderRunDoesNotAutoRetry(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
 	var mu sync.Mutex
 	var events []*aop.Event
-	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	rt.Observe(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-	}))
+	})
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -610,7 +608,7 @@ func TestNilProviderIdlePushDoesNotLoop(t *testing.T) {
 	var mu sync.Mutex
 	var events []*aop.Event
 	ended := make(chan struct{}, 1)
-	rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	rt.Observe(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -620,7 +618,7 @@ func TestNilProviderIdlePushDoesNotLoop(t *testing.T) {
 			default:
 			}
 		}
-	}))
+	})
 	session, err := rt.OpenSession(context.Background(), SessionOptions{ID: "session-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -791,7 +789,7 @@ func TestCompactWithoutEnoughContextPublishesItsResult(t *testing.T) {
 	originalID := session.ID()
 
 	var events []*aop.Event
-	unsub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	unsub := runtime.Observe(func(event *aop.Event) { events = append(events, event) })
 	result, err := session.Command(context.Background(), "/compact")
 	unsub.Cancel()
 	if err != nil {

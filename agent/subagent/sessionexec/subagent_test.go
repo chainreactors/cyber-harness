@@ -42,11 +42,11 @@ func TestSubAgentSyncReturnsResult(t *testing.T) {
 func TestSubagentMessagesBelongToChild(t *testing.T) {
 	bus := coreevents.New()
 	var messages []*aop.Event
-	bus.Observe(coreevents.ObserverFunc(func(ev *aop.Event) {
+	bus.Observe(func(ev *aop.Event) {
 		if ev.GetMessage() != nil {
 			messages = append(messages, ev)
 		}
-	}))
+	})
 	parent := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{}, Bus: bus, SessionID: "parent", AgentName: "parent",
 		Provider: &scriptedProvider{responses: []*agent.ChatCompletionResponse{chatResponse(newTextMessage("assistant", "child result"))}},
 	})
@@ -99,11 +99,11 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 	var mu sync.Mutex
 	var events []*aop.Event
 	bus := coreevents.New()
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	bus.Observe(func(event *aop.Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
-	}))
+	})
 	active := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
 		Provider:  provider,
 		Tools:     newTestTools(t),

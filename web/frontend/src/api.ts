@@ -271,7 +271,7 @@ export async function createChatSession(nodeID: string, title?: string, scanID?:
   }
 }
 
-export type SessionFilters = { search: string; nodeId: string; archived: boolean; target: string; view: 'tasks' | 'nodes' | 'targets' }
+export type SessionFilters = { search: string; nodeId: string; archived: boolean }
 export async function listChatSessions(filters?: Partial<SessionFilters>): Promise<SessionRecord[]> {
   const sessions: SessionRecord[] = []
   let afterCursor = ''

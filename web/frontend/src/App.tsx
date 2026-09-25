@@ -286,13 +286,12 @@ export default function App() {
             onFilter={chat.filterSessions}
             onUpdateSession={chat.updateSession}
             activeSessionID={chat.activeSessionID}
+            activeSessionNodeID={activeSession?.session?.nodeId || null}
+            activeSessionBusy={chat.busy}
             selectedNodeID={chat.selectedNodeID}
-            terminalNodeID={activeToolPanel === 'agents' ? agentPanelFocusNodeID : null}
-            onSelectNode={chat.selectNode}
             onSelectSession={handleSelectSession}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}
-            onOpenTerminal={handleOpenTerminal}
           />
 
           <ChatPanel

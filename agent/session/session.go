@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/eventbus"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
@@ -812,7 +812,7 @@ func (rt *Runtime) findSessionLocked(sessionID string) (string, *sessionState) {
 	return "", nil
 }
 
-func (rt *Runtime) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
+func (rt *Runtime) Observe(observer func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
 	if rt == nil || rt.events == nil || observer == nil {
 		return nil
 	}
@@ -1546,18 +1546,14 @@ func (rt *Runtime) nextRuntimeID(prefix string) string {
 	return id
 }
 
-// A command result is a durable transcript entry, but the runtime counter it
-// used to be named after restarts at one with the node process. The hub keeps
-// every earlier result, so after a reconnect two different results share a
-// message id and any reader that identifies messages by id — the web transcript
-// does — overwrites one with the other. Stamp the emission time into the id so
-// it stays unique across restarts, the way rotated session ids already do.
+// Durable ids must remain unique after the runtime counter resets on restart.
+// Wall-clock timestamps can repeat on platforms with coarse clock resolution.
 func (rt *Runtime) nextCommandResultID() string {
-	return rt.nextRuntimeID(fmt.Sprintf("command-%d", time.Now().UnixNano()))
+	return rt.nextRuntimeID("command-" + rand.Text())
 }
 
 func (rt *Runtime) nextContinuationID(logicalID string) string {
-	return logicalID + "-" + rt.nextRuntimeID(fmt.Sprintf("session-%d", time.Now().UnixNano()))
+	return logicalID + "-" + rt.nextRuntimeID("session-" + rand.Text())
 }
 
 func (rt *Runtime) releaseRun(run *Run) {

@@ -55,6 +55,7 @@ type correlationLease struct {
 	operation  *operationpb.Ref
 	invocation operation.Invocation
 	cancel     func(error) bool
+	dial       proxyclient.Dial
 	mu         sync.Mutex
 	active     int
 	released   bool
@@ -69,10 +70,16 @@ type resolvedCorrelation struct {
 	finish     func()
 }
 
+const routeTokenPrefix = "cyber-route-"
+
 // Egress returns an opaque correlation lease for one real execution. The token
 // is transport-only and cannot leak call/session identity through proxy auth.
 // release must run when the actual HTTP owner or process exits.
 func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
+	return h.egress(ctx, nil)
+}
+
+func (h *ProxyHub) egress(ctx context.Context, dial proxyclient.Dial) (string, string, func()) {
 	if h == nil {
 		return "", "", func() {}
 	}
@@ -80,10 +87,11 @@ func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
 	if base == "" {
 		return "", h.CAPath(), func() {}
 	}
-	token := rand.Text()
+	token := routeTokenPrefix + rand.Text()
 	lease := &correlationLease{
 		operation: operation.Correlation(ctx), invocation: operation.InvocationFromContext(ctx),
 		cancel: func(cause error) bool { return operation.RequestCancel(ctx, cause) },
+		dial:   dial,
 		done:   make(chan struct{}),
 	}
 	h.correlationMu.Lock()

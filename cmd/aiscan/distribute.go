@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	types "github.com/chainreactors/cyber/core/types"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	scannerext "github.com/chainreactors/cyber/pkg/exts/scanner"
@@ -28,16 +26,10 @@ func DistributeFromOption(option *cfg.Option) (*types.DistributeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]string, 0, 2)
-	for _, raw := range []string{recon.TavilyKey, searchKeys} {
-		if raw = strings.TrimSpace(raw); raw != "" {
-			keys = append(keys, raw)
-		}
-	}
 	value, err := cfg.SharedFromOption(option)
 	if err != nil {
 		return nil, err
 	}
-	value.Search = &types.SearchConfig{TavilyKeys: strings.Join(keys, ",")}
+	value.Search = &types.SearchConfig{TavilyKeys: tavilyKeys(recon.TavilyKey, searchKeys)}
 	return value, nil
 }

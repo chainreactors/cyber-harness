@@ -14,7 +14,7 @@ func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 	a := stream
 	var mu sync.Mutex
 	seen := make(map[uint64]*aop.Event)
-	a.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	a.Observe(func(event *aop.Event) {
 		mu.Lock()
 		if seen[event.Seq] != nil {
 			t.Errorf("duplicate sequence %d", event.Seq)
@@ -24,7 +24,7 @@ func TestPublishConcurrentProducersAndReentrantObserver(t *testing.T) {
 		if event.Id == "outer" {
 			a.Publish(&aop.Event{SessionId: "shared", Id: "nested"})
 		}
-	}))
+	})
 	stamp := timestamppb.Now()
 	outer := &aop.Event{SessionId: "shared", Id: "outer", EmittedAt: stamp}
 	a.Publish(outer)

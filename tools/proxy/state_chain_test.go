@@ -6,8 +6,7 @@ import (
 	"github.com/chainreactors/proxyclient"
 )
 
-// dialPtr returns the identity of the currently published chain pointer so a
-// swap can be observed without comparing func values (which are not comparable).
+// dialPtr identifies the published chain without comparing func values.
 func (s *State) dialPtr() *proxyclient.Dial { return s.chain.Load() }
 
 func TestCurrentDialNeverNil(t *testing.T) {
@@ -27,27 +26,24 @@ func TestOriginalProxyBecomesChain(t *testing.T) {
 	}
 }
 
-func TestWithOverrideDialSwapAndRestore(t *testing.T) {
+func TestSetProxyURLPublishesPersistentRoute(t *testing.T) {
 	s := NewState("")
 	base := s.dialPtr()
 
-	restore, err := s.WithOverrideDial("socks5://127.0.0.1:1080")
-	if err != nil {
-		t.Fatalf("override failed: %v", err)
+	if err := s.SetProxyURL("socks5://127.0.0.1:1080"); err != nil {
+		t.Fatalf("set proxy failed: %v", err)
 	}
 	if s.dialPtr() == base {
-		t.Fatal("override should republish a different chain pointer")
+		t.Fatal("route should publish a different chain pointer")
 	}
-
-	restore()
-	if s.dialPtr() != base {
-		t.Fatal("restore should return to the previous chain pointer")
+	if s.ActiveProxy() != "socks5://127.0.0.1:1080" {
+		t.Fatalf("active proxy = %q", s.ActiveProxy())
 	}
 }
 
-func TestWithOverrideDialRejectsBadURL(t *testing.T) {
+func TestSetProxyURLRejectsBadURL(t *testing.T) {
 	s := NewState("")
-	if _, err := s.WithOverrideDial("://not a url"); err == nil {
+	if err := s.SetProxyURL("://not a url"); err == nil {
 		t.Fatal("expected error for malformed proxy URL")
 	}
 }

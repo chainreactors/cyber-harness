@@ -1399,7 +1399,7 @@ func toolCallDelta(index uint32, id, name, args string) ChatCompletionStreamEven
 func testBus(handler func(*aop.Event)) *coreevents.Stream {
 	b := coreevents.New()
 	if handler != nil {
-		b.Observe(coreevents.ObserverFunc(handler))
+		b.Observe(handler)
 	}
 	return b
 }

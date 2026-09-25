@@ -250,7 +250,7 @@ func TestRemoteReloadKeepsFailedProfileAndDrainsSuccessfulSwitch(t *testing.T) {
 	defer server.Close()
 	nodeDone := make(chan error, 1)
 	go func() {
-		nodeDone <- runRemoteAgent(ctx, build, &cfg.Option{Explicit: map[string]bool{}, NodeOptions: cfg.NodeOptions{NodeID: "reload-test"}, AgentOptions: cfg.AgentOptions{ServerURL: server.URL}}, telemetry.NopLogger())
+		nodeDone <- RunWebSocket(ctx, build, &cfg.Option{Explicit: map[string]bool{}, NodeOptions: cfg.NodeOptions{NodeID: "reload-test"}, AgentOptions: cfg.AgentOptions{ServerURL: server.URL}}, telemetry.NopLogger())
 	}()
 	select {
 	case err := <-serverDone:

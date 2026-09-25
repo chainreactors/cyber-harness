@@ -140,11 +140,17 @@ func TestPassthroughNoExecutor(t *testing.T) {
 func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
 	state := NewState("socks5://127.0.0.1:1080")
 	cmd := New(state)
+	resource := NewProxyHub(state, nil, t.TempDir(), false, nil)
+	if err := resource.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer resource.Close(context.Background())
+	cmd.SetHub(resource.ProxyHub)
 	base := state.dialPtr()
 
-	var duringExec = base
+	var childRoute string
 	cmd.SetCommandExecutor(func(_ context.Context, tokens []string, execution *coretool.Execution) (any, error) {
-		duringExec = state.dialPtr()
+		childRoute = coretool.ResolveExecutionEgress(execution, "").ProxyURL
 		fmt.Fprint(execution.Stdout, "executed: "+strings.Join(tokens, " "))
 		return nil, nil
 	})
@@ -156,13 +162,11 @@ func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
 	if !strings.Contains(out, "executed: echo hello") {
 		t.Fatalf("expected command output, got: %q", out)
 	}
-	// The override republishes a different chain for the duration of the wrapped
-	// command, then restores the previous one.
-	if duringExec == base {
-		t.Fatal("expected egress chain to be overridden during passthrough execution")
+	if !strings.Contains(childRoute, "@") {
+		t.Fatalf("child route has no per-call token: %q", childRoute)
 	}
 	if state.dialPtr() != base {
-		t.Fatal("expected egress chain to be restored after passthrough")
+		t.Fatal("per-call route changed global egress")
 	}
 }
 

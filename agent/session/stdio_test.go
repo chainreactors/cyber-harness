@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"io"
 	"strings"
 	"sync"
@@ -318,9 +317,9 @@ func initRuntimeStdioHost(t *testing.T, h *stdioHost, prov agent.Provider) {
 	t.Cleanup(h.host.Close)
 	h.rt.agentConfig.Model = "test"
 	h.rt.agentConfig.MaxTurns = 4
-	unsubscribe := h.rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := h.rt.Observe(func(event *aop.Event) {
 		_ = h.emit(aop.MustWrap(aop.EnvelopeID(), "", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}))
-	}))
+	})
 	t.Cleanup(func() { _ = h.rt.close(context.Background()); unsubscribe.Cancel() })
 }
 

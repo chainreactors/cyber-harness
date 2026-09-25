@@ -59,7 +59,8 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 
 	var resultCh <-chan sdktypes.Result
 	if needsBruteMode(opts) {
-		resultCh, err = eng.Execute(sprayCtx, spray.NewBruteTasks(opts.URLs, crawlSeedWordlist(opts)))
+		// BruteTask.Validate requires a seed; spray loads requested dictionaries itself.
+		resultCh, err = eng.Execute(sprayCtx, spray.NewBruteTasks(opts.URLs, []string{"/"}))
 	} else {
 		resultCh, err = eng.Execute(sprayCtx, spray.NewCheckTask(opts.URLs))
 	}
@@ -149,14 +150,6 @@ func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 // the lightweight check-only path.
 func needsBruteMode(opts SprayCheckOptions) bool {
 	return opts.Crawl || opts.DefaultDict || len(opts.Dictionaries) > 0 || opts.Word != ""
-}
-
-// crawlSeedWordlist returns a minimal seed wordlist so the brute runner's
-// initial request triggers response-body URL extraction by the crawl plugin.
-// When dictionaries/word/defaultDict are set, spray's runner will load them
-// internally, but BruteTask.Validate still requires a non-empty wordlist.
-func crawlSeedWordlist(opts SprayCheckOptions) []string {
-	return []string{"/"}
 }
 
 // Spray's native parser and SDK runner both mutate upstream global options,

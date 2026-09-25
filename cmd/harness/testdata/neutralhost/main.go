@@ -26,7 +26,6 @@ import (
 	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/pkg/host"
 	"github.com/chainreactors/cyber/tools/ioa"
-	"github.com/chainreactors/cyber/tools/terminal"
 )
 
 func arg(name string) string {
@@ -38,9 +37,6 @@ func arg(name string) string {
 	return ""
 }
 func main() {
-	if code, handled := terminal.RunShellCommandProxy(); handled {
-		os.Exit(code)
-	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -102,9 +98,9 @@ func run() error {
 
 	h := host.New(mux)
 	stream := host.NewStdio(os.Stdin, os.Stdout)
-	subscription := rt.Observe(events.ObserverFunc(func(event *aop.Event) {
+	subscription := rt.Observe(func(event *aop.Event) {
 		_ = h.Send(aop.Reply("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}), stream.Send)
-	}))
+	})
 	err = h.Serve(stream)
 	if err != nil {
 		cancel()

@@ -18,8 +18,8 @@ func formatJSONLines(d *collector) (string, error) {
 		sb.Write(line)
 		sb.WriteByte('\n')
 	}
-	for _, item := range d.sprayResults {
-		line, err := json.Marshal(item.Result)
+	for _, result := range d.sprayResults {
+		line, err := json.Marshal(result)
 		if err != nil {
 			return "", err
 		}

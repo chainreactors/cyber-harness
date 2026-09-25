@@ -66,7 +66,7 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
 			MitmCapture: cloneBool(hub.Mitm), TrafficStorage: option.TrafficOptions,
 		},
-		Logger: logger, CLISkillPaths: skillPaths(option),
+		Logger: logger, CLISkillPaths: cfg.LocalSkillPaths(option.Skills),
 	}
 }
 
@@ -75,16 +75,6 @@ func envLookup(option *cfg.Option) func(string) (string, bool) {
 		return option.Context.LookupEnv
 	}
 	return os.LookupEnv
-}
-
-func skillPaths(option *cfg.Option) []string {
-	var paths []string
-	for _, value := range option.Skills {
-		if strings.ContainsAny(value, `/\`) || strings.HasPrefix(value, ".") {
-			paths = append(paths, value)
-		}
-	}
-	return paths
 }
 
 func tavilyKeys(primary string, fallbacks ...string) string {

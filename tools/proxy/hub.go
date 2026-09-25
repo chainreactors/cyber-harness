@@ -278,6 +278,19 @@ func (h *ProxyHub) start(caRootPath string) error {
 // dial is the stable indirection: it reads the current egress chain from State
 // on every connection, so `proxy switch/auto/clear` swaps the upstream live.
 func (h *ProxyHub) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	if token := mitmproxy.ProxyAuthUser(ctx); strings.HasPrefix(token, routeTokenPrefix) {
+		h.correlationMu.RLock()
+		lease := h.correlations[token]
+		if lease != nil && lease.dial != nil {
+			dial := lease.dial
+			h.correlationMu.RUnlock()
+			return dial(ctx, network, address)
+		}
+		h.correlationMu.RUnlock()
+		if lease == nil {
+			return nil, fmt.Errorf("proxy route expired")
+		}
+	}
 	if h.state == nil {
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}

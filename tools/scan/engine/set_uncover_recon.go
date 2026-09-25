@@ -12,38 +12,10 @@ func (e *Set) SetupUncover(opts ReconOptions, logger telemetry.Logger) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
-	e.Recon = mergeReconOptions(e.Recon, opts)
-	eng := NewUncoverEngine(e.Recon, logger)
+	eng := NewUncoverEngine(opts, logger)
 	if len(eng.Sources()) == 0 {
 		return
 	}
-	if e.Uncover != nil {
-		_ = e.Uncover.Close()
-	}
 	e.Uncover = eng
 	logger.Infof("%s", telemetry.StartupOK("uncover", strings.Join(e.Uncover.Sources(), ",")))
-}
-
-func mergeReconOptions(base, next ReconOptions) ReconOptions {
-	if next.FofaKey != "" {
-		base.FofaKey = next.FofaKey
-	}
-	if next.HunterAPIKey != "" {
-		base.HunterAPIKey = next.HunterAPIKey
-	}
-	if next.IngressProxy != "" {
-		base.IngressProxy = next.IngressProxy
-	}
-	if next.Limit != 0 {
-		base.Limit = next.Limit
-	}
-	if len(next.Credentials) > 0 {
-		if base.Credentials == nil {
-			base.Credentials = make(map[string]string, len(next.Credentials))
-		}
-		for key, value := range next.Credentials {
-			base.Credentials[key] = value
-		}
-	}
-	return base
 }
