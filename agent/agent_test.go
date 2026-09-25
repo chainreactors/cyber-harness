@@ -595,6 +595,8 @@ func TestAgentTmuxMultiRoundInteraction(t *testing.T) {
 		Provider: llm,
 		Tools:    tools,
 		Model:    "test",
+		// PTY lifecycle notices may arrive after the scripted final response.
+		MaxTurns: 9,
 	}).Run(context.Background(), TextInput("Start an interactive shell session using tmux, test multi-round interaction"))
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
