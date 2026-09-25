@@ -51,11 +51,12 @@ func winPTYAvailable() bool {
 }
 
 func loadWinPTYLib() {
-	dir, err := extractWinPTYBin()
+	execPath, err := os.Executable()
 	if err != nil {
 		winptyErr = err
 		return
 	}
+	dir := filepath.Dir(execPath)
 
 	dllPath := filepath.Join(dir, "winpty.dll")
 	if _, err := os.Stat(dllPath); err != nil {

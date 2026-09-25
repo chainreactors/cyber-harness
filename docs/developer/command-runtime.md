@@ -33,6 +33,9 @@ session takes ownership of its route lease until the session ends.
 
 `third_party/proc` is based on `github.com/chainreactors/utils/proc`
 `v0.0.0-20260917082019-d9b6bc48f7e2` and adds logical session status.
+On Windows it uses ConPTY when available. Older systems can use WinPTY when
+`winpty.dll` and `winpty-agent.exe` are installed beside the executable;
+without them, the runtime falls back to pipes.
 `third_party/mitmproxy` is based on `github.com/chainreactors/utils/mitmproxy`
 `v0.0.0-20260909040842-68732c4ef873` and exposes the request's proxy-auth
 identity to its dial callback. The root and audit modules use these local
