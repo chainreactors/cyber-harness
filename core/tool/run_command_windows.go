@@ -76,7 +76,7 @@ func assignCommandJob(job windows.Handle, pid int) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 	return windows.AssignProcessToJobObject(job, handle)
 }
 
@@ -85,7 +85,7 @@ func resumeCommandProcess(pid int) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 	status, _, callErr := windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess").Call(uintptr(handle))
 	if status != 0 {
 		if callErr != nil && callErr != windows.ERROR_SUCCESS {

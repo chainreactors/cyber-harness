@@ -8,7 +8,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	aop "github.com/chainreactors/cyber/aop"
-	coreevents "github.com/chainreactors/cyber/core/events"
 )
 
 func TestAttachedSessionClosesBeforeParentInboxWithoutDelegation(t *testing.T) {
@@ -18,11 +17,11 @@ func TestAttachedSessionClosesBeforeParentInboxWithoutDelegation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ended atomic.Bool
-	rt.events.Observe(coreevents.ObserverFunc(func(ev *aop.Event) {
+	rt.events.Observe(func(ev *aop.Event) {
 		if ev.SessionId == "child" && ev.GetSessionEnded() != nil {
 			ended.Store(true)
 		}
-	}))
+	})
 	var called atomic.Int32
 	_, err = rt.OpenSession(t.Context(), SessionOptions{ID: "child", ParentSessionID: parent.ID(), Attached: true, SingleTask: true, OnClosed: func(outcome Outcome) {
 		called.Add(1)

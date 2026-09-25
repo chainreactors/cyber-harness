@@ -63,7 +63,7 @@ func TestVerificationPrecedenceAndEvidenceOnFailure(t *testing.T) {
 			ctx = operation.ContextWithInvocation(ctx, operation.Invocation{CallID: "evidence-call", SessionID: "evidence-session", Emitter: "scan"})
 			stream := coreevents.New()
 			var events []*aop.Event
-			sub := stream.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+			sub := stream.Observe(func(event *aop.Event) { events = append(events, event) })
 			defer sub.Cancel()
 			calls := 0
 			command := New(engines, WithEvents(stream), WithVerification(test.node, func(context.Context) bool { return test.model }), WithWorker(func(ctx context.Context, _ string, loot parsers.Loot) (string, error) {

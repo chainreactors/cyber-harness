@@ -122,7 +122,7 @@ type functionalEvent struct {
 
 func newFunctionalRecorder(bus *coreevents.Stream) *functionalRecorder {
 	recorder := &functionalRecorder{}
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	bus.Observe(func(event *aop.Event) {
 		if event == nil || event.GetExtension() == nil {
 			return
 		}
@@ -138,7 +138,7 @@ func newFunctionalRecorder(bus *coreevents.Stream) *functionalRecorder {
 			Tool: artifact.Tool, Kind: artifact.Kind, Target: artifact.Target, CallID: ref.GetCallId(), Data: decoded,
 		})
 		recorder.mu.Unlock()
-	}))
+	})
 	return recorder
 }
 

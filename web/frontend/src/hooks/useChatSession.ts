@@ -161,8 +161,7 @@ function messagesDiffer(a: ChatMessage[], b: ChatMessage[]): boolean {
 
 function readSessionFilters(): SessionFilters {
   const params = new URLSearchParams(window.location.search)
-  const view = params.get('view')
-  return { search: params.get('search') || '', nodeId: params.get('node') || '', archived: params.get('archived') === 'true', target: params.get('target') || '', view: view === 'nodes' || view === 'targets' ? view : 'tasks' }
+  return { search: params.get('search') || '', nodeId: params.get('node') || '', archived: params.get('archived') === 'true' }
 }
 
 export function useChatSession() {
@@ -232,15 +231,17 @@ export function useChatSession() {
   const refreshSessions = useCallback(async () => {
     const version = ++sessionQueryVersion.current
     try {
-      const records = await listChatSessions(sessionFilters)
+      const records = await listChatSessions({ search: sessionFilters.search, archived: sessionFilters.archived })
       if (version === sessionQueryVersion.current) setSessions(records)
     } catch (error) { if (version === sessionQueryVersion.current) setError(String(error)) }
-  }, [sessionFilters])
+  }, [sessionFilters.search, sessionFilters.archived])
 
   function filterSessions(patch: Partial<SessionFilters>) {
     const next = { ...sessionFilters, ...patch }
     const url = new URL(window.location.href)
-    for (const [key, value] of Object.entries({ search: next.search, node: next.nodeId, archived: next.archived ? 'true' : '', target: next.target, view: next.view })) {
+    url.searchParams.delete('target')
+    url.searchParams.delete('view')
+    for (const [key, value] of Object.entries({ search: next.search, node: next.nodeId, archived: next.archived ? 'true' : '' })) {
       if (value) url.searchParams.set(key, value); else url.searchParams.delete(key)
     }
     window.history.replaceState({}, '', url)
@@ -255,6 +256,12 @@ export function useChatSession() {
   useEffect(() => {
     const restore = () => setSessionFilters(readSessionFilters())
     window.addEventListener('popstate', restore)
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('view') || url.searchParams.has('target')) {
+      url.searchParams.delete('view')
+      url.searchParams.delete('target')
+      window.history.replaceState({}, '', url)
+    }
     return () => window.removeEventListener('popstate', restore)
   }, [])
 

@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { createNodeTask, nodeActions } from './task-ui'
+import { createNodeTask, openNodeTerminal } from './task-ui'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
 
@@ -109,6 +109,97 @@ test.describe('HTTP shell and authentication', () => {
     await expect(close).toBeHidden()
   })
 
+  test('sidebar groups tasks by node while assets stay in the header', async ({ page, request }) => {
+    let agents = await requireRegisteredAgents(request)
+    await expect.poll(async () => {
+      const response = await connectRPC(request, '/cyber.rpc.agent.AgentService/ListAgents', {})
+      agents = response.agents ?? []
+      return agents.length
+    }).toBeGreaterThanOrEqual(2)
+    const [nodeID, otherNodeID] = agents.map((agent) => agent.hello.nodeId as string)
+    const login = await page.request.post('/api/auth/login', { data: { token: API_TOKEN } })
+    expect(login.ok()).toBeTruthy()
+    await page.goto('/?view=nodes&target=legacy')
+
+    const sidebar = page.locator('aside')
+    await expect(sidebar.getByText('Tasks', { exact: true })).toBeVisible()
+    await expect(sidebar.getByRole('button', { name: 'Nodes', exact: true })).toHaveCount(0)
+    await expect(sidebar.getByRole('button', { name: 'Targets', exact: true })).toHaveCount(0)
+    await expect(sidebar.getByRole('combobox')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Asset pool' })).toBeVisible()
+    await expect.poll(() => new URL(page.url()).searchParams.has('view')).toBe(false)
+    expect(new URL(page.url()).searchParams.has('target')).toBe(false)
+
+    const firstNode = sidebar.locator(`[data-node-id="${nodeID}"]`)
+    const secondNode = sidebar.locator(`[data-node-id="${otherNodeID}"]`)
+    await firstNode.locator('button[aria-pressed][aria-expanded]').click()
+    await expect(firstNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'true')
+    await expect(secondNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'false')
+    expect(new URL(page.url()).searchParams.get('node')).toBe(nodeID)
+
+    const created: string[] = []
+    try {
+      for (const [id, title, group] of [[nodeID, 'Sidebar task A', firstNode], [otherNodeID, 'Sidebar task B', secondNode]] as const) {
+        const previousPath = new URL(page.url()).pathname
+        await group.getByRole('button', { name: /New task on/ }).click()
+        await expect.poll(() => new URL(page.url()).pathname).not.toBe(previousPath)
+        expect(new URL(page.url()).pathname).toMatch(/^\/sessions\//)
+        const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
+        created.push(sessionID)
+        const record = await connectRPC(request, '/cyber.rpc.chat.SessionService/GetSession', { sessionId: sessionID })
+        expect(record.session?.session?.nodeId).toBe(id)
+        await connectRPC(request, '/cyber.rpc.chat.SessionService/UpdateSession', {
+          requestId: rpcID('rename'), sessionId: sessionID, title,
+        })
+      }
+
+      await sidebar.getByRole('textbox', { name: 'Search tasks' }).fill('Sidebar task')
+      await firstNode.locator('button[aria-pressed][aria-expanded]').click()
+      await expect(firstNode.getByText('Sidebar task A')).toBeVisible()
+      await expect(sidebar.getByText('Sidebar task B')).toHaveCount(0)
+      await secondNode.locator('button[aria-pressed][aria-expanded]').click()
+      await expect(secondNode.getByText('Sidebar task B')).toBeVisible()
+      await expect(sidebar.getByText('Sidebar task A')).toHaveCount(0)
+      await sidebar.getByRole('textbox', { name: 'Search tasks' }).fill('')
+
+      const actions = secondNode.getByRole('button', { name: 'Actions for Sidebar task B' })
+      await actions.hover()
+      await actions.click()
+      await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible()
+      await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
+      await expect(secondNode.getByText('Sidebar task B')).toHaveCount(0)
+      await sidebar.getByRole('button', { name: 'Archived' }).click()
+      await expect(secondNode.getByText('Sidebar task B')).toBeVisible()
+      await secondNode.getByRole('button', { name: 'Actions for Sidebar task B' }).hover()
+      await secondNode.getByRole('button', { name: 'Actions for Sidebar task B' }).click()
+      await page.getByRole('menuitem', { name: 'Restore' }).click()
+      await expect(secondNode.getByText('Sidebar task B')).toHaveCount(0)
+      await page.reload()
+      await expect(sidebar.getByRole('button', { name: 'Archived' })).toHaveAttribute('aria-pressed', 'true')
+      await expect(sidebar.getByText('No archived tasks')).toBeVisible()
+      await sidebar.getByRole('button', { name: 'Show active tasks' }).click()
+      await expect(secondNode.getByText('Sidebar task B')).toBeVisible()
+
+      const search = sidebar.getByRole('textbox', { name: 'Search tasks' })
+      await search.fill('sidebar-no-match')
+      await expect(sidebar.getByText('No matching tasks')).toBeVisible()
+      await sidebar.getByRole('button', { name: 'Clear search' }).click()
+      await expect(search).toHaveValue('')
+
+      await page.reload()
+      await expect(secondNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'true')
+      await expect(firstNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'false')
+      await sidebar.getByRole('button', { name: /All tasks/ }).click()
+      await expect(firstNode.getByText('Sidebar task A')).toBeVisible()
+      await expect(secondNode.getByText('Sidebar task B')).toBeVisible()
+      await firstNode.locator('[data-session-id]').getByRole('button', { name: /Sidebar task A/ }).first().click()
+      await expect(firstNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'true')
+      await expect(secondNode.locator('button[aria-pressed][aria-expanded]')).toHaveAttribute('aria-expanded', 'false')
+    } finally {
+      for (const sessionID of created) await deleteSession(request, sessionID)
+    }
+  })
+
   test('agent token is available only to authenticated clients and is not cacheable', async ({ request }) => {
     const unauthorized = await request.get('/api/auth/agent-token')
     expect(unauthorized.status()).toBe(401)
@@ -215,6 +306,61 @@ test.describe('single AOP WebSocket browser plane', () => {
     expect(tokenRequests).toBe(2)
   })
 
+  test('quick connect copies on an HTTP origin without the Clipboard API', async ({ page }) => {
+    await openAuthenticatedApp(page)
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.getByRole('button', { name: 'Quick connect an agent' }).click()
+    const quickConnect = page.getByRole('dialog', { name: 'Download & connect an agent' })
+    await expect(quickConnect.getByText('Token configured', { exact: true })).toBeVisible()
+    const row = quickConnect.locator('pre').last().locator('..')
+    const command = await row.locator('pre').innerText()
+    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }))
+
+    const copy = row.getByRole('button')
+    await copy.click()
+    await expect(copy).toHaveClass(/text-emerald-500/)
+    await page.evaluate(() => { delete (navigator as any).clipboard })
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(command)
+    await expect(quickConnect.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('quick connect reports a failed clipboard fallback', async ({ page }) => {
+    await openAuthenticatedApp(page)
+    await page.getByRole('button', { name: 'Quick connect an agent' }).click()
+    const quickConnect = page.getByRole('dialog', { name: 'Download & connect an agent' })
+    await expect(quickConnect.getByText('Token configured', { exact: true })).toBeVisible()
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+      Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
+    })
+
+    const copy = quickConnect.locator('pre').first().locator('..').getByRole('button')
+    await copy.click()
+    await expect(quickConnect.getByRole('alert')).toHaveText('Could not copy the command. Select and copy it manually.')
+    await expect(copy).not.toHaveClass(/text-emerald-500/)
+  })
+
+  test('spray help command renders compact output in the web transcript', async ({ page, request }) => {
+    await requireRegisteredAgents(request)
+    await openAuthenticatedApp(page)
+    await page.locator('aside [data-node-id="local"]').getByRole('button', { name: /New task on/ }).click()
+    await expect.poll(() => new URL(page.url()).pathname).toMatch(/^\/sessions\//)
+    const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
+    try {
+      await page.getByRole('textbox', { name: 'Your goal' }).fill('!spray -h')
+      await page.getByRole('button', { name: 'Send message' }).click()
+      const help = page.locator('pre').filter({ hasText: '--client-fingerprint' }).last()
+      await expect(help).toBeVisible({ timeout: 20_000 })
+      const text = await help.innerText()
+      expect(text).toContain('Usage:')
+      expect(text).toContain('--poc-config')
+      expect(text).toContain('Request Options:')
+      expect(Math.max(...text.split('\n').map(line => line.length))).toBeLessThanOrEqual(96)
+    } finally {
+      await deleteSession(request, sessionID)
+    }
+  })
+
   test('creates a session and streams a turn through the application AOP client', async ({ page, request }) => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
@@ -252,7 +398,7 @@ test.describe('single AOP WebSocket browser plane', () => {
   test('opens the PTY console without a terminal-specific socket', async ({ page, request }) => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
-    await (await nodeActions(page)).getByRole('button', { name: 'Terminal', exact: true }).click()
+    await openNodeTerminal(page)
     await expect(page.locator('.xterm')).toBeVisible({ timeout: 15_000 })
   })
 })

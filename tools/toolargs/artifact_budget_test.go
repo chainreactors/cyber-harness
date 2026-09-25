@@ -214,7 +214,7 @@ func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
 	wantID := ArtifactResultID("katana", toolpb.ArtifactKindWeb, "http://target/bundle.js", data)
 	var artifact *toolpb.Artifact
 	var ref *operationpb.Ref
-	unsubscribe := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := bus.Observe(func(event *aop.Event) {
 		decoded := new(toolpb.Artifact)
 		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
 			artifact = decoded
@@ -223,7 +223,7 @@ func TestArtifactEmissionBoundsDataWithoutChangingIdentity(t *testing.T) {
 				ref = correlation
 			}
 		}
-	}))
+	})
 	defer unsubscribe.Cancel()
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{CallID: "call-1"})
 

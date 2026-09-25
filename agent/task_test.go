@@ -20,7 +20,7 @@ func (f taskTestLoop) Run(ctx context.Context, cfg Config) (*Result, error) { re
 func TestRunTaskIsolatesParentAndCorrelatesEvents(t *testing.T) {
 	bus := coreevents.New()
 	var events []*aop.Event
-	bus.Observe(coreevents.ObserverFunc(func(ev *aop.Event) { events = append(events, ev) }))
+	bus.Observe(func(ev *aop.Event) { events = append(events, ev) })
 	parent := NewAgent(Config{Loop: StandardLoop{}, Model: "selected-model", SessionID: "parent", TurnID: "parent-turn", MessageCounter: 42, Bus: bus,
 		Provider: &scriptedProvider{responses: []*ChatCompletionResponse{chatResponse(NewTextMessage("assistant", "done"))}},
 	})
@@ -116,14 +116,14 @@ func TestRunTaskPanicFinishesTrace(t *testing.T) {
 	var ended *aop.TurnEnded
 	var closed bool
 	var childInbox inbox.Inbox
-	bus.Observe(coreevents.ObserverFunc(func(ev *aop.Event) {
+	bus.Observe(func(ev *aop.Event) {
 		if ev.GetTurnEnded() != nil {
 			ended = ev.GetTurnEnded()
 		}
 		if ev.GetSessionEnded() != nil {
 			closed = true
 		}
-	}))
+	})
 	_, err := RunTask(t.Context(), Config{Bus: bus, Provider: &scriptedProvider{}, Loop: taskTestLoop(func(_ context.Context, cfg Config) (*Result, error) {
 		childInbox = cfg.Inbox
 		panic("worker failure")
@@ -136,7 +136,7 @@ func TestRunTaskPanicFinishesTrace(t *testing.T) {
 func TestToolCallDoesNotInferDelegation(t *testing.T) {
 	bus := coreevents.New()
 	events := make(chan *aop.Event, 1)
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events <- event }))
+	bus.Observe(func(event *aop.Event) { events <- event })
 	em := newAOPEmitter(bus, "cyber", "parent-session", "", "", nil, 0)
 
 	em.toolCall(&aop.ToolCall{

@@ -8,7 +8,6 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/host"
@@ -31,9 +30,9 @@ func runStdio(ctx context.Context, newProfile func(profile.Request) (profile.Pro
 	}
 	h := host.New(mux)
 	stream := host.NewStdio(input, output)
-	unsubscribe := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := rt.Observe(func(event *aop.Event) {
 		_ = h.Send(aop.Reply("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_Event{Event: event}}), stream.Send)
-	}))
+	})
 	// One owner closes in dependency order and checks failures from the last
 	// session-ended events as well as ordinary replies.
 	defer func() {

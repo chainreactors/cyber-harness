@@ -63,12 +63,12 @@ func TestResponseEmitsSprayArtifact(t *testing.T) {
 
 	bus := coreevents.New()
 	var artifact *toolpb.Artifact
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	bus.Observe(func(event *aop.Event) {
 		decoded := new(toolpb.Artifact)
 		if extension := event.GetExtension(); extension != nil && extension.UnmarshalTo(decoded) == nil {
 			artifact = decoded
 		}
-	}))
+	})
 	req, err := Parse([]string{srv.URL})
 	if err != nil {
 		t.Fatal(err)

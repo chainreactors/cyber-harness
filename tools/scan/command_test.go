@@ -1528,9 +1528,9 @@ func TestEmitStructuredDataPublishesScannerFacts(t *testing.T) {
 	cmd := New(&engine.Set{}, WithEvents(bus))
 
 	var events []*aop.Event
-	unsub := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsub := bus.Observe(func(event *aop.Event) {
 		events = append(events, event)
-	}))
+	})
 	defer unsub.Cancel()
 
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{
@@ -1568,7 +1568,7 @@ func TestEmitStructuredDataPublishesNativeArtifactAndLoot(t *testing.T) {
 	bus := coreevents.New()
 	cmd := New(&engine.Set{}, WithEvents(bus))
 	var events []*aop.Event
-	unsub := bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	unsub := bus.Observe(func(event *aop.Event) { events = append(events, event) })
 	defer unsub.Cancel()
 
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{

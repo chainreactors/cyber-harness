@@ -37,7 +37,7 @@ func TestScannerNamedWorkersSharePreparation(t *testing.T) {
 			resolver := &workerPromptResolver{}
 			bus := coreevents.New()
 			var events []*aop.Event
-			bus.Observe(coreevents.ObserverFunc(func(ev *aop.Event) { events = append(events, ev) }))
+			bus.Observe(func(ev *aop.Event) { events = append(events, ev) })
 			cfg := agent.Config{Loop: agent.StandardLoop{}, Provider: llm, Model: "scan-model", PromptResolver: resolver, Bus: bus}
 			reads := 0
 			executor := installWorkers(t, func(skill string) string {

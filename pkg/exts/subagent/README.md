@@ -72,6 +72,6 @@ subagent(action="kill", session_id="执行 ID")
 
 ## Scanner
 
-scanner 贡献 verify/sniper 的 Subagent、skill 与 prompt 装配。扫描传入 `scan.WorkerPromptPayload`，
+scanner 贡献 verify/sniper 的 Subagent、skill 与 prompt 装配。扫描传入 `parsers.Loot`，
 模型调用传入文本；Payload 非空时必须合法，Prompt 可补充说明。
 `tools/scan` 只通过注入的 `Worker` 回调委派，保留候选筛选、结果解析和标注。

@@ -10,7 +10,6 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
-	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -66,7 +65,7 @@ func TestInstallationSharesCapabilitiesAndRetargetableLogger(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
-	sub := rt.Observe(events.ObserverFunc(func(*aop.Event) { count++ }))
+	sub := rt.Observe(func(*aop.Event) { count++ })
 	defer sub.Cancel()
 	first := &aop.Event{SessionId: "shared", Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}}
 	second := &aop.Event{SessionId: "shared", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{}}}

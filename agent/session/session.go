@@ -19,7 +19,6 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/eventbus"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/operation"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
@@ -812,7 +811,7 @@ func (rt *Runtime) findSessionLocked(sessionID string) (string, *sessionState) {
 	return "", nil
 }
 
-func (rt *Runtime) Observe(observer coreevents.Observer) *eventbus.Subscription[*aop.Event] {
+func (rt *Runtime) Observe(observer func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
 	if rt == nil || rt.events == nil || observer == nil {
 		return nil
 	}

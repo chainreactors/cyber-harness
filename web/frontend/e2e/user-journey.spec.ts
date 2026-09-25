@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { createNodeTask } from './task-ui'
+import { createNodeTask, openNodeTerminal } from './task-ui'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
 const E2E_MODEL = process.env.CYBER_E2E_LLM_MODEL || 'deepseek-flash'
@@ -77,7 +77,7 @@ test('operator completes a full Cyber Web journey', async ({ page, request }) =>
 
     // One durable Chat session, two LLM turns, then a real REPL command through
     // the same node channel.
-    const remoteNodeGroup = await createNodeTask(page)
+    await createNodeTask(page)
     sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1) || ''
     expect(sessionID).not.toBe('')
 
@@ -95,8 +95,7 @@ test('operator completes a full Cyber Web journey', async ({ page, request }) =>
 
     // Terminal attaches to the resident tmux-backed Main REPL, accepts keyboard
     // input as a user would, and receives output from the selected node.
-    await remoteNodeGroup.getByRole('button', { name: 'Terminal', exact: true }).click()
-    await expect(page.locator('.xterm')).toBeVisible({ timeout: 20_000 })
+    await openNodeTerminal(page)
     await page.getByRole('button', { name: /Main REPL/ }).click()
     const terminalInput = page.locator('.xterm-helper-textarea')
     await terminalInput.focus()
@@ -159,9 +158,9 @@ test('operator completes a full Cyber Web journey', async ({ page, request }) =>
     await expect(page.getByRole('button', { name: 'Pause response' })).toHaveCount(0)
 
     // Destructive cleanup is also a visible user action with confirmation.
-    const sessionRow = page.getByText(firstPrompt, { exact: true }).first().locator('xpath=ancestor::div[contains(@class,"group")]')
-    await sessionRow.hover()
-    await sessionRow.getByRole('button', { name: 'Delete session' }).click()
+    const sessionRow = page.locator(`aside [data-session-id="${sessionID}"]`)
+    await sessionRow.getByRole('button', { name: `Actions for ${firstPrompt}` }).click()
+    await page.getByRole('menuitem', { name: 'Delete session' }).click()
     const confirm = page.getByRole('dialog', { name: 'Please confirm' })
     await expect(confirm).toContainText('Delete this session?')
     await confirm.getByRole('button', { name: 'Confirm' }).click()

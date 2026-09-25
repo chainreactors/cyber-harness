@@ -1,21 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  PanelLeftClose, PanelLeft,
-  MessageSquare, Plus, Trash2,
-  ChevronDown, ChevronRight, Monitor, Terminal,
-  Unplug, Archive, ArchiveRestore, Pencil, Check, X,
+  PanelLeftClose, PanelLeft, ChevronDown, ChevronRight, Monitor,
+  List, MessageSquare, MoreHorizontal, Plus, Trash2,
+  Archive, ArchiveRestore, Pencil, Check, X,
 } from 'lucide-react'
 import {
   Button, Tooltip, TooltipTrigger, TooltipContent,
-  EmptyState, StatusDot, ThemeToggle,
+  ThemeToggle, DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from '@cyber/ui'
 import { cn, useTheme } from '@cyber/theme'
 import LanguageToggle from './LanguageToggle'
 import type { AgentView, SessionRecord, SessionFilters } from '../api'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
-import { agentActivity } from '../lib/agentActivity'
-import { agentMatchesSession } from '../lib/session-agent'
 import i18n from '../i18n'
 
 function recordID(record: SessionRecord): string {
@@ -31,20 +28,18 @@ interface Props {
   onFilter: (patch: Partial<SessionFilters>) => void
   onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
   activeSessionID: string | null
+  activeSessionNodeID: string | null
+  activeSessionBusy: boolean
   selectedNodeID: string | null
-  terminalNodeID: string | null
-  onSelectNode: (nodeID: string) => void
   onSelectSession: (id: string) => void
   onCreateSession: (nodeID: string) => void
   onDeleteSession: (id: string) => void
-
-  onOpenTerminal: (nodeID: string) => void
 }
 
 export default function SessionList({
   open, onToggle, agents = [], sessions = [], filters, onFilter,
-  activeSessionID, selectedNodeID, terminalNodeID,
-  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal, onUpdateSession,
+  activeSessionID, activeSessionNodeID, activeSessionBusy, selectedNodeID,
+  onSelectSession, onCreateSession, onDeleteSession, onUpdateSession,
 }: Props) {
   const { t } = useTranslation('sidebar')
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -63,48 +58,33 @@ export default function SessionList({
       previouslyFocused?.focus()
     }
   }, [open])
-  // Attach each session to a connected agent by id-or-name (see
-  // agentMatchesSession — the hub re-mints agent ids on reconnect, so match the
-  // stable name too). Whatever no live agent claims is "orphaned": its bound
-  // node is offline. Sessions persist server-side, so without this those
-  // sessions would silently drop out of the sidebar — which nests sessions
-  // under live agents — even though their transcripts are still openable.
-  // Group the orphans by their bound agent name so they get a dedicated,
-  // read-only "offline" section below instead of vanishing.
-  const { groups, orphanGroups } = useMemo(() => {
-    const claimed = new Set<string>()
-    const groups = agents.map((agent) => {
-      const own = sessions.filter((s) => !claimed.has(recordID(s)) && agentMatchesSession(agent, s))
-      own.forEach((s) => claimed.add(recordID(s)))
-      return { agent, sessions: own }
-    })
-    const orphanMap = new Map<string, SessionRecord[]>()
-    for (const s of sessions) {
-      if (claimed.has(recordID(s))) continue
-      const key = s.agentName || s.session?.nodeId || 'unknown'
-      const list = orphanMap.get(key) || []
-      list.push(s)
-      orphanMap.set(key, list)
-    }
-    const orphanGroups = [...orphanMap.entries()]
-      .map(([name, list]) => ({ name, sessions: list }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-    return { groups, orphanGroups }
-  }, [agents, sessions])
-
-  const targetGroups = useMemo(() => {
-    const groups = new Map<string, SessionRecord[]>()
-    for (const session of sessions) {
-      const values = session.extensions.scan?.targets
-      const targets = Array.isArray(values) ? values.filter((v): v is string => typeof v === 'string') : []
-      for (const target of new Set(targets.length ? targets.map(normalizeTarget) : [''])) groups.set(target, [...(groups.get(target) || []), session])
-    }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [sessions])
-
-  // Live node count for the roster header — connected agents only (orphaned
-  // sessions belong to nodes that are no longer online).
-  const online = agents.length
+  const revealedSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeSessionID || !activeSessionNodeID || revealedSessionRef.current === activeSessionID) return
+    const visible = sessions.some((session) => recordID(session) === activeSessionID)
+    if (!visible) return
+    revealedSessionRef.current = activeSessionID
+    if (filters.nodeId !== activeSessionNodeID) onFilter({ nodeId: activeSessionNodeID })
+  }, [activeSessionID, activeSessionNodeID, sessions, filters.nodeId, onFilter])
+  const newTaskNodeID = filters.nodeId
+    ? agents.find((agent) => agent.hello?.nodeId === filters.nodeId)?.hello?.nodeId
+    : agents.find((agent) => agent.hello?.nodeId === selectedNodeID)?.hello?.nodeId || agents[0]?.hello?.nodeId
+  const groups = new Map<string, { name: string; online: boolean; sessions: SessionRecord[] }>()
+  for (const agent of agents) {
+    const id = agent.hello?.nodeId
+    if (id) groups.set(id, { name: agent.hello?.name || id, online: true, sessions: [] })
+  }
+  for (const session of sessions) {
+    const id = session.session?.nodeId
+    if (!id) continue
+    const group = groups.get(id) || { name: session.agentName || id, online: false, sessions: [] }
+    group.sessions.push(session)
+    groups.set(id, group)
+  }
+  if (filters.nodeId && !groups.has(filters.nodeId)) groups.set(filters.nodeId, { name: filters.nodeId, online: false, sessions: [] })
+  const visibleGroups = [...groups].filter(([id, group]) => (!filters.search && !filters.archived) || group.sessions.length > 0 || id === filters.nodeId)
+  const visibleTaskCount = filters.nodeId ? groups.get(filters.nodeId)?.sessions.length || 0 : sessions.length
+  const emptyMessage = filters.search ? 'noMatchingTasks' : filters.archived ? 'noArchivedTasks' : filters.nodeId ? 'noNodeTasks' : 'noTasksYet'
 
   return (
     <>
@@ -127,16 +107,10 @@ export default function SessionList({
             : 'w-12 max-md:hidden',
         )}
       >
-        {/* Header — fleet roster identity + live node count */}
         <div className={cn('flex border-b border-border/60', open ? 'items-center gap-2 px-3 py-2.5' : 'flex-col items-center gap-2 p-2')}>
           {open ? (
             <>
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                {online > 0 && <StatusDot status="online" className="h-1.5 w-1.5" />}
-                <span className="truncate text-xs font-medium text-muted-foreground">
-                  {online > 0 ? t('onlineCount', { count: online }) : t('rosterIdle')}
-                </span>
-              </div>
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{t('tasks')}</span>
               <Button ref={closeButtonRef} variant="ghost" size="icon" onClick={onToggle} className="h-7 w-7 text-muted-foreground" aria-label={t('collapseSidebar')}>
                 <PanelLeftClose className="w-4 h-4" />
               </Button>
@@ -153,106 +127,64 @@ export default function SessionList({
           )}
         </div>
 
-        {open && <div className="space-y-2 border-b border-border/60 p-2.5">
+        {open && <div className="flex items-center gap-1 border-b border-border/60 p-2.5">
           <input aria-label={t('searchTasks')} placeholder={t('searchTasks')} value={filters.search} onChange={(event) => onFilter({ search: event.target.value })} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs" />
-          <div className="flex gap-1">
-            <Button size="xs" variant="ghost" aria-label={t('newTask')} title={t('newTask')} disabled={!agents.length} onClick={() => onCreateSession(agents.find((agent) => agent.hello?.nodeId === selectedNodeID)?.hello?.nodeId || agents[0]?.hello?.nodeId || '')}><Plus className="h-3 w-3" /></Button>
-            {(['tasks', 'nodes', 'targets'] as const).map((view) => <Button key={view} size="xs" variant={filters.view === view ? 'secondary' : 'ghost'} onClick={() => onFilter({ view })}>{t(view)}</Button>)}
-            <Button size="xs" variant={filters.archived ? 'secondary' : 'ghost'} aria-label={t('archived')} title={t('archived')} onClick={() => onFilter({ archived: !filters.archived })}><Archive className="h-3 w-3" /></Button>
-          </div>
-          <select aria-label={t('filterNode')} value={filters.nodeId} onChange={(event) => onFilter({ nodeId: event.target.value })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs">
-            <option value="">{t('allNodes')}</option>
-            {[...new Map([...agents.map((a) => [a.hello?.nodeId || '', a.hello?.name || a.hello?.nodeId || ''] as const), ...sessions.map((r) => [r.session?.nodeId || '', r.agentName || r.session?.nodeId || ''] as const)]).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
+          <Button size="icon-xs" variant={filters.archived ? 'secondary' : 'ghost'} aria-label={t('archived')} title={t('archived')} aria-pressed={filters.archived} onClick={() => onFilter({ archived: !filters.archived })}><Archive className="h-3.5 w-3.5" /></Button>
         </div>}
 
-        {/* Content */}
         {open ? (
           <div className="flex-1 overflow-auto p-2.5 animate-fade-in">
-            {filters.view !== 'nodes' ? (
-              <div className="space-y-2">
-                {(filters.view === 'targets' ? targetGroups : [['', sessions] as [string, SessionRecord[]]]).map(([target, records]) => (
-                  <div key={target}>
-                    {filters.view === 'targets' && <div className="truncate px-2 py-1 text-xs font-medium" title={target}>{target || t('unlinkedTarget')}</div>}
-                    {records.map((session) => <SessionItem key={recordID(session)} session={session} active={recordID(session) === activeSessionID} onSelect={() => onSelectSession(recordID(session))} onDelete={() => onDeleteSession(recordID(session))} onUpdate={(patch) => onUpdateSession(recordID(session), patch)} />)}
+            <div className="space-y-1">
+              <button type="button" aria-pressed={!filters.nodeId} onClick={() => onFilter({ nodeId: '' })} className={cn('flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs', !filters.nodeId ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
+                <List className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{t('allTasks')}</span>
+                <span className="tabular-nums text-[10px] text-muted-foreground">{sessions.length}</span>
+              </button>
+              {visibleGroups.map(([id, group]) => {
+                const expanded = !filters.nodeId || filters.nodeId === id
+                return <div key={id} data-node-id={id}>
+                  <div className={cn('group flex h-9 items-center gap-1 rounded-md px-1.5', filters.nodeId === id ? 'bg-accent' : 'hover:bg-accent/50')}>
+                    <button type="button" aria-expanded={expanded} aria-pressed={filters.nodeId === id} onClick={() => onFilter({ nodeId: id })} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      {expanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                      <Monitor className={cn('h-3.5 w-3.5 shrink-0', group.online ? 'text-primary' : 'text-muted-foreground/50')} />
+                      <span className="truncate text-xs font-medium">{group.name}</span>
+                      {!group.online && <span className="shrink-0 text-[9px] text-warning">{t('agentOffline')}</span>}
+                      <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground">{group.sessions.length}</span>
+                    </button>
+                    {group.online && <Button size="icon-xs" variant="ghost" aria-label={t('newTaskForNode', { name: group.name })} title={t('newTask')} onClick={() => { onFilter({ nodeId: id, search: '', archived: false }); onCreateSession(id) }}><Plus className="h-3.5 w-3.5" /></Button>}
                   </div>
-                ))}
-                {sessions.length === 0 && <p className="p-3 text-xs text-muted-foreground">{t('noMatchingTasks')}</p>}
-              </div>
-            ) : agents.length === 0 && orphanGroups.length === 0 ? (
-              <EmptyState icon={Monitor} title={t('noAgentsConnected')} description={t('startAgentToBegin')} compact />
-            ) : (
-              <div className="space-y-1">
-                {/* No live agents, but orphaned sessions remain — keep the
-                    "launch an agent" nudge as a slim banner so the guidance
-                    isn't lost now that the full empty state is suppressed. */}
-                {agents.length === 0 && (
-                  <div className="mb-1 flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-muted-foreground">
-                    <Monitor className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-                    <span className="min-w-0">{t('startAgentToBegin')}</span>
-                  </div>
-                )}
-                {groups.map(({ agent, sessions: own }) => (
-                  <AgentGroup
-                    key={agent.hello?.nodeId}
-                    agent={agent}
-                    sessions={own}
-                    isSelected={agent.hello?.nodeId === selectedNodeID}
-                    activeSessionID={activeSessionID}
-                    terminalActive={agent.hello?.nodeId === terminalNodeID}
-                    onSelectNode={() => onSelectNode(agent.hello?.nodeId || '')}
-                    onSelectSession={onSelectSession}
-                    onCreateSession={() => onCreateSession(agent.hello?.nodeId || '')}
-                    onDeleteSession={onDeleteSession}
-                    onUpdateSession={onUpdateSession}
-                    onOpenTerminal={() => onOpenTerminal(agent.hello?.nodeId || '')}
-                  />
-                ))}
-                {orphanGroups.length > 0 && (
-                  <div className="mt-2 space-y-0.5 border-t border-border/50 pt-2">
-                    <div className="flex items-center gap-1.5 px-2 pb-1">
-                      <Unplug className="h-3 w-3 text-muted-foreground/50" />
-                      <span className="mono-label text-muted-foreground/70">{t('offlineSessions')}</span>
-                    </div>
-                    {orphanGroups.map((g) => (
-                      <OfflineAgentGroup
-                        key={g.name}
-                        name={g.name}
-                        sessions={g.sessions}
-                        activeSessionID={activeSessionID}
-                        defaultOpen={agents.length === 0 || g.sessions.some((s) => recordID(s) === activeSessionID)}
-                        onSelectSession={onSelectSession}
-                        onDeleteSession={onDeleteSession}
-                        onUpdateSession={onUpdateSession}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                  {expanded && group.sessions.length > 0 && <div className="ml-4 space-y-0.5 border-l border-border/70 pl-1.5">
+                    {group.sessions.map((session) => <SessionItem
+                      key={recordID(session)}
+                      session={session}
+                      active={recordID(session) === activeSessionID}
+                      busy={recordID(session) === activeSessionID && activeSessionBusy}
+                      onSelect={() => onSelectSession(recordID(session))}
+                      onDelete={() => onDeleteSession(recordID(session))}
+                      onUpdate={(patch) => onUpdateSession(recordID(session), patch)}
+                    />)}
+                  </div>}
+                </div>
+              })}
+              {visibleTaskCount === 0 && <div className="space-y-1 px-2 py-3 text-xs text-muted-foreground">
+                <p>{t(emptyMessage)}</p>
+                {filters.search ? <button type="button" className="text-primary hover:underline" onClick={() => onFilter({ search: '' })}>{t('clearSearch')}</button>
+                  : filters.archived ? <button type="button" className="text-primary hover:underline" onClick={() => onFilter({ archived: false })}>{t('showActiveTasks')}</button>
+                    : filters.nodeId ? <button type="button" className="text-primary hover:underline" onClick={() => onFilter({ nodeId: '' })}>{t('allTasks')}</button>
+                      : null}
+              </div>}
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 pt-3">
-            {agents.map((agent) => (
-              <Tooltip key={agent.hello?.nodeId}>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    active={agent.hello?.nodeId === selectedNodeID}
-                    onClick={() => { onSelectNode(agent.hello?.nodeId || ''); onToggle() }}
-                    className="relative"
-                  >
-                    <Monitor className="w-4 h-4 text-muted-foreground" />
-                    <StatusDot
-                      status={agent.busy ? 'warning' : 'online'}
-                      className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5"
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">{agent.hello?.name}</TooltipContent>
-              </Tooltip>
-            ))}
+          <div className="flex flex-col items-center pt-3">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" disabled={!newTaskNodeID} onClick={() => newTaskNodeID && onCreateSession(newTaskNodeID)} aria-label={t('newTask')}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{t('newTask')}</TooltipContent>
+            </Tooltip>
           </div>
         )}
 
@@ -287,122 +219,12 @@ function SidebarPreferences({ expanded }: { expanded: boolean }) {
   )
 }
 
-function AgentGroup({
-  agent, sessions, isSelected, activeSessionID, terminalActive,
-  onSelectNode, onSelectSession, onCreateSession, onDeleteSession, onOpenTerminal, onUpdateSession,
-}: {
-  agent: AgentView
-  sessions: SessionRecord[]
-  isSelected: boolean
-  activeSessionID: string | null
-  terminalActive: boolean
-  onSelectNode: () => void
-  onSelectSession: (id: string) => void
-  onCreateSession: () => void
-  onDeleteSession: (id: string) => void
-  onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
-  onOpenTerminal: () => void
-}) {
-  const { t } = useTranslation('sidebar')
-  const [expanded, setExpanded] = useState(isSelected || sessions.some((s) => recordID(s) === activeSessionID))
-  const status = agent.status
-  const llm = [status?.provider, status?.model].filter(Boolean).join('/')
-  const act = agentActivity(agent)
-
-  function handleToggle() {
-    setExpanded(!expanded)
-    onSelectNode()
-  }
-
-  return (
-    <div className="rounded-lg">
-      {/* Agent card */}
-      <div className={cn(
-        'rounded-lg px-2.5 py-2 transition-all',
-        isSelected
-          ? 'bg-primary/[0.06] shadow-soft ring-1 ring-inset ring-primary/20'
-          : 'hover:bg-accent/50',
-      )}>
-        <button
-          type="button"
-          onClick={handleToggle}
-          className="flex w-full items-center gap-2 text-left"
-        >
-          <StatusDot status={agent.busy ? 'warning' : 'online'} className="h-2.5 w-2.5" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="min-w-0 truncate text-xs font-semibold text-foreground">{agent.hello?.name}</span>
-              <span className="shrink-0 whitespace-nowrap text-[9px] text-muted-foreground">{agent.busy ? t('busy') : t('idle')}</span>
-            </div>
-            {act?.kind === 'tool' ? (
-              <div className="truncate text-[10px] text-warning">
-                ▸ {act.tool}
-                {act.detail && <span className="text-muted-foreground"> · {act.detail}</span>}
-              </div>
-            ) : act?.kind === 'thinking' ? (
-              <div className="truncate text-[10px] text-warning">{t('working')}</div>
-            ) : llm ? (
-              <div className="truncate text-[10px] text-muted-foreground">{llm}</div>
-            ) : null}
-          </div>
-          {expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-          )}
-        </button>
-
-        {/* Action buttons on the agent card */}
-        <div className="mt-1.5 flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="xs"
-            active={terminalActive}
-            onClick={(e) => { e.stopPropagation(); onOpenTerminal() }}
-            className={terminalActive ? undefined : 'text-muted-foreground'}
-          >
-            <Terminal className="h-2.5 w-2.5" />
-            {t('terminal')}
-          </Button>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={(e) => { e.stopPropagation(); setExpanded(true); onCreateSession() }}
-            className="text-muted-foreground"
-          >
-            <Plus className="h-2.5 w-2.5" />
-            {t('new')}
-          </Button>
-          {sessions.length > 0 && (
-            <span className="ml-auto text-[9px] font-mono text-muted-foreground">{t('sessionsCount', { count: sessions.length })}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Sessions list (second level) */}
-      {expanded && sessions.length > 0 && (
-        <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2 animate-in fade-in slide-in-from-top-1 duration-150">
-          {sessions.map((session) => (
-            <SessionItem
-              key={recordID(session)}
-              session={session}
-              active={recordID(session) === activeSessionID}
-              onSelect={() => onSelectSession(recordID(session))}
-              onDelete={() => onDeleteSession(recordID(session))}
-              onUpdate={(patch) => onUpdateSession(recordID(session), patch)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function SessionItem({
-  session, active, onSelect, onDelete, onUpdate,
+  session, active, busy, onSelect, onDelete, onUpdate,
 }: {
   session: SessionRecord
   active: boolean
+  busy: boolean
   onSelect: () => void
   onDelete: () => void
   onUpdate: (patch: { title?: string; archived?: boolean }) => Promise<void>
@@ -411,6 +233,10 @@ function SessionItem({
   const [editing, setEditing] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const itemRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (active) itemRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [active])
   const save = async (patch: { title?: string; archived?: boolean }) => {
     if (saving) return
     setSaving(true)
@@ -421,11 +247,14 @@ function SessionItem({
   const title = session.session?.title || t('newSession')
   const updatedAt = session.updatedAt ? timestampDate(session.updatedAt) : null
   const time = (updatedAt || new Date(0)).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })
+  const closed = session.session?.state === 'closed'
 
   return (
     <div
+      ref={itemRef}
+      data-session-id={recordID(session)}
       className={cn(
-        'group flex items-center gap-1.5 rounded-md px-2 py-1 cursor-pointer transition-colors',
+        'group flex min-h-10 items-center gap-1 rounded-md px-2 py-1 transition-colors',
         active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
       )}
     >
@@ -436,95 +265,25 @@ function SessionItem({
       </form> : <>
       <button type="button" onClick={onSelect} className="flex-1 min-w-0 text-left">
         <div className="flex items-center gap-1.5">
-          <MessageSquare className="h-2.5 w-2.5 shrink-0" />
+          {busy ? <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-warning" role="status" aria-label={t('runningTask')} title={t('runningTask')} />
+            : closed ? <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/50" role="status" aria-label={t('closedTask')} title={t('closedTask')} />
+              : <MessageSquare className="h-2.5 w-2.5 shrink-0" />}
           <span className="truncate text-[11px] font-medium">{title}</span>
         </div>
         <div className="mt-0.5 text-[9px] text-muted-foreground">{time}</div>
       </button>
-      <Button size="icon-xs" variant="ghost" aria-label={t('renameTask')} onClick={() => { setTitleDraft(title); setEditing(true) }}><Pencil className="h-3 w-3" /></Button>
-      <Button size="icon-xs" variant="ghost" disabled={saving} aria-label={t(session.archived ? 'restoreTask' : 'archiveTask')} onClick={() => void save({ archived: !session.archived })}>{session.archived ? <ArchiveRestore className="h-3 w-3" /> : <Archive className="h-3 w-3" />}</Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="icon-xs" variant="ghost" aria-label={t('taskActions', { title })} className="h-7 w-7 shrink-0 text-muted-foreground"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => { setTitleDraft(title); setEditing(true) }}><Pencil className="mr-2 h-3.5 w-3.5" />{t('renameTask')}</DropdownMenuItem>
+          <DropdownMenuItem disabled={saving} onSelect={() => void save({ archived: !session.archived })}>{session.archived ? <ArchiveRestore className="mr-2 h-3.5 w-3.5" /> : <Archive className="mr-2 h-3.5 w-3.5" />}{t(session.archived ? 'restoreTask' : 'archiveTask')}</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}><Trash2 className="mr-2 h-3.5 w-3.5" />{t('deleteSession')}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       </>}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={(e) => { e.stopPropagation(); onDelete() }}
-        // Touch devices have no hover, so a hover-only reveal would make delete
-        // permanently unreachable there. Keep it visible by default; only tuck it
-        // behind row-hover on pointers that actually hover (desktop). Larger hit
-        // box on touch (h-8) meets the tap-target floor.
-        className="h-8 w-8 shrink-0 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive [@media(hover:hover)]:invisible [@media(hover:hover)]:h-6 [@media(hover:hover)]:w-6 [@media(hover:hover)]:group-hover:visible"
-        aria-label={t('deleteSession')}
-      >
-        <Trash2 className="h-3 w-3" />
-      </Button>
     </div>
   )
-}
-
-// OfflineAgentGroup lists sessions whose bound agent is no longer connected.
-// Sessions live server-side, so when a node goes away (a local agent's process
-// exiting, the hub restarting) its sessions would otherwise be stranded —
-// dropped from the sidebar, which nests sessions under live agents, even though
-// their transcripts are still openable. Surface them here, read-only: you can
-// reopen (to read history) or delete them, but there's no connected agent to
-// start a new turn on, so the terminal / new-session actions are omitted. A
-// banner in the chat panel spells out that a reconnect is needed to continue.
-function OfflineAgentGroup({
-  name, sessions, activeSessionID, defaultOpen, onSelectSession, onDeleteSession, onUpdateSession,
-}: {
-  name: string
-  sessions: SessionRecord[]
-  activeSessionID: string | null
-  defaultOpen: boolean
-  onSelectSession: (id: string) => void
-  onDeleteSession: (id: string) => void
-  onUpdateSession: (id: string, patch: { title?: string; archived?: boolean }) => Promise<void>
-}) {
-  const { t } = useTranslation('sidebar')
-  const [expanded, setExpanded] = useState(defaultOpen)
-
-  return (
-    <div className="rounded-lg">
-      <div className="rounded-md px-2 py-1.5 transition-colors hover:bg-accent/40">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center gap-2 text-left"
-        >
-          <StatusDot status="idle" className="h-2.5 w-2.5 opacity-40" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">{name}</span>
-              <span className="shrink-0 whitespace-nowrap text-[9px] text-warning">{t('agentOffline')}</span>
-            </div>
-          </div>
-          <span className="text-[9px] font-mono text-muted-foreground/60">{t('sessionsCount', { count: sessions.length })}</span>
-          {expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-          )}
-        </button>
-      </div>
-
-      {expanded && sessions.length > 0 && (
-        <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2 animate-in fade-in slide-in-from-top-1 duration-150">
-          {sessions.map((session) => (
-            <SessionItem
-              key={recordID(session)}
-              session={session}
-              active={recordID(session) === activeSessionID}
-              onSelect={() => onSelectSession(recordID(session))}
-              onDelete={() => onDeleteSession(recordID(session))}
-              onUpdate={(patch) => onUpdateSession(recordID(session), patch)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function normalizeTarget(target: string): string {
-  try { return new URL(target).href } catch { return target.trim().toLowerCase() }
 }

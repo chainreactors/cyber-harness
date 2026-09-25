@@ -94,11 +94,11 @@ func TestCloseSessionTimeoutRetainsInstanceUntilCleanup(t *testing.T) {
 	t.Cleanup(func() { unblock.Do(func() { close(release) }) })
 	runtime.agentConfig.Loop = managed.Loop()
 	var ended atomic.Int32
-	sub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	sub := runtime.Observe(func(event *aop.Event) {
 		if event.SessionId == "closing" && event.GetSessionEnded() != nil {
 			ended.Add(1)
 		}
-	}))
+	})
 	defer sub.Cancel()
 	session, err := runtime.EnsureSession(SessionOptions{ID: "closing"})
 	if err != nil {
@@ -153,13 +153,13 @@ func TestCloseSessionDeadlineBoundsFinalEventDelivery(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var unblock sync.Once
 	var deliveries atomic.Int32
-	subscription := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	subscription := rt.Observe(func(event *aop.Event) {
 		if event.SessionId == "final-event" && event.GetSessionEnded() != nil {
 			deliveries.Add(1)
 			close(entered)
 			<-release
 		}
-	}))
+	})
 	t.Cleanup(func() {
 		unblock.Do(func() { close(release) })
 		subscription.Cancel()
@@ -206,18 +206,18 @@ func TestRuntimeCloseCompletesDespiteObserverFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := session.currentState()
-	subscription := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	subscription := rt.Observe(func(event *aop.Event) {
 		if event.GetSessionEnded() != nil {
 			panic("test observer failure")
 		}
-	}))
+	})
 	defer subscription.Cancel()
 	var completions atomic.Int32
-	healthy := rt.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	healthy := rt.Observe(func(event *aop.Event) {
 		if event.GetSessionEnded() != nil {
 			completions.Add(1)
 		}
-	}))
+	})
 	defer healthy.Cancel()
 	if err := rt.close(t.Context()); err != nil {
 		t.Fatalf("runtime close = %v", err)
@@ -387,7 +387,7 @@ func TestRuntimeCloseKeepsSharedTerminalManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rtSet.Close(context.Background()) })
-	unsubscribe := rt.Runtime().Observe(coreevents.ObserverFunc(output.HandleEvent))
+	unsubscribe := rt.Runtime().Observe(output.HandleEvent)
 	defer unsubscribe.Cancel()
 	if _, err := rt.Runtime().OpenSession(context.Background(), SessionOptions{ID: "owned-session"}); err != nil {
 		t.Fatal(err)
@@ -626,7 +626,7 @@ func TestClearRotatesToAnEmptyContinuationSession(t *testing.T) {
 	oldID := session.ID()
 
 	var events []*aop.Event
-	unsub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	unsub := runtime.Observe(func(event *aop.Event) { events = append(events, event) })
 	result, err := session.Command(context.Background(), "/clear")
 	unsub.Cancel()
 	if err != nil {
@@ -676,7 +676,7 @@ func TestCompactRotatesAndPersistsOnlyCompactedContext(t *testing.T) {
 	}
 	oldID := session.ID()
 	var events []*aop.Event
-	unsub := runtime.Observe(coreevents.ObserverFunc(func(event *aop.Event) { events = append(events, event) }))
+	unsub := runtime.Observe(func(event *aop.Event) { events = append(events, event) })
 	if _, err := session.Command(context.Background(), "/compact focus on findings"); err != nil {
 		unsub.Cancel()
 		t.Fatalf("/compact: %v", err)
@@ -916,11 +916,11 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 	defer aSet.Close(context.Background())
 	var mu sync.Mutex
 	var events []*aop.Event
-	unsubscribe := a.Stream.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := a.Stream.Observe(func(event *aop.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, event)
-	}))
+	})
 	defer unsubscribe.Cancel()
 	var runtimes []*Resource
 	for range 2 {

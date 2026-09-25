@@ -11,7 +11,6 @@ import (
 	aop "github.com/chainreactors/cyber/aop"
 	filepb "github.com/chainreactors/cyber/aop/file"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
-	coreevents "github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	types "github.com/chainreactors/cyber/core/types"
@@ -194,12 +193,12 @@ func serveAgentConnection(ctx context.Context, cc connectionConfig, logger telem
 		}
 	}
 	stats := NewAgentStatsTracker()
-	unsubscribe := cc.Events.Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := cc.Events.Observe(func(event *aop.Event) {
 		if next, changed := stats.Observe(event); changed {
 			send("", &aop.ProtocolMessage{Message: &aop.ProtocolMessage_AgentStats{AgentStats: next}})
 		}
 		calls.Forward(event)
-	}))
+	})
 	if unsubscribe == nil {
 		return fmt.Errorf("agent event subscription is required")
 	}

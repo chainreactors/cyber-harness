@@ -177,7 +177,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 	registry := testToolExecutor(t, singleDeliveryProbeTool{})
 	runtimeEvents := make(chan *aop.Event, 1)
 	var runtimeToolCalls atomic.Int32
-	unsubscribe := rt.Runtime().Observe(coreevents.ObserverFunc(func(event *aop.Event) {
+	unsubscribe := rt.Runtime().Observe(func(event *aop.Event) {
 		if event == nil {
 			return
 		}
@@ -187,7 +187,7 @@ func TestManagerToolResultUsesSingleDeliveryPath(t *testing.T) {
 		if event.GetToolResult() != nil {
 			runtimeEvents <- event
 		}
-	}))
+	})
 	defer unsubscribe.Cancel()
 	directMessages := make(chan protobuf.Message, 2)
 	send := func(_ string, message protobuf.Message) { directMessages <- message }

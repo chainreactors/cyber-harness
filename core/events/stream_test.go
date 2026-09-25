@@ -13,7 +13,7 @@ func TestStreamIsTheSingleConcurrentStampingAuthority(t *testing.T) {
 	stream := New()
 	var mu sync.Mutex
 	seen := make(map[uint64]*aop.Event)
-	stream.Observe(ObserverFunc(func(event *aop.Event) {
+	stream.Observe(func(event *aop.Event) {
 		mu.Lock()
 		if seen[event.Seq] != nil {
 			t.Errorf("duplicate sequence %d", event.Seq)
@@ -23,7 +23,7 @@ func TestStreamIsTheSingleConcurrentStampingAuthority(t *testing.T) {
 		if event.Id == "outer" {
 			stream.Publish(&aop.Event{SessionId: "shared", Id: "nested"})
 		}
-	}))
+	})
 
 	stamp := timestamppb.Now()
 	outer := &aop.Event{SessionId: "shared", Id: "outer", EmittedAt: stamp}
@@ -48,10 +48,10 @@ func TestStreamIsTheSingleConcurrentStampingAuthority(t *testing.T) {
 
 func TestObserverPanicDoesNotEscapePublication(t *testing.T) {
 	stream := New()
-	failed := stream.Observe(ObserverFunc(func(*aop.Event) { panic("broken observer") }))
+	failed := stream.Observe(func(*aop.Event) { panic("broken observer") })
 	defer failed.Cancel()
 	var observed bool
-	healthy := stream.Observe(ObserverFunc(func(*aop.Event) { observed = true }))
+	healthy := stream.Observe(func(*aop.Event) { observed = true })
 	defer healthy.Cancel()
 	stream.Publish(&aop.Event{})
 	if !observed {
@@ -65,7 +65,7 @@ func TestObserverPanicDoesNotEscapePublication(t *testing.T) {
 func TestStreamSequencesSessionlessRootEvents(t *testing.T) {
 	stream := New()
 	var got []*aop.Event
-	stream.Observe(ObserverFunc(func(event *aop.Event) { got = append(got, event) }))
+	stream.Observe(func(event *aop.Event) { got = append(got, event) })
 	stream.Publish(&aop.Event{})
 	stream.Publish(&aop.Event{})
 	if len(got) != 2 || got[0].Seq != 1 || got[1].Seq != 2 {

@@ -33,40 +33,42 @@ func (t *BashTool) interpreterAttachment(script *syntax.File, execution *coretoo
 				interp.Dir(execution.Dir),
 				interp.Env(expand.ListEnviron(append(os.Environ(), execution.Env...)...)),
 				interp.StdIO(stdin, stdout, stderr),
-				interp.ExecHandler(func(callCtx context.Context, argv []string) error {
-					hc := interp.HandlerCtx(callCtx)
-					id, err := execution.WaitID(callCtx)
-					if err != nil {
-						return err
-					}
-					parent := &coretool.Execution{
-						ID: id, Dir: hc.Dir, Env: exportedShellEnv(hc.Env),
-						Stdin: hc.Stdin, Stdout: hc.Stdout, Stderr: hc.Stderr,
-					}
-					details, runErr := coretool.RunCommand(callCtx, t.registry, argv, parent)
-					if execution.Command == argv[0] {
-						execution.SetDetails(details)
-					}
-					if runErr == nil {
-						return nil
-					}
-					var exit *exec.ExitError
-					if errors.As(runErr, &exit) {
-						return interp.ExitStatus(exit.ExitCode())
-					}
-					var coded interface{ ExitCode() int }
-					if errors.As(runErr, &coded) {
-						return interp.ExitStatus(coded.ExitCode())
-					}
-					if errors.Is(runErr, exec.ErrNotFound) {
+				interp.ExecHandlers(func(_ interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+					return func(callCtx context.Context, argv []string) error {
+						hc := interp.HandlerCtx(callCtx)
+						id, err := execution.WaitID(callCtx)
+						if err != nil {
+							return err
+						}
+						parent := &coretool.Execution{
+							ID: id, Dir: hc.Dir, Env: exportedShellEnv(hc.Env),
+							Stdin: hc.Stdin, Stdout: hc.Stdout, Stderr: hc.Stderr,
+						}
+						details, runErr := coretool.RunCommand(callCtx, t.registry, argv, parent)
+						if execution.Command == argv[0] {
+							execution.SetDetails(details)
+						}
+						if runErr == nil {
+							return nil
+						}
+						var exit *exec.ExitError
+						if errors.As(runErr, &exit) {
+							return interp.ExitStatus(exit.ExitCode())
+						}
+						var coded interface{ ExitCode() int }
+						if errors.As(runErr, &coded) {
+							return interp.ExitStatus(coded.ExitCode())
+						}
+						if errors.Is(runErr, exec.ErrNotFound) {
+							fmt.Fprintln(hc.Stderr, runErr)
+							return interp.ExitStatus(127)
+						}
+						if callCtx.Err() != nil {
+							return callCtx.Err()
+						}
 						fmt.Fprintln(hc.Stderr, runErr)
-						return interp.ExitStatus(127)
+						return interp.ExitStatus(1)
 					}
-					if callCtx.Err() != nil {
-						return callCtx.Err()
-					}
-					fmt.Fprintln(hc.Stderr, runErr)
-					return interp.ExitStatus(1)
 				}),
 			)
 			if err == nil {

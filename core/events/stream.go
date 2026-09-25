@@ -12,28 +12,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Observer participates synchronously in publication. It is appropriate for
-// ordering-sensitive transport and projection boundaries that must observe an
-// event before Publish returns. Implementations must report their own failures;
-// observer failure never changes the operation that produced the event.
-type Observer interface {
-	ObserveEvent(*aop.Event)
-}
-
-// ObserverFunc is the standard function implementation for short-lived
-// transport observers, analogous to net/http.HandlerFunc. Long-lived resource
-// consumers should implement Observer directly so ownership remains visible.
-type ObserverFunc func(*aop.Event)
-
-func (f ObserverFunc) ObserveEvent(event *aop.Event) { f(event) }
-
-// Consumer processes owned event copies on a bounded serial worker. Durable
-// outputs implement this interface directly; their Subscription is the sole
-// source of backpressure, processing and drain status.
-type Consumer interface {
-	ConsumeEvent(*aop.Event) error
-}
-
 // Stream is shared by every producer in one Profile. It is the single sequence
 // authority; independent observations legitimately use the empty session key.
 type Stream struct {
@@ -46,7 +24,7 @@ func New() *Stream {
 	return &Stream{bus: eventbus.New[*aop.Event](), seq: make(map[string]uint64)}
 }
 
-func (s *Stream) Observe(observer Observer) *eventbus.Subscription[*aop.Event] {
+func (s *Stream) Observe(observer func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
 	if s == nil || observer == nil {
 		return nil
 	}
@@ -56,15 +34,15 @@ func (s *Stream) Observe(observer Observer) *eventbus.Subscription[*aop.Event] {
 				slog.Error("AOP observer panicked", "error", recovered, "stack", string(debug.Stack()))
 			}
 		}()
-		observer.ObserveEvent(event)
+		observer(event)
 	})
 }
 
-func (s *Stream) Consume(options eventbus.SubscribeOptions[*aop.Event], consumer Consumer) (*eventbus.Subscription[*aop.Event], error) {
+func (s *Stream) Consume(options eventbus.SubscribeOptions[*aop.Event], consumer func(*aop.Event) error) (*eventbus.Subscription[*aop.Event], error) {
 	if s == nil || consumer == nil {
 		return nil, errors.New("event stream and consumer are required")
 	}
-	return s.bus.SubscribeAsync(options, consumer.ConsumeEvent)
+	return s.bus.SubscribeAsync(options, consumer)
 }
 
 // Publish is the only envelope-stamping authority. Producers transfer event

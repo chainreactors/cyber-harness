@@ -204,7 +204,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		sub := cfg.Progress.Subscribe(calls.ForwardProgress)
 		defer sub.Cancel()
 	}
-	sub := cfg.Events.Observe(coreevents.ObserverFunc(calls.Forward))
+	sub := cfg.Events.Observe(calls.Forward)
 	defer sub.Cancel()
 	defer func() { cancel(); calls.Close() }()
 	return connection.Run(func(_ context.Context, envelope *aop.Envelope, reply aop.SendFunc) error {

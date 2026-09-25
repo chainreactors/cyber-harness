@@ -278,7 +278,7 @@ func TestPartialStreamFailureWithoutRetryKeepsAttempt(t *testing.T) {
 func TestStatusPreservesTypedExtension(t *testing.T) {
 	bus := coreevents.New()
 	var emitted *aop.Event
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { emitted = event }))
+	bus.Observe(func(event *aop.Event) { emitted = event })
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0)
 	emitter.status(types.CompactStateEnd, &types.CompactDetail{
 		TokensBefore: 1000,
@@ -298,7 +298,7 @@ func TestStatusPreservesTypedExtension(t *testing.T) {
 func TestToolResultEmitterPreservesAllProtocolFields(t *testing.T) {
 	bus := coreevents.New()
 	var emitted *aop.Event
-	bus.Observe(coreevents.ObserverFunc(func(event *aop.Event) { emitted = event }))
+	bus.Observe(func(event *aop.Event) { emitted = event })
 	emitter := newAOPEmitter(bus, "agent-1", "session-1", "", "", nil, 0).turn("turn-1")
 	emitter.toolResult(&aop.ToolCall{Id: "call-1", Name: "scan"}, []*aop.Content{
 		aop.Text("done"),
