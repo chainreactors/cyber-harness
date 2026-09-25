@@ -28,6 +28,7 @@ type Extension struct {
 }
 
 func New(config Config) *Extension { return &Extension{config: config} }
+func Usage() string                { return protontool.New().Usage() }
 func (e *Extension) Load(scope *extension.Scope) error {
 	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {

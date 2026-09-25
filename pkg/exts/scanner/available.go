@@ -3,10 +3,10 @@ package scanner
 import (
 	"fmt"
 
+	"github.com/chainreactors/cyber/pkg/exts/proton"
 	"github.com/chainreactors/cyber/tools/curl"
 	"github.com/chainreactors/cyber/tools/gogo"
 	"github.com/chainreactors/cyber/tools/neutron"
-	"github.com/chainreactors/cyber/tools/proton"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/spray"
 	"github.com/chainreactors/cyber/tools/zombie"
@@ -34,7 +34,7 @@ func Usage(name string) (string, bool) {
 	case "neutron":
 		return neutron.New(nil, nil).Usage(), true
 	case "proton":
-		return proton.New().Usage(), true
+		return proton.Usage(), true
 	case "spray":
 		return spray.New(nil).Usage(), true
 	case "zombie":
