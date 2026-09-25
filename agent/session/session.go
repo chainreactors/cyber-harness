@@ -427,7 +427,7 @@ func (m *sessionMailbox) Push(message inboxpkg.Message) error {
 func (m *sessionMailbox) enqueue(message inboxpkg.Message) (func(), error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Inbox.Closed() {
+	if m.Closed() {
 		return nil, inboxpkg.ErrInboxClosed
 	}
 	err := m.Inbox.Push(message)
@@ -452,7 +452,7 @@ func (m *sessionMailbox) setActive(active bool) {
 // leftover input after success, it is not a retry loop.
 func (m *sessionMailbox) kickAutomatic() {
 	m.mu.Lock()
-	pending := !m.active && m.Inbox.Len() > 0 && !m.automaticPending
+	pending := !m.active && m.Len() > 0 && !m.automaticPending
 	if pending {
 		m.automaticPending = true
 	}
