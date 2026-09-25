@@ -35,14 +35,14 @@ func cliCommandSummary() string {
 }
 
 type webCommand struct {
-	Addr               string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
-	DB                 string `long:"db" default:"cyber-web.db" description:"SQLite database path"`
-	MaxScans           int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
-	ScanTimeout        int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
-	Token              string `long:"token" description:"Access key for the server (auto-generated if empty)"`
-	NoAgent            bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
-	cfg.LLMOptions     `group:"LLM Options"`
-	cfg.NodeOptions    `group:"Server Options"`
+	Addr            string `long:"addr" default:"127.0.0.1:8080" description:"HTTP listen address"`
+	DB              string `long:"db" default:"cyber-web.db" description:"SQLite database path"`
+	MaxScans        int    `long:"max-scans" default:"3" description:"Maximum concurrent scans"`
+	ScanTimeout     int    `long:"scan-timeout" default:"600" description:"Maximum scan runtime in seconds"`
+	Token           string `long:"token" description:"Access key for the server (auto-generated if empty)"`
+	NoAgent         bool   `long:"no-agent" description:"Start the web console only, without the embedded agent node"`
+	cfg.LLMOptions  `group:"LLM Options"`
+	cfg.NodeOptions `group:"Server Options"`
 }
 
 type cliOptions struct {
@@ -286,7 +286,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string) (parsed
 	} else {
 		scannerArgs = append([]string(nil), scannerRest...)
 	}
-	if boolFlagEnabled(scannerArgs, "--debug") {
+	if scannerBoolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
 	}
 	if err := validateOutputFlags(&option); err != nil {
@@ -704,19 +704,6 @@ func truthyFlagValue(value string) bool {
 	default:
 		return false
 	}
-}
-
-func boolFlagEnabled(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-		if strings.HasPrefix(arg, flag+"=") {
-			v := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(arg, flag+"=")))
-			return v != "false" && v != "0" && v != "no"
-		}
-	}
-	return false
 }
 
 type signalHandler struct {

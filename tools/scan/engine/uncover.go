@@ -21,13 +21,10 @@ import (
 // custom agents for fofa/hunter to preserve rich fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
 type UncoverEngine struct {
-	provider *sources.Provider
-	keys     sources.Keys
-	proxy    string
-	limit    int
-	timeout  int
-	logger   telemetry.Logger
-	avail    []string
+	keys   sources.Keys
+	proxy  string
+	limit  int
+	logger telemetry.Logger
 }
 
 // NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
@@ -54,22 +51,17 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 		keys.FofaKey = opts.FofaKey
 	}
 
-	timeout := 600
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 100
 	}
 
-	e := &UncoverEngine{
-		provider: p,
-		keys:     keys,
-		proxy:    opts.IngressProxy,
-		limit:    limit,
-		timeout:  timeout,
-		logger:   logger,
+	return &UncoverEngine{
+		keys:   keys,
+		proxy:  opts.IngressProxy,
+		limit:  limit,
+		logger: logger,
 	}
-	e.avail = e.detectSources()
-	return e
 }
 
 func applyCredentials(p *sources.Provider, values map[string]string) {
@@ -104,7 +96,8 @@ func applyCredentials(p *sources.Provider, values map[string]string) {
 	appendPair(&p.Google, "GOOGLE_API_KEY", "GOOGLE_API_CX")
 }
 
-func (e *UncoverEngine) detectSources() []string {
+// Sources returns the list of sources that have valid credentials.
+func (e *UncoverEngine) Sources() []string {
 	type check struct {
 		name string
 		ok   bool
@@ -135,16 +128,13 @@ func (e *UncoverEngine) detectSources() []string {
 	return out
 }
 
-// Sources returns the list of sources that have valid credentials.
-func (e *UncoverEngine) Sources() []string { return e.avail }
-
 // QueryRaw executes a single-source query and returns collected results.
 func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sources.Result, error) {
 	agent, err := e.agentFor(src)
 	if err != nil {
 		return nil, err
 	}
-	session, err := sources.NewSession(&e.keys, 3, e.timeout, 10, []string{src}, time.Minute, e.proxy)
+	session, err := sources.NewSession(&e.keys, 3, 600, 10, []string{src}, time.Minute, e.proxy)
 	if err != nil {
 		return nil, fmt.Errorf("uncover session: %w", err)
 	}
@@ -164,9 +154,6 @@ func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sour
 	return results, nil
 }
 
-// Close is a no-op; sessions are per-query.
-func (e *UncoverEngine) Close() error { return nil }
-
 func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
 	switch src {
 	case "fofa":
@@ -174,7 +161,10 @@ func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
 	case "hunter":
 		return &richHunterAgent{}, nil
 	default:
-		return stockAgent(src)
+		if agent, ok := stockAgents[src]; ok {
+			return agent, nil
+		}
+		return nil, fmt.Errorf("uncover: unknown source %q", src)
 	}
 }
 
@@ -391,16 +381,4 @@ func joinComponents(cs []hunterComponent) string {
 		}
 	}
 	return strings.Join(parts, ",")
-}
-
-// --------------- stock agents ---------------------------------------------------
-
-func stockAgent(name string) (sources.Agent, error) {
-	// Lazy-import stock agents to avoid pulling all transitive deps into the
-	// engine package. We use a simple registry map populated at init time in
-	// uncover_agents.go.
-	if a, ok := stockAgents[name]; ok {
-		return a, nil
-	}
-	return nil, fmt.Errorf("uncover: unknown source %q", name)
 }

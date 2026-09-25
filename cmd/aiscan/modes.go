@@ -104,11 +104,14 @@ type shellHost interface {
 }
 
 func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, rest []string, logger telemetry.Logger) (runErr error) {
-	defaultVerify, err := scannerext.ReadVerify(option)
+	scanOptions, err := scannerext.ReadScan(option)
 	if err != nil {
 		return err
 	}
-	mode, scannerArgs, err := resolveScannerMode(rest, defaultVerify)
+	if err := scan.ValidateVerify(scanOptions.Verify); err != nil {
+		return err
+	}
+	mode, scannerArgs, err := resolveScannerMode(rest, scanOptions.Verify)
 	if err != nil {
 		return err
 	}
@@ -190,7 +193,7 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return runScannerWithAgent(ctx, option, runtime, scannerArgs, logger)
 	}
 
-	if option.NoColor && scannerArgs[0] == "scan" && !hasScannerFlag(scannerArgs[1:], "--no-color") {
+	if option.NoColor && scannerArgs[0] == "scan" && !toolargs.HasFlag(scannerArgs[1:], "--no-color") {
 		scannerArgs = append(scannerArgs, "--no-color")
 	}
 	sessionID := fmt.Sprintf("scan-%d", time.Now().UnixNano())

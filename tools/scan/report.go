@@ -13,7 +13,6 @@ import (
 func formatSummary(d *collector, color bool) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	stats := d.statsSnapshotLocked()
 
 	var sb strings.Builder
 	if d.stream == nil {
@@ -22,7 +21,7 @@ func formatSummary(d *collector, color bool) string {
 			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString(formatScanSummaryLine(d, stats, color))
+	sb.WriteString(formatScanSummaryLine(d, color))
 	for _, line := range d.trace {
 		sb.WriteString(line)
 		sb.WriteString("\n")
@@ -30,7 +29,7 @@ func formatSummary(d *collector, color bool) string {
 	return sb.String()
 }
 
-func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string {
+func formatScanSummaryLine(d *collector, color bool) string {
 	status := "completed"
 	if len(d.errors) > 0 {
 		status = "failed"
@@ -39,16 +38,16 @@ func formatScanSummaryLine(d *collector, stats statsSnapshot, color bool) string
 		status = "canceled"
 	}
 	parts := []string{status}
-	parts = appendCount(parts, stats.Inputs, "target", "targets")
+	parts = appendCount(parts, d.inputs, "target", "targets")
 	parts = appendCount(parts, len(d.gogoResults), "service", "services")
 	parts = appendCount(parts, len(d.seenWeb), "web", "web")
 	parts = appendCount(parts, len(d.sprayResults), "probe", "probes")
 	parts = appendCount(parts, len(d.seenFinger), "fingerprint", "fingerprints")
 	parts = appendCount(parts, len(d.loots), "loot", "loots")
 	parts = appendCount(parts, len(d.errors), "error", "errors")
-	parts = appendCount64(parts, stats.Tasks, "task", "tasks")
-	parts = appendCount64(parts, stats.Requests, "request", "requests")
-	parts = append(parts, stats.Duration().Round(time.Millisecond).String())
+	parts = appendCount64(parts, d.tasks, "task", "tasks")
+	parts = appendCount64(parts, d.requests, "request", "requests")
+	parts = append(parts, d.duration().Round(time.Millisecond).String())
 	c := output.NewColor(color)
 	return output.FormatLine(output.OutputPrefix("summary", c.Dim), strings.Join(parts, " "), c) + "\n"
 }
@@ -108,8 +107,8 @@ func formatTraceEvent(event pipeline.Observation[event]) string {
 	if hostHeader != "" {
 		parts = append(parts, hostHeader)
 	}
-	if event.Event.Kind == eventError && event.Event.Error.Message != "" {
-		parts = append(parts, event.Event.Error.Message)
+	if event.Event.Kind == eventError && event.Event.Error != "" {
+		parts = append(parts, event.Event.Error)
 	}
 	return output.FormatLine("[trace]", parsers.JoinOutput(parts...), output.NewColor(false))
 }

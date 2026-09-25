@@ -43,7 +43,7 @@ func extendKatanaProfile(mode string, p *profile) {
 
 func (c *Command) buildKatanaCapabilities(p profile) []pipeline.Capability[event] {
 	var caps []pipeline.Capability[event]
-	katanaWebRoutes := routes(acceptsTarget(targetWeb), webSources()...)
+	katanaWebRoutes := routes(acceptsTarget(targetWeb), "", capGogoPortscan)
 	if p.Enabled(capKatanaCrawl) {
 		depth := p.CrawlDepth
 		if depth <= 0 {
@@ -108,7 +108,7 @@ func runKatanaCrawl(ctx context.Context, c *Command, e event, depth int, jsMode 
 		seen[discoveredURL] = struct{}{}
 		mu.Unlock()
 
-		emit(targetEvent(source, wt.Raw, newWebTarget(wt.Raw, discoveredURL, wt.HostHeader)))
+		emit(targetEvent(source, newWebTarget(discoveredURL, wt.HostHeader)))
 	}
 
 	options := &katanatypes.Options{

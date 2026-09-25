@@ -62,7 +62,7 @@ func cyberhubEnvironment(sources cfg.Sources) (map[string]any, map[string]any, e
 // ReadCyberhub decodes the cyberhub section from a parsed option set.
 func ReadCyberhub(option *cfg.Option) (CyberhubOptions, error) {
 	if option == nil {
-		return *newCyberhubDefaults(), nil
+		return *CyberhubSection().New().(*CyberhubOptions), nil
 	}
 	if option.Resolved != nil {
 		decoded, err := cfg.Get[*CyberhubOptions](option.Resolved, CyberhubConfigKey)
@@ -80,8 +80,4 @@ func ReadCyberhub(option *cfg.Option) (CyberhubOptions, error) {
 		return CyberhubOptions{}, err
 	}
 	return *raw.(*CyberhubOptions), nil
-}
-
-func newCyberhubDefaults() *CyberhubOptions {
-	return CyberhubSection().New().(*CyberhubOptions)
 }

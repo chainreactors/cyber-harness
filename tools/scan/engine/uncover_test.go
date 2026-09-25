@@ -4,22 +4,6 @@ package engine
 
 import "testing"
 
-func TestMergeReconOptionsCredentials(t *testing.T) {
-	base := ReconOptions{FofaKey: "oldkey", HunterAPIKey: "oldhunter"}
-	got := mergeReconOptions(base, ReconOptions{FofaKey: "newkey", HunterAPIKey: "newhunter"})
-	if got.FofaKey != "newkey" || got.HunterAPIKey != "newhunter" {
-		t.Fatalf("merge failed: %#v", got)
-	}
-}
-
-func TestMergeReconOptionsEmptyDoesNotOverwrite(t *testing.T) {
-	base := ReconOptions{FofaKey: "keep", IngressProxy: "socks5://keep"}
-	got := mergeReconOptions(base, ReconOptions{})
-	if got.FofaKey != "keep" || got.IngressProxy != "socks5://keep" {
-		t.Fatalf("empty merge overwrote: %#v", got)
-	}
-}
-
 func TestNewUncoverEngineFofaKeyOnly(t *testing.T) {
 	t.Setenv("FOFA_KEY", "")
 

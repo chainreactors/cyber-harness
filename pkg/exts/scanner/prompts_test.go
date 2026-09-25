@@ -63,7 +63,7 @@ func TestScannerOwnsWorkerPrompts(t *testing.T) {
 		{scan.SniperRequestTarget, []string{"Analyze fingerprint", "- Names: nginx, php"}},
 	} {
 		result := resolver.Build(t.Context(), prompt.Context{
-			Target: test.target, Payload: scan.WorkerPromptPayload{Loot: loot},
+			Target: test.target, Payload: loot,
 		})
 		if len(result.Diagnostics) != 0 {
 			t.Fatalf("request target %q diagnostics = %#v", test.target, result.Diagnostics)
@@ -80,7 +80,7 @@ func TestScannerRequestPromptRejectsForeignPayload(t *testing.T) {
 	result := scannerPromptResolver(t).Build(t.Context(), prompt.Context{
 		Target: scan.VerifyRequestTarget, Payload: "wrong",
 	})
-	if result.Prompt != "" || len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, "scan.WorkerPromptPayload") {
+	if result.Prompt != "" || len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, "parsers.Loot") {
 		t.Fatalf("invalid payload result = %#v", result)
 	}
 }

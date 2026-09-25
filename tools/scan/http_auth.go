@@ -25,7 +25,7 @@ func basicAuthZombieTarget(ctx context.Context, rawURL, hostHeader string, timeo
 		return sdkzombie.Target{}, false
 	}
 
-	target, ok := zombieTargetFromParsedURL(parsed, "")
+	target, ok := zombieTargetFromParsedURL(parsed)
 	if !ok || !isGenericWebZombieService(target.Service) {
 		return sdkzombie.Target{}, false
 	}

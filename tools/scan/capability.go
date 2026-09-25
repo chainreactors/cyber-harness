@@ -19,17 +19,9 @@ const (
 	capNeutronPOC     = "neutron_poc"
 )
 
-func acceptsTarget(kinds ...targetKind) func(event) bool {
-	set := make(map[targetKind]struct{}, len(kinds))
-	for _, kind := range kinds {
-		set[kind] = struct{}{}
-	}
+func acceptsTarget(kind targetKind) func(event) bool {
 	return func(e event) bool {
-		if e.Kind != eventTarget || e.Target == nil {
-			return false
-		}
-		_, ok := set[e.Target.Kind()]
-		return ok
+		return e.Kind == eventTarget && e.Target != nil && e.Target.Kind() == kind
 	}
 }
 
@@ -50,62 +42,62 @@ func scanCapability(name string, routes []pipeline.Route[event], worker int, run
 	}
 }
 
-// webSources returns the sources that produce webTarget events for probing capabilities.
-func webSources() []string {
-	return []string{"", capGogoPortscan}
-}
-
-// crawlSources returns the sources whose output feeds into spray_check for enrichment.
-func crawlSources() []string {
-	return []string{capSprayCrawl}
-}
-
-func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profile) []pipeline.Capability[event] {
+func (c *Command) buildCapabilities(flags flags, profile profile) []pipeline.Capability[event] {
 	if c.engines == nil {
 		c.engines = &engine.Set{}
 	}
-	c.engines.Capacity = distributeCapacity(flags.Thread)
-	derivePerInvocationThreads(&flags, c.engines.Capacity)
+	total := flags.Thread
+	if total <= 0 {
+		total = 1000
+	}
+	gogoCapacity := total * 8 / 10
+	otherCapacity := total / 10
+	derivePerInvocationThreads(&flags, gogoCapacity, otherCapacity)
 
 	var capabilities []pipeline.Capability[event]
 	gogoBuilt := false
 	sprayBuilt := false
 	weakpassBuilt := false
 
-	if profile.Enabled(capGogoPortscan) && hasGogo(c.engines) {
+	if profile.Enabled(capGogoPortscan) && c.engines.Gogo != nil {
 		gogoBuilt = true
 		capabilities = append(capabilities, scanCapability(
 			capGogoPortscan,
 			routes(acceptsTarget(targetScan), ""),
-			capWorkers(c.engines.Capacity.Gogo, flags.Threads),
+			capWorkers(gogoCapacity, flags.Threads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runPortDiscoveryCapability(ctx, opts.Discovery, profile, e.Target, emit)
+				c.runPortDiscoveryCapability(ctx, flags, e.Target, emit)
 			},
 		))
 	}
 
-	addSpray := func(name string, sopts engine.SprayCheckOptions, sources []string) {
-		if !profile.Enabled(name) || !hasSpray(c.engines) {
+	addSpray := func(name string, sopts engine.SprayCheckOptions, sources ...string) {
+		if !profile.Enabled(name) || c.engines.Spray == nil {
 			return
 		}
-		// The final call-scoped route is applied in runSprayCapability, where the
-		// pipeline context is available. Keep the startup value here for direct
-		// unit callers that do not install an invocation context.
-		sopts.Proxy = c.Proxy
 		sprayBuilt = true
-		capabilities = append(capabilities, sprayCapability(c, flags, opts.Web, name, sources, sopts, c.runSprayCapability))
+		capabilities = append(capabilities, scanCapability(
+			name,
+			routes(acceptsTarget(targetWeb), sources...),
+			capWorkers(otherCapacity, flags.SprayThreads),
+			func(ctx context.Context, e event, emit func(event)) {
+				c.runSprayCapability(ctx, flags, e.Target, name, sopts, emit)
+			},
+		))
 	}
 
-	sprayCheckSources := append(webSources(), crawlSources()...)
-	addSpray(capSprayCheck, engine.SprayCheckOptions{Finger: true}, sprayCheckSources)
+	addSpray(capSprayCheck, engine.SprayCheckOptions{Finger: true}, "", capGogoPortscan, capSprayCrawl)
 
 	if profile.Enabled(capCoreWeb) {
 		capabilities = append(capabilities, scanCapability(
 			capCoreWeb,
 			routes(acceptsTarget(targetWebProbe), capSprayCheck, capSprayPlugins, capSprayBrute),
 			2,
-			func(ctx context.Context, e event, emit func(event)) {
-				runWebResultAnalysisCapability(ctx, profile, e.Target, emit)
+			func(_ context.Context, e event, emit func(event)) {
+				target, ok := e.Target.(webProbeTarget)
+				if ok && reportableSprayResultForCapability(target.Result, e.Source) {
+					deriveWebProbeResult(flags.BroadPOC, e.Source, target.Result, emit)
+				}
 			},
 		))
 	}
@@ -115,75 +107,64 @@ func (c *Command) buildCapabilities(flags flags, opts scanOptions, profile profi
 		BakPlugin:    true,
 		ActivePlugin: true,
 		Finger:       true,
-	}, webSources())
+	}, "", capGogoPortscan)
 
-	if profile.Enabled(capSprayCrawl) && hasSpray(c.engines) {
+	if profile.Enabled(capSprayCrawl) && c.engines.Spray != nil {
 		sprayBuilt = true
 		capabilities = append(capabilities, scanCapability(
 			capSprayCrawl,
-			routes(acceptsTarget(targetWeb), webSources()...),
-			capWorkers(c.engines.Capacity.Spray, flags.SprayThreads),
+			routes(acceptsTarget(targetWeb), "", capGogoPortscan),
+			capWorkers(otherCapacity, flags.SprayThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runSprayCapability(ctx, flags, opts.Web, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth, Proxy: c.proxyForContext(ctx)}, emit)
+				c.runSprayCapability(ctx, flags, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth}, emit)
 			},
 		))
 	}
 
-	addSpray(capSprayBrute, engine.SprayCheckOptions{DefaultDict: true}, webSources())
+	addSpray(capSprayBrute, engine.SprayCheckOptions{DefaultDict: true}, "", capGogoPortscan)
 
-	if profile.Enabled(capZombieWeakpass) && hasZombie(c.engines) {
+	if profile.Enabled(capZombieWeakpass) && c.engines.Zombie != nil {
 		weakpassBuilt = true
 		capabilities = append(capabilities, scanCapability(
 			capHTTPBasicAuth,
 			routes(acceptsTarget(targetWebProbe), capSprayCheck, capSprayPlugins),
-			capWorkers(c.engines.Capacity.Zombie, flags.ZombieThreads),
+			capWorkers(otherCapacity, flags.ZombieThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runHTTPBasicAuthCapability(ctx, flags, e.Target, emit)
+				c.runHTTPBasicAuthCapability(ctx, flags, e, emit)
 			},
 		))
 		capabilities = append(capabilities, scanCapability(
 			capZombieWeakpass,
 			routes(acceptsTarget(targetWeakpass), "", capGogoPortscan, capCoreWeb, capHTTPBasicAuth),
-			capWorkers(c.engines.Capacity.Zombie, flags.ZombieThreads),
+			capWorkers(otherCapacity, flags.ZombieThreads),
 			func(ctx context.Context, e event, emit func(event)) {
-				c.runWeakpassCapability(ctx, flags, opts.Credentials, e.Target, emit)
+				c.runWeakpassCapability(ctx, flags, e.Target, emit)
 			},
 		))
 	}
 
-	if profile.Enabled(capNeutronPOC) && hasNeutron(c.engines) {
+	if profile.Enabled(capNeutronPOC) && c.engines.Neutron != nil {
 		capabilities = append(capabilities, scanCapability(
 			capNeutronPOC,
 			routes(acceptsTarget(targetPOC), capGogoPortscan, capCoreWeb),
-			capWorkers(c.engines.Capacity.Neutron, 1),
+			capWorkers(otherCapacity, 1),
 			func(ctx context.Context, e event, emit func(event)) {
 				c.runPOCCapability(ctx, flags, e.Target, emit)
 			},
 		))
 	}
 
-	if opts.hasDiscoveryOverrides() && !gogoBuilt {
+	if flags.Ports != "" && !gogoBuilt {
 		c.Logger.Warnf("scan capability=%s option=port status=ignored reason=engine_unavailable", capGogoPortscan)
 	}
-	if opts.hasWebOverrides() && !sprayBuilt {
+	if (len(flags.Dictionaries) > 0 || len(flags.Rules) > 0 || flags.Word != "" || flags.DefaultDict || flags.Advance) && !sprayBuilt {
 		c.Logger.Warnf("scan capability=web_probe option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable")
 	}
-	if opts.hasWeakpassOverrides() && !weakpassBuilt {
+	if (len(flags.Users) > 0 || len(flags.Passwords) > 0) && !weakpassBuilt {
 		c.Logger.Warnf("scan capability=%s option=user,pwd status=ignored reason=engine_unavailable", capZombieWeakpass)
 	}
 
 	return append(capabilities, c.buildKatanaCapabilities(profile)...)
-}
-
-func sprayCapability(c *Command, flags flags, web webOptions, name string, sources []string, opts engine.SprayCheckOptions, run func(context.Context, flags, webOptions, target, string, engine.SprayCheckOptions, func(event))) pipeline.Capability[event] {
-	return scanCapability(
-		name,
-		routes(acceptsTarget(targetWeb), sources...),
-		capWorkers(c.engines.Capacity.Spray, flags.SprayThreads),
-		func(ctx context.Context, e event, emit func(event)) {
-			run(ctx, flags, web, e.Target, name, opts, emit)
-		},
-	)
 }
 
 const (
@@ -192,30 +173,18 @@ const (
 	defaultZombieThreads = 100
 )
 
-func derivePerInvocationThreads(f *flags, cap engine.CapacityConfig) {
+func derivePerInvocationThreads(f *flags, gogoCapacity, otherCapacity int) {
 	f.Threads = defaultGogoThreads
-	if cap.Gogo > 0 && cap.Gogo < f.Threads {
-		f.Threads = cap.Gogo
+	if gogoCapacity > 0 && gogoCapacity < f.Threads {
+		f.Threads = gogoCapacity
 	}
 	f.SprayThreads = defaultSprayThreads
-	if cap.Spray > 0 && cap.Spray < f.SprayThreads {
-		f.SprayThreads = cap.Spray
+	if otherCapacity > 0 && otherCapacity < f.SprayThreads {
+		f.SprayThreads = otherCapacity
 	}
 	f.ZombieThreads = defaultZombieThreads
-	if cap.Zombie > 0 && cap.Zombie < f.ZombieThreads {
-		f.ZombieThreads = cap.Zombie
-	}
-}
-
-func distributeCapacity(total int) engine.CapacityConfig {
-	if total <= 0 {
-		total = 1000
-	}
-	return engine.CapacityConfig{
-		Gogo:    total * 8 / 10,
-		Spray:   total / 10,
-		Zombie:  total / 10,
-		Neutron: total / 10,
+	if otherCapacity > 0 && otherCapacity < f.ZombieThreads {
+		f.ZombieThreads = otherCapacity
 	}
 }
 
@@ -231,20 +200,4 @@ func capWorkers(capacity, threadsPerInvocation int) int {
 		w = 16
 	}
 	return w
-}
-
-func hasGogo(engineSet *engine.Set) bool {
-	return engineSet != nil && engineSet.Gogo != nil
-}
-
-func hasSpray(engineSet *engine.Set) bool {
-	return engineSet != nil && engineSet.Spray != nil
-}
-
-func hasZombie(engineSet *engine.Set) bool {
-	return engineSet != nil && engineSet.Zombie != nil
-}
-
-func hasNeutron(engineSet *engine.Set) bool {
-	return engineSet != nil && engineSet.Neutron != nil
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/cyber/internal/testutil/hosttest"
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
-	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -49,9 +48,9 @@ func TestScannerNamedWorkersSharePreparation(t *testing.T) {
 				return "instructions"
 			})
 			ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{SessionID: "caller", CallID: "scan-call"})
-			output, err := scannerWorker(executor, cfg)(ctx, name, parsers.Loot{Target: "http://example.test", Description: "finding"})
-			if err != nil || output != "status:confirmed" {
-				t.Fatalf("output=%q error=%v", output, err)
+			result, err := executor.Execute(ctx, cfg, subagent.Request{Name: name, Input: subagent.Input{Payload: parsers.Loot{Target: "http://example.test", Description: "finding"}}})
+			if err != nil || result == nil || result.Output != "status:confirmed" {
+				t.Fatalf("result=%v error=%v", result, err)
 			}
 			if reads != 1 || len(resolver.inputs) != 2 {
 				t.Fatalf("reads=%d prompts=%v", reads, resolver.inputs)
@@ -72,7 +71,7 @@ func TestScannerNamedWorkersSharePreparation(t *testing.T) {
 			if events[len(events)-1].GetSessionEnded() == nil {
 				t.Fatal("worker did not finish")
 			}
-			result, err := executor.Execute(ctx, cfg, subagent.Request{Name: name, Input: subagent.Input{Prompt: "text task"}})
+			result, err = executor.Execute(ctx, cfg, subagent.Request{Name: name, Input: subagent.Input{Prompt: "text task"}})
 			if err != nil || result.Output != "status:confirmed" || reads != 2 {
 				t.Fatalf("text result=%v reads=%d err=%v", result, reads, err)
 			}
@@ -83,7 +82,7 @@ func TestScannerNamedWorkersSharePreparation(t *testing.T) {
 func TestScannerPreparationRejectsInvalidInput(t *testing.T) {
 	cfg := agent.Config{PromptResolver: &workerPromptResolver{}}
 	worker := scannerSubagents(func(string) string { return "instructions" })[0]
-	for _, input := range []subagent.Input{{}, {Prompt: "text", Payload: "bad"}, {Payload: scan.WorkerPromptPayload{}}} {
+	for _, input := range []subagent.Input{{}, {Prompt: "text", Payload: "bad"}, {Payload: parsers.Loot{}}} {
 		if _, _, err := worker.Prepare(t.Context(), cfg, input); err == nil {
 			t.Fatalf("accepted %#v", input)
 		}
@@ -91,17 +90,6 @@ func TestScannerPreparationRejectsInvalidInput(t *testing.T) {
 	_, _, err := scannerSubagents(func(string) string { return "" })[0].Prepare(t.Context(), cfg, subagent.Input{Prompt: "text"})
 	if err == nil || !strings.Contains(err.Error(), "skill is unavailable") {
 		t.Fatalf("missing skill: %v", err)
-	}
-}
-
-func TestScannerWorkerUsesCallerConfiguration(t *testing.T) {
-	llm := &workerProvider{}
-	cfg := agent.Config{Loop: agent.StandardLoop{}, Provider: llm, Model: "caller-model", PromptResolver: &workerPromptResolver{}}
-	executor := installWorkers(t, func(string) string { return "instructions" })
-	ctx := agent.ContextWithToolAgentConfig(t.Context(), cfg)
-	_, err := scannerWorker(executor, agent.Config{})(ctx, "verify", parsers.Loot{Target: "http://example.test"})
-	if err != nil || len(llm.requests) != 1 || llm.requests[0].Model != "caller-model" {
-		t.Fatalf("requests=%v err=%v", llm.requests, err)
 	}
 }
 

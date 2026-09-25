@@ -46,12 +46,3 @@ func ReadScan(option *cfg.Option) (ScanOptions, error) {
 	}
 	return *raw.(*ScanOptions), nil
 }
-
-// ReadVerify returns the configured value without inventing a default.
-func ReadVerify(option *cfg.Option) (string, error) {
-	value, err := ReadScan(option)
-	if err != nil {
-		return "", err
-	}
-	return value.Verify, scan.ValidateVerify(value.Verify)
-}

@@ -36,16 +36,6 @@ type Set struct {
 	Uncover   *UncoverEngine
 	Index     *association.Index
 	Resources *resources.Set
-	Capacity  CapacityConfig
-	Recon     ReconOptions
-}
-
-// CapacityConfig holds per-engine capacity limits. Zero means unlimited.
-type CapacityConfig struct {
-	Gogo    int // total concurrent scan threads (default: 5000)
-	Spray   int // total concurrent HTTP threads (default: 200)
-	Zombie  int // total concurrent auth threads (default: 500)
-	Neutron int // total concurrent template executions (default: 10)
 }
 
 func (e *Set) Close() {
@@ -64,16 +54,9 @@ func (e *Set) Close() {
 	if e.Zombie != nil {
 		e.Zombie.Close()
 	}
-	if e.Uncover != nil {
-		_ = e.Uncover.Close()
-	}
 }
 
 func InitWithOptions(ctx context.Context, opts resources.Options, logger telemetry.Logger) (*Set, error) {
-	return initWithCapacity(ctx, opts, CapacityConfig{}, opts.Proxy, logger)
-}
-
-func initWithCapacity(ctx context.Context, opts resources.Options, caps CapacityConfig, proxy string, logger telemetry.Logger) (*Set, error) {
 	if logger == nil {
 		logger = telemetry.NopLogger()
 	}
@@ -143,11 +126,8 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if set.Neutron != nil {
 		gogoConfig.WithNeutronEngine(set.Neutron)
 	}
-	if caps.Gogo > 0 {
-		gogoConfig.WithCapacity(caps.Gogo)
-	}
-	if proxy != "" {
-		gogoConfig.WithProxy(proxy)
+	if opts.Proxy != "" {
+		gogoConfig.WithProxy(opts.Proxy)
 	}
 	gogoEngine, err := gogo.NewEngine(gogoConfig)
 	if err != nil {
@@ -162,11 +142,8 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 	if set.Fingers != nil {
 		sprayConfig.WithFingersEngine(set.Fingers)
 	}
-	if caps.Spray > 0 {
-		sprayConfig.WithCapacity(caps.Spray)
-	}
-	if proxy != "" {
-		sprayConfig.WithProxy(proxy)
+	if opts.Proxy != "" {
+		sprayConfig.WithProxy(opts.Proxy)
 	}
 	sprayEngine, err := spray.NewEngine(sprayConfig)
 	if err != nil {
@@ -178,11 +155,8 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 
 	zombieConfig := sdkzombie.NewConfig()
 	zombieConfig.WithResourceProvider(resourceSet.ZombieConfig)
-	if caps.Zombie > 0 {
-		zombieConfig.WithCapacity(caps.Zombie)
-	}
-	if proxy != "" {
-		zombieConfig.WithProxy(proxy)
+	if opts.Proxy != "" {
+		zombieConfig.WithProxy(opts.Proxy)
 	}
 	zombieEngine, err := sdkzombie.NewEngine(zombieConfig)
 	if err != nil {
@@ -192,11 +166,6 @@ func initWithCapacity(ctx context.Context, opts resources.Options, caps Capacity
 		logger.Infof("%s", telemetry.StartupOK("zombie", ""))
 	}
 
-	if set.Neutron != nil && caps.Neutron > 0 {
-		set.Neutron.SetCapacity(caps.Neutron)
-	}
-
-	set.Capacity = caps
 	return set, nil
 }
 
