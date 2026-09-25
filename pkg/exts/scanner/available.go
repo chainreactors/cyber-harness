@@ -49,7 +49,7 @@ func Usage(name string) (string, bool) {
 func UsageLines() []string {
 	var result []string
 	for _, name := range Names() {
-		if description := scannerDescription(name); description != "" {
+		if description := Description(name); description != "" {
 			result = append(result, fmt.Sprintf("  %-15s%s", name, description))
 		}
 	}
@@ -57,10 +57,6 @@ func UsageLines() []string {
 }
 
 func Description(name string) string {
-	return scannerDescription(name)
-}
-
-func scannerDescription(name string) string {
 	switch name {
 	case "curl":
 		return "HTTP requests (pure-Go, browser-naturalized)"

@@ -96,16 +96,6 @@ func (p *Page) hasModificationRules() bool {
 	return len(p.rules) > 0
 }
 
-// hasResponseRules checks if any rules target the response part.
-func (p *Page) hasResponseRules() bool {
-	for _, r := range p.rules {
-		if r.Part == "response" {
-			return true
-		}
-	}
-	return false
-}
-
 // ExecuteActions runs a sequence of actions on the page.
 // Returns accumulated output data from named actions.
 func (p *Page) ExecuteActions(actions []*Action) (ActionData, error) {

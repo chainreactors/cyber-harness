@@ -7,7 +7,10 @@ import (
 )
 
 func TestModelPickerSelectsCurrentModel(t *testing.T) {
-	model := newModelPicker([]string{"model-a", "model-b"}, "model-b", 80, 20)
+	model := newChoicePicker("models", []choiceItem{
+		{value: "model-a", title: "model-a"},
+		{value: "model-b", title: "model-b"},
+	}, "model-b", 80, 20)
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	picker, ok := updated.(choicePicker)
 	if !ok {

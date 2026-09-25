@@ -194,27 +194,3 @@ func outputPoliciesEqual(a, b OutputPolicy) bool {
 		a.LiveStatus == b.LiveStatus &&
 		a.Usage == b.Usage
 }
-
-func mergeOutputOptions(dst, src *OutputOptions) {
-	if dst.Preset == "" {
-		dst.Preset = src.Preset
-	}
-	if dst.Reasoning == "" {
-		dst.Reasoning = src.Reasoning
-	}
-	if dst.ToolCalls == "" {
-		dst.ToolCalls = src.ToolCalls
-	}
-	if dst.ToolArguments == "" {
-		dst.ToolArguments = src.ToolArguments
-	}
-	if dst.ToolResults == "" {
-		dst.ToolResults = src.ToolResults
-	}
-	if dst.LiveStatus == nil {
-		dst.LiveStatus = src.LiveStatus
-	}
-	if dst.Usage == nil {
-		dst.Usage = src.Usage
-	}
-}

@@ -107,7 +107,7 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message)
 		summary = "No prior history."
 		if cut.TurnStart > 0 {
 			var err error
-			summary, err = summarize(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, msgs[:cut.TurnStart], cfg.CustomInstructions, summaryLimit)
+			summary, err = summarizeConversation(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, prompt.CompactRequest, msgs[:cut.TurnStart], cfg.CustomInstructions, summaryLimit)
 			if err != nil {
 				return nil, nil, fmt.Errorf("compact history summarize: %w", err)
 			}
@@ -128,7 +128,7 @@ func compactHistory(ctx context.Context, cfg CompactConfig, msgs []*aop.Message)
 		summary += "\n\n---\n\n**Turn Context (split turn):**\n\n" + prefixSummary
 	} else {
 		var err error
-		summary, err = summarize(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, msgs[:cut.FirstKept], cfg.CustomInstructions, summaryLimit)
+		summary, err = summarizeConversation(ctx, cfg.Provider, cfg.Model, cfg.PromptResolver, cfg.Logger, prompt.CompactRequest, msgs[:cut.FirstKept], cfg.CustomInstructions, summaryLimit)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compact summarize: %w", err)
 		}
@@ -274,10 +274,6 @@ func serializeMessages(msgs []*aop.Message) string {
 		}
 	}
 	return sb.String()
-}
-
-func summarize(ctx context.Context, p Provider, model string, resolver prompt.Resolver, logger telemetry.Logger, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {
-	return summarizeConversation(ctx, p, model, resolver, logger, prompt.CompactRequest, msgs, customInstructions, maxTokens)
 }
 
 func summarizeConversation(ctx context.Context, p Provider, model string, resolver prompt.Resolver, logger telemetry.Logger, target prompt.Target, msgs []*aop.Message, customInstructions string, maxTokens int) (string, error) {

@@ -185,10 +185,10 @@ func applyRuntimeEnvironment(option *Option, explicit Option, lookup envLookup) 
 
 func selectedEnvProvider(option *Option, lookup envLookup) string {
 	if v := strings.ToLower(strings.TrimSpace(option.Provider)); v != "" {
-		return normalizeProviderName(v)
+		return provider.NormalizeProvider(v)
 	}
 	if option.BaseURL != "" {
-		return inferProviderName(option.BaseURL)
+		return provider.InferFromBaseURL(option.BaseURL)
 	}
 	for _, providerName := range []string{"anthropic", "openai"} {
 		if providerAPIKeyEnv(providerName, lookup) != "" {
@@ -248,18 +248,10 @@ func normalizeProviderOptions(option *Option) error {
 	return nil
 }
 
-func normalizeProviderName(name string) string {
-	return provider.NormalizeProvider(name)
-}
-
-func inferProviderName(baseURL string) string {
-	return provider.InferFromBaseURL(baseURL)
-}
-
 func resolveProviderName(name, baseURL string) (string, error) {
-	name = normalizeProviderName(name)
+	name = provider.NormalizeProvider(name)
 	if name == "" {
-		name = inferProviderName(baseURL)
+		name = provider.InferFromBaseURL(baseURL)
 	}
 	if !provider.IsSupportedProvider(name) {
 		return "", fmt.Errorf("unsupported provider %q: use openai/anthropic or a known OpenAI-compatible vendor", name)

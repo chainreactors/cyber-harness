@@ -201,17 +201,8 @@ func (s *Service) broadcastSystemMessageMetadata(sessionID, fallback string, met
 	s.BroadcastAOPEvent(sessionID, event)
 }
 
-// broadcastScanComplete mirrors a finished scan into the AOP timeline of every
-// session bound to it, so a scan submitted over the scan RPC surfaces as a
-// result card in the chat that commissioned it. The binding is the durable
-// session_scans relation a session writes at open time (SessionBinding), not
-// the in-flight task map: a scan id is never a registered session task.
-// A session that binds after the scan already finished gets no live event and
-// rebuilds the card from its own scan ids on load instead.
-func (s *Service) broadcastScanComplete(scanID string) {
-	s.broadcastScanStatus(scanID, scanpb.ScanStatus_SCAN_STATUS_COMPLETED)
-}
-
+// broadcastScanStatus uses durable session_scans bindings, not the in-flight
+// task map. Sessions bound after a scan finishes rebuild the card on load.
 func (s *Service) broadcastScanStatus(scanID string, status scanpb.ScanStatus) {
 	if s.store == nil {
 		return

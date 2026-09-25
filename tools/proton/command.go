@@ -144,10 +144,10 @@ type protonFlags struct {
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("proton", &err)
 	args := execution.Args
-	args = c.resolveRelativePaths(args)
+	args = toolargs.ResolveRelativePaths(args, protonFileFlags, c.WorkDir)
 	var flags protonFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
-	remaining, err := parser.ParseArgs(normalizeShortFlags(args))
+	remaining, err := parser.ParseArgs(toolargs.NormalizeFlags(args, protonKnownFlags, toolargs.CommonAliases))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			fmt.Fprint(execution.Stdout, c.Usage()+"\n")
@@ -379,10 +379,6 @@ var protonFileFlags = map[string]bool{
 	"-l": true, "--list": true,
 	"-o": true, "--output": true,
 	"-t": true, "--templates": true,
-}
-
-func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, protonFileFlags, c.WorkDir)
 }
 
 // --- output ---
@@ -626,10 +622,6 @@ var protonKnownFlags = map[string]struct{}{
 	"-template-list": {}, "-output": {}, "-json": {},
 	"-stats": {}, "-no-stats": {}, "-silent": {},
 	"-bin": {}, "-timeout": {}, "-debug": {},
-}
-
-func normalizeShortFlags(args []string) []string {
-	return toolargs.NormalizeFlags(args, protonKnownFlags, toolargs.CommonAliases)
 }
 
 func excludedPath(path string, excludes []string) bool {

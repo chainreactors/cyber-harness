@@ -421,7 +421,7 @@ func (c *Command) execOpen(ctx context.Context, args []string) (string, error) {
 	}
 
 	if o.record {
-		sess.rec = newRecorder(o.url)
+		sess.rec = &recorder{}
 		sess.rec.record(RecordedAction{
 			Action: headless.ActionNavigate,
 			Args:   map[string]string{"url": "{{BaseURL}}"},

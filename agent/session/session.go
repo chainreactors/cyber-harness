@@ -408,7 +408,7 @@ func commandText(line, presentation, text string) commandOutcome {
 }
 
 type sessionMailbox struct {
-	base             inboxpkg.Inbox
+	inboxpkg.Inbox
 	mu               sync.Mutex
 	active           bool
 	automaticPending bool
@@ -427,10 +427,10 @@ func (m *sessionMailbox) Push(message inboxpkg.Message) error {
 func (m *sessionMailbox) enqueue(message inboxpkg.Message) (func(), error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.base.Closed() {
+	if m.Closed() {
 		return nil, inboxpkg.ErrInboxClosed
 	}
-	err := m.base.Push(message)
+	err := m.Inbox.Push(message)
 	if err != nil || m.active || m.automaticPending || m.automatic == nil {
 		return nil, err
 	}
@@ -452,7 +452,7 @@ func (m *sessionMailbox) setActive(active bool) {
 // leftover input after success, it is not a retry loop.
 func (m *sessionMailbox) kickAutomatic() {
 	m.mu.Lock()
-	pending := !m.active && m.base.Len() > 0 && !m.automaticPending
+	pending := !m.active && m.Len() > 0 && !m.automaticPending
 	if pending {
 		m.automaticPending = true
 	}
@@ -462,20 +462,6 @@ func (m *sessionMailbox) kickAutomatic() {
 		automatic()
 	}
 }
-
-func (m *sessionMailbox) Drain() []inboxpkg.Message        { return m.base.Drain() }
-func (m *sessionMailbox) InterruptSignal() <-chan struct{} { return m.base.InterruptSignal() }
-func (m *sessionMailbox) Close()                           { m.base.Close() }
-func (m *sessionMailbox) Closed() bool                     { return m.base.Closed() }
-func (m *sessionMailbox) Len() int                         { return m.base.Len() }
-func (m *sessionMailbox) Wait(ctx context.Context) bool    { return m.base.Wait(ctx) }
-func (m *sessionMailbox) WaitWhileActive(ctx context.Context) bool {
-	return m.base.WaitWhileActive(ctx)
-}
-func (m *sessionMailbox) RegisterProducer(name string) *inboxpkg.ProducerHandle {
-	return m.base.RegisterProducer(name)
-}
-func (m *sessionMailbox) ActiveProducers() int { return m.base.ActiveProducers() }
 
 type sessionState struct {
 	runtime          *Runtime
@@ -575,7 +561,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	}
 	cancel := func() { stopParent(); stopLifetime(); cancelSession() }
 	baseInbox := inboxpkg.NewBuffered(agent.DefaultInboxCapacity)
-	mailbox := &sessionMailbox{base: baseInbox}
+	mailbox := &sessionMailbox{Inbox: baseInbox}
 	scheduler := agent.NewLoopScheduler(sessionCtx, mailbox, rt.agentConfig.Logger)
 	agentCfg := rt.agentConfig.WithStream(true)
 	if options.Config != nil {
@@ -1517,7 +1503,7 @@ func (state *sessionState) deliver(ctx context.Context, message inboxpkg.Message
 		return inboxpkg.ErrInboxClosed
 	}
 	if state.starting {
-		err := state.inbox.base.Push(message)
+		err := state.inbox.Inbox.Push(message)
 		state.mu.Unlock()
 		rt.lifecycle.Unlock()
 		return err

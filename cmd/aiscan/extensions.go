@@ -56,8 +56,8 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	if !config.SkipEngines {
 		extensions = append(extensions, scannerext.New(config.Scanner, workDir), protonext.New(protonext.Config{Directory: workDir}))
 	}
-	if optionalToolEnabled(config.Tools.OptionalTools, "search") {
-		extensions = append(extensions, searchext.New(searchext.Config{TavilyKeys: config.Tools.TavilyKeys}))
+	if optionalToolEnabled(config.OptionalTools, "search") {
+		extensions = append(extensions, searchext.New(searchext.Options{TavilyKeys: config.TavilyKeys}))
 	}
 	browser, err := browserExtension(config, workDir)
 	if err != nil {

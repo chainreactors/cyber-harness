@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,11 +26,6 @@ type RecordedAction struct {
 type recorder struct {
 	mu      sync.Mutex
 	actions []RecordedAction
-	baseURL string
-}
-
-func newRecorder(baseURL string) *recorder {
-	return &recorder{baseURL: baseURL}
 }
 
 func (r *recorder) record(action RecordedAction) {
@@ -52,22 +46,6 @@ func (r *recorder) len() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.actions)
-}
-
-// templateURL replaces the session's base URL with {{BaseURL}} for portability.
-func (r *recorder) templateURL(rawURL string) string {
-	if r.baseURL == "" {
-		return rawURL
-	}
-	parsed, err := url.Parse(r.baseURL)
-	if err != nil {
-		return rawURL
-	}
-	base := fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
-	if strings.HasPrefix(rawURL, base) {
-		return "{{BaseURL}}" + rawURL[len(base):]
-	}
-	return rawURL
 }
 
 // generateTemplate builds a nuclei headless template from recorded actions.
@@ -101,12 +79,6 @@ func (r *recorder) generateTemplate(id, name string) *headless.Template {
 			Steps: steps,
 		}},
 	}
-}
-
-// recordCommand maps a playwright command invocation to a nuclei headless action
-// and appends it to the session's recorder. Returns true if the action was recorded.
-func recordCommand(sess *Session, cmd string, args []string) bool {
-	return recordCommandResult(sess, cmd, args, "")
 }
 
 func recordCommandResult(sess *Session, cmd string, args []string, result string) bool {
@@ -260,7 +232,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 			return false
 		}
 		var headers map[string]string
-		if err := parseJSONMap(args[1], &headers); err != nil {
+		if err := json.Unmarshal([]byte(args[1]), &headers); err != nil {
 			return false
 		}
 		for k, v := range headers {
@@ -596,20 +568,14 @@ func (c *Command) execRecord(ctx context.Context, args []string) (string, error)
 		if sess.rec != nil {
 			return fmt.Sprintf("Session %q is already recording (%d actions)", sess.Name, sess.rec.len()), nil
 		}
-		baseURL := ""
-		if sess.Page != nil {
-			if info, infoErr := sess.Page.Info(); infoErr == nil && info != nil {
-				baseURL = info.URL
-			}
-		}
-		sess.rec = newRecorder(baseURL)
+		sess.rec = &recorder{}
 		return fmt.Sprintf("Recording started on session %q", sess.Name), nil
 
 	case "--clear":
 		if sess.rec == nil {
 			return fmt.Sprintf("Session %q is not recording", sess.Name), nil
 		}
-		sess.rec = &recorder{baseURL: sess.rec.baseURL}
+		sess.rec = &recorder{}
 		return fmt.Sprintf("Recording cleared on session %q", sess.Name), nil
 
 	default:
@@ -694,13 +660,4 @@ func mergeMaps(a, b map[string]string) map[string]string {
 		m[k] = v
 	}
 	return m
-}
-
-func parseJSONMap(s string, v interface{}) error {
-	return json.Unmarshal([]byte(s), v)
-}
-
-// isSession checks if the given arg is a session name (not a URL).
-func (r *recorder) isSession(arg string) bool {
-	return !strings.HasPrefix(arg, "http://") && !strings.HasPrefix(arg, "https://")
 }

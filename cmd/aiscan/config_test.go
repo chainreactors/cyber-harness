@@ -37,11 +37,11 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 	if config.Scanner.Recon.FofaKey != "fofa" || config.Scanner.Recon.HunterAPIKey != "hk" || config.Scanner.Recon.IngressProxy != "http://recon-proxy" {
 		t.Fatalf("recon config = %+v", config.Scanner)
 	}
-	if config.Tools.TavilyKeys != "tv-1,tv-2" || len(config.Tools.OptionalTools) != 2 {
+	if config.TavilyKeys != "tv-1,tv-2" || len(config.OptionalTools) != 2 {
 		t.Fatalf("application config = %+v", config)
 	}
-	if config.Tools.MitmCapture == nil || *config.Tools.MitmCapture || config.Tools.PlaywrightSession != "browser-1" || config.Tools.TrafficStorage != option.TrafficOptions {
-		t.Fatalf("tool extras = %+v", config.Tools)
+	if config.MitmCapture == nil || *config.MitmCapture || config.PlaywrightSession != "browser-1" || config.TrafficStorage != option.TrafficOptions {
+		t.Fatalf("tool extras = %+v", config)
 	}
 	if config.Scanner.Recon.Credentials["SHODAN_API_KEY"] != "shodan-key" {
 		t.Fatalf("scanner extras = %+v", config.Scanner)
@@ -66,8 +66,8 @@ func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
 	if config.Scanner.Resources.CyberhubURL != scannerext.DefaultCyberhubURL || config.Scanner.Resources.APIKey != scannerext.DefaultCyberhubKey || config.Scanner.Resources.Mode != scannerext.DefaultCyberhubMode {
 		t.Fatalf("scanner cyberhub config = %#v", config.Scanner)
 	}
-	if config.Tools.TavilyKeys != searchext.DefaultTavilyKeys {
-		t.Fatalf("tool search config = %#v", config.Tools)
+	if config.TavilyKeys != searchext.DefaultTavilyKeys {
+		t.Fatalf("tool search config = %#v", config)
 	}
 	if config.Provider.Mode != provider.StartupOptional {
 		t.Fatalf("provider config = %#v", config.Provider)

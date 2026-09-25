@@ -79,14 +79,6 @@ func newChoicePicker(title string, choices []choiceItem, current string, width, 
 	return choicePicker{list: m}
 }
 
-func newModelPicker(models []string, current string, width, height int) choicePicker {
-	choices := make([]choiceItem, 0, len(models))
-	for _, model := range models {
-		choices = append(choices, choiceItem{value: model, title: model})
-	}
-	return newChoicePicker("models", choices, current, width, height)
-}
-
 func (m choicePicker) Init() tea.Cmd {
 	return nil
 }

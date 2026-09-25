@@ -17,22 +17,18 @@ import (
 // appConfig selects the reusable capability packs in the reference
 // distribution. Runtime capabilities are owned by their extensions.
 type appConfig struct {
-	Resolved      *cfg.Resolved
-	DataDir       string
-	Provider      provider.StartupConfig
-	Scanner       scannerext.Config
-	Tools         toolConfig
-	Logger        telemetry.Logger
-	CLISkillPaths []string
-	SkipEngines   bool
-}
-
-type toolConfig struct {
+	Resolved          *cfg.Resolved
+	DataDir           string
+	Provider          provider.StartupConfig
+	Scanner           scannerext.Config
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string
 	MitmCapture       *bool
 	TrafficStorage    cfg.TrafficOptions
+	Logger            telemetry.Logger
+	CLISkillPaths     []string
+	SkipEngines       bool
 }
 
 func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMode, logger telemetry.Logger) appConfig {
@@ -61,11 +57,9 @@ func appConfigFromOption(option *cfg.Option, providerMode profilepkg.ProviderMod
 				Limit: intValue(recon.Limit), Credentials: scannerext.UncoverCredentials(envLookup(option)),
 			},
 		},
-		Tools: toolConfig{
-			TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
-			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
-			MitmCapture: cloneBool(hub.Mitm), TrafficStorage: option.TrafficOptions,
-		},
+		TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
+		PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
+		MitmCapture: cloneBool(hub.Mitm), TrafficStorage: option.TrafficOptions,
 		Logger: logger, CLISkillPaths: cfg.LocalSkillPaths(option.Skills),
 	}
 }

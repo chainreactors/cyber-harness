@@ -1,4 +1,4 @@
-package gogo_test
+package gogo
 
 import (
 	"bytes"
@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	coretool "github.com/chainreactors/cyber/core/tool"
-	"github.com/chainreactors/cyber/tools/gogo"
 )
 
 func TestGogoInjectProxy(t *testing.T) {
 	proxyAddr := "socks5://127.0.0.1:1080"
 
-	cmd := gogo.New(nil).WithProxy(proxyAddr)
+	cmd := New(nil).WithProxy(proxyAddr)
 
 	var output bytes.Buffer
 	_, err := cmd.Run(context.Background(), &coretool.Execution{Args: []string{"--help"}, Stdout: &output, Stderr: &output})
@@ -23,7 +22,7 @@ func TestGogoInjectProxy(t *testing.T) {
 		t.Fatal("expected help output")
 	}
 
-	injected := cmd.TestInjectProxy([]string{"-i", "127.0.0.1"})
+	injected := cmd.injectProxyURL([]string{"-i", "127.0.0.1"}, cmd.Proxy)
 	hasProxy := false
 	for i, arg := range injected {
 		if arg == "--proxy" && i+1 < len(injected) && injected[i+1] == proxyAddr {
@@ -35,7 +34,7 @@ func TestGogoInjectProxy(t *testing.T) {
 		t.Fatalf("expected --proxy %s in args, got %v", proxyAddr, injected)
 	}
 
-	alreadyHas := cmd.TestInjectProxy([]string{"-i", "127.0.0.1", "--proxy", "socks5://other:1080"})
+	alreadyHas := cmd.injectProxyURL([]string{"-i", "127.0.0.1", "--proxy", "socks5://other:1080"}, cmd.Proxy)
 	proxyCount := 0
 	for _, arg := range alreadyHas {
 		if arg == "--proxy" {

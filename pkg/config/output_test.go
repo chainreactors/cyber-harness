@@ -126,21 +126,3 @@ func TestOutputPolicyRejectsInvalidValues(t *testing.T) {
 		}
 	}
 }
-
-func TestMergeOutputOptionsKeepsLocalValues(t *testing.T) {
-	dst := OutputOptions{Preset: "full", ToolResults: "hidden", LiveStatus: boolPtr(false)}
-	src := OutputOptions{
-		Preset: "verbose", Reasoning: "full", ToolCalls: "compact",
-		ToolArguments: "preview", ToolResults: "full",
-		LiveStatus: boolPtr(true), Usage: boolPtr(true),
-	}
-	mergeOutputOptions(&dst, &src)
-
-	if dst.Preset != "full" || dst.ToolResults != "hidden" || dst.LiveStatus == nil || *dst.LiveStatus {
-		t.Fatalf("local output values were overwritten: %#v", dst)
-	}
-	if dst.Reasoning != "full" || dst.ToolCalls != "compact" ||
-		dst.ToolArguments != "preview" || dst.Usage == nil || !*dst.Usage {
-		t.Fatalf("config output values were not merged: %#v", dst)
-	}
-}

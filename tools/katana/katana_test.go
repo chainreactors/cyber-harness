@@ -267,7 +267,7 @@ func TestE2EHeadlessReusesDiscoveredBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse headless options: %v", err)
 	}
-	if err := configureBrowserOptions(options); err != nil {
+	if err := configureBrowserOptionsWith(options, browserutil.Discover); err != nil {
 		t.Fatalf("configure browser options: %v", err)
 	}
 	if options.SystemChromePath != binary.Path || !options.UseInstalledChrome {

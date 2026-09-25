@@ -96,7 +96,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	ctx = withInvocationProxy(ctx, egress.ProxyURL)
 	// Command output is consumed by agents and remote hosts as plain text.
-	args := c.resolveRelativePaths(execution.Args)
+	args := toolargs.ResolveRelativePaths(execution.Args, scanFileFlags, c.WorkDir)
 	if !slices.Contains(args, "--no-color") {
 		args = append(slices.Clone(args), "--no-color")
 	}
@@ -304,8 +304,4 @@ var scanFileFlags = map[string]bool{
 	"-l": true, "--list": true,
 	"-f": true, "--file": true,
 	"--dict": true, "--rule": true,
-}
-
-func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, scanFileFlags, c.WorkDir)
 }

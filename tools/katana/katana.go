@@ -152,7 +152,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	if options.Proxy == "" {
 		options.Proxy = egress.ProxyURL
 	}
-	if err := configureBrowserOptions(options); err != nil {
+	if err := configureBrowserOptionsWith(options, browserutil.Discover); err != nil {
 		return nil, fmt.Errorf("katana: %w", err)
 	}
 
@@ -237,10 +237,6 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 }
 
 type browserDiscoverer func() (browserutil.Binary, error)
-
-func configureBrowserOptions(options *katanatypes.Options) error {
-	return configureBrowserOptionsWith(options, browserutil.Discover)
-}
 
 func configureBrowserOptionsWith(options *katanatypes.Options, discover browserDiscoverer) error {
 	if options.ChromeWSUrl != "" {

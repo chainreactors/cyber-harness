@@ -50,7 +50,7 @@ func installScanner(t *testing.T, directory string, config Config, extra ...exte
 	if err != nil {
 		t.Fatal(err)
 	}
-	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), protonext.New(protonext.Config{Directory: directory}), searchext.New(searchext.Config{}))
+	values = append(values, loopext.New(agent.StandardLoop{}), subagentext.New(), New(config, directory), protonext.New(protonext.Config{Directory: directory}), searchext.New(searchext.Options{}))
 	values = append(values, extra...)
 	var installed scannerInstallation
 	values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error {

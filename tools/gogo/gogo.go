@@ -114,15 +114,6 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	return nil, nil
 }
 
-// TestInjectProxy is exported for cross-package testing.
-func (c *Command) TestInjectProxy(args []string) []string {
-	return c.injectProxy(args)
-}
-
-func (c *Command) injectProxy(args []string) []string {
-	return c.injectProxyURL(args, c.Proxy)
-}
-
 func (c *Command) injectProxyURL(args []string, proxy string) []string {
 	if proxy == "" {
 		return args

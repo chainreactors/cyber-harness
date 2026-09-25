@@ -126,20 +126,13 @@ func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execut
 	return details, err
 }
 
-type flowQueryFlags struct {
-	Host   string `long:"host" description:"Filter by host substring"`
-	Status string `long:"status" description:"Filter by status code (2xx, 404, 5xx)"`
-	Type   string `long:"type" description:"Filter by Content-Type substring"`
-	Last   int    `long:"last" description:"Show only the last N flows"`
-}
-
 func (c *MitmCommand) queryFlows(args []string) (string, error) {
-	var f flowQueryFlags
+	var f QueryOpts
 	p := goflags.NewParser(&f, goflags.Default&^goflags.PrintErrors&^goflags.HelpFlag)
 	if _, err := p.ParseArgs(args); err != nil {
 		return "", err
 	}
-	return formatFlowList(c.store.Query(QueryOpts{Host: f.Host, Status: f.Status, CType: f.Type, Last: f.Last})), nil
+	return formatFlowList(c.store.Query(f)), nil
 }
 
 func (c *MitmCommand) flowDetail(args []string) (string, error) {
@@ -439,10 +432,10 @@ type Flow struct {
 }
 
 type QueryOpts struct {
-	Host   string
-	Status string
-	CType  string
-	Last   int
+	Host   string `long:"host" description:"Filter by host substring"`
+	Status string `long:"status" description:"Filter by status code (2xx, 404, 5xx)"`
+	CType  string `long:"type" description:"Filter by Content-Type substring"`
+	Last   int    `long:"last" description:"Show only the last N flows"`
 }
 
 // FlowStore owns the retained flow ring and its file-backed body lifecycle.
