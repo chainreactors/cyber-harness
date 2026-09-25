@@ -10,6 +10,7 @@ require (
 	github.com/chainreactors/crtm v0.0.3-0.20260924103954-9432523918ae
 	github.com/chainreactors/cyber v0.0.0
 	github.com/chainreactors/cyber/aop v0.0.0-20260818112202-76d90a72b2c5
+	github.com/gorilla/websocket v1.5.3
 	github.com/jessevdk/go-flags v1.6.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -19,7 +20,6 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -76,7 +76,6 @@ require (
 	github.com/gookit/config/v2 v2.2.8 // indirect
 	github.com/gookit/goutil v0.7.5 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

@@ -13,7 +13,6 @@ tool (
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/Microsoft/go-winio v0.6.2
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/carapace-sh/carapace v1.11.6
 	github.com/chainreactors/crtm v0.0.3-0.20260924103954-9432523918ae
