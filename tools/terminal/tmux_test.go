@@ -482,13 +482,13 @@ func TestTmuxUnknownSubcommand(t *testing.T) {
 		t.Skip("unix-only")
 	}
 	tmux := tmuxTool(t)
-	// Unknown subcommands now trigger implicit new-session (runs as shell command).
-	// "invalid" is not a real command so the session will be created but the
-	// shell command will fail; Execute itself should not return an error.
 	Output.Reset(nil)
 	err := tmux.Execute(context.Background(), []string{"invalid"})
-	if err != nil {
-		t.Fatalf("expected implicit new-session (no error), got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("expected missing executable error, got: %v", err)
+	}
+	if sessions := tmux.manager.List(); len(sessions) != 0 {
+		t.Fatalf("failed implicit new-session left %d sessions", len(sessions))
 	}
 }
 
