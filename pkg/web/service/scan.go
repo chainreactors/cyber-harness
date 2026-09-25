@@ -298,7 +298,7 @@ func (s *Service) completeScan(ctx context.Context, scan *scanpb.Scan) (bool, er
 	}
 	proto.Merge(scan, next)
 	s.hub.BroadcastScan(managementapi.ScanCompletedEvent(scan.Id), true)
-	s.broadcastScanComplete(scan.Id)
+	s.broadcastScanStatus(scan.Id, scanpb.ScanStatus_SCAN_STATUS_COMPLETED)
 	return true, nil
 }
 

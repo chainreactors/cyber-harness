@@ -340,7 +340,7 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewService(ServiceConfig{Store: store})
-	service.broadcastScanComplete("scan-123")
+	service.broadcastScanStatus("scan-123", scanpb.ScanStatus_SCAN_STATUS_COMPLETED)
 
 	events, err := store.ListAOPEvents(context.Background(), "session-scan", 10)
 	if err != nil || len(events) != 1 {
@@ -375,7 +375,7 @@ func TestScanCompleteWithoutSessionBindingEmitsNothing(t *testing.T) {
 	// the durable session_scans relation, so a stray task registration must not
 	// leak a result card into a session the scan was never bound to.
 	service.registerSessionTask("scan-stray", "session-unbound")
-	service.broadcastScanComplete("scan-stray")
+	service.broadcastScanStatus("scan-stray", scanpb.ScanStatus_SCAN_STATUS_COMPLETED)
 
 	events, err := store.ListAOPEvents(context.Background(), "session-unbound", 10)
 	if err != nil {
