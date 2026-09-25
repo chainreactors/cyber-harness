@@ -12,6 +12,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/core/truncate"
 	"github.com/chainreactors/utils/proc"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type tmuxCommand struct {
@@ -59,7 +60,7 @@ func (t *tmuxCommand) run(ctx context.Context, execution *coretool.Execution) (a
 	} else {
 		switch args[0] {
 		case "new", "new-session":
-			result, err = t.cmdNewSession(ctx, args[1:])
+			result, err = t.cmdNewSession(ctx, args[1:], execution)
 		case "ls", "list-sessions":
 			result, err = t.cmdListSessions()
 		case "send", "send-keys":
@@ -71,7 +72,7 @@ func (t *tmuxCommand) run(ctx context.Context, execution *coretool.Execution) (a
 		case "wait", "wait-for":
 			result, err = t.cmdWaitFor(ctx, args[1:])
 		default:
-			result, err = t.cmdImplicitNewSession(ctx, args)
+			result, err = t.cmdImplicitNewSession(ctx, args, execution)
 		}
 	}
 	if err != nil {
@@ -83,9 +84,12 @@ func (t *tmuxCommand) run(ctx context.Context, execution *coretool.Execution) (a
 	return nil, nil
 }
 
-func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) (string, error) {
-	cmdLine := strings.Join(args, " ")
-	execution, err := t.createSession(ctx, cmdLine, "", proc.DefaultTimeout, true)
+func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string, parent *coretool.Execution) (string, error) {
+	cmdLine, err := sessionCommandLine(args)
+	if err != nil {
+		return "", err
+	}
+	execution, err := t.createSession(ctx, cmdLine, "", proc.DefaultTimeout, true, parent)
 	if err != nil {
 		return "", err
 	}
@@ -95,7 +99,7 @@ func (t *tmuxCommand) cmdImplicitNewSession(ctx context.Context, args []string) 
 }
 
 // new-session [-d] [-s name] [--timeout 30m] "command args..."
-func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string, error) {
+func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string, parent *coretool.Execution) (string, error) {
 	var detached bool
 	var name, timeoutStr string
 	var cmdParts []string
@@ -105,17 +109,23 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		case "-d":
 			detached = true
 		case "-s":
-			if i+1 < len(args) {
-				i++
-				name = args[i]
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("tmux new-session: -s requires a name")
 			}
+			i++
+			name = args[i]
 		case "--timeout":
-			if i+1 < len(args) {
-				i++
-				timeoutStr = args[i]
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("tmux new-session: --timeout requires a duration")
 			}
+			i++
+			timeoutStr = args[i]
+		case "--":
+			cmdParts = append(cmdParts, args[i+1:]...)
+			i = len(args)
 		default:
-			cmdParts = append(cmdParts, args[i])
+			cmdParts = append(cmdParts, args[i:]...)
+			i = len(args)
 		}
 	}
 
@@ -123,7 +133,10 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		return "", fmt.Errorf("tmux new-session: missing command")
 	}
 
-	cmdLine := strings.Join(cmdParts, " ")
+	cmdLine, err := sessionCommandLine(cmdParts)
+	if err != nil {
+		return "", err
+	}
 	timeout := proc.DefaultTimeout
 	if timeoutStr != "" {
 		d, err := time.ParseDuration(timeoutStr)
@@ -133,7 +146,7 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 		timeout = d
 	}
 
-	execution, err := t.createSession(ctx, cmdLine, name, timeout, detached)
+	execution, err := t.createSession(ctx, cmdLine, name, timeout, detached, parent)
 	if err != nil {
 		return "", err
 	}
@@ -158,17 +171,39 @@ func (t *tmuxCommand) cmdNewSession(ctx context.Context, args []string) (string,
 	return output, nil
 }
 
+func sessionCommandLine(parts []string) (string, error) {
+	if len(parts) == 1 {
+		return parts[0], nil
+	}
+	quoted := make([]string, len(parts))
+	for i, part := range parts {
+		value, err := syntax.Quote(part, syntax.LangBash)
+		if err != nil {
+			return "", fmt.Errorf("tmux command argument: %w", err)
+		}
+		quoted[i] = value
+	}
+	return strings.Join(quoted, " "), nil
+}
+
 // createSession starts the session's command. A detached session outlives the
 // tool call that created it, so it hands its lifetime to the process manager;
 // a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
-func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool) (*coretool.Execution, error) {
-	execution, err := t.start(ctx, cmdLine, BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true})
+func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool, parent *coretool.Execution) (*coretool.Execution, error) {
+	options := BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true, interactive: true}
+	if parent != nil {
+		options.route = parent.Route
+	}
+	execution, err := t.start(ctx, cmdLine, options)
 	if err != nil {
 		return nil, err
 	}
 	if detached {
 		execution.DetachParent()
+		if parent != nil && parent.OnBackground != nil {
+			parent.OnBackground(execution)
+		}
 		info, _ := execution.Session()
 		t.bash.startMonitor(info, inbox.FromContext(ctx))
 	}
@@ -213,12 +248,16 @@ func (t *tmuxCommand) cmdSendKeys(args []string) (string, error) {
 	if len(rest) == 0 {
 		return "", fmt.Errorf("tmux send-keys: keys required")
 	}
+	enter := byte('\n')
+	if info, ok := t.manager.Get(id); ok && info.Shape == proc.ShapeTTY {
+		enter = '\r'
+	}
 
 	var buf strings.Builder
 	for _, key := range rest {
 		switch key {
 		case "Enter", "C-m":
-			buf.WriteByte('\n')
+			buf.WriteByte(enter)
 		case "C-c":
 			buf.WriteByte(0x03)
 		case "C-d":

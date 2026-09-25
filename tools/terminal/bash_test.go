@@ -114,39 +114,15 @@ func newBashWithPseudo(t *testing.T, dir string, cmds ...*outputCommand) *BashTo
 // Scanner tests (from bash_scanner_test.go)
 // ---------------------------------------------------------------------------
 
-func TestScannerRejectsShellPipeAndFileRedir(t *testing.T) {
+func TestScannerComposesWithShellSyntax(t *testing.T) {
 	impl := &simpleCommand{name: "spray"}
 	registry, _ := loadTestRegistry(t, commandBatch(coretool.Command{Name: impl.Name(), Usage: impl.Usage(), Run: impl.Run}))
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	bash.SetCommandRegistry(registry)
 
-	// Single pipe (|) is now supported — pseudo-command output is piped
-	// through a shell pipeline. Only ||, redirections, and chaining are
-	// still rejected.
-	tests := []struct {
-		name     string
-		cmd      string
-		wantHint string
-	}{
-		{"double pipe", `spray -u http://x || echo done`, "shell pipes"},
-		{"file redirection >", `spray -u http://x > out.txt`, "file redirection"},
-		{"file redirection >>", `spray -u http://x >> out.txt`, "file redirection"},
-		{"stderr to file", `spray -u http://x 2>err.log`, "file redirection"},
-		{"combined to file", `spray -u http://x &> all.log`, "file redirection"},
-		{"chained with &&", `spray -u http://x && spray -u http://y`, "chaining"},
-		{"chained with ;", `spray -u http://x ; echo done`, "chaining"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			res, err := bash.Execute(context.Background(), bashArgs(tt.cmd))
-			if err == nil {
-				t.Fatalf("expected error, got output %q", coretool.ResultText(res))
-			}
-			if !strings.Contains(err.Error(), tt.wantHint) {
-				t.Fatalf("error = %v, want hint containing %q", err, tt.wantHint)
-			}
-		})
+	result, err := bash.Execute(t.Context(), bashArgs(`spray -u http://x && echo done`))
+	if err != nil || !strings.Contains(coretool.ResultText(result), "okdone") {
+		t.Fatalf("registered command chaining: result=%q err=%v", coretool.ResultText(result), err)
 	}
 }
 
@@ -374,34 +350,32 @@ func TestPseudoPipeGrepRegexWithPipe(t *testing.T) {
 	}
 }
 
-func TestDoublesPipeStillRejected(t *testing.T) {
+func TestDoublePipeRunsFallback(t *testing.T) {
 	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
-	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . || echo fallback`))
-	if err == nil {
-		t.Fatal("expected error for ||, got nil")
+	result, err := bash.Execute(context.Background(), bashArgs(`sample -i . || echo fallback`))
+	if err != nil || coretool.ResultText(result) != "ok" {
+		t.Fatalf("result=%q err=%v", coretool.ResultText(result), err)
 	}
-	t.Logf("correctly rejected: %v", err)
 }
 
-func TestChainStillRejected(t *testing.T) {
+func TestChainRunsBoth(t *testing.T) {
 	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
 
-	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . && echo next`))
-	if err == nil {
-		t.Fatal("expected error for &&, got nil")
+	result, err := bash.Execute(context.Background(), bashArgs(`sample -i . && echo next`))
+	if err != nil || coretool.ResultText(result) != "oknext" {
+		t.Fatalf("result=%q err=%v", coretool.ResultText(result), err)
 	}
-	t.Logf("correctly rejected: %v", err)
 }
 
-func TestRedirectionStillRejected(t *testing.T) {
-	bash := newBashWithPseudo(t, t.TempDir(), &outputCommand{name: "sample", output: "ok"})
-
-	_, err := bash.Execute(context.Background(), bashArgs(`sample -i . > out.txt`))
-	if err == nil {
-		t.Fatal("expected error for >, got nil")
+func TestRedirectionWritesFile(t *testing.T) {
+	dir := t.TempDir()
+	bash := newBashWithPseudo(t, dir, &outputCommand{name: "sample", output: "ok"})
+	result, err := bash.Execute(context.Background(), bashArgs(`sample -i . > out.txt`))
+	data, readErr := os.ReadFile(filepath.Join(dir, "out.txt"))
+	if err != nil || readErr != nil || result.IsError || string(data) != "ok" {
+		t.Fatalf("result=%q file=%q err=%v read=%v", coretool.ResultText(result), data, err, readErr)
 	}
-	t.Logf("correctly rejected: %v", err)
 }
 
 func TestNoPipeStillWorks(t *testing.T) {

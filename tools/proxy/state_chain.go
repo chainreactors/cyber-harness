@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"fmt"
 	"net/url"
 
 	"github.com/chainreactors/proxyclient"
@@ -12,21 +11,6 @@ func (s *State) CurrentDial() proxyclient.Dial {
 		return *pointer
 	}
 	return proxyclient.DefaultDial
-}
-
-func (s *State) WithOverrideDial(proxyURL string) (func(), error) {
-	parsed, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy URL: %w", err)
-	}
-	dial, err := proxyclient.NewClient(parsed)
-	if err != nil {
-		return nil, fmt.Errorf("create proxy client: %w", err)
-	}
-	previous := s.chain.Load()
-	current := proxyclient.Dial(dial)
-	s.chain.Store(&current)
-	return func() { s.chain.Store(previous) }, nil
 }
 
 func (s *State) publishChainLocked() {

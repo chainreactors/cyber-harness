@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+!third_party/proc/winpty_bin/winpty-agent.exe
+!third_party/proc/winpty_bin/winpty.dll
 
 # Test binary, built with `go test -c`
 *.test

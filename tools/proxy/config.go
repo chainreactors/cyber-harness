@@ -55,6 +55,7 @@ type correlationLease struct {
 	operation  *operationpb.Ref
 	invocation operation.Invocation
 	cancel     func(error) bool
+	dial       proxyclient.Dial
 	mu         sync.Mutex
 	active     int
 	released   bool
@@ -73,6 +74,10 @@ type resolvedCorrelation struct {
 // is transport-only and cannot leak call/session identity through proxy auth.
 // release must run when the actual HTTP owner or process exits.
 func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
+	return h.egress(ctx, nil)
+}
+
+func (h *ProxyHub) egress(ctx context.Context, dial proxyclient.Dial) (string, string, func()) {
 	if h == nil {
 		return "", "", func() {}
 	}
@@ -84,6 +89,7 @@ func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
 	lease := &correlationLease{
 		operation: operation.Correlation(ctx), invocation: operation.InvocationFromContext(ctx),
 		cancel: func(cause error) bool { return operation.RequestCancel(ctx, cause) },
+		dial:   dial,
 		done:   make(chan struct{}),
 	}
 	h.correlationMu.Lock()

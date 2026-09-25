@@ -1,5 +1,9 @@
 module github.com/chainreactors/cyber
 
+replace github.com/chainreactors/utils/proc => ./third_party/proc
+
+replace github.com/chainreactors/utils/mitmproxy => ./third_party/mitmproxy
+
 go 1.26
 
 tool (

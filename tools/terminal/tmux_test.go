@@ -1,13 +1,18 @@
 package terminal
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	procbus "github.com/chainreactors/cyber/core/proc"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/utils/proc"
 	"io"
+	"os"
+	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +40,107 @@ func tmuxTool(t *testing.T) *testTmuxCommand {
 	bash := NewBashTool(t.TempDir(), 10, nil)
 	t.Cleanup(bash.Close)
 	return &testTmuxCommand{command: NewTmuxCommand(bash), manager: bash.Manager()}
+}
+
+func TestTmuxInteractiveExternalProcess(t *testing.T) {
+	program, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bash := NewBashTool(t.TempDir(), 10, nil).WithEnvironment(map[string]string{"TMUX_INTERACTIVE_CHILD": "1"})
+	t.Cleanup(bash.Close)
+	tmux := NewTmuxCommand(bash)
+	_, err = tmux.Run(t.Context(), &coretool.Execution{
+		Args:   []string{"new-session", "-d", "-s", "interactive", program, "-test.run=^TestTmuxInteractiveChild$"},
+		Stdout: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, ok := bash.Manager().Get("interactive")
+	if !ok || info.Shape != proc.ShapeTTY || info.Proc == nil || info.Proc.PID <= 0 {
+		t.Fatalf("interactive session has no real PTY process: %+v", info)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(bash.Manager().PeekOrEmpty("interactive", 20), "ready") {
+		if time.Now().After(deadline) {
+			t.Fatalf("interactive process did not become ready: %q", bash.Manager().PeekOrEmpty("interactive", 20))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := tmux.Run(t.Context(), &coretool.Execution{
+		Args: []string{"send-keys", "-t", "interactive", "hello", "Enter"}, Stdout: io.Discard,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-bash.Manager().Done("interactive"):
+	case <-time.After(5 * time.Second):
+		t.Fatalf("interactive process did not exit after input: %q", bash.Manager().PeekOrEmpty("interactive", 20))
+	}
+	output := bash.Manager().PeekOrEmpty("interactive", 20)
+	if !strings.Contains(output, "received:hello") {
+		t.Fatalf("interactive output = %q", output)
+	}
+}
+
+func TestTmuxInteractiveChild(t *testing.T) {
+	if os.Getenv("TMUX_INTERACTIVE_CHILD") != "1" {
+		return
+	}
+	fmt.Println("ready")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("received:" + strings.TrimSpace(line))
+}
+
+func TestTmuxInteractiveShell(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is unavailable")
+	}
+	bash := NewBashTool(t.TempDir(), 10, nil)
+	t.Cleanup(bash.Close)
+	tmux := NewTmuxCommand(bash)
+	_, err := tmux.Run(t.Context(), &coretool.Execution{
+		Args: []string{"new-session", "-d", "-s", "native-shell", "sh"}, Stdout: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, ok := bash.Manager().Get("native-shell")
+	if !ok || info.Shape != proc.ShapeTTY || info.Proc == nil {
+		t.Fatalf("shell session has no real PTY process: %+v", info)
+	}
+	for _, keys := range [][]string{{"send-keys", "-t", "native-shell", "echo native-shell-ready", "Enter"}, {"send-keys", "-t", "native-shell", "exit", "Enter"}} {
+		if _, err := tmux.Run(t.Context(), &coretool.Execution{Args: keys, Stdout: io.Discard}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-bash.Manager().Done("native-shell"):
+	case <-time.After(5 * time.Second):
+		t.Fatalf("shell did not exit: %q", bash.Manager().PeekOrEmpty("native-shell", 20))
+	}
+	if output := bash.Manager().PeekOrEmpty("native-shell", 20); strings.Count(output, "native-shell-ready") < 2 {
+		t.Fatalf("shell output = %q", output)
+	}
+}
+
+func TestTmuxSessionCommandPreservesArgv(t *testing.T) {
+	line, err := sessionCommandLine([]string{"python", "-c", "print('hello world')"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := parseShellCommand(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argv, ok := new(BashTool).literalExternal(script)
+	if !ok || !slices.Equal(argv, []string{"python", "-c", "print('hello world')"}) {
+		t.Fatalf("session argv = %q", argv)
+	}
 }
 
 func TestTmuxNewSessionForeground(t *testing.T) {

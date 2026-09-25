@@ -72,7 +72,9 @@ func (t *BashTool) Start(ctx context.Context, command string, options BashExecOp
 	if cause := context.Cause(processCtx); cause != nil {
 		return nil, completeStartFailure(cause)
 	}
-	if t.egressResolver != nil {
+	if options.route.ProxyURL != "" {
+		options.Env = withEgressEnvironment(options.Env, options.route.ProxyURL, options.route.CAPath)
+	} else if t.egressResolver != nil {
 		proxyURL, caPath, release := t.egressResolver(processCtx)
 		if release != nil {
 			releaseEgress = release

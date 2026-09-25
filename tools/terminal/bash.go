@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -37,48 +35,36 @@ const (
 // BashTool defaults. Runner/WebAgent transports use this entry point while the
 // agent-facing Execute method applies the explicit wait/background contract.
 type BashExecOptions struct {
-	foreground bool
-	Name       string
-	WorkDir    string
-	Env        map[string]string
-	Timeout    time.Duration
-	TimeoutSet bool
-	OnOutput   func([]byte)
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
-}
-
-// ProcessContainment is a process resource supplied by profiles that require
-// a stronger descendant boundary than the host shell provides. Bash invokes it
-// only for paths that actually start a shell. The profile that constructs the
-// resource remains responsible for closing it.
-type ProcessContainment interface {
-	Prepare(string, BashExecOptions) (BashExecOptions, func(), error)
+	interactive bool
+	route       coretool.Egress
+	Name        string
+	WorkDir     string
+	Env         map[string]string
+	Timeout     time.Duration
+	TimeoutSet  bool
+	OnOutput    func([]byte)
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 type BashTool struct {
-	baseEnv            map[string]string
-	hooks              *hooks.Registry
-	processMu          sync.Mutex
-	processClosed      bool
-	processWG          sync.WaitGroup
-	workDir            string
-	timeout            int
-	egressProxy       string
-	egressProxyCA     string
-	egressResolver     func(context.Context) (proxyURL, caPath string, release func())
-	tasks              *procbus.Manager
-	registry           coretool.CommandExecutor
-	shellCommands      bool
-	hiddenCommands     map[string]struct{}
-	standaloneCommands map[string]struct{}
-	adapterMu          sync.Mutex
-	shellAdapter       *shellCommandAdapter
-	containment        ProcessContainment
-	maxTimeout         time.Duration
-	closeOnce          sync.Once
-	monitored          sync.Map // tmux session ID -> notification already installed
+	baseEnv        map[string]string
+	hooks          *hooks.Registry
+	processMu      sync.Mutex
+	processClosed  bool
+	processWG      sync.WaitGroup
+	workDir        string
+	timeout        int
+	egressProxy    string
+	egressProxyCA  string
+	egressResolver func(context.Context) (proxyURL, caPath string, release func())
+	tasks          *procbus.Manager
+	registry       coretool.CommandExecutor
+	hiddenCommands map[string]struct{}
+	maxTimeout     time.Duration
+	closeOnce      sync.Once
+	monitored      sync.Map // tmux session ID -> notification already installed
 }
 
 func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashTool {
@@ -88,7 +74,7 @@ func NewBashTool(workDir string, timeout int, registry *hooks.Registry) *BashToo
 	return &BashTool{workDir: workDir, timeout: timeout, hooks: registry, tasks: procbus.NewManager()}
 }
 
-func (t *BashTool) Manager() *procbus.Manager       { return t.tasks }
+func (t *BashTool) Manager() *procbus.Manager      { return t.tasks }
 func (t *BashTool) SetEgressProxy(proxy string)    { t.egressProxy = proxy }
 func (t *BashTool) SetEgressProxyCA(caPath string) { t.egressProxyCA = caPath }
 func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, func())) {
@@ -98,11 +84,6 @@ func (t *BashTool) SetEgressResolver(fn func(context.Context) (string, string, f
 // SetCommandRegistry supplies the profile-owned command boundary before use.
 func (t *BashTool) SetCommandRegistry(registry coretool.CommandExecutor) {
 	t.registry = registry
-}
-
-func (t *BashTool) WithProcessContainment(containment ProcessContainment) *BashTool {
-	t.containment = containment
-	return t
 }
 
 func (t *BashTool) WithForegroundTimeoutCeiling(max time.Duration) *BashTool {
@@ -116,42 +97,12 @@ func (t *BashTool) Close() {
 		t.processMu.Lock()
 		t.processClosed = true
 		t.processMu.Unlock()
-		t.adapterMu.Lock()
-		adapter := t.shellAdapter
-		if adapter != nil {
-			adapter.shutdown()
-		}
-		t.adapterMu.Unlock()
 		t.tasks.Shutdown()
 		t.processWG.Wait()
-		if adapter != nil {
-			adapter.cleanup()
-		}
 	})
 }
 
-func (t *BashTool) attachShellCommands(registry coretool.CommandExecutor) {
-	t.registry = registry
-	t.shellCommands = true
-}
-
-// EnableShellCommands binds the pseudo-command registry used when a shell line
-// composes registered commands. Profiles call this before publication.
-func (t *BashTool) EnableShellCommands(registry coretool.CommandExecutor) {
-	t.attachShellCommands(registry)
-}
-
-// StandaloneCommands keeps commands discoverable but prevents their invocation
-// from shell adapters. Only direct registry dispatch may start these commands.
-func (t *BashTool) StandaloneCommands(names ...string) {
-	t.standaloneCommands = make(map[string]struct{}, len(names))
-	for _, name := range names {
-		t.standaloneCommands[name] = struct{}{}
-	}
-}
-
-// HideCommands removes control-only commands from Bash discovery and shell
-// aliases while leaving direct, policy-checked registry execution available.
+// HideCommands removes control-only commands from Bash discovery.
 // Profiles configure this before publishing the Bash tool.
 func (t *BashTool) HideCommands(names ...string) {
 	if t.hiddenCommands == nil {
@@ -179,34 +130,6 @@ func (t *BashTool) commandNames() []string {
 		}
 	}
 	return visible
-}
-
-func (t *BashTool) ensureShellCommands() (*shellCommandAdapter, error) {
-	if !t.shellCommands || t.registry == nil {
-		return nil, nil
-	}
-	t.adapterMu.Lock()
-	defer t.adapterMu.Unlock()
-	if t.shellAdapter == nil {
-		adapter, err := newShellCommandAdapter(t.registry)
-		if err != nil {
-			return nil, err
-		}
-		t.shellAdapter = adapter
-	}
-	names := t.commandNames()
-	allowed := names[:0]
-	for _, name := range names {
-		if _, standalone := t.standaloneCommands[name]; !standalone {
-			allowed = append(allowed, name)
-		}
-	}
-	if err := t.shellAdapter.syncAliases(allowed); err != nil {
-		t.shellAdapter.close()
-		t.shellAdapter = nil
-		return nil, err
-	}
-	return t.shellAdapter, nil
 }
 
 func (t *BashTool) WithEgressProxy(proxy string) *BashTool {
@@ -323,7 +246,6 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*coretool.Res
 // final session state. Non-zero exits are represented by Info.ExitStatus() rather
 // than returned as transport errors.
 func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
-	options.foreground = true
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
@@ -406,9 +328,7 @@ func (t *BashTool) RunForegroundTool(ctx context.Context, command string, option
 	return result, nil
 }
 
-// start routes one script. A single literal registered command stays in
-// process. Shell syntax is parsed before argv splitting; composition runs
-// through a POSIX shell when one is available.
+// start creates one managed interpreter session for a shell script.
 func (t *BashTool) start(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
@@ -437,101 +357,33 @@ func (t *BashTool) start(ctx context.Context, command string, options BashExecOp
 	if len(script.Stmts) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
-	if spec, args, ok := t.literalBuiltin(script); ok {
-		return t.startBuiltin(ctx, spec, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
-	}
-	if name, ok := leadingCommandName(script); ok {
-		if _, standalone := t.standaloneCommands[name]; standalone {
-			return nil, fmt.Errorf("%s must be a standalone command without shell composition", name)
+	env := t.runEnv(options.Env)
+	if options.interactive {
+		if argv, ok := t.literalExternal(script); ok {
+			execution := coretool.NewExecution(t.tasks, command, argv[1:], workDir, env)
+			info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout), proc.TTY(proc.ProcOptions{
+				Binary: argv[0], Args: argv[1:], Dir: workDir, Env: env,
+			}))
+			if err != nil {
+				return nil, err
+			}
+			execution.BindID(info.ID)
+			return execution, nil
 		}
 	}
-	adapter, err := t.ensureShellCommands()
-	if err != nil {
-		return nil, err
-	}
-	if adapter != nil {
-		return t.startShellScript(ctx, command, timeout, workDir, options, adapter)
-	}
-	if left, right, ok := splitPipeline(script, command); ok {
-		leftScript, leftErr := parseShellCommand(left)
-		rightScript, rightErr := parseShellCommand(right)
-		if leftErr == nil && rightErr == nil {
-			if spec, args, builtin := t.literalBuiltin(leftScript); builtin && !t.hasRegisteredCommand(rightScript) {
-				options, cleanup, err := t.prepareShell(command, options)
-				if err != nil {
-					return nil, err
-				}
-				execution, err := t.startBuiltinToShell(ctx, spec, args, right, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
-				if err != nil {
-					cleanup()
-					return nil, err
-				}
-				t.releaseProcess(cleanup, execution)
-				return execution, nil
-			}
-			if spec, args, builtin := t.literalBuiltin(rightScript); builtin && !t.hasRegisteredCommand(leftScript) {
-				options, cleanup, err := t.prepareShell(command, options)
-				if err != nil {
-					return nil, err
-				}
-				execution, err := t.startShellToBuiltin(ctx, left, spec, args, timeout, workDir, t.runEnv(ctx, options.Env, nil, ""), options)
-				if err != nil {
-					cleanup()
-					return nil, err
-				}
-				t.releaseProcess(cleanup, execution)
-				return execution, nil
-			}
-		}
-	}
-	if t.hasRegisteredCommand(script) {
-		return nil, fmt.Errorf("registered commands with shell pipes, command chaining, file redirection or expansion require EnableShellCommands")
-	}
-	return t.startShellScript(ctx, command, timeout, workDir, options, nil)
-}
-
-func (t *BashTool) startShellScript(ctx context.Context, command string, timeout time.Duration, workDir string, options BashExecOptions, adapter *shellCommandAdapter) (*coretool.Execution, error) {
-	options, cleanup, err := t.prepareShell(command, options)
-	if err != nil {
-		return nil, err
-	}
-	var contextID string
-	if adapter != nil {
-		contextID = adapter.retainContext(ctx)
-	}
-	env := t.runEnv(ctx, options.Env, adapter, contextID)
 	execution := coretool.NewExecution(t.tasks, command, nil, workDir, env)
-	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout), shellAttachment(command, workDir, env))
+	if spec, args, ok := t.literalBuiltin(script); ok {
+		execution.Command, execution.Args = spec.Name, args
+	}
+	info, err := t.tasks.Start(ctx, procSpec(options.Name, command, timeout), t.interpreterAttachment(script, execution, options))
 	if err != nil {
-		if adapter != nil {
-			adapter.releaseContext(contextID)
-		}
-		cleanup()
 		return nil, err
+	}
+	if execution.Command != command {
+		t.tasks.SetKind(info.ID, builtinSessionKind)
 	}
 	execution.BindID(info.ID)
-	if adapter != nil {
-		go func() {
-			<-t.tasks.Done(execution.ID)
-			adapter.releaseContext(contextID)
-		}()
-	}
-	t.releaseProcess(cleanup, execution)
 	return execution, nil
-}
-
-func shellAttachment(command, workDir string, env []string) proc.Attachment {
-	env = prepareShellProcessEnv(env)
-	procOptions := proc.ProcOptions{Dir: workDir, Env: env}
-	if binary, args, useLine := commandShell(command); useLine {
-		procOptions.Line = command
-	} else {
-		procOptions.Binary = binary
-		procOptions.Args = args
-	}
-	// Windows uses a pipe so the console cannot rewrite newlines or trailing
-	// spaces, and a job so cancel stops descendants the process tree misses.
-	return shellProcess(procOptions)
 }
 
 // procSpec is the registry-level half of a bash invocation: identity and
@@ -541,30 +393,6 @@ func procSpec(name, command string, timeout time.Duration) proc.Spec {
 	return proc.Spec{Name: name, Command: command, Timeout: timeout, StripANSI: true}
 }
 
-func (t *BashTool) prepareShell(command string, options BashExecOptions) (BashExecOptions, func(), error) {
-	if t.containment == nil {
-		return options, func() {}, nil
-	}
-	prepared, cleanup, err := t.containment.Prepare(command, options)
-	if cleanup == nil {
-		cleanup = func() {}
-	}
-	return prepared, cleanup, err
-}
-
-func (t *BashTool) releaseProcess(cleanup func(), execution *coretool.Execution) {
-	if cleanup == nil || execution == nil || execution.ID == "" {
-		if cleanup != nil {
-			cleanup()
-		}
-		return
-	}
-	go func(id string) {
-		<-t.tasks.Done(id)
-		cleanup()
-	}(execution.ID)
-}
-
 func (t *BashTool) resolve(name string) (*types.CommandSpec, bool) {
 	if t.registry == nil || name == "" {
 		return nil, false
@@ -572,153 +400,14 @@ func (t *BashTool) resolve(name string) (*types.CommandSpec, bool) {
 	return t.registry.Get(name)
 }
 
-// Built-in commands run in-process and borrow the session manager for timeouts
-// and output capture. Tagging them keeps `tmux ls` to terminal sessions: without
-// it the listing command reports itself as a session.
+// Tagging direct registered commands keeps tmux ls focused on terminal sessions.
 const builtinSessionKind = "builtin"
-
-func (t *BashTool) startBuiltin(
-	ctx context.Context,
-	command *types.CommandSpec,
-	args []string,
-	timeout time.Duration,
-	workDir string,
-	env []string,
-	options BashExecOptions,
-) (*coretool.Execution, error) {
-	execution := coretool.NewExecution(t.tasks, command.Name, args, workDir, env)
-	name := options.Name
-	if name == "" {
-		name = command.Name
-	}
-	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
-		stdout := joinedWriter(session, options.Stdout)
-		stderr := joinedWriter(session, options.Stderr)
-		execution.SetIO(options.Stdin, stdout, stderr)
-		details, runErr := t.registry.Execute(runCtx, command.Name, execution)
-		execution.SetDetails(details)
-		return runErr
-	}))
-	if err != nil {
-		return nil, err
-	}
-	t.tasks.SetKind(info.ID, builtinSessionKind)
-	execution.BindID(info.ID)
-	return execution, nil
-}
-
-func (t *BashTool) startBuiltinToShell(
-	ctx context.Context,
-	command *types.CommandSpec,
-	args []string,
-	pipeline string,
-	timeout time.Duration,
-	workDir string,
-	env []string,
-	options BashExecOptions,
-) (*coretool.Execution, error) {
-	execution := coretool.NewExecution(t.tasks, command.Name, args, workDir, env)
-	name := options.Name
-	if name == "" {
-		name = command.Name
-	}
-	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
-		reader, writer := io.Pipe()
-		sh := pipeCommand(runCtx, pipeline)
-		sh.Stdin = reader
-		sh.Stdout = joinedWriter(session, options.Stdout)
-		sh.Stderr = joinedWriter(session, options.Stderr)
-		configureProcess(sh, workDir, env)
-		shellDone := make(chan error, 1)
-		go func() {
-			shellDone <- sh.Run()
-			_ = reader.Close()
-		}()
-
-		execution.SetIO(options.Stdin, writer, joinedWriter(session, options.Stderr))
-		details, commandErr := t.registry.Execute(runCtx, command.Name, execution)
-		execution.SetDetails(details)
-		_ = writer.CloseWithError(commandErr)
-		shellErr := <-shellDone
-		if commandErr != nil {
-			return commandErr
-		}
-		return shellErr
-	}))
-	if err != nil {
-		return nil, err
-	}
-	t.tasks.SetKind(info.ID, builtinSessionKind)
-	execution.BindID(info.ID)
-	return execution, nil
-}
-
-func (t *BashTool) startShellToBuiltin(
-	ctx context.Context,
-	shellLine string,
-	command *types.CommandSpec,
-	args []string,
-	timeout time.Duration,
-	workDir string,
-	env []string,
-	options BashExecOptions,
-) (*coretool.Execution, error) {
-	execution := coretool.NewExecution(t.tasks, command.Name, args, workDir, env)
-	name := options.Name
-	if name == "" {
-		name = command.Name
-	}
-	info, err := t.tasks.Start(ctx, procSpec(name, name, timeout), proc.Func(func(runCtx context.Context, session io.Writer) error {
-		reader, writer := io.Pipe()
-		sh := pipeCommand(runCtx, shellLine)
-		sh.Stdin = options.Stdin
-		sh.Stdout = writer
-		sh.Stderr = joinedWriter(session, options.Stderr)
-		configureProcess(sh, workDir, env)
-		shellDone := make(chan error, 1)
-		go func() {
-			err := sh.Run()
-			_ = writer.CloseWithError(err)
-			shellDone <- err
-		}()
-
-		execution.SetIO(reader, joinedWriter(session, options.Stdout), joinedWriter(session, options.Stderr))
-		details, commandErr := t.registry.Execute(runCtx, command.Name, execution)
-		execution.SetDetails(details)
-		_ = reader.Close()
-		shellErr := <-shellDone
-		if commandErr != nil {
-			return commandErr
-		}
-		return shellErr
-	}))
-	if err != nil {
-		return nil, err
-	}
-	t.tasks.SetKind(info.ID, builtinSessionKind)
-	execution.BindID(info.ID)
-	return execution, nil
-}
 
 func joinedWriter(session, extra io.Writer) io.Writer {
 	if extra == nil || extra == session {
 		return session
 	}
 	return io.MultiWriter(session, extra)
-}
-
-func pipeCommand(ctx context.Context, script string) *exec.Cmd {
-	binary, args := pipeShell(script)
-	return exec.CommandContext(ctx, binary, args...)
-}
-
-func configureProcess(cmd *exec.Cmd, workDir string, env []string) {
-	if workDir != "" {
-		cmd.Dir = workDir
-	}
-	if env = prepareShellProcessEnv(env); len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
 }
 
 func (t *BashTool) waitOrBackground(execution *coretool.Execution, ctx context.Context, targetInbox inbox.Inbox, wait time.Duration) *coretool.Result {
@@ -815,30 +504,18 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adapter *shellCommandAdapter, shellContextID string) []string {
+func (t *BashTool) runEnv(overrides map[string]string) []string {
 	values := make(map[string]string)
 	for key, value := range t.baseEnv {
 		values[key] = value
 	}
-	for _, item := range t.proxyEnv(ctx) {
+	for _, item := range coretool.EgressEnvironment(t.egressProxy, t.egressProxyCA) {
 		if key, value, ok := strings.Cut(item, "="); ok {
 			values[key] = value
 		}
 	}
 	for key, value := range overrides {
 		values[key] = value
-	}
-	if adapter != nil && shellContextID != "" {
-		for _, item := range adapter.environment(shellContextID) {
-			if key, value, ok := strings.Cut(item, "="); ok {
-				values[key] = value
-			}
-		}
-		path := values["PATH"]
-		if path == "" {
-			path = os.Getenv("PATH")
-		}
-		values["PATH"] = adapter.runtimeDir + string(os.PathListSeparator) + path
 	}
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -850,13 +527,6 @@ func (t *BashTool) runEnv(ctx context.Context, overrides map[string]string, adap
 		out = append(out, key+"="+values[key])
 	}
 	return out
-}
-
-func (t *BashTool) proxyEnv(ctx context.Context) []string {
-	proxy, ca := t.egressProxy, t.egressProxyCA
-	// Point the same common proxy/CA surface at child processes that built-in
-	// tools consume through Execution.Env.
-	return coretool.EgressEnvironment(proxy, ca)
 }
 
 func (t *BashTool) startMonitor(info proc.Info, targetInbox inbox.Inbox) {

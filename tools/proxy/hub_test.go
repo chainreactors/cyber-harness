@@ -320,11 +320,9 @@ func TestChainTraversesUpstreamProxy(t *testing.T) {
 	upstreamAddr, connects := startCountingConnectProxy(t)
 
 	_, state, client := newTestHub(t, true)
-	restore, err := state.WithOverrideDial("http://" + upstreamAddr)
-	if err != nil {
-		t.Fatalf("override: %v", err)
+	if err := state.SetProxyURL("http://" + upstreamAddr); err != nil {
+		t.Fatalf("set proxy: %v", err)
 	}
-	defer restore()
 
 	body := get(t, client, localhost(target.URL))
 	if !strings.Contains(body, "reached-via-chain") {
@@ -344,11 +342,9 @@ func TestFailClosedNoDirectLeak(t *testing.T) {
 	defer target.Close()
 
 	_, state, client := newTestHub(t, true)
-	restore, err := state.WithOverrideDial("socks5://127.0.0.1:1") // nothing listening
-	if err != nil {
-		t.Fatalf("override: %v", err)
+	if err := state.SetProxyURL("socks5://127.0.0.1:1"); err != nil { // nothing listening
+		t.Fatalf("set proxy: %v", err)
 	}
-	defer restore()
 
 	resp, err := client.Get(target.URL)
 	if err == nil {

@@ -24,6 +24,10 @@ type Execution struct {
 	Stderr io.Writer
 
 	Details any
+	// Route is an explicit route inherited by a child process started by a command.
+	Route Egress
+	// OnBackground transfers resources owned by a wrapping command to a detached session.
+	OnBackground func(*Execution)
 
 	manager *procbus.Manager
 	mu      sync.RWMutex
@@ -185,6 +189,9 @@ func (e *Execution) waitID(ctx context.Context) (string, error) {
 		return "", ctx.Err()
 	}
 }
+
+// WaitID waits until the owning session has an identity for child commands.
+func (e *Execution) WaitID(ctx context.Context) (string, error) { return e.waitID(ctx) }
 
 // SetIO attaches the invocation's streams once the terminal decides how to
 // present them.

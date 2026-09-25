@@ -26,7 +26,6 @@ import (
 	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/pkg/host"
 	"github.com/chainreactors/cyber/tools/ioa"
-	"github.com/chainreactors/cyber/tools/terminal"
 )
 
 func arg(name string) string {
@@ -38,9 +37,6 @@ func arg(name string) string {
 	return ""
 }
 func main() {
-	if code, handled := terminal.RunShellCommandProxy(); handled {
-		os.Exit(code)
-	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
