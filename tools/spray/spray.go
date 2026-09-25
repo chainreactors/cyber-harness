@@ -85,7 +85,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 		return nil, err
 	}
 	defer release()
-	args = c.resolveRelativePaths(args)
+	args = toolargs.ResolveRelativePaths(args, sprayFileFlags, c.WorkDir)
 	var buf bytes.Buffer
 	jsonOut := toolargs.BoolFlagEnabled(args, "-j") || toolargs.BoolFlagEnabled(args, "--json")
 	if c.engine != nil {
@@ -151,15 +151,6 @@ func writeResult(w io.Writer, result *parsers.SprayResult, jsonOutput bool) {
 	}
 }
 
-// TestInjectProxy is exported for cross-package testing.
-func (c *Command) TestInjectProxy(args []string) []string {
-	return c.injectProxy(args)
-}
-
-func (c *Command) injectProxy(args []string) []string {
-	return c.injectProxyURL(args, c.Proxy)
-}
-
 func (c *Command) injectProxyURL(args []string, proxy string) []string {
 	if proxy == "" {
 		return args
@@ -170,16 +161,10 @@ func (c *Command) injectProxyURL(args []string, proxy string) []string {
 	return append(args, "--proxy", proxy)
 }
 
-func withDefaultNoBar(args []string) []string {
-	return withDefaultBoolFlag(args, "--no-bar")
-}
-
-func withDefaultNoStat(args []string) []string {
-	return withDefaultBoolFlag(args, "--no-stat")
-}
-
 func withDefaultScannerFlags(args []string) []string {
-	return withDefaultClient(withDefaultNoStat(withDefaultNoBar(args)))
+	args = withDefaultBoolFlag(args, "--no-bar")
+	args = withDefaultBoolFlag(args, "--no-stat")
+	return withDefaultClient(args)
 }
 
 func withDefaultClient(args []string) []string {
@@ -209,8 +194,4 @@ var sprayFileFlags = map[string]bool{
 	"-d": true, "--dict": true, "-r": true, "--rules": true,
 	"-R": true, "--append-rule": true, "--append": true,
 	"-f": true, "--file": true, "--dump-file": true, "--extract-config": true,
-}
-
-func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, sprayFileFlags, c.WorkDir)
 }

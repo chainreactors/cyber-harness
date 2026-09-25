@@ -16,18 +16,14 @@ import (
 
 // Extension owns search tool declarations and command registrations.
 type Extension struct {
-	config        Config
+	config        Options
 	executionOnly bool
 }
 
-type Config struct {
-	TavilyKeys string
-}
-
-func New(config Config) *Extension { return &Extension{config: config} }
+func New(config Options) *Extension { return &Extension{config: config} }
 
 // NewExecution uses the configured non-model search backend only.
-func NewExecution(config Config) *Extension { return &Extension{config: config, executionOnly: true} }
+func NewExecution(config Options) *Extension { return &Extension{config: config, executionOnly: true} }
 
 func (e *Extension) Load(scope *extension.Scope) error {
 	if scope == nil {

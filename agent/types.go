@@ -100,11 +100,6 @@ const (
 // SystemPromptFunc resolves the system prompt once at the start of a run.
 type SystemPromptFunc func(context.Context, *Config) (string, error)
 
-type ProviderEntry struct {
-	Provider Provider
-	Model    string
-}
-
 type CompactionSettings struct {
 	ReserveTokens    int
 	KeepRecentTokens int

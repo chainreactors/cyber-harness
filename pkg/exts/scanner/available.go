@@ -3,10 +3,10 @@ package scanner
 import (
 	"fmt"
 
-	"github.com/chainreactors/cyber/pkg/exts/proton"
 	"github.com/chainreactors/cyber/tools/curl"
 	"github.com/chainreactors/cyber/tools/gogo"
 	"github.com/chainreactors/cyber/tools/neutron"
+	"github.com/chainreactors/cyber/tools/proton"
 	"github.com/chainreactors/cyber/tools/scan"
 	"github.com/chainreactors/cyber/tools/spray"
 	"github.com/chainreactors/cyber/tools/zombie"
@@ -34,7 +34,7 @@ func Usage(name string) (string, bool) {
 	case "neutron":
 		return neutron.New(nil, nil).Usage(), true
 	case "proton":
-		return proton.Usage(), true
+		return proton.New().Usage(), true
 	case "spray":
 		return spray.New(nil).Usage(), true
 	case "zombie":
@@ -49,7 +49,7 @@ func Usage(name string) (string, bool) {
 func UsageLines() []string {
 	var result []string
 	for _, name := range Names() {
-		if description := scannerDescription(name); description != "" {
+		if description := Description(name); description != "" {
 			result = append(result, fmt.Sprintf("  %-15s%s", name, description))
 		}
 	}
@@ -57,10 +57,6 @@ func UsageLines() []string {
 }
 
 func Description(name string) string {
-	return scannerDescription(name)
-}
-
-func scannerDescription(name string) string {
 	switch name {
 	case "curl":
 		return "HTTP requests (pure-Go, browser-naturalized)"

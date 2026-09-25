@@ -22,7 +22,7 @@ import (
 )
 
 func TestRecorderBasicActions(t *testing.T) {
-	rec := newRecorder("https://example.com")
+	rec := &recorder{}
 
 	rec.record(RecordedAction{
 		Action: headless.ActionNavigate,
@@ -66,27 +66,8 @@ func TestRecorderBasicActions(t *testing.T) {
 	}
 }
 
-func TestRecorderTemplateURL(t *testing.T) {
-	rec := newRecorder("https://example.com/app/login")
-
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"https://example.com/app/login", "{{BaseURL}}/app/login"},
-		{"https://example.com/other", "{{BaseURL}}/other"},
-		{"https://other.com/path", "https://other.com/path"},
-	}
-	for _, tt := range tests {
-		got := rec.templateURL(tt.input)
-		if got != tt.want {
-			t.Errorf("templateURL(%q) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-}
-
 func TestRecorderYAMLOutput(t *testing.T) {
-	rec := newRecorder("https://example.com")
+	rec := &recorder{}
 	rec.record(RecordedAction{
 		Action: headless.ActionNavigate,
 		Args:   map[string]string{"url": "{{BaseURL}}"},
@@ -134,7 +115,7 @@ func TestRecorderYAMLOutput(t *testing.T) {
 func TestRecordCommandMapping(t *testing.T) {
 	sess := &Session{
 		Name: "test",
-		rec:  newRecorder("https://example.com"),
+		rec:  &recorder{},
 	}
 
 	tests := []struct {
@@ -179,7 +160,7 @@ func TestRecordCommandMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		before := sess.rec.len()
-		ok := recordCommand(sess, tt.cmd, tt.args)
+		ok := recordCommandResult(sess, tt.cmd, tt.args, "")
 		if !ok {
 			t.Errorf("recordCommand(%q) returned false", tt.cmd)
 			continue
@@ -194,11 +175,11 @@ func TestRecordCommandMapping(t *testing.T) {
 }
 
 func TestRecordCommandReplaySemantics(t *testing.T) {
-	sess := &Session{Name: "test", rec: newRecorder("https://example.com")}
+	sess := &Session{Name: "test", rec: &recorder{}}
 
-	recordCommand(sess, "fill", []string{"test", "label=Email", "alice@example.com"})
-	recordCommand(sess, "press", []string{"test", `role=button[name="Sign in"]`, "Shift+Enter"})
-	recordCommand(sess, "wait-for", []string{"test", "testid=ready"})
+	recordCommandResult(sess, "fill", []string{"test", "label=Email", "alice@example.com"}, "")
+	recordCommandResult(sess, "press", []string{"test", `role=button[name="Sign in"]`, "Shift+Enter"}, "")
+	recordCommandResult(sess, "wait-for", []string{"test", "testid=ready"}, "")
 
 	actions := sess.rec.snapshot()
 	if len(actions) != 3 {
@@ -219,7 +200,7 @@ func TestRecordCommandReplaySemantics(t *testing.T) {
 }
 
 func TestRecordCommandResultPreservesBooleanState(t *testing.T) {
-	sess := &Session{Name: "test", rec: newRecorder("https://example.com")}
+	sess := &Session{Name: "test", rec: &recorder{}}
 	if !recordCommandResult(sess, "is-visible", []string{"test", "#optional"}, "#optional visible = false") {
 		t.Fatal("is-visible result was not recorded")
 	}
@@ -231,10 +212,10 @@ func TestRecordCommandResultPreservesBooleanState(t *testing.T) {
 func TestRecordCommandXPath(t *testing.T) {
 	sess := &Session{
 		Name: "test",
-		rec:  newRecorder("https://example.com"),
+		rec:  &recorder{},
 	}
 
-	recordCommand(sess, "click", []string{"test", "xpath://div[@id='login']"})
+	recordCommandResult(sess, "click", []string{"test", "xpath://div[@id='login']"}, "")
 	actions := sess.rec.snapshot()
 	if len(actions) != 1 {
 		t.Fatalf("expected 1 action, got %d", len(actions))
@@ -248,7 +229,7 @@ func TestRecordCommandXPath(t *testing.T) {
 }
 
 func TestRecorderEmpty(t *testing.T) {
-	rec := newRecorder("https://example.com")
+	rec := &recorder{}
 	if tmpl := rec.generateTemplate("empty", "Empty"); tmpl != nil {
 		t.Error("expected nil template for empty recorder")
 	}
@@ -257,10 +238,10 @@ func TestRecorderEmpty(t *testing.T) {
 func TestRecordSetExtraHeaders(t *testing.T) {
 	sess := &Session{
 		Name: "test",
-		rec:  newRecorder("https://example.com"),
+		rec:  &recorder{},
 	}
 
-	ok := recordCommand(sess, "set-extra-headers", []string{"test", `{"Authorization":"Bearer token","X-Custom":"value"}`})
+	ok := recordCommandResult(sess, "set-extra-headers", []string{"test", `{"Authorization":"Bearer token","X-Custom":"value"}`}, "")
 	if !ok {
 		t.Fatal("recordCommand returned false for set-extra-headers")
 	}

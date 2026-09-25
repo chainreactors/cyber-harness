@@ -11,6 +11,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/tools/toolargs"
 )
 
 func TestExecuteDebugActivatesTelemetryLogger(t *testing.T) {
@@ -42,10 +43,7 @@ func TestExecuteRejectsInvalidCallScopedProxy(t *testing.T) {
 
 func TestResolveRelativePathsOnlyRewritesZombieFileFlags(t *testing.T) {
 	dir := t.TempDir()
-	cmd := New(nil)
-	cmd.SetWorkDir(dir)
-
-	got := cmd.resolveRelativePaths([]string{
+	got := toolargs.ResolveRelativePaths([]string{
 		"-l",
 		"-o", "string",
 		"-I", "ips.txt",
@@ -62,7 +60,7 @@ func TestResolveRelativePathsOnlyRewritesZombieFileFlags(t *testing.T) {
 		"--gogo=more-gogo.json",
 		"-f", "out.json",
 		"--file=more-out.json",
-	})
+	}, zombieFileFlags, dir)
 	want := []string{
 		"-l",
 		"-o", "string",

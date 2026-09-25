@@ -11,13 +11,14 @@ import (
 
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
+	"github.com/chainreactors/cyber/tools/toolargs"
 	sdkspray "github.com/chainreactors/sdk/spray"
 	spraypkg "github.com/chainreactors/spray/pkg"
 	"github.com/chainreactors/utils/parsers"
 )
 
 func TestWithDefaultNoBarAppendsFlag(t *testing.T) {
-	got := withDefaultNoBar([]string{"-u", "http://127.0.0.1", "--finger"})
+	got := withDefaultBoolFlag([]string{"-u", "http://127.0.0.1", "--finger"}, "--no-bar")
 	want := []string{"-u", "http://127.0.0.1", "--finger", "--no-bar"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withDefaultNoBar() = %#v, want %#v", got, want)
@@ -63,14 +64,14 @@ func TestSprayHelpExecutionMatchesUsage(t *testing.T) {
 
 func TestWithDefaultNoBarKeepsExplicitFlag(t *testing.T) {
 	args := []string{"-u", "http://127.0.0.1", "--no-bar=false"}
-	got := withDefaultNoBar(args)
+	got := withDefaultBoolFlag(args, "--no-bar")
 	if !reflect.DeepEqual(got, args) {
 		t.Fatalf("withDefaultNoBar() = %#v, want %#v", got, args)
 	}
 }
 
 func TestWithDefaultNoStatAppendsFlag(t *testing.T) {
-	got := withDefaultNoStat([]string{"-u", "http://127.0.0.1", "--finger"})
+	got := withDefaultBoolFlag([]string{"-u", "http://127.0.0.1", "--finger"}, "--no-stat")
 	want := []string{"-u", "http://127.0.0.1", "--finger", "--no-stat"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withDefaultNoStat() = %#v, want %#v", got, want)
@@ -79,7 +80,7 @@ func TestWithDefaultNoStatAppendsFlag(t *testing.T) {
 
 func TestWithDefaultNoStatKeepsExplicitFlag(t *testing.T) {
 	args := []string{"-u", "http://127.0.0.1", "--no-stat=false"}
-	got := withDefaultNoStat(args)
+	got := withDefaultBoolFlag(args, "--no-stat")
 	if !reflect.DeepEqual(got, args) {
 		t.Fatalf("withDefaultNoStat() = %#v, want %#v", got, args)
 	}
@@ -129,10 +130,7 @@ func TestWriteResultSupportsTextAndJSON(t *testing.T) {
 
 func TestResolveRelativePathsOnlyRewritesSprayFileFlags(t *testing.T) {
 	dir := t.TempDir()
-	cmd := New(nil)
-	cmd.SetWorkDir(dir)
-
-	got := cmd.resolveRelativePaths([]string{
+	got := toolargs.ResolveRelativePaths([]string{
 		"-l", "targets.txt",
 		"-w", "admin{?ld#2}",
 		"-o", "full",
@@ -148,7 +146,7 @@ func TestResolveRelativePathsOnlyRewritesSprayFileFlags(t *testing.T) {
 		"-c", "spray.yaml",
 		"--config=custom.yaml",
 		"--extract-config", "extract.yaml",
-	})
+	}, sprayFileFlags, dir)
 	want := []string{
 		"-l", filepath.Join(dir, "targets.txt"),
 		"-w", "admin{?ld#2}",

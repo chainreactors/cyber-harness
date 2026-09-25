@@ -10,7 +10,7 @@ import (
 )
 
 func recordExtension(config appConfig, workDir string) (extension.Extension, error) {
-	if !optionalToolEnabled(config.Tools.OptionalTools, "record") {
+	if !optionalToolEnabled(config.OptionalTools, "record") {
 		return nil, nil
 	}
 	options, err := record.ReadOptions(config.Resolved)

@@ -69,7 +69,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (*scanpb.Scan, error) 
 	if err := s.orm.NewSelect().Model(&model).Column("scan_json").Where("id = ?", id).Limit(1).Scan(ctx); err != nil {
 		return nil, err
 	}
-	return scanFromModel(model)
+	return scanFromJSON(model.ScanJSON)
 }
 
 func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, error) {
@@ -82,7 +82,7 @@ func (s *SQLiteStore) List(ctx context.Context, limit int) ([]*scanpb.Scan, erro
 	}
 	scans := make([]*scanpb.Scan, 0, len(models))
 	for _, model := range models {
-		scan, err := scanFromModel(model)
+		scan, err := scanFromJSON(model.ScanJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -151,10 +151,6 @@ func scanToModel(scan *scanpb.Scan) (*scanModel, error) {
 		Error: scan.GetError(), ScanJSON: raw,
 		CreatedAt: formatProtoTime(scan.GetCreatedAt()), UpdatedAt: formatProtoTime(scan.GetUpdatedAt()),
 	}, nil
-}
-
-func scanFromModel(model scanModel) (*scanpb.Scan, error) {
-	return scanFromJSON(model.ScanJSON)
 }
 
 func scanFromJSON(raw string) (*scanpb.Scan, error) {

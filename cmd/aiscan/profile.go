@@ -114,10 +114,10 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve Cyber working directory: %w", err)
 	}
-	capture := config.Base.Tools.MitmCapture == nil || *config.Base.Tools.MitmCapture
+	capture := config.Base.MitmCapture == nil || *config.Base.MitmCapture
 	proxyExtension := proxyext.New(proxyext.Config{
 		WorkDir: workDir, Proxy: config.Base.Scanner.Resources.Proxy,
-		Capture: capture, Storage: config.Base.Tools.TrafficStorage,
+		Capture: capture, Storage: config.Base.TrafficStorage,
 	})
 	// One loop for the profile: the scanner and the session run against the
 	// same installation rather than each being handed its own. A profile that

@@ -67,7 +67,7 @@ func (c *Command) QuickReference() string {
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("zombie", &err)
 	args := execution.Args
-	args = c.resolveRelativePaths(args)
+	args = toolargs.ResolveRelativePaths(args, zombieFileFlags, c.WorkDir)
 	args = ensureOutputDrain(args)
 	egress := coretool.ResolveExecutionEgress(execution, c.Proxy)
 	proxyDial, err := proxyDialFor(egress.ProxyURL)
@@ -128,8 +128,4 @@ var zombieFileFlags = map[string]bool{
 	"-P": true, "--PWD": true, "-A": true, "--AUTH": true,
 	"-j": true, "--json": true, "-g": true, "--gogo": true,
 	"-f": true, "--file": true,
-}
-
-func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, zombieFileFlags, c.WorkDir)
 }

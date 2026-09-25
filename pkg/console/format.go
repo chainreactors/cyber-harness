@@ -165,35 +165,6 @@ func isToolMetaLine(line string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Spinner label helpers
-// ---------------------------------------------------------------------------
-
-var knownScanners = map[string]bool{
-	"scan": true, "gogo": true, "spray": true, "zombie": true,
-	"neutron": true, "proton": true, "katana": true, "passive": true,
-}
-
-func extractPseudoCommand(cmdLine string) (tool, target string) {
-	fields := strings.Fields(cmdLine)
-	if len(fields) == 0 {
-		return "", ""
-	}
-	cmd := fields[0]
-	if !knownScanners[cmd] {
-		return "", ""
-	}
-	for i := 1; i < len(fields); i++ {
-		if (fields[i] == "-i" || fields[i] == "--input") && i+1 < len(fields) {
-			return cmd, fields[i+1]
-		}
-	}
-	if len(fields) > 1 {
-		return cmd, truncate.Clip(strings.Join(fields[1:], " "), 40)
-	}
-	return cmd, ""
-}
-
-// ---------------------------------------------------------------------------
 // User intent rendering
 // ---------------------------------------------------------------------------
 

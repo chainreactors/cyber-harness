@@ -519,22 +519,3 @@ func preserveLLMProfileSecrets(incoming *types.LLMConfig, existing *types.LLMCon
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Listen-address helpers
-// ---------------------------------------------------------------------------
-
-// hubLocalURL derives the loopback URL a local agent child should dial from the
-// server listen address. A wildcard/empty host becomes 127.0.0.1; an
-// unparseable address yields "".
-func hubLocalURL(addr string) string {
-	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
-	if err != nil || port == "" {
-		return ""
-	}
-	switch host {
-	case "", "0.0.0.0", "::", "[::]":
-		host = "127.0.0.1"
-	}
-	return "http://" + net.JoinHostPort(host, port)
-}

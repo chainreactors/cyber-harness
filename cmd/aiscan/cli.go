@@ -184,7 +184,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	rest, err := parser.ParseArgs(args)
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			if scannerName := firstCommandName(args, rootFlagValueArity); isScannerCommandName(scannerName) {
+			if scannerName := firstCommandName(args, rootFlagValueArity); scannerext.Available(scannerName) {
 				option := cfg.Option{MiscOptions: cli.MiscOptions}
 				finalizeOptions(&option, nil)
 				option.Timeout = 3600
@@ -228,7 +228,7 @@ func parseCLI(args []string) (parsedCLI, error) {
 	if mode == cfg.RunModeScanner {
 		scannerName := selectedScanner(parser)
 		option.Timeout = 3600
-		scannerRest, err := applyScannerRootArgs(rest, &option)
+		scannerRest, err := applyScannerCommandArgs("", rest, &option)
 		if err != nil {
 			return parsedCLI{}, err
 		}
@@ -427,7 +427,7 @@ func parserOptionsForArgs(args []string) goflags.Options {
 	if len(args) == 0 {
 		return options
 	}
-	if isScannerCommandName(firstCommandName(args, rootFlagValueArity)) {
+	if scannerext.Available(firstCommandName(args, rootFlagValueArity)) {
 		options |= goflags.IgnoreUnknown
 	}
 	return options
@@ -436,7 +436,7 @@ func parserOptionsForArgs(args []string) goflags.Options {
 func splitScannerCommand(args []string) (string, []string, []string, bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if isScannerCommandName(arg) {
+		if scannerext.Available(arg) {
 			return arg, append([]string(nil), args[:i]...), append([]string(nil), args[i+1:]...), true
 		}
 		if shouldSkipRootFlagValue(arg) && i+1 < len(args) {
@@ -607,10 +607,6 @@ func argsAfterCommand(args []string, command string) []string {
 	return nil
 }
 
-func isScannerCommandName(name string) bool {
-	return scannerext.Available(name)
-}
-
 func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	active := parser.Active
 	if active == nil {
@@ -638,10 +634,6 @@ func selectedScanner(parser *goflags.Parser) string {
 		return active.Name
 	}
 	return ""
-}
-
-func applyScannerRootArgs(args []string, option *cfg.Option) ([]string, error) {
-	return applyScannerCommandArgs("", args, option)
 }
 
 func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Option) ([]string, error) {

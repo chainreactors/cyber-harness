@@ -118,7 +118,7 @@ func (c *Command) QuickReference() string {
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("neutron", &err)
 	args := execution.Args
-	args = c.resolveRelativePaths(args)
+	args = toolargs.ResolveRelativePaths(args, neutronFileFlags, c.WorkDir)
 	var flags neutronFlags
 	parser := toolargs.NewGoFlagsParser("neutron", &flags)
 	_, err = parser.ParseArgs(normalizeNucleiStyleArgs(args))
@@ -467,15 +467,10 @@ func cleanTemplateTags(tmpl *templates.Template) []string {
 	return tags
 }
 
-// resolveRelativePaths resolves relative file arguments against workDir.
 var neutronFileFlags = map[string]bool{
 	"-l": true, "--list": true,
 	"-o": true, "--output": true,
 	"-t": true, "--templates": true,
-}
-
-func (c *Command) resolveRelativePaths(args []string) []string {
-	return toolargs.ResolveRelativePaths(args, neutronFileFlags, c.WorkDir)
 }
 
 func appendNonEmpty(parts []string, values ...string) []string {

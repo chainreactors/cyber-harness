@@ -948,31 +948,6 @@ func TestFormatToolArguments(t *testing.T) {
 	}
 }
 
-func TestExtractPseudoCommand(t *testing.T) {
-	tests := []struct {
-		input      string
-		wantTool   string
-		wantTarget string
-	}{
-		{"scan -i 10.0.0.1 --mode quick", "scan", "10.0.0.1"},
-		{"gogo -i 10.0.0.0/24 --ports top1000", "gogo", "10.0.0.0/24"},
-		{"ls -la", "", ""},
-		{"neutron http://target.com", "neutron", "http://target.com"},
-		{"", "", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			tool, target := extractPseudoCommand(tt.input)
-			if tool != tt.wantTool {
-				t.Errorf("tool = %q, want %q", tool, tt.wantTool)
-			}
-			if target != tt.wantTarget {
-				t.Errorf("target = %q, want %q", target, tt.wantTarget)
-			}
-		})
-	}
-}
-
 func TestToolCallCounting(t *testing.T) {
 	var stderr syncedBuffer
 	o := testOutput(&stderr, 0, false)

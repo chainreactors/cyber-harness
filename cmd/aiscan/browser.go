@@ -8,8 +8,8 @@ import (
 )
 
 func browserExtension(config appConfig, workDir string) (extension.Extension, error) {
-	if !optionalToolEnabled(config.Tools.OptionalTools, "browser") {
+	if !optionalToolEnabled(config.OptionalTools, "browser") {
 		return nil, nil
 	}
-	return browserext.New(workDir, config.Tools.PlaywrightSession)
+	return browserext.New(workDir, config.PlaywrightSession)
 }

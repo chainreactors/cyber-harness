@@ -205,7 +205,7 @@ func (r *AgentConsole) startFastInput() error {
 
 		r.promptCompactIfNeeded()
 
-		fmt.Fprint(r.stderr, r.promptString())
+		fmt.Fprint(r.stderr, agentPromptString(r.ensureOutput()))
 		r.setReadlineActive(true)
 		line, err := readFastInputLine(r.ctx, reader)
 		r.setReadlineActive(false)
@@ -369,10 +369,6 @@ func (r *AgentConsole) handleInputLine(line string) (bool, error) {
 		return true, nil
 	}
 	return false, err
-}
-
-func (r *AgentConsole) promptString() string {
-	return agentPromptString(r.ensureOutput())
 }
 
 func agentPromptString(output *AgentOutput) string {

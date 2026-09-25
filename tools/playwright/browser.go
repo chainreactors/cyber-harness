@@ -950,7 +950,7 @@ func (c *Command) execPDF(ctx context.Context, args []string) (string, error) {
 	}
 	defer func() { _ = reader.Close() }()
 
-	data, err := readAll(reader)
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return "", fmt.Errorf("playwright pdf: read: %w", err)
 	}
@@ -1576,8 +1576,4 @@ func writeFile(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
-}
-
-func readAll(r io.Reader) ([]byte, error) {
-	return io.ReadAll(r)
 }
