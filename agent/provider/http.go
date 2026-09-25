@@ -121,7 +121,7 @@ func streamSSE(
 	providerName string,
 	protocol string,
 	acceptDoneMarker bool,
-	parse func(eventType string, data []byte) (ChatCompletionStreamEvent, error),
+	parse func(eventType string, data []byte) ([]ChatCompletionStreamEvent, error),
 ) (<-chan ChatCompletionStreamEvent, error) {
 	captureFrame(ctx, RawFrame{Provider: providerName, Protocol: protocol, Direction: "request", Transport: "http", Payload: body, MediaType: "application/json"})
 	reqCtx, reqCancel := context.WithCancel(ctx)
@@ -203,23 +203,25 @@ func streamSSE(
 				return
 			}
 
-			event, parseErr := parse(sseEvent, []byte(data))
+			parsed, parseErr := parse(sseEvent, []byte(data))
 			sseEvent = ""
 			if parseErr != nil {
 				sseSend(ctx, events, ChatCompletionStreamEvent{Err: parseErr})
 				return
 			}
-			if event.Done {
-				sseSend(ctx, events, event)
-				return
-			}
-			if event.Role != "" || event.MessageDelta != nil ||
-				len(event.ToolDeltas) > 0 ||
-				event.FinishReason != "" || event.Usage != nil {
-				select {
-				case events <- event:
-				case <-ctx.Done():
+			for _, event := range parsed {
+				if event.Done {
+					sseSend(ctx, events, event)
 					return
+				}
+				if event.Role != "" || event.MessageDelta != nil ||
+					len(event.ToolDeltas) > 0 ||
+					event.FinishReason != "" || event.Usage != nil {
+					select {
+					case events <- event:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}

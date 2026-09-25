@@ -9,6 +9,10 @@ import (
 
 type Extension struct{ manager *crtm.Manager }
 
+func NewManager(directory string, options crtm.ManagerOption) (*crtm.Manager, error) {
+	return tool.NewManager(directory, options)
+}
+
 func New(manager *crtm.Manager) *Extension { return &Extension{manager: manager} }
 
 func (e *Extension) Load(scope *extension.Scope) error {

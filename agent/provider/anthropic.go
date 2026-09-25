@@ -100,7 +100,10 @@ func (p *AnthropicProvider) ChatCompletionStream(ctx context.Context, req *ChatC
 	events, err := streamSSE(ctx, p.client, timeoutFromConfig(p.config.Timeout),
 		p.completionEndpoint(), bodyBytes, p.setAuthHeaders, p.Name(), ProviderAnthropic,
 		false,
-		parser.parse,
+		func(eventType string, data []byte) ([]ChatCompletionStreamEvent, error) {
+			event, err := parser.parse(eventType, data)
+			return []ChatCompletionStreamEvent{event}, err
+		},
 	)
 	if err != nil {
 		return nil, hint404(err, p.completionEndpoint(), "OpenAI", "openai")

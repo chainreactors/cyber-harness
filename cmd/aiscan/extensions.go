@@ -18,7 +18,6 @@ import (
 	subagentext "github.com/chainreactors/cyber/pkg/exts/subagent"
 	terminalext "github.com/chainreactors/cyber/pkg/exts/terminal"
 	harness "github.com/chainreactors/cyber/pkg/harness"
-	"github.com/chainreactors/cyber/tools/arsenal"
 	"github.com/chainreactors/cyber/tools/scan"
 )
 
@@ -33,7 +32,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	if err != nil {
 		return nil, err
 	}
-	manager, err := arsenal.NewManager(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
+	manager, err := arsenalext.NewManager(filepath.Join(config.DataDir, "arsenal"), ToolSpec.ManagerOption(bundle))
 	if err != nil {
 		return nil, err
 	}

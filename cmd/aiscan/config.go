@@ -94,17 +94,6 @@ func intValue(value *int) int {
 	return 0
 }
 
-func cloneStrings(source map[string]string) map[string]string {
-	if len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
-}
-
 func cloneBool(source *bool) *bool {
 	if source == nil {
 		return nil

@@ -58,8 +58,8 @@ func readVirtual(location string) (string, bool, error) {
 		return "", false, nil
 	}
 	data, err := content.ReadFile(rel)
-	if err != nil {
-		return "", false, nil
+	if err == nil {
+		return string(data), true, nil
 	}
-	return string(data), true, nil
+	return "", false, nil
 }

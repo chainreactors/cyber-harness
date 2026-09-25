@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test'
+import { createNodeTask, nodeActions } from './task-ui'
 
 const API_TOKEN = process.env.ACCESS_KEY || 'test-token'
 
@@ -218,8 +219,8 @@ test.describe('single AOP WebSocket browser plane', () => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
 
-    await page.getByRole('button', { name: 'New', exact: true }).first().click()
-    const input = page.getByRole('textbox', { name: 'Type a message... (/ for commands)' })
+    await createNodeTask(page)
+    const input = page.getByRole('textbox', { name: 'Your goal' })
     await expect(input).toBeVisible()
     const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
 
@@ -251,7 +252,7 @@ test.describe('single AOP WebSocket browser plane', () => {
   test('opens the PTY console without a terminal-specific socket', async ({ page, request }) => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
-    await page.getByRole('button', { name: 'Terminal', exact: true }).first().click()
+    await (await nodeActions(page)).getByRole('button', { name: 'Terminal', exact: true }).click()
     await expect(page.locator('.xterm')).toBeVisible({ timeout: 15_000 })
   })
 })

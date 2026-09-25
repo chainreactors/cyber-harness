@@ -166,6 +166,13 @@ var knownTextOnlyKeywords = []string{
 }
 
 func isKnownMultimodalModel(model string) bool {
+	// DeepSeek V4.1 Flash and its official aliases support vision. V4 Pro
+	// still does not; keep the broader DeepSeek family text-only.
+	name := model[strings.LastIndex(model, "/")+1:]
+	switch name {
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp":
+		return true
+	}
 	for _, kw := range knownMultimodalKeywords {
 		if strings.Contains(model, kw) {
 			return true

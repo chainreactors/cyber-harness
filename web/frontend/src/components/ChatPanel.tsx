@@ -47,7 +47,7 @@ import {
   type ViewerTimelineItem,
   type AOPEvent,
 } from '@/viewer'
-import { fetchSessionCommands, uploadChatFile } from '../api'
+import { fetchSessionCommands, uploadChatFile, type ChatSendOptions } from '../api'
 import { BudgetWarningSchema, CommandDetailSchema, CompactDetailSchema, EvalDetailSchema, WebMessageMetadataSchema } from '../cyber-proto'
 import { anyUnpack } from '@bufbuild/protobuf/wkt'
 import type { AgentListMetadata, CommandSpec, SCONode } from '../api'
@@ -92,6 +92,11 @@ function eventText(event: AOPEvent): string {
 
 function presentAOPEvent(event: AOPEvent): AOPEvent {
   return event
+}
+
+function responseBoundary(event: AOPEvent): boolean {
+  return event.payload.case === 'status'
+    && ['eval_start', 'compact_start'].includes(event.payload.value.state)
 }
 
 function extensionBlock(event: AOPEvent): Record<string, unknown> {
@@ -295,7 +300,7 @@ function reduceConversationAOP(
   const topLevel = collapseRepeatedDividers(mergeTimelineItems(
     reduceAOPToTimeline(
       topLevelSplit.messages.map(presentAOPEvent),
-      { streaming, lifecycle: 'errors' },
+      { streaming, lifecycle: 'errors', responseBoundary },
     ) as ViewerTimelineItem[],
     orderedTimelineItems(statusTimelineItems(topLevelSplit.messages), topLevelSplit.commands),
   ))
@@ -326,6 +331,7 @@ function reduceConversationAOP(
       reduceAOPToTimeline(childSplit.messages.map(presentAOPEvent), {
         streaming: streaming && !end,
         lifecycle: 'errors',
+        responseBoundary,
       }).filter((item) => item.kind !== 'divider' || item.variant === 'warning') as ViewerTimelineItem[],
       orderedTimelineItems(statusTimelineItems(childSplit.messages), childSplit.commands),
     ))
@@ -417,7 +423,7 @@ interface Props {
   onCreateSession?: (nodeID: string) => void
   onOpenTerminal?: (nodeID: string) => void
   onOpenIOA?: (target?: IOAConsoleTarget) => void
-  onSend: (content: string, opts?: { persist?: boolean; evalCriteria?: string; evalRounds?: string; sessionID?: string }) => Promise<boolean>
+  onSend: (content: string, opts?: ChatSendOptions & { sessionID?: string }) => Promise<boolean>
   ensureSession: () => Promise<string | null>
   onPause: () => void
   onClearError: () => void
@@ -446,6 +452,7 @@ export default function ChatPanel({
   onClearError,
 }: Props) {
   const { t, i18n } = useTranslation('chat')
+  const [attachmentError, setAttachmentError] = useState('')
   const agentEvents = useMemo(
     () => aopEvents.filter((event) => !isInternalUserEvent(event)),
     [aopEvents],
@@ -506,6 +513,8 @@ export default function ChatPanel({
   const inputFormClass = cn(contentOffsetClass, hasIOARail && threadOffsetClass)
   const composerRootRef = useRef<HTMLDivElement>(null)
   const [persist, setPersist] = useState(false)
+  const activeSessionRef = useRef(activeSessionID)
+  useEffect(() => { activeSessionRef.current = activeSessionID }, [activeSessionID])
   // Screen-reader turn status. Streamed replies mutate the DOM silently, so
   // mirror the coarse turn phase into a polite live region below. It announces
   // transitions (thinking → responding → done), never the token stream itself
@@ -611,26 +620,35 @@ export default function ChatPanel({
     [isThinking, viewerTimeline],
   )
 
-  const uploadedFiles = useRef(new WeakMap<File, Set<string>>())
   async function handleSendWithAttachments(content: string, attachments?: ChatAttachment[]) {
     const sessionID = await ensureSession()
     if (!sessionID) return false
-    const opts = sendOpts(content)
+    const opts: ChatSendOptions = sendOpts(content) || {}
+    setAttachmentError('')
     const contextParts: string[] = []
-    for (const attachment of attachments || []) {
-      if (attachment.mode === 'context') {
-        contextParts.push(`<file name="${attachment.file.name}">\n${await attachment.file.text()}\n</file>`)
-      } else {
-        const uploaded = uploadedFiles.current.get(attachment.file) || new Set<string>()
-        if (!uploaded.has(sessionID)) {
-          await uploadChatFile(sessionID, attachment.file)
-          uploaded.add(sessionID)
-          uploadedFiles.current.set(attachment.file, uploaded)
+    try {
+      for (const a of attachments || []) {
+        if (a.file.type.startsWith('image/')) {
+          if (a.file.size > 20 * 1024 * 1024) throw new Error('Image exceeds 20 MiB limit')
+          opts.images ??= []
+          opts.images.push({ data: new Uint8Array(await a.file.arrayBuffer()), mediaType: a.file.type, filename: a.file.name })
+        } else if (a.mode === 'context') {
+          const text = await a.file.text()
+          contextParts.push(`<file name="${a.file.name}">\n${text}\n</file>`)
+        } else if (a.mode === 'upload') {
+          const uploaded = await uploadChatFile(sessionID, a.file)
+          contextParts.push(`Uploaded file: ${uploaded.path}`)
         }
       }
+    } catch (err) {
+      if (!activeSessionRef.current || sessionID === activeSessionRef.current) setAttachmentError(err instanceof Error ? err.message : 'Failed to read attachment')
+      return false
     }
-    const fullContent = contextParts.length ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}` : content
-    const accepted = await onSend(fullContent.trim() || (attachments || []).map((a) => a.file.name).join(', '), { ...opts, sessionID })
+    if (activeSessionRef.current && sessionID !== activeSessionRef.current) return false
+    const fullContent = contextParts.length > 0
+      ? `${FILE_CONTEXT_PREAMBLE}\n${contextParts.join('\n')}\n\n${content}`
+      : content
+    const accepted = await onSend(fullContent.trim(), { ...opts, sessionID })
     if (accepted && persist) resetGoal()
     return accepted
   }
@@ -701,15 +719,15 @@ export default function ChatPanel({
       timeline={viewerTimeline as unknown as CyberTimelineItem[]}
       className="min-w-0 bg-transparent"
     >
-      {error && (
+      {(error || attachmentError) && (
         <ViewerChatPanel.ErrorBar>
           <div
             role="alert"
             className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive animate-in fade-in slide-in-from-top-1 duration-200"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{error}</span>
-            <button type="button" aria-label={t('dismiss')} onClick={onClearError} className="rounded p-0.5 hover:bg-destructive/10">
+            <span className="min-w-0 flex-1 break-words">{error || attachmentError}</span>
+            <button type="button" aria-label={t('dismiss')} onClick={() => { setAttachmentError(''); onClearError() }} className="rounded p-0.5 hover:bg-destructive/10">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -1007,6 +1025,11 @@ function EvalNote({ pass, round, reason }: { pass: boolean; round?: number; reas
 }
 
 function numOrUndefined(value: unknown): number | undefined {
+  // Protobuf uint64 counters decode as bigint (compaction and token budgets).
+  if (typeof value === 'bigint') {
+    const number = Number(value)
+    return Number.isSafeInteger(number) ? number : undefined
+  }
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
@@ -1069,7 +1092,11 @@ function AssistantResponseEntry({
       actorName={response.actorName}
       timestamp={new Date(response.timestamp).toISOString()}
       streaming={response.streaming}
-      thinking={hasThinking ? <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted /> : undefined}
+      thinking={hasThinking ? (
+        <div role="region" aria-label={t('thinkingLabel')} tabIndex={0} className="max-h-64 overflow-y-auto overscroll-contain">
+          <MarkdownContent content={trimDisplayContent(response.thinking || '')} compact muted />
+        </div>
+      ) : undefined}
       thinkingExpanded={thinkingExpanded}
       onThinkingToggle={setThinkingExpanded}
       tools={toolCount > 0 ? (
@@ -1087,7 +1114,11 @@ function AssistantResponseEntry({
           ))}
         </div>
       ) : undefined}
-      response={hasResponse ? <MarkdownContent content={trimDisplayContent(message?.content || '')} compact /> : undefined}
+      response={hasResponse ? (
+        <div className={cn(response.streaming && 'max-h-96 overflow-y-auto overscroll-contain')}>
+          <MarkdownContent content={trimDisplayContent(message?.content || '')} compact />
+        </div>
+      ) : undefined}
       labels={{ tools: toolsLabel, thinking: t('thinkingLabel'), response: t('responseLabel') }}
       headerClassName="xl:hidden"
       timeLabel={formatRailTime(response)}
