@@ -126,10 +126,13 @@ func TestStreamOwnerCanInterruptBlockedRead(t *testing.T) {
 	defer writer.Close()
 	h := New(aop.NewNamespaceMux(t.Context()))
 	// The embedding owns this pipe, so it may close it on communication cancel.
-	stop := context.AfterFunc(h.Context(), func() { _ = reader.CloseWithError(context.Canceled) })
+	stop := context.AfterFunc(h.Context(), func() { _ = writer.CloseWithError(context.Canceled) })
 	defer stop()
 	done := make(chan error, 1)
 	go func() { done <- h.Serve(NewStdio(reader, io.Discard)) }()
+	if _, err := writer.Write([]byte(" ")); err != nil {
+		t.Fatal(err)
+	}
 	h.Close()
 	select {
 	case err := <-done:
