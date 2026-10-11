@@ -28,6 +28,7 @@ import (
 	nativeext "github.com/chainreactors/cyber/exts/native"
 	nodeext "github.com/chainreactors/cyber/exts/node"
 	observeext "github.com/chainreactors/cyber/exts/observe"
+	otelext "github.com/chainreactors/cyber/exts/otel"
 	proxyext "github.com/chainreactors/cyber/exts/proxy"
 	ptyext "github.com/chainreactors/cyber/exts/pty"
 	recapext "github.com/chainreactors/cyber/exts/recap"
@@ -188,8 +189,25 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		}
 		values = append(values, output)
 	}
-	if len(config.Observe) > 0 {
-		observer, err := observeext.New(observeext.Options{Kinds: config.Observe})
+	lookup := envLookup(config.Option)
+	if endpoint, _ := lookup("OTEL_EXPORTER_OTLP_ENDPOINT"); strings.TrimSpace(endpoint) != "" {
+		service, _ := lookup("OTEL_SERVICE_NAME")
+		project, _ := lookup("CYBER_OTEL_PROJECT")
+		capture, _ := lookup("CYBER_OTEL_CAPTURE_CONTENT")
+		observer, err := otelext.New(otelext.Options{Endpoint: endpoint, ServiceName: service, Project: project, CaptureContent: capture == "true"})
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, observer)
+	}
+	observeKinds := config.Observe
+	// OTel consumes existing operation events emitted by observe. Explicit
+	// --observe selections remain exact; otherwise enable execution lifecycles.
+	if endpoint, _ := lookup("OTEL_EXPORTER_OTLP_ENDPOINT"); strings.TrimSpace(endpoint) != "" && len(observeKinds) == 0 {
+		observeKinds = []observeext.Kind{observeext.Tools, observeext.Commands, observeext.Processes}
+	}
+	if len(observeKinds) > 0 {
+		observer, err := observeext.New(observeext.Options{Kinds: observeKinds})
 		if err != nil {
 			return nil, err
 		}

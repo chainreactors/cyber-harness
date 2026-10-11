@@ -472,6 +472,12 @@ func (t *BashTool) background(execution *coretool.Execution, targetInbox inbox.I
 }
 
 func (t *BashTool) collectResult(execution *coretool.Execution) *coretool.Result {
+	// A completed native session still has completion hooks and process control
+	// to drain. Returning earlier cancels the tool's scope while observers are
+	// recording the successful process, spuriously turning it into cancellation.
+	if info, ok := t.tasks.Get(execution.ID); ok && info.State != proc.StateRunning {
+		_ = execution.WaitProcessCompletion(context.Background())
+	}
 	fullCapture := execution != nil && execution.Command == "tmux" && len(execution.Args) >= 2 &&
 		(execution.Args[0] == "capture-pane" || execution.Args[0] == "peek") && contains(execution.Args[1:], "--full")
 	data, total, _ := t.tasks.SnapshotBytes(execution.ID, 0)
