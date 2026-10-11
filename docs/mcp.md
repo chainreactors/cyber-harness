@@ -173,6 +173,29 @@ JAR SHA-256 为 `6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff7
 
 2026-10-11 在 Windows x64、JBR 21.0.7 上通过此 lane：发现 26 个工具，索引 2,876 个顶层类，实际返回 `ApiDemos` 的 Java 类与 `onCreate` 方法。普通运行耗时 13.67 秒。此结果验证 stdio 接入的真实 JADX；JADX HTTP 模式和其他分析引擎不由此 lane 建立覆盖。
 
+## 真实 LLM 驱动的分析
+
+[examples/mcp-agent](../examples/mcp-agent/main.go) 把 MCP ext、现有 `StandardLoop` 和 Session 装入同一个长期运行的 harness。模型通过普通 bash 工具发现命令、加载文件、查询和卸载；入口支持任意 MCP 配置和用户任务文件。没有预写的分析调用序列，也不需要新的 JADX/IDA adapter。
+
+先准备隔离的任务目录、目标文件、UTF-8 任务文件和上述 `mcp.json`。在已有环境中设置 `CYBER_MCP_API_KEY` 后运行：
+
+```sh
+go run ./examples/mcp-agent \
+  -config /absolute/path/mcp.json \
+  -dir /absolute/path/task-workspace \
+  -task /absolute/path/task.txt \
+  -base-url https://your-provider.example/v1 \
+  -model your-tool-calling-model \
+  -trace /absolute/path/new-events.jsonl \
+  -max-turns 40 -timeout 15m
+```
+
+任务应指定输入文件、分析问题、证据要求，以及显式卸载本次打开的分析资源。入口把最终回答写到 stdout，工具调用、用量、耗时和 harness 关闭状态写到 stderr。可选 trace 使用新的文件，保存完成后的 AOP 消息、工具参数/结果和生命周期事件，略去逐 token delta。最大模型决策数和总 deadline 由入口限制。
+
+入口在创建工具或子进程之前取出并移除专用密钥环境变量，provider 在内存中持有凭据；不开启 HTTP/provider 原始帧捕获。trace 和最终输出遮蔽已知密钥的明文值。trace 包含本地任务和分析证据，应按实际输入管理。任务目录不是安全沙箱；示例提供真实 bash 能力，模型的权限由宿主环境决定。它不安装引擎或运行 APK。
+
+真实模型驱动的 UnCrackable / ApiDemos 分析、独立核验、失败恢复和模型结论遗漏见[验证记录](verification/mcp-jadx-llm.md)。
+
 ## 边界和验证
 
 目录是加载时的快照；上游工具变化后需重建 Profile。扩展处理 tools，不暴露 resources/prompts、sampling、elicitation 或 legacy HTTP+SSE，也不自动把服务 instructions 变成系统提示词。完整 schema 提供给调用方，命名参数转换不是完整 JSON Schema 验证器；完整 JSON 输入只检查 object，上游负责业务参数校验。
