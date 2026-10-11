@@ -142,6 +142,37 @@ legacy GUI 的 `/mcp` 是内部 RPC 接口，需要通过 stdio proxy，不能�
 
 也可以连接已安装的 REA MCP 服务，复用其 Hopper / Ghidra / IDA provider：配置 command 为 `npx`、args 为 `["rea-agents", "mcp"]`，按 [REA provider 文档](https://github.com/morluto/rea#choosing-a-deep-analysis-provider)配置分析引擎。Windows 上填写可直接执行的入口；npm 的 `.cmd` shim 可改为 `node` 加已安装包的入口路径。
 
+## 真实开源引擎验证：JADX
+
+可用 REA 已集成的 [jadx-headless-mcp v0.7.1](https://github.com/1013503897/jadx-headless-mcp/releases/tag/v0.7.1) 验证此扩展。它用 jadx-core 实际反编译 APK，直接提供 stdio MCP；需要现有 Java 17+。固定输入为开源 [Appium ApiDemos v6.0.18](https://github.com/appium/android-apidemos/releases/tag/v6.0.18) 的 debug APK，仅执行静态分析。
+
+配置服务别名 `jadx`，command 为现有 Java，args 为 `["-Xmx512m", "-jar", "/absolute/path/jadx-headless-mcp-0.7.1-all.jar"]`。在同一个长期运行的 harness Profile 的 bash 中执行：
+
+```sh
+jadx --list
+jadx get_class_source --help
+jadx load_apk --path '/absolute/path/ApiDemos-debug.apk' --threads 1 --resources lite
+jadx list_classes --prefix io.appium.android.apis --offset 0 --limit 3
+jadx get_class_source --class_name io.appium.android.apis.ApiDemos --max_bytes 32768 --smali_fallback false
+jadx get_method_by_name --class_name io.appium.android.apis.ApiDemos --method_name onCreate --smali_fallback false
+jadx unload_apk
+```
+
+可重复运行的真实引擎 lane 是 [TestJADXRealBashWorkflow](../exts/mcp/jadx_integration_test.go)。调用链为 **AI bash 工具边界 → CommandRegistry → MCP ext → 上游 JADX MCP → jadx-core**。测试检查发布包与 APK 的固定 SHA-256，再验证工具发现、动态帮助、无 APK 时的失败状态、含空格路径、会话状态、整型分页参数、布尔参数、实际 Java 类与方法、命名参数和完整 JSON 的结果一致、变量/管道/重定向、卸载和连接清理。它不会下载引擎、安装 Java 或执行 APK；默认不配置环境时跳过。
+
+准备文件后，PowerShell 中运行：
+
+```powershell
+$env:CYBER_MCP_JAVA = 'D:\tools\existing-jdk\bin\java.exe'
+$env:CYBER_MCP_JADX_JAR = 'D:\tools\jadx-headless-mcp-0.7.1-all.jar'
+$env:CYBER_MCP_JADX_APK = 'D:\targets\ApiDemos-debug.apk'
+go test -v ./exts/mcp -run '^TestJADXRealBashWorkflow$' -count=1
+```
+
+JAR SHA-256 为 `6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75`，与 [REA 的发布身份](https://github.com/morluto/rea/blob/main/src/android/JadxRelease.ts)一致；APK SHA-256 为 `a9eecf37b26cd084855c530db81c2bb1b91f4c1b095a04f47aa7c20e2791f686`，与 Appium 发布资产摘要一致。环境配置不完整或摘要不匹配会失败。
+
+2026-10-11 在 Windows x64、JBR 21.0.7 上通过此 lane：发现 26 个工具，索引 2,876 个顶层类，实际返回 `ApiDemos` 的 Java 类与 `onCreate` 方法。普通运行耗时 13.67 秒。此结果验证 stdio 接入的真实 JADX；JADX HTTP 模式和其他分析引擎不由此 lane 建立覆盖。
+
 ## 边界和验证
 
 目录是加载时的快照；上游工具变化后需重建 Profile。扩展处理 tools，不暴露 resources/prompts、sampling、elicitation 或 legacy HTTP+SSE，也不自动把服务 instructions 变成系统提示词。完整 schema 提供给调用方，命名参数转换不是完整 JSON Schema 验证器；完整 JSON 输入只检查 object，上游负责业务参数校验。
