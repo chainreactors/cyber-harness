@@ -1,0 +1,229 @@
+# Based on the official SigNoz v0.129.0 Docker Compose deployment.
+x-common:
+  networks: &id001
+  - signoz-net
+  restart: unless-stopped
+  logging: &id002
+    options:
+      max-size: 50m
+      max-file: '3'
+x-clickhouse-defaults:
+  networks: *id001
+  restart: unless-stopped
+  logging: *id002
+  image: clickhouse/clickhouse-server:25.5.6
+  tty: true
+  labels: &id005
+    signoz.io/scrape: 'true'
+    signoz.io/port: '9363'
+    signoz.io/path: /metrics
+  depends_on: &id006
+    init-clickhouse:
+      condition: service_completed_successfully
+    zookeeper-1:
+      condition: service_healthy
+  healthcheck: &id007
+    test:
+    - CMD
+    - wget
+    - --spider
+    - -q
+    - 0.0.0.0:8123/ping
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  ulimits: &id008
+    nproc: 65535
+    nofile:
+      soft: 262144
+      hard: 262144
+  environment: &id009
+  - CLICKHOUSE_SKIP_USER_SETUP=1
+x-zookeeper-defaults:
+  networks: *id001
+  restart: unless-stopped
+  logging: *id002
+  image: signoz/zookeeper:3.7.1
+  user: root
+  labels: &id003
+    signoz.io/scrape: 'true'
+    signoz.io/port: '9141'
+    signoz.io/path: /metrics
+  healthcheck: &id004
+    test:
+    - CMD-SHELL
+    - curl -s -m 2 http://localhost:8080/commands/ruok | grep error | grep null
+    interval: 30s
+    timeout: 5s
+    retries: 3
+x-db-depend:
+  networks: *id001
+  restart: unless-stopped
+  logging: *id002
+  depends_on: &id010
+    clickhouse:
+      condition: service_healthy
+services:
+  init-clickhouse:
+    networks: *id001
+    restart: on-failure
+    logging: *id002
+    image: clickhouse/clickhouse-server:25.5.6
+    command:
+    - bash
+    - -c
+    - 'version="v0.0.1"
+
+      node_os=$$(uname -s | tr ''[:upper:]'' ''[:lower:]'')
+
+      node_arch=$$(uname -m | sed s/aarch64/arm64/ | sed s/x86_64/amd64/)
+
+      echo "Fetching histogram-binary for $${node_os}/$${node_arch}"
+
+      cd /tmp
+
+      wget -O histogram-quantile.tar.gz "https://github.com/SigNoz/signoz/releases/download/histogram-quantile%2F$${version}/histogram-quantile_$${node_os}_$${node_arch}.tar.gz"
+
+      tar -xvzf histogram-quantile.tar.gz
+
+      mv histogram-quantile /var/lib/clickhouse/user_scripts/histogramQuantile
+
+      '
+    volumes:
+    - user-scripts:/var/lib/clickhouse/user_scripts/
+  zookeeper-1:
+    networks: *id001
+    restart: unless-stopped
+    logging: *id002
+    image: signoz/zookeeper:3.7.1
+    user: root
+    labels: *id003
+    healthcheck: *id004
+    volumes:
+    - zookeeper-1:/bitnami/zookeeper
+    environment:
+    - ZOO_SERVER_ID=1
+    - ALLOW_ANONYMOUS_LOGIN=yes
+    - ZOO_AUTOPURGE_INTERVAL=1
+    - ZOO_ENABLE_PROMETHEUS_METRICS=yes
+    - ZOO_PROMETHEUS_METRICS_PORT_NUMBER=9141
+  clickhouse:
+    networks: *id001
+    restart: unless-stopped
+    logging: *id002
+    image: clickhouse/clickhouse-server:25.5.6
+    tty: true
+    labels: *id005
+    depends_on: *id006
+    healthcheck: *id007
+    ulimits: *id008
+    environment: *id009
+    volumes:
+    - ../common/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+    - ../common/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+    - ../common/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml
+    - user-scripts:/var/lib/clickhouse/user_scripts/
+    - ../common/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml
+    - clickhouse:/var/lib/clickhouse/
+  signoz:
+    networks: *id001
+    restart: unless-stopped
+    logging: *id002
+    depends_on: *id010
+    image: signoz/signoz:v0.129.0
+    ports:
+    - 127.0.0.1:24880:8080
+    volumes:
+    - sqlite:/var/lib/signoz/
+    environment:
+    - SIGNOZ_ALERTMANAGER_PROVIDER=signoz
+    - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://clickhouse:9000
+    - SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db
+    - SIGNOZ_TOKENIZER_JWT_SECRET=secret
+    - SIGNOZ_ANALYTICS_ENABLED=false
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - --spider
+      - -q
+      - localhost:8080/api/v1/health
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  otel-collector:
+    networks: *id001
+    restart: unless-stopped
+    logging: *id002
+    depends_on: *id010
+    image: signoz/signoz-otel-collector:v0.144.5
+    entrypoint:
+    - /bin/sh
+    command:
+    - -c
+    - /signoz-otel-collector migrate sync check && /signoz-otel-collector --config=/etc/otel-collector-config.yaml
+    volumes:
+    - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    environment:
+    - OTEL_RESOURCE_ATTRIBUTES=host.name=signoz-host,os.type=linux
+    - LOW_CARDINAL_EXCEPTION_GROUPING=false
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://clickhouse:9000
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER=cluster
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION=true
+    - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
+    ports:
+    - 127.0.0.1:24317:4317
+    - 127.0.0.1:24318:4318
+    - 127.0.0.1:23133:13133
+  signoz-telemetrystore-migrator:
+    networks: *id001
+    restart: on-failure
+    logging: *id002
+    depends_on: *id010
+    image: signoz/signoz-otel-collector:v0.144.5
+    environment:
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://clickhouse:9000
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER=cluster
+    - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION=true
+    - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
+    entrypoint:
+    - /bin/sh
+    command:
+    - -c
+    - '/signoz-otel-collector migrate bootstrap &&
+
+      /signoz-otel-collector migrate sync up &&
+
+      /signoz-otel-collector migrate async up
+
+      '
+  phoenix:
+    image: arizephoenix/phoenix:version-20.20.0
+    restart: unless-stopped
+    networks:
+    - signoz-net
+    ports:
+    - 127.0.0.1:24006:6006
+    environment:
+      PHOENIX_WORKING_DIR: /phoenix-data
+      PHOENIX_ENABLE_AUTH: 'false'
+    volumes:
+    - phoenix:/phoenix-data
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen("http://localhost:6006/healthz")
+      interval: 5s
+      timeout: 5s
+      retries: 30
+networks:
+  signoz-net: {}
+volumes:
+  clickhouse: {}
+  sqlite: {}
+  zookeeper-1: {}
+  phoenix: {}
+  user-scripts: {}
+name: cyber-observability

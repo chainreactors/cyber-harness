@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -142,6 +143,13 @@ func (t *BashTool) observeProcessCompletion(ctx context.Context, execution *core
 		completionErr = errors.Join(completionErr, cause)
 	}
 	session := executionSession(execution)
+	if completionErr == nil && session != nil {
+		if session.Reason != "" {
+			completionErr = errors.New(session.Reason)
+		} else if code := session.ExitStatus(); code != 0 {
+			completionErr = fmt.Errorf("process exited with code %d", code)
+		}
+	}
 	if toolhooks.ProcessCompleted.Has(t.hooks) {
 		corehooks.Notify(context.WithoutCancel(ctx), t.hooks, toolhooks.ProcessCompleted, toolhooks.ProcessCompletion{
 			Lifecycle: toolhooks.Lifecycle{Operation: event.Operation, StartedAt: startedAt, EndedAt: time.Now(), Err: completionErr},

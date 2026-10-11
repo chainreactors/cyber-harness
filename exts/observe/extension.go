@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	procbus "github.com/chainreactors/cyber/core/proc"
 	"github.com/chainreactors/cyber/core/telemetry"
+	coretool "github.com/chainreactors/cyber/core/tool"
 	toolhooks "github.com/chainreactors/cyber/core/tool/hooks"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -173,6 +174,15 @@ func (e *Extension) toolStarted(ctx context.Context, event toolhooks.CallEvent) 
 }
 
 func (e *Extension) toolCompleted(ctx context.Context, event toolhooks.Completion) (struct{}, error) {
+	// ToolResult.IsError is model-visible failure feedback even when the tool
+	// deliberately returns no Go error (for example, a shell's nonzero exit).
+	if event.Lifecycle.Err == nil && event.Result.GetIsError() {
+		message := coretool.ResultText(event.Result)
+		if message == "" {
+			message = "tool returned an error result"
+		}
+		event.Lifecycle.Err = errors.New(message)
+	}
 	e.emitCompleted(ctx, "tool", event.Call.GetName(), event.Lifecycle)
 	return struct{}{}, nil
 }
