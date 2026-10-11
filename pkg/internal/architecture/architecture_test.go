@@ -145,6 +145,7 @@ var installationRules = map[string][]installationRule{
 		{"exts/tmux", []string{"NewTmuxCommand"}},
 	},
 	"tools/files":       {{"exts/files", []string{"New", "Resource"}}},
+	"tools/mcp":         {{"exts/mcp", []string{"New"}}},
 	"tools/proxy":       {{"exts/proxy", []string{"New*", "Resource", "TrafficNamespace"}}},
 	"tools/arsenal":     {{"exts/arsenal", []string{"New*"}}},
 	"tools/playwright":  {{"exts/browser", []string{"New"}}},
