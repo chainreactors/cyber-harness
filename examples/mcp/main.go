@@ -33,7 +33,7 @@ func main() {
 
 func run(ctx context.Context, configPath string, argv []string, output, diagnostics io.Writer) (err error) {
 	if configPath == "" {
-		return fmt.Errorf("usage: go run ./examples/mcp -config mcp.json [mcp-ida tools | mcp-ida call <tool> --json '{...}']")
+		return fmt.Errorf("usage: go run ./examples/mcp -config mcp.json [ida --list | ida <tool> --<parameter> <value>]")
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {

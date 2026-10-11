@@ -89,7 +89,7 @@ type declaration struct {
 func (c *Catalog) lookup(name string) (declaration, error) {
 	index, ok := c.byName[name]
 	if !ok {
-		return declaration{}, fmt.Errorf("MCP server %s: unknown or excluded tool %q; run mcp-%s tools", c.connection.name, name, c.connection.name)
+		return declaration{}, fmt.Errorf("MCP server %s: unknown or excluded tool %q; run %s --list", c.connection.name, name, c.connection.name)
 	}
 	return c.tools[index], nil
 }

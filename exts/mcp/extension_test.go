@@ -135,22 +135,22 @@ func TestStdioBashWorkflowAndLifetime(t *testing.T) {
 	}
 	cancel() // The child must survive cancellation of the short load context.
 	definitions := h.tools.ToolDefinitions()
-	if len(definitions) != 1 || definitions[0].Name != "bash" || !strings.Contains(h.commands.UsageDocs(), "mcp-ida tools") {
+	if len(definitions) != 1 || definitions[0].Name != "bash" || !strings.Contains(h.commands.UsageDocs(), "ida --list") {
 		t.Fatal("MCP should be discoverable as CLI through bash")
 	}
-	arguments := `{"command":"mcp-ida call echo --json '{\"message\":\"hello\"}'"}`
+	arguments := `{"command":"ida echo --message hello"}`
 	result, err := h.tools.ExecuteTool(context.Background(), "bash", arguments)
 	if err != nil || result.IsError || !strings.Contains(coretool.ResultText(result), "hello|") || !strings.Contains(coretool.ResultText(result), "chosen-value") {
 		t.Fatalf("stdio call through AI bash boundary: %v %v", result, err)
 	}
-	output, err := h.command(context.Background(), "mcp-ida", "tools")
+	output, err := h.command(context.Background(), "ida", "--list")
 	if err != nil || !strings.Contains(output, "echo") {
 		t.Fatalf("catalog: %s %v", output, err)
 	}
 	if err := h.set.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if h.commands.Has("mcp-ida") {
+	if h.commands.Has("ida") {
 		t.Fatal("command remained visible after unload")
 	}
 }
@@ -165,7 +165,7 @@ func TestStdioUnloadCancelsInFlightCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	finished := make(chan error, 1)
-	go func() { _, err := h.command(context.Background(), "mcp-ida", "call", "wait"); finished <- err }()
+	go func() { _, err := h.command(context.Background(), "ida", "wait"); finished <- err }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if _, err := os.Stat(marker); err == nil {
@@ -200,7 +200,7 @@ func TestHTTPBashCompositionAndAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Native CLI participates in variable expansion, pipelines and redirects.
-	script := `message='two words'; mcp-http call echo --json "{\"message\":\"$message\"}" | { read -r result; printf '%s\n' "$result"; } > result.json`
+	script := `message='two words'; http echo --message "$message" | { read -r result; printf '%s\n' "$result"; } > result.json`
 	var output bytes.Buffer
 	execution, err := h.bash.RunForeground(context.Background(), script, terminaltool.BashExecOptions{Stdout: &output})
 	if err != nil {
@@ -215,29 +215,29 @@ func TestHTTPBashCompositionAndAdmission(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "args.json"), []byte(`{"nested":{"array":[true,"hello",{"value":null}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	text, err := h.command(context.Background(), "mcp-http", "call", name, "--file", "args.json")
+	text, err := h.command(context.Background(), "http", name, "--file", "args.json")
 	if err != nil || !strings.Contains(text, "hello") {
 		t.Fatalf("arbitrary tool name and nested arguments: %s %v", text, err)
 	}
 	// Tool failures retain stdout and fail the shell command.
-	result, err := h.bash.RunForegroundTool(context.Background(), "mcp-http call fail > failure.json", terminaltool.BashExecOptions{})
+	result, err := h.bash.RunForegroundTool(context.Background(), "http fail > failure.json", terminaltool.BashExecOptions{})
 	failure, readErr := os.ReadFile(filepath.Join(h.dir, "failure.json"))
 	if err != nil || !result.IsError || readErr != nil || !strings.Contains(string(failure), `"isError":true`) {
 		t.Fatalf("failure lost stdout or exit status: %v %v %s %v", result, err, failure, readErr)
 	}
-	result, err = h.bash.RunForegroundTool(context.Background(), "mcp-http call fail > failure.json 2> diagnostics.txt || printf recovered", terminaltool.BashExecOptions{})
+	result, err = h.bash.RunForegroundTool(context.Background(), "http fail > failure.json 2> diagnostics.txt || printf recovered", terminaltool.BashExecOptions{})
 	if err != nil || result.IsError || !strings.Contains(coretool.ResultText(result), "recovered") {
 		t.Fatalf("shell recovery failed: %v %v", result, err)
 	}
 	before := calls.Load()
 	denial := toolhooks.BeforeCommand.On(h.hooks, "deny-mcp", func(_ context.Context, event toolhooks.CommandEvent) (toolhooks.Admission, error) {
-		if event.Name == "mcp-http" && len(event.Args) > 0 && event.Args[0] == "call" {
+		if event.Name == "http" && len(event.Args) > 0 && event.Args[0] == "echo" {
 			return toolhooks.Admission{Deny: errors.New("denied by test")}, nil
 		}
 		return toolhooks.Admission{}, nil
 	})
 	defer denial.Cancel()
-	if _, err := h.command(context.Background(), "mcp-http", "call", "echo"); !errors.Is(err, operation.ErrDenied) || calls.Load() != before {
+	if _, err := h.command(context.Background(), "http", "echo"); !errors.Is(err, operation.ErrDenied) || calls.Load() != before {
 		t.Fatalf("admission bypassed: %v calls=%d", err, calls.Load())
 	}
 }
@@ -251,7 +251,7 @@ func TestStdioInitializationTimeoutRollsBackOwnedProcess(t *testing.T) {
 	if err := h.set.Load(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("initialization deadline lost: %v", err)
 	}
-	if h.commands.Has("mcp-stall") {
+	if h.commands.Has("stall") {
 		t.Fatal("failed initialization exposed a command")
 	}
 	if err := h.set.Close(context.Background()); err != nil {
@@ -293,13 +293,35 @@ func TestHTTPRollbackAndAllowlist(t *testing.T) {
 			if err := h.set.Load(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			output, err := h.command(context.Background(), "mcp-filtered", "tools")
+			output, err := h.command(context.Background(), "filtered", "--list")
 			var summaries []any
 			if err != nil || json.Unmarshal([]byte(output), &summaries) != nil || len(summaries) != test.count {
 				t.Fatalf("allowlist semantics: %s %v", output, err)
 			}
-			if _, err := h.command(context.Background(), "mcp-filtered", "call", "fail"); err == nil {
+			if _, err := h.command(context.Background(), "filtered", "fail"); err == nil {
 				t.Fatal("excluded tool was callable")
+			}
+		})
+	}
+}
+
+func TestAliasRejectsBashNamespaceConflictsBeforeConnecting(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+	for _, name := range []string{"echo", "test", "printf", "if", "for", "declare"} {
+		t.Run(name, func(t *testing.T) {
+			h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{
+				"a": {URL: upstream.URL}, name: {URL: upstream.URL},
+			}})
+			if err := h.set.Load(context.Background()); err == nil || !strings.Contains(err.Error(), "conflicts with a bash") {
+				t.Fatalf("unreachable alias accepted: %v", err)
+			}
+			if requests.Load() != 0 || len(h.commands.Names()) != 0 {
+				t.Fatal("validation started a server or exposed commands")
 			}
 		})
 	}

@@ -8,32 +8,34 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-// Command automatically exposes this server's catalog as one native CLI.
-// Keeping upstream names as argv values avoids renaming/collision/loss and
-// does not inflate the model's function-tool list for large MCP catalogs.
+// Command exposes tools as subcommands of the configured server alias.
+// Discovery and argument conversion happen at runtime, without code generation
+// or expanding the model's function-tool list for large MCP catalogs.
 func (c *Catalog) Command() coretool.Command {
-	name := "mcp-" + c.connection.name
+	name := c.connection.name
 	usage := fmt.Sprintf(`%s — %d MCP tools
 
 Usage:
-  %s tools                             list tool names and descriptions (JSON)
-  %s schema <tool>                     show the complete upstream declaration
-  %s call <tool> [--json '<object>']    call a tool; defaults to {}
-  %s call <tool> --file <path>          read arguments from a JSON file
-  %s --help                           show this help
+  %s --list                           list tool names and descriptions (JSON)
+  %s <tool> --help                    show parameters and the complete declaration
+  %s <tool> --<parameter> <value> ...  call with schema-derived parameter flags
+  %s <tool> --json '<object>'         call with a complete JSON argument object
+  %s <tool> --file <path>             read arguments from a JSON file
 
 Results are complete MCP JSON on stdout. Tool isError and protocol failures
-fail the command. Use single quotes around inline JSON in bash. Relative
-argument files resolve against the caller's working directory.
-`, name, len(c.tools), name, name, name, name, name)
+fail the command. Tool and parameter names keep their upstream spelling.
+Relative argument files resolve against the caller's working directory.
+Use %s -- <tool> to address a tool named --help, -h or --list.
+`, name, len(c.tools), name, name, name, name, name, name)
 	return coretool.Command{
 		Name: name, Usage: usage,
-		QuickReference: fmt.Sprintf("- %s: %d MCP tools; discover with `%s tools`, inspect `%s schema <tool>`, invoke `%s call <tool> --json '<object>'`.", name, len(c.tools), name, name, name),
+		QuickReference: fmt.Sprintf("- %s: %d MCP tools; discover with `%s --list`, inspect `%s <tool> --help`, invoke `%s <tool> --<parameter> <value>`.", name, len(c.tools), name, name, name),
 		Run: func(ctx context.Context, execution *coretool.Execution) (any, error) {
 			return nil, c.run(ctx, execution, usage)
 		},
@@ -49,16 +51,15 @@ func (c *Catalog) run(ctx context.Context, execution *coretool.Execution, usage 
 	if output == nil {
 		output = io.Discard
 	}
-	if len(args) == 0 || len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h") {
+	if len(args) == 0 || len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
 		_, err := io.WriteString(output, usage)
 		return err
 	}
-	switch args[0] {
-	case "tools":
+	if args[0] == "--list" {
 		if len(args) != 1 {
-			return fmt.Errorf("usage: mcp-%s tools", c.connection.name)
+			return fmt.Errorf("usage: %s --list", c.connection.name)
 		}
-		// Progressive discovery: schemas stay behind the schema subcommand.
+		// Progressive discovery: schemas stay behind per-tool help.
 		type summary struct {
 			Name        string `json:"name"`
 			Description string `json:"description,omitempty"`
@@ -68,49 +69,79 @@ func (c *Catalog) run(ctx context.Context, execution *coretool.Execution, usage 
 			tools = append(tools, summary{d.Name, d.Description})
 		}
 		return json.NewEncoder(output).Encode(tools)
-	case "schema":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: mcp-%s schema <tool>", c.connection.name)
-		}
-		d, err := c.lookup(args[1])
-		if err != nil {
-			return err
-		}
-		return writeJSON(output, d.raw)
-	case "call":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: mcp-%s call <tool> [--json '<object>' | --file <path>]", c.connection.name)
-		}
-		if _, err := c.lookup(args[1]); err != nil {
-			return err
-		}
-		if len(args) == 3 && args[2] == "--help" {
-			d, _ := c.lookup(args[1])
-			return writeJSON(output, d.raw)
-		}
-		arguments, err := callArguments(ctx, args[2:], execution.Dir)
-		if err != nil {
-			return err
-		}
-		raw, callErr := c.Call(ctx, args[1], arguments)
-		if len(raw) != 0 {
-			callErr = errors.Join(callErr, writeJSON(output, raw))
-		}
-		return callErr
-	default:
-		return fmt.Errorf("unknown MCP subcommand %q; run mcp-%s --help", args[0], c.connection.name)
 	}
+	if args[0] == "--" {
+		args = args[1:]
+		if len(args) == 0 {
+			return fmt.Errorf("expected a tool name after --")
+		}
+	}
+	d, err := c.lookup(args[0])
+	if err != nil {
+		return err
+	}
+	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		return c.toolHelp(output, d)
+	}
+	var arguments json.RawMessage
+	if len(args) > 1 && (args[1] == "--json" || args[1] == "--file") {
+		arguments, err = rawArguments(ctx, args[1:], execution.Dir)
+	} else {
+		arguments, err = namedArguments(d.InputSchema, args[1:])
+	}
+	if err != nil {
+		return err
+	}
+	raw, callErr := c.Call(ctx, d.Name, arguments)
+	if len(raw) != 0 {
+		callErr = errors.Join(callErr, writeJSON(output, raw))
+	}
+	return callErr
 }
 
-func callArguments(ctx context.Context, args []string, directory string) (json.RawMessage, error) {
+func (c *Catalog) toolHelp(output io.Writer, d declaration) error {
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s\n\nUsage: %s %s [--<parameter> <value> ...]\n\nParameters:\n", d.Description, c.connection.name, d.Name)
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if json.Unmarshal(d.InputSchema, &schema) == nil {
+		names := make([]string, 0, len(schema.Properties))
+		for name := range schema.Properties {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			raw := schema.Properties[name]
+			var parameter struct {
+				Description string `json:"description"`
+			}
+			_ = json.Unmarshal(raw, &parameter)
+			flag := "--" + name
+			if !parameterFlag(name) {
+				flag = fmt.Sprintf("%q (use --json/--file)", name)
+			}
+			required := ""
+			if slices.Contains(schema.Required, name) {
+				required = " (required)"
+			}
+			fmt.Fprintf(&text, "  %s <%s>%s  %s\n", flag, parameterType(raw), required, strings.Join(strings.Fields(parameter.Description), " "))
+		}
+	}
+	text.WriteString("\nEvery parameter flag takes one value; --name=value is also accepted.\nObjects, arrays and ambiguous types take JSON. Optional defaults stay omitted.\nUse --json '<object>' or --file <path> for a complete argument object,\nincluding nulls, unusual property names and parameters named help, json or file.\nThe upstream server validates the complete schema.\n\nUpstream declaration:\n")
+	if _, err := io.WriteString(output, text.String()); err != nil {
+		return err
+	}
+	return writeJSON(output, d.raw)
+}
+
+func rawArguments(ctx context.Context, args []string, directory string) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(args) == 0 {
-		return json.RawMessage(`{}`), nil
-	}
-	if len(args) != 2 || (args[0] != "--json" && args[0] != "--file") {
-		return nil, fmt.Errorf("expected exactly one --json '<object>' or --file <path>; quote JSON as one shell argument")
+	if len(args) != 2 {
+		return nil, fmt.Errorf("expected exactly one --json '<object>' or --file <path>; cannot mix raw input with parameter flags")
 	}
 	if args[0] == "--json" {
 		return json.RawMessage(args[1]), nil

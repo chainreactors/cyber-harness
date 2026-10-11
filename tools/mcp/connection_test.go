@@ -97,15 +97,15 @@ func TestHTTPDiscoveryAndInvocationPreserveWireValues(t *testing.T) {
 	}
 	var output bytes.Buffer
 	command := catalog.Command()
-	_, err = command.Run(context.Background(), &coretool.Execution{Args: []string{"call", "decompile", "--json", `{"address":9007199254740993}`}, Stdout: &output})
+	_, err = command.Run(context.Background(), &coretool.Execution{Args: []string{"decompile", "--address", "9007199254740993"}, Stdout: &output})
 	if err == nil || output.String() != richResult+"\n" {
 		t.Fatalf("CLI did not preserve complete failed result: %s %v", &output, err)
 	}
 	before := calls.Load()
 	for _, args := range [][]string{
-		{"call", "other"}, {"call", "decompile", "--json", "{}", "--file", "x"},
-		{"call", "decompile", "--json"}, {"call", "decompile", "--json", "[]"},
-		{"tools", "unexpected"}, {"schema"}, {"unknown"},
+		{"other"}, {"decompile", "--json", "{}", "--file", "x"},
+		{"decompile", "--json"}, {"decompile", "--json", "[]"},
+		{"--list", "unexpected"}, {"schema"}, {"unknown"}, {"--"},
 	} {
 		if _, err := command.Run(context.Background(), &coretool.Execution{Args: args, Stdout: &output}); err == nil {
 			t.Fatalf("invalid CLI input accepted: %q", args)
@@ -115,7 +115,7 @@ func TestHTTPDiscoveryAndInvocationPreserveWireValues(t *testing.T) {
 		t.Fatal("invalid or excluded CLI call reached upstream")
 	}
 	output.Reset()
-	if _, err := command.Run(context.Background(), &coretool.Execution{Args: []string{"call", "decompile", "--help"}, Stdout: &output}); err != nil || !strings.Contains(output.String(), schema) {
+	if _, err := command.Run(context.Background(), &coretool.Execution{Args: []string{"decompile", "--help"}, Stdout: &output}); err != nil || !strings.Contains(output.String(), schema) || !strings.Contains(output.String(), "--address <integer>") {
 		t.Fatalf("generated tool help lost schema: %s %v", &output, err)
 	}
 	if err := c.Close(context.Background()); err != nil || deletes.Load() != 1 {

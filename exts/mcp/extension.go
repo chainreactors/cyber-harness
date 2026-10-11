@@ -11,6 +11,8 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	mcptools "github.com/chainreactors/cyber/tools/mcp"
+	"mvdan.cc/sh/v3/interp"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type Config struct {
@@ -49,6 +51,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	for _, name := range names {
 		if err := e.config.MCPServers[name].Validate(name); err != nil {
 			return err
+		}
+		if interp.IsBuiltin(name) || syntax.IsKeyword(name) {
+			return fmt.Errorf("MCP server alias %q conflicts with a bash builtin or keyword; choose another alias", name)
 		}
 	}
 	var commands []coretool.Command
