@@ -22,6 +22,8 @@
 
 [OKF 扩展](../../exts/okf/extension.go)是一个小而完整的参考：Load 同时贡献命令、说明文档与提示词策略。阅读它时，可以沿着 `tools/okf` 的命令实现确认业务逻辑并没有依赖 Scope。
 
+已有标准 MCP 服务时可使用 [MCP → CLI 扩展](../mcp.md)：Load 使用 mcp-go 连接服务、发现工具并贡献 `mcp-<alias>` 命令，Agent 从 bash 按需列举、查询 schema 和调用工具。
+
 ## 子 Agent 贡献
 
 子任务定义使用 `agent/subagent.Subagent`，在组合根按依赖顺序安装：

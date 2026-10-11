@@ -23,6 +23,8 @@ cyber-harness 将模型、工具和运行环境组合为可以持续执行任务
 
 [开发者指南](development.md)从可运行的 Go 工具组合推进到会话应用；[扩展开发](developer/extensions.md)说明工具、命令、知识与共享服务的贡献方式；[宿主集成](developer/hosting.md)说明生命周期及终端、Web、协议和协作接入。
 
+已有 MCP 服务可通过 [MCP → CLI 扩展](mcp.md)自动成为 bash 命令，供模型按需发现和调用。
+
 构建入口、产物和依赖见[源码构建](../README_CN.md#构建与嵌入)，选择所需能力见[自定义最小应用](../README_CN.md#自定义最小应用)。非 Go 客户端见[第三方语言集成](integration.md)，字段与错误语义见[API 参考](api.md)。
 
 ## 架构
