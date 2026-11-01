@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
+	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/prompt"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
@@ -18,6 +19,12 @@ import (
 
 type CollaborationOptions struct {
 	Skills []skills.Bundle
+	// Receive admits incoming messages to a routing extension. Nil retains
+	// direct delivery for hosts that do not install an inbox router.
+	Receive func(context.Context, inbox.Message) error
+	// Cursors are installed by the active host, after its durable inbox opens.
+	LoadCursor func(string) (string, error)
+	SaveCursor func(string, string) error
 }
 
 type CollaborationExtension struct {

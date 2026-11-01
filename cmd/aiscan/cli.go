@@ -16,7 +16,9 @@ import (
 	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 
 	"github.com/chainreactors/cyber/core/telemetry"
+	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
+	sessionext "github.com/chainreactors/cyber/exts/session"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
 	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
@@ -29,7 +31,7 @@ import (
 const runModeWeb cfg.RunMode = "web"
 
 func cliCommandSummary() string {
-	base := "agent, web, serve"
+	base := "agent, inbox, web, serve"
 	summaries := productScannerNames()
 	if len(summaries) == 0 {
 		return base
@@ -51,9 +53,11 @@ type webCommand struct {
 type cliOptions struct {
 	registry        *hostcli.Registry `no-flag:"true"`
 	cfg.MiscOptions `group:"Miscellaneous Options"`
-	Timeout         int          `long:"timeout" description:"Overall timeout in seconds"`
-	Agent           agentCommand `command:"agent" description:"Run the natural-language agent"`
-	Web             webCommand   `command:"web" description:"Start the web UI server (includes embedded agent server)"`
+	Timeout         int              `long:"timeout" description:"Overall timeout in seconds"`
+	Agent           agentCommand     `command:"agent" description:"Run the natural-language agent"`
+	Inbox           agentCommand     `command:"inbox" description:"Run the persistent message router and subagent host"`
+	InboxOptions    cfg.InboxOptions `no-flag:"true"`
+	Web             webCommand       `command:"web" description:"Start the web UI server (includes embedded agent server)"`
 }
 
 type agentCommand struct {
@@ -97,7 +101,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	option := parsed.Option
 	taskOutput := taskcli.NewOutput(&option, stdout, stderr)
 	defer func() {
-		if parsed.Mode == cfg.RunModeAgent || parsed.Mode == cfg.RunModeScanner && option.AI && len(parsed.ScannerArgs) > 0 && parsed.ScannerArgs[0] != "scan" {
+		if parsed.Mode == cfg.RunModeAgent || parsed.Mode == cfg.RunModeInbox || parsed.Mode == cfg.RunModeScanner && option.AI && len(parsed.ScannerArgs) > 0 && parsed.ScannerArgs[0] != "scan" {
 			resultErr = taskOutput.Finish(resultErr)
 		}
 	}()
@@ -119,7 +123,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		return fmt.Errorf("missing subcommand: use %s", cliCommandSummary())
 	}
 	resolveConfig := cfg.ResolveRuntimeConfig
-	if parsed.Mode == cfg.RunModeAgent {
+	if parsed.Mode == cfg.RunModeAgent || parsed.Mode == cfg.RunModeInbox {
 		resolveConfig = cfg.ResolveAgentRuntimeConfig
 	}
 	if parsed.Mode == cfg.RunModeScanner {
@@ -154,6 +158,8 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
 		return runAgentTransport(ctx, newAIScanProfile, &option, logger, stdin, stdout, setInterrupt, taskOutput)
+	case cfg.RunModeInbox:
+		return runInbox(ctx, newAIScanProfile, &option, logger, stdin, stdout)
 	case runModeWeb:
 		return serveWeb(ctx, &option, &explicitOption, parsed.WebOpts, logger)
 	case cfg.RunModeScanner:
@@ -200,7 +206,7 @@ func parseCLIWithOutput(args []string, stdout io.Writer) (parsedCLI, error) {
 	if flag := parser.Group.FindOptionByLongName("timeout"); flag != nil && flag.IsSet() {
 		option.Timeout = cli.Timeout
 	}
-	if option.Timeout == 0 && !option.Explicit["timeout"] {
+	if option.Timeout == 0 && !option.Explicit["timeout"] && mode != cfg.RunModeInbox {
 		// Commands that own their options through the extension registry (the IOA
 		// queries, for one) never receive AgentOptions, so nothing else supplies
 		// this default. A zero deadline would cancel the context before the
@@ -349,6 +355,7 @@ func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
 
 func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 	var opt cfg.Option
+	opt.Command = selectedMode(parser)
 	opt.MiscOptions = cli.MiscOptions
 
 	active := parser.Active
@@ -361,6 +368,11 @@ func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
 		opt.LLMOptions = cli.Agent.LLMOptions
 		opt.AgentOptions = cli.Agent.AgentOptions
 		opt.NodeOptions = cli.Agent.NodeOptions
+	case "inbox":
+		opt.LLMOptions = cli.Inbox.LLMOptions
+		opt.AgentOptions = cli.Inbox.AgentOptions
+		opt.NodeOptions = cli.Inbox.NodeOptions
+		opt.InboxOptions = cli.InboxOptions
 	case "web":
 		opt.LLMOptions = cli.Web.LLMOptions
 		opt.NodeOptions = cli.Web.NodeOptions
@@ -379,6 +391,21 @@ func newCLIParser(cli *cliOptions, options goflags.Options) *goflags.Parser {
 	}
 	cli.registry = hostcli.New(parser)
 	declareResources(cli.registry, &cli.Agent.AgentOptions)
+	for _, group := range sessionext.FlagGroups(&cli.Inbox.AgentOptions) {
+		if err := cli.registry.Group("inbox", "", group); err != nil {
+			panic(err)
+		}
+	}
+	parser.Find("inbox").FindOptionByLongName("timeout").Default = []string{"0"}
+	if err := cli.registry.Group("inbox", "", cfg.FlagGroup{Name: "Inbox Options", Options: &cli.InboxOptions}); err != nil {
+		panic(err)
+	}
+	if err := cli.registry.Group("inbox", ioaclient.ConfigKey, ioaclient.FlagGroup()); err != nil {
+		panic(err)
+	}
+	if err := cli.registry.Group("inbox", scannerext.CyberhubConfigKey, scannerext.CyberhubFlagGroup()); err != nil {
+		panic(err)
+	}
 	if err := cli.registry.Seal(); err != nil {
 		panic(err)
 	}
@@ -393,6 +420,7 @@ Commands:
   doctor         Check configuration and dependencies
   scan           Scan a target, with optional AI skills (--verify, --sniper)
   agent          Run the natural-language agent
+  inbox          Run the persistent message router and subagent host
   web            Start the web UI server (includes embedded agent server)
   serve          Run the standalone agent server
 
@@ -403,6 +431,7 @@ Examples:
   aiscan scan -i 127.0.0.1
   aiscan scan -i http://target.example --verify=on --sniper --model gpt-4o
   aiscan agent -p "find web services and check vulnerabilities" -i 192.168.1.0/24
+  aiscan inbox --state-dir .cyber/active --max-active 4
   aiscan web --addr 0.0.0.0:8080
   aiscan serve --token mykey --addr 0.0.0.0:8765`, strings.Join(productScannerUsageLines(), "\n"))
 	return parser
@@ -601,6 +630,8 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	switch active.Name {
 	case "agent":
 		return cfg.RunModeAgent
+	case "inbox":
+		return cfg.RunModeInbox
 	case "web":
 		return runModeWeb
 	default:

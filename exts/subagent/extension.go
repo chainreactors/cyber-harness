@@ -49,6 +49,9 @@ func (e *ToolsExtension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.tool = sessionexec.New(runtime, executor, scope.Lifetime())
+	if err := extension.Provide[*sessionexec.Tool](scope, e.tool); err != nil {
+		return err
+	}
 	return extension.Add[coretool.Tool](scope, e.tool)
 }
 

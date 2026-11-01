@@ -67,6 +67,60 @@ extension.Add(scope, subagent.Subagent{
 
 `Prepare` 返回本次配置快照与非空任务文本，不执行任务或创建需要另行关闭的资源；匿名调用跳过名称解析和 Prepare。消费者借用 `Executor`，同步 Execute 使用 `agent.RunTask`，会话工具使用 Start 接入 Session。运行时 Add 返回的 Handle 由贡献者关闭；重复名称拒绝，撤销隐藏定义、取消任务并排空准备、执行及通知，之后才允许同名注册。接口见 [agent/subagent](../../agent/subagent)，状态与租约见[运行机制](../architecture.md#subagent-委派)，模型调用方式见[子 Agent 使用说明](../user/web.md#子-agent)。
 
+## Inbox 路由 Agent
+
+`exts/inbox` 借用 Agent Loop、Provider、hooks 与事件流，拥有一个跨 Run 保留上下文的路由 Agent。它只安装私有的 `inbox_route` 工具执行器，宿主的 shell、文件和 subagent 工具不会进入路由模型。接收者目录由实际 SessionStart/SessionEnd 构成，回调仍由 Session 控制准入和取消。
+
+inbox 组合在 Session、subagent tools 和 IOA collaboration hooks 之后启动 Router，确保恢复任务发出的事件能被全部观察：
+
+```go
+router := inboxext.New(inboxext.Config{
+    StateDir: ".cyber/active", MaxActive: 4,
+    Notify: notifyResult, // 返回错误会保留在 durable outbox 重试
+})
+collaboration := ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
+    Receive: router.Router().Deliver,
+    LoadCursor: router.Router().LoadCursor,
+    SaveCursor: router.Router().SaveCursor,
+})
+// 顺序：base / prompt / loop / subagent 定义 → IOA client
+//     → sessionext → subagentext.NewTools() → collaboration → router
+```
+
+Router 借用 `*sessionexec.Tool` 调用与模型 subagent 工具相同的 Prepare、定义租约和 Session 执行后端，以及内部 `*proc.Manager` 管理工作单元。Router 模型仅能分发，scheduler 负责并发与实例生命周期；不另建 Worker 进程或 worktree。
+
+其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；发送结果支持重发，使用反馈 Message ID 去重。存储失败取消宿主，不能返回虚假的成功确认。
+
+路由投影只包含文本和媒体描述。执行输入保留媒体、附件与来源，但其内部 Message ID 按 origin/sender/source_session/id 规范化，避免不同来源相同 ID 在恢复时被误去重；原外部 ID 留在 `Meta.message_id` 和 Receipt。对 live Session 的直接投递仍保留原消息。明确的目标不能被模型改投：inbox 的 `task_id` 或历史 execution ID 可恢复原任务，非任务 Session 必须仍存活；重名 Session 拒绝。
+
+每个 inbox Profile 一个 Router，每个 Session 各自拥有 mailbox，IOA 承担跨节点传输。监控采集仍由 producer 或外部进程完成。IOA 先订阅再补读，持久游标只在按序 durable 准入后推进；首次读取全部保留历史，之后分页，并每秒补读以弥补在线 SSE 缺口。进程重启使用由 hostname 和状态目录派生的同一 IOA identity。已被来源删除的消息无法补齐。
+
+inbox 输入、路由、任务历史、执行 journal、反馈和 outbox 都在同一状态目录 SQLite 中保存。完成快照与输入消费原子提交，重启将旧执行置为 interrupted，恢复任务历史并核对外部副作用；不恢复旧进程，也不承诺副作用 exactly-once。关闭先停准入和调度，再取消／排空 Session 与所属后台工作，最后释放订阅、数据库和目录锁。
+
+空 `StateDir` 仍可选择原内存 Router，安装在消息源与会话之前以建立 live Session 目录。它只转发到存活 Session，消息与最近 1024 条完成回执仅在内存保留，没有持久任务调度、恢复与游标接口。`aiscan agent` 不安装 Router；独立的 `aiscan inbox` 子命令选择持久实现，宿主以运行期 `Option.Command` 识别入口，该字段不能由 YAML 或远程配置选择。Inbox 专属配置位于 `inbox` section。
+
+持久 Router 的集成测试使用脚本 Provider 驱动真实 Agent Loop、Session、内部 Manager、HTTP IOA server/SDK，覆盖重启续接、强杀恢复、历史隔离、并发与纠正、反馈循环、outbox 重发、后台进程清理和超过一页的 IOA 补读：
+
+```powershell
+go test -race ./exts/inbox ./exts/ioa/client ./agent/subagent/sessionexec ./cmd/aiscan -count=1 -timeout 2m
+$env:CYBER_ACTIVE_SOAK_DURATION='65s'
+go test -race ./exts/inbox -run '^TestActiveIOAMonitorRestartAndContinuous$' -count=1 -v -timeout 2m
+```
+
+65 秒持续用例还会主动断开 SSE 并重启整个 inbox 宿主，检查离线事件补读与重复抑制。它不调用真实模型服务，不能替代真实模型的路由质量验证。
+
+离线复杂场景使用脚本 Provider 驱动真实 Agent Loop、HTTP IOA server/SDK 和 Session；执行 `go test -race ./exts/inbox ./exts/ioa/client`。`TestContinuousMonitorIOARouting` 覆盖忙碌接收者、独立任务、5 批监控事件、空闲后续跑、SSE 重连、中断纠正、结果交回协调者、IOA 回执和停止准入。设置 `CYBER_INBOX_MONITOR_INTERVAL=10s` 可把用例扩展为约 71 秒的持续验证，默认使用短间隔保持离线测试快速。
+
+`TestIOABurstWaitsForRouterCapacity` 用真实 IOA 订阅向容量为 1 的 Router 突发发送 10 条消息，先阻塞路由再释放，验证满队列退避后的顺序和消息 ID。客户端边界另测准入失败不记去重、重试可取消，以及 SSE 解码失败前的缓冲事件排空。
+
+真实模型验证使用 `TestLiveRouterInterleavedTasks` 与 `TestLiveContinuousMonitorIOARouting`，只将路由决策发送给真实模型，下游执行 Provider 保持确定性。配置 `CYBER_API_KEY`、`CYBER_MODEL`、`CYBER_BASE_URL`，需要代理时配置 `CYBER_PROXY`，再设置 `CYBER_INBOX_LIVE=1`：
+
+```powershell
+go test ./exts/inbox -run '^TestLive(RouterInterleavedTasks|ContinuousMonitorIOARouting)$' -count=1 -v -timeout 5m
+```
+
+模型地址需包含 API 前缀（如 `/v1`）。密钥仅通过当前进程环境传入，不写入源码或测试报告；模型连接失败作为测试失败报告，不回退到脚本 Provider。
+
 ## 知识与提示词
 
 面向最终使用者的可编辑知识适合放入 [Skill 文件](../user/knowledge.md)。随功能扩展分发的知识可贡献 `skills.Bundle`，由统一的 Store 提供虚拟路径和读取。工具说明因此可以跟着功能一起安装与移除，无需复制到多个系统提示词里。

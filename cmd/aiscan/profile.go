@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	jevapi "github.com/chainreactors/cyber/agent/provider/jev"
 	agentsession "github.com/chainreactors/cyber/agent/session"
@@ -23,6 +24,7 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	guardrailext "github.com/chainreactors/cyber/exts/guardrail"
+	inboxext "github.com/chainreactors/cyber/exts/inbox"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	jevext "github.com/chainreactors/cyber/exts/jev"
 	nativeext "github.com/chainreactors/cyber/exts/native"
@@ -42,6 +44,7 @@ import (
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 	ioatools "github.com/chainreactors/cyber/tools/ioa"
 	terminaltool "github.com/chainreactors/cyber/tools/terminal"
+	"github.com/chainreactors/ioa/protocols"
 )
 
 type config struct {
@@ -82,6 +85,7 @@ func parseObserve(value string) []observeext.Kind {
 
 // aiscanProfile owns one reference-distribution extension graph.
 type aiscanProfile struct {
+	router             *inboxext.Router
 	guardrail          *guardrailext.Runtime
 	extensions         *extension.Set
 	providers          *provider.State
@@ -215,14 +219,51 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		}
 		values = append(values, observer)
 	}
+	// Install session tools and source hooks before starting the active router.
+	var router *inboxext.Extension
 	var ioa *ioaclient.Extension
+	if config.Option.Command == cfg.RunModeInbox && config.Session != nil {
+		dir := cfg.InboxStateDir(config.Option, workDir)
+		router = inboxext.New(inboxext.Config{StateDir: dir, MaxActive: config.Option.MaxActive, Notify: func(ctx context.Context, m inbox.Message) error {
+			text := provider.MessageText(m.Message)
+			if node, _ := m.Meta["reply_node"].(string); node != "" {
+				if ioa == nil || ioa.Service() == nil {
+					return fmt.Errorf("IOA reply transport is unavailable")
+				}
+				svc := ioa.Service()
+				space, _ := m.Meta["space"].(string)
+				if space == "" {
+					space = svc.ReceiveSpace()
+				}
+				source, _ := m.Meta["reply_session"].(string)
+				reference, _ := m.Meta["reply_message"].(string)
+				refs := &protocols.Ref{Nodes: []string{node}}
+				if reference != "" {
+					refs.Messages = []string{reference}
+				}
+				_, err := svc.Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: refs, Meta: map[string]any{"source_task_id": m.Meta["task_id"], "target_session_id": source, "feedback_id": m.Message.Id, "kind": "task_result"}})
+				return err
+			}
+			config.Base.Logger.Importantf("task=%v status=%v\n%s", m.Meta["task_id"], m.Meta["status"], text)
+			return nil
+		}})
+		p.router = router.Router()
+	}
+	var collaboration *ioaclient.CollaborationExtension
 	if config.IOA != nil {
 		bundle, diagnostics := ioaclient.Skills()
 		if len(diagnostics) > 0 {
 			return nil, fmt.Errorf("load IOA skills: %v", diagnostics)
 		}
 		ioa = ioaclient.New(*config.IOA)
-		values = append(values, ioa, ioaclient.NewCollaboration(ioaclient.CollaborationOptions{Skills: []skills.Bundle{bundle}}))
+		options := ioaclient.CollaborationOptions{Skills: []skills.Bundle{bundle}}
+		if p.router != nil {
+			options.Receive = p.router.Deliver
+			options.LoadCursor = p.router.LoadCursor
+			options.SaveCursor = p.router.SaveCursor
+		}
+		collaboration = ioaclient.NewCollaboration(options)
+		values = append(values, ioa)
 	}
 	values = append(values, nativeext.New())
 	presents := config.Session != nil || ioa != nil
@@ -245,6 +286,12 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		}
 		values = append(values, sessionext.NewConsole())
 		values = append(values, guardrailext.NewConsole())
+	}
+	if collaboration != nil {
+		values = append(values, collaboration)
+	}
+	if router != nil {
+		values = append(values, router)
 	}
 	// Last in the slice, so it borrows after everything is published and
 	// releases before anything is torn down. This is how a composition root
@@ -320,6 +367,8 @@ func (p *aiscanProfile) Runtime() (*agentsession.Runtime, error) {
 	}
 	return p.runtime, nil
 }
+
+func (p *aiscanProfile) InboxRouter() *inboxext.Router { return p.router }
 
 func (p *aiscanProfile) RegisterNamespaces(mux *aop.NamespaceMux) error {
 	if p == nil || p.extensions == nil || !p.extensions.Active() {

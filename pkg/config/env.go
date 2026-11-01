@@ -81,6 +81,9 @@ func resolveRuntimeConfig(option *Option, agentMode bool, usesModel func(*Option
 		if err != nil {
 			return configPath, err
 		}
+		if option.Command == RunModeInbox && (transport != AgentTransportLocal || option.ServerURL != "") {
+			return configPath, fmt.Errorf("inbox requires local transport without --server-url")
+		}
 		if transport == AgentTransportWeb {
 			if HasAgentTaskInput(option) || option.Resume != "" {
 				return configPath, fmt.Errorf("node mode receives tasks from the server; omit --prompt, --input, --task-file and --resume")
@@ -125,6 +128,9 @@ func resolveExtensions(option, explicit *Option, lookup envLookup) error {
 }
 
 func finishExecutionConfig(option, explicit *Option) error {
+	if option.Command == RunModeInbox && !option.present["agent.timeout"] && !explicit.hasExplicit("Timeout") {
+		option.Timeout = 0
+	}
 	ApplyDefaults(option)
 	if err := validateExecutionOptions(option); err != nil {
 		return err

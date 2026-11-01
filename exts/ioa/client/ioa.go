@@ -3,7 +3,10 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
@@ -42,9 +45,18 @@ func (e *CollaborationExtension) switchSpace(ctx context.Context, space string) 
 	go func() {
 		defer e.workers.Done()
 		defer cancel()
+		backfill := time.NewTicker(time.Second)
+		defer backfill.Stop()
 		for attempt := 0; ; attempt++ {
+			if err := e.replay(feedCtx, space); err != nil {
+				e.Service().ReportError(err)
+			}
 			for feed != nil {
 				select {
+				case <-backfill.C:
+					if err := e.replay(feedCtx, space); err != nil {
+						e.Service().ReportError(err)
+					}
 				case <-feedCtx.Done():
 					stop()
 					return
@@ -53,14 +65,34 @@ func (e *CollaborationExtension) switchSpace(ctx context.Context, space string) 
 						feed = nil
 						break
 					}
-					if err := e.deliver(feedCtx, msg); err != nil && feedCtx.Err() == nil {
+					for admission := 0; ; admission++ {
+						err := e.deliver(feedCtx, msg)
+						if err == nil || feedCtx.Err() != nil {
+							break
+						}
 						e.Service().ReportError(err)
+						if e.options.Receive == nil || !errors.Is(err, inbox.ErrInboxFull) {
+							break
+						}
+						// Retain this event until the router admits it. Sleeping
+						// outside e.mu keeps session registration and shutdown live.
+						select {
+						case <-feedCtx.Done():
+							stop()
+							return
+						case <-time.After(retryDelay(admission)):
+						}
 					}
-				case err := <-errs:
+				case err, ok := <-errs:
+					if !ok {
+						errs = nil
+						continue
+					}
 					if err != nil {
 						e.Service().ReportError(err)
 					}
-					feed = nil
+					// The SDK closes feed after errs; drain messages already
+					// decoded before reconnecting, even after a stream error.
 				}
 			}
 			stop()
@@ -107,6 +139,10 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 		e.mu.Unlock()
 		return nil
 	}
+	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
+	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
+	input.Message.Id = msg.ID
+	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"]}
 	var route *sessionRoute
 	if target != "" {
 		route = e.routes[target]
@@ -121,7 +157,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 				}
 			}
 		}
-	} else {
+	} else if e.options.Receive == nil {
 		for _, candidate := range e.routes {
 			if candidate.primary {
 				route = candidate
@@ -141,11 +177,22 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 			}
 		}
 	}
-	if route == nil || route.deliver == nil {
+	if (target != "" && e.options.LoadCursor == nil || e.options.Receive == nil) && (route == nil || route.deliver == nil) {
 		e.mu.Unlock()
 		return fmt.Errorf("no active IOA receiver for session %q", target)
 	}
-	deliver := route.deliver
+	var deliver func(context.Context, inbox.Message) error
+	if receive := e.options.Receive; receive != nil {
+		// Explicit addressing is validated above without starting a model turn.
+		// Unaddressed messages are selected by the router, not a default route.
+		// Admission and deduplication share the gate; failure stays retryable.
+		if err := receive(ctx, input); err != nil {
+			e.mu.Unlock()
+			return err
+		}
+	} else {
+		deliver = route.deliver
+	}
 	e.seen[msg.ID] = true
 	e.recent = append(e.recent, msg.ID)
 	if len(e.recent) > 1024 {
@@ -153,10 +200,66 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 		e.recent = e.recent[1:]
 	}
 	e.mu.Unlock()
-	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
-	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
-	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target}
+	if deliver == nil {
+		return nil
+	}
 	return deliver(ctx, input)
+}
+
+// Subscribe before replaying; the persisted cursor only advances through
+// historical reads in source order. Live delivery never jumps over a gap.
+func (e *CollaborationExtension) replay(ctx context.Context, space string) error {
+	if e.options.LoadCursor == nil || e.options.SaveCursor == nil {
+		return nil
+	}
+	key := "ioa:" + e.service.Client().NodeID() + ":" + space
+	cursor, err := e.options.LoadCursor(key)
+	if err != nil {
+		return err
+	}
+	for {
+		// This SDK returns the LAST page for an empty cursor. An initial full
+		// read is required to establish an oldest-first cursor without gaps.
+		limit := 256
+		if cursor == "" {
+			limit = 0
+		}
+		messages, err := e.service.ReadPublic(ctx, space, protocols.ReadOptions{After: cursor, Limit: limit, All: true})
+		if err != nil {
+			var protocolErr *protocols.Error
+			if cursor != "" && errors.As(err, &protocolErr) && protocolErr.Status == http.StatusUnprocessableEntity && strings.HasPrefix(protocolErr.Detail, "after:") {
+				e.Service().ReportError(fmt.Errorf("IOA cursor no longer exists; replaying retained source history: %w", err))
+				if err := e.options.SaveCursor(key, ""); err != nil {
+					return err
+				}
+				cursor = ""
+				continue
+			}
+			return err
+		}
+		if len(messages) == 0 {
+			return nil
+		}
+		before := cursor
+		for _, message := range messages {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			if err = e.deliver(ctx, message); err != nil {
+				return err
+			}
+			if err = e.options.SaveCursor(key, message.ID); err != nil {
+				return err
+			}
+			cursor = message.ID
+		}
+		if cursor == before {
+			return fmt.Errorf("IOA replay cursor made no progress")
+		}
+		if limit == 0 || len(messages) < limit {
+			return nil
+		}
+	}
 }
 
 func formatIOAMessage(msg protocols.Message) string {

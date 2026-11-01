@@ -57,9 +57,33 @@ Session 持有对话、队列和身份，一次外部提交形成 Turn。Turn �
 
 ### Inbox 与后台生产者
 
-追问、后台命令完成、子 Agent 回报和 IOA 消息通过有界 Inbox 回到会话。队列有优先级，满队列可能替换较低优先级消息；无法接收时返回错误，不承诺离线保存。
+mailbox 是每个 Session 的基本机制。`aiscan agent` 由 prompt／REPL 驱动，IOA 可直接投递到存活 Session；独立的 `aiscan inbox` 子命令才安装 `exts/inbox` 常驻 Router。它跨 Run 保存路由上下文，只拥有 `inbox_route`，根据消息、存活 Session 与持久任务目录选择 `new_task`、`task_id` 或 `session_id`。业务执行由已有 subagent + Session 后端承担，Router 不获得 shell、文件或执行工具。媒体只向路由模型提供描述，不读取 URI。
 
-后台工作注册 producer，完成后释放。模型不再调用工具时，循环仍处理待收消息；有活跃 producer 则等待消息或取消，全部结束且队列为空才自然收尾。周期任务和 heartbeat 也通过调度器向 Inbox 提交提示，由模型执行，不是绕过模型的 OS 定时器；进程重启不恢复计划。
+```mermaid
+flowchart LR
+    Sources[用户 / IOA / 外部监控] --> Router[inbox Profile 的 Router]
+    Router -->|路由与准入| Tasks[持久任务与输入队列]
+    Tasks -->|有界调度| Sessions[subagent / Session 执行实例]
+    Sessions -->|结果与反馈| Router
+    Router --> Outbox[结果 outbox]
+    Outbox --> Sources
+```
+
+每个 inbox Profile 一个 Router，每个执行 Session 自己持有 mailbox；IOA 负责跨节点传输。Profile 入口不是跨进程全局总线，AOP 事件流记录事实，不承担消息投递。外部监控由独立 producer 采集后调用 `Router.Submit` 或 IOA Send；空闲监听、补读和调度不请求模型。
+
+Router 和执行实例都作为 `proc.IOFunc`、Kind=`agent` 托管在内部 `proc.Manager`，可用内置 `tmux` 查看、输入和取消。它们是当前宿主中的工作单元，没有额外 Agent OS 进程。调度默认最多 4 个任务同时执行，同一任务不并发，按最早待处理输入安排。任务各有隔离历史，但共享宿主工作目录，不创建 worktree；执行结束关闭 Session、释放定义租约，并停止该执行及其 attached subagent 所属的后台命令。
+
+`--state-dir`（默认 `.cyber/active`）内 SQLite 以 WAL 与 FULL 同步保存消息、路由确认、任务历史、输入、执行记录、结果 outbox 和 IOA 游标。目录有独占所有权锁，同目录不允许两个 inbox 宿主同时运行。消息以 origin/sender/source_session/id 去重，已完成回执也可在重启后恢复。执行输入的内部 Message ID 按该来源身份规范化，原始外部 ID 保留在 `Meta.message_id` 和 Receipt；媒体、附件、优先级和中断标记保留。
+
+`Submit` 成功表示消息已落盘，Receipt 完成表示路由／任务输入准入，均不等于业务任务完成。待路由队列满时拒绝新消息，不替换已接收消息；路由失败以 1–64 秒指数退避重试，不阻塞其他消息，目前没有最大重试次数。执行期间的纠正先落盘再尝试投递；未被完成快照消费的输入排回队列。反馈经过同一 Router，可返回来源、记录或投递已有任务；禁止反馈创建新任务、回投已访问任务，并限制最多 16 跳。
+
+调度每次按执行 mailbox 容量认领一批输入，预留恢复说明的位置，其余输入保留 pending。SessionStart 注册接收入口后仍须等待实际 TurnStarted，才允许实时输入进入 mailbox，避免抢占初始化 seed 的容量。运行中的 pending 输入定期补投递，队列满或接收端尚未就绪不会使已落盘的纠正永久滞留。
+
+所有来源的完整输入、模型 Message 与 ToolResult 同步写执行 journal，结束时原子保存历史、消费输入并产生反馈。消费身份同时核对恢复历史、最终快照及本 Run 新消息，避免上下文压缩删除原始输入后重复执行；晚于最后一次 drain 的输入仍排队。宿主重启将未结束执行标记 interrupted，新输入不会抹去该状态；创建新执行实例恢复同一任务历史，恢复截断到完整工具批次并注入副作用核对说明。旧 journal 合入恢复快照后在同一事务中退休，claim 失败则整体回滚。恢复的是任务进度，不是 OS 进程、模型调用栈或未完成的工具批次。外部操作发生后、结果落盘前仍存在不确定窗口，执行者需要核对实际文件或外部系统，不能承诺副作用 exactly-once。
+
+inbox IOA 使用 hostname 与状态目录派生稳定身份；更换目录或主机名会改变绑定。先订阅 SSE，再按持久游标补读；启动、重连及在线期间每秒补读保留历史，按来源顺序成功准入后才推进游标，live 事件不跳过缺口。失效游标回到保留历史重新去重。首次空游标读取全部历史，以避开当前 SDK 默认只取最后一页的行为。来源已删除的历史无法恢复；网络发送与 outbox 确认之间可能重发结果，接收方应使用 feedback ID 去重。
+
+嵌入宿主仍可显式使用空 `StateDir` 的内存 Router：只投递存活 Session，不调度持久任务，保留待处理与最近 1024 条完成回执，重启不恢复。执行层自己的有界 mailbox 仍有优先级和低优先级替换语义。后台 producer 完成后释放，循环在 producer 全部结束且队列为空时自然收尾；周期任务与 heartbeat 的计划本身不因此自动持久化。
 
 ### Subagent 委派
 

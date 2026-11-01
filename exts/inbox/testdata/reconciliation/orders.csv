@@ -1,0 +1,13 @@
+order_id,currency,total_minor,approved_refund_minor,status
+A001,CNY,10000,0,paid
+A002,CNY,20000,0,paid
+A003,CNY,15000,2000,paid
+A004,CNY,8000,8000,canceled
+A005,CNY,5000,0,paid
+A006,USD,1200,0,paid
+A007,USD,2500,0,paid
+A008,CNY,9000,0,paid
+A009,USD,4000,500,paid
+A010,CNY,6000,0,paid
+A011,CNY,7000,7000,canceled
+A012,USD,3000,3000,canceled

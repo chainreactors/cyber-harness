@@ -97,12 +97,10 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 				}
 				for _, cm := range inboxMsgs[i].ToMessages() {
 					transcript.append(cm)
-					if inboxMsgs[i].Origin == inbox.OriginUser {
-						if cm.Id != "" {
-							em.messageWithIdentity(cm.Id, cm.Role, cm.Name, cm.Content)
-						} else {
-							em.message(cm.Role, cm.Content)
-						}
+					if cm.Id != "" {
+						em.messageWithIdentity(cm.Id, cm.Role, cm.Name, cm.Content)
+					} else {
+						em.message(cm.Role, cm.Content)
 					}
 				}
 			}

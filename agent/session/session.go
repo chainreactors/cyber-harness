@@ -962,6 +962,15 @@ func (s *Session) MessagesSnapshot() []*aop.Message {
 	return cloneSessionMessages(state.agent.MessagesSnapshot())
 }
 
+// Deliver addresses this exact execution; it never selects another session.
+func (s *Session) Deliver(ctx context.Context, message inboxpkg.Message) error {
+	state := s.currentState()
+	if state == nil {
+		return inboxpkg.ErrInboxClosed
+	}
+	return state.deliver(ctx, message)
+}
+
 // SetModel changes only this session's next run. Existing runs and children
 // keep their snapshots; the Profile's provider configuration is unchanged.
 func (s *Session) SetModel(model string) error {
