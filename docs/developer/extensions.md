@@ -89,7 +89,7 @@ collaboration := ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
 
 Router 借用 `*sessionexec.Tool` 调用与模型 subagent 工具相同的 Prepare、定义租约和 Session 执行后端，以及内部 `*proc.Manager` 管理工作单元。Router 模型仅能分发，scheduler 负责并发与实例生命周期；不另建 Worker 进程或 worktree。
 
-其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；重发时将稳定的反馈 Message ID 放入 `feedback_id`，并标记 `kind=task_result`。IOA adapter 保留该值；持久 Router 对 peer 结果以 sender/source_session/feedback_id 去重，保留首次 wire ID 作为 Receipt.ID 和回复引用。普通消息仍按传输 ID 去重，其他接收方需自行实现结果幂等。存储失败取消宿主，不能返回虚假的成功确认。
+其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。调用方必须提供非 nil context 和从 `New` 获取的 Router。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；重发时将稳定的反馈 Message ID 放入 `feedback_id`，并标记 `kind=task_result`，同时转发 `source_task_id`、execution 对应的 `source_session_id` 和 `feedback_chain`。IOA adapter 保留这些字段；持久 Router 对 peer 结果以 sender/source_session/feedback_id 去重，保留首次 wire ID 作为 Receipt.ID 和回复引用。peer 结果也受禁止 new_task、反馈环路及 16 跳上限约束；无需执行时可 record，普通 peer 消息不允许直接 record。普通消息仍按传输 ID 去重，其他接收方需自行实现结果幂等。存储失败取消宿主，不能返回虚假的成功确认。
 
 路由投影只包含文本和媒体描述。执行输入保留媒体、附件与来源，但其内部 Message ID 按 origin/sender/source_session/id 规范化，避免不同来源相同 ID 在恢复时被误去重；原外部 ID 留在 `Meta.message_id` 和 Receipt。对 live Session 的直接投递仍保留原消息。明确的目标不能被模型改投：inbox 的 `task_id` 或历史 execution ID 可恢复原任务，非任务 Session 必须仍存活；重名 Session 拒绝。
 
@@ -115,6 +115,8 @@ go test -race ./exts/inbox -run '^TestActiveIOAMonitorRestartAndContinuous$' -co
 $env:CYBER_INBOX_CASES_OUTPUT = Join-Path (Get-Location) 'outputs/inbox-real-cases'
 go test -race ./exts/inbox -run '^TestRepositoryCI' -shuffle=on -count=10 -timeout 180s -v
 ```
+
+`TestReleaseReviewFeedbackSafetyAcrossIOA` 由 builder worker 生成当前提交的 go.mod SHA-256，通过 HTTP/SSE 交给 reviewer worker 写实际审计文件；再重启接收宿主，补读离线回传的 cyclic feedback，并测试隐式新任务、过长链、历史 execution 地址及仅有 source_task_id 的回投。路由模型故意先选择错误目标，必须收到工具错误后改为 record；五个结果都不得新增执行，独立普通通知仍能处理。`cmd/aiscan` 的 `TestInboxCLIProcessWorkflow` 还从独立进程的真实 Profile 验证外部 IOA 请求、回包身份/反馈链、tmux 输入与宿主重启，避免只验证手工拼装的测试宿主。
 
 离线复杂场景使用脚本 Provider 驱动真实 Agent Loop、HTTP IOA server/SDK 和 Session；执行 `go test -race ./exts/inbox ./exts/ioa/client`。`TestContinuousMonitorIOARouting` 覆盖忙碌接收者、独立任务、5 批监控事件、空闲后续跑、SSE 重连、中断纠正、结果交回协调者、IOA 回执和停止准入。设置 `CYBER_INBOX_MONITOR_INTERVAL=10s` 可把用例扩展为约 71 秒的持续验证，默认使用短间隔保持离线测试快速。
 

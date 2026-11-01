@@ -39,11 +39,8 @@ func Section() cfg.Section {
 	}}
 }
 
+// ReadOptions resolves the non-nil configuration supplied by the host.
 func ReadOptions(option *cfg.Option) (Options, error) {
-	value := Options{URL: DefaultURL, Space: DefaultSpace}
-	if option == nil {
-		return value, nil
-	}
 	var decoded *Options
 	var err error
 	if option.Resolved != nil {
@@ -62,7 +59,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
-	value = *decoded
+	value := *decoded
 	if value.NodeName == "" {
 		value.NodeName = option.NodeName
 	}
@@ -92,9 +89,6 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	value, err := ReadOptions(option)
 	if err != nil {
 		return nil, err
-	}
-	if option == nil {
-		option = &cfg.Option{}
 	}
 	var identity protocols.Identity = localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}
 	if option.Command == cfg.RunModeInbox {

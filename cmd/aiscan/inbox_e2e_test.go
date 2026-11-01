@@ -16,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	peerclient "github.com/chainreactors/ioa/client"
+	"github.com/chainreactors/ioa/protocols"
+	ioaserver "github.com/chainreactors/ioa/server"
 )
 
 // Exercise the actual CLI/config/provider/extension graph in a separate process.
@@ -29,6 +33,22 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	dir := t.TempDir()
 	config := filepath.Join(dir, "cyber.yaml")
 	if err := os.WriteFile(config, []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := ioaserver.NewMemoryStore()
+	defer store.Close()
+	ioa := httptest.NewServer(ioaserver.NewHTTPHandler(ioaserver.NewService(store, "cli-e2e")))
+	defer ioa.Close()
+	endpoint := strings.Replace(ioa.URL, "http://", "http://cli-e2e@", 1)
+	monitor, err := peerclient.NewClient(endpoint, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := monitor.EnsureRegistered(ctx, "cli-release-monitor", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	space, err := monitor.Space(ctx, "cli-release-review", "external release checks")
+	if err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
@@ -75,7 +95,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 				if m.Role != "user" {
 					continue
 				}
-				for _, name := range []string{"alpha", "beta", "gamma"} {
+				for _, name := range []string{"alpha", "beta", "gamma", "delta"} {
 					if strings.Contains(string(m.Content), "e2e-"+name) {
 						if task != "" && task != name {
 							failures <- fmt.Errorf("worker history leaked: %s and %s", task, name)
@@ -120,7 +140,8 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 		cmd := exec.CommandContext(ctx, executable, "-test.run=^TestInboxCLIProcessChild$", "-test.timeout=40s", "--",
 			"--config", config, "--data-dir", filepath.Join(dir, "data"), "--no-color", "inbox",
 			"--base-url", model.URL+"/v1", "--provider", "openai", "--model", "scenario", "--api-key", "local-test-key",
-			"--state-dir", filepath.Join(dir, "state"), "--max-active", "2", "--timeout", timeout)
+			"--state-dir", filepath.Join(dir, "state"), "--max-active", "2", "--timeout", timeout,
+			"--ioa-url", endpoint, "--space", "cli-release-review", "--node-name", "cli-inbox-worker")
 		cmd.Dir = dir
 		for _, value := range os.Environ() {
 			key := strings.ToUpper(strings.SplitN(value, "=", 2)[0])
@@ -197,6 +218,49 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait(done, log, func(s string) bool { return strings.Contains(s, "routed") })
+	nodes, err := monitor.ListNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receiver string
+	for _, node := range nodes {
+		if node.Name == "cli-inbox-worker" {
+			receiver = node.ID
+		}
+	}
+	if receiver == "" {
+		t.Fatal("CLI inbox did not register its IOA identity")
+	}
+	request, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "e2e-delta"}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: map[string]any{"source_session_id": "release-monitor"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCompleted(4)
+	transcript, err := monitor.ReadPublic(ctx, space.ID, protocols.ReadOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := 0
+	for _, message := range transcript {
+		if message.Meta["kind"] != "task_result" {
+			continue
+		}
+		results++
+		chain, ok := message.Meta["feedback_chain"].([]any)
+		var execution string
+		if err := db.QueryRow("SELECT session_id FROM tasks WHERE id=?", message.Meta["source_task_id"]).Scan(&execution); err != nil {
+			t.Fatal(err)
+		}
+		if !ok || len(chain) != 1 || chain[0] != message.Meta["source_task_id"] || message.Meta["source_session_id"] != execution || message.Meta["target_session_id"] != "release-monitor" || message.Meta["feedback_id"] != "feedback-"+execution {
+			t.Fatalf("CLI result lost execution identity or feedback ancestry: %v", message.Meta)
+		}
+		if len(message.Refs.Nodes) != 1 || message.Refs.Nodes[0] != monitor.NodeID() || len(message.Refs.Messages) != 1 || message.Refs.Messages[0] != request.ID {
+			t.Fatalf("CLI result lost its requester: %+v", message.Refs)
+		}
+	}
+	if results != 1 {
+		t.Fatalf("external check received %d results, want one", results)
+	}
 	secondInput, secondLog, secondDone := start("competing", "5")
 	_ = secondInput.Close()
 	select {
@@ -241,7 +305,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if got := calls.Load(); got != before {
 		t.Fatalf("idle restart called model: before=%d after=%d", before, got)
 	}
-	for _, name := range []string{"alpha", "beta", "gamma"} {
+	for _, name := range []string{"alpha", "beta", "gamma", "delta"} {
 		b, err := os.ReadFile(filepath.Join(dir, name+".txt"))
 		if err != nil || string(b) != name+"\n" {
 			t.Fatalf("file side effect %s duplicated/lost: %q %v", name, b, err)
@@ -254,7 +318,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if err := db.QueryRow("SELECT count(*) FROM attempts").Scan(&attempts); err != nil {
 		t.Fatal(err)
 	}
-	if tasks != 3 || attempts != 3 {
+	if tasks != 4 || attempts != 4 {
 		t.Fatalf("unexpected task/execution counts: %d/%d", tasks, attempts)
 	}
 	select {
@@ -262,7 +326,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 		t.Fatal(err)
 	default:
 	}
-	t.Logf("3 isolated real shell tasks; tmux list/input/capture; exclusive host lock; clean exit; EOF persistence; restart without replay (%d HTTP model calls)", calls.Load())
+	t.Logf("4 isolated real shell tasks; external IOA request and result ancestry; tmux list/input/capture; exclusive host lock; clean exit; EOF persistence; restart without replay (%d HTTP model calls)", calls.Load())
 }
 
 func TestInboxCLIProcessChild(t *testing.T) {

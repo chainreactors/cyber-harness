@@ -241,7 +241,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 				if reference != "" {
 					refs.Messages = []string{reference}
 				}
-				_, err := svc.Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: refs, Meta: map[string]any{"source_task_id": m.Meta["task_id"], "target_session_id": source, "feedback_id": m.Message.Id, "kind": "task_result"}})
+				_, err := svc.Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: refs, Meta: map[string]any{"source_task_id": m.Meta["task_id"], "source_session_id": m.Meta["execution_id"], "target_session_id": source, "feedback_id": m.Message.Id, "feedback_chain": m.Meta["feedback_chain"], "kind": "task_result"}})
 				return err
 			}
 			config.Base.Logger.Importantf("task=%v status=%v\n%s", m.Meta["task_id"], m.Meta["status"], text)

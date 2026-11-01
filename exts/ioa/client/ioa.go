@@ -142,13 +142,13 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
 	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
 	input.Message.Id = msg.ID
-	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"], "feedback_id": msg.Meta["feedback_id"]}
+	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"], "feedback_id": msg.Meta["feedback_id"], "feedback_chain": msg.Meta["feedback_chain"], "source_task_id": msg.Meta["source_task_id"]}
 	var route *sessionRoute
 	if target != "" {
 		route = e.routes[target]
 		if route == nil {
 			for _, candidate := range e.routes {
-				if candidate.start.AgentName == target && candidate.deliver != nil {
+				if candidate.start.AgentName == target && candidate.start.Deliver != nil {
 					if route != nil {
 						e.mu.Unlock()
 						return fmt.Errorf("IOA session name %q is ambiguous; use its Session ID", target)
@@ -159,7 +159,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 		}
 	} else if e.options.Receive == nil {
 		for _, candidate := range e.routes {
-			if candidate.primary {
+			if candidate.start.Primary {
 				route = candidate
 				break
 			}
@@ -167,7 +167,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 		if route == nil {
 			count := 0
 			for _, candidate := range e.routes {
-				if !candidate.delegated {
+				if candidate.start.Delegation == nil {
 					route = candidate
 					count++
 				}
@@ -177,7 +177,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 			}
 		}
 	}
-	if (target != "" && e.options.LoadCursor == nil || e.options.Receive == nil) && (route == nil || route.deliver == nil) {
+	if (target != "" && e.options.LoadCursor == nil || e.options.Receive == nil) && (route == nil || route.start.Deliver == nil) {
 		e.mu.Unlock()
 		return fmt.Errorf("no active IOA receiver for session %q", target)
 	}
@@ -191,7 +191,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 			return err
 		}
 	} else {
-		deliver = route.deliver
+		deliver = route.start.Deliver
 	}
 	e.seen[msg.ID] = true
 	e.recent = append(e.recent, msg.ID)

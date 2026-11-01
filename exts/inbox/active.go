@@ -651,5 +651,8 @@ func messageChain(message mailbox.Message) []string {
 	if id, _ := message.Meta["task_id"].(string); id != "" && message.Meta["kind"] == "subagent_feedback" && !slices.Contains(chain, id) {
 		chain = append(chain, id)
 	}
+	if id, _ := message.Meta["source_task_id"].(string); id != "" && message.Origin == mailbox.OriginPeer && message.Meta["kind"] == "task_result" && !slices.Contains(chain, id) {
+		chain = append(chain, id)
+	}
 	return chain
 }

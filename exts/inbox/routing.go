@@ -148,27 +148,21 @@ func (e *Extension) route(ag *agent.Agent, providers *provider.State, stream *ev
 	slices.SortFunc(catalog, func(a, b target) int { return strings.Compare(a.ID, b.ID) })
 	// Routing sees text and media descriptors only. Passing media to Agent.Run
 	// would resolve image URIs and read files, which belongs to the recipient.
-	metadata, err := json.Marshal(map[string]any{
+	metadataFields := map[string]any{
 		"message_id": receipt.ID, "origin": receipt.message.Origin,
 		"meta": receipt.message.Meta, "priority": receipt.message.Priority,
 		"interrupt": receipt.message.Interrupt, "created_at": receipt.message.CreatedAt,
 		"attachments": receipt.message.Attachments, "sessions": catalog,
-	})
+	}
 	if r.active != nil {
 		tasks, taskErr := r.active.store.tasks()
 		if taskErr != nil {
 			routeErr = taskErr
 			return
 		}
-		var value map[string]any
-		if err == nil {
-			err = json.Unmarshal(metadata, &value)
-		}
-		if err == nil {
-			value["tasks"] = tasks
-			metadata, err = json.Marshal(value)
-		}
+		metadataFields["tasks"] = tasks
 	}
+	metadata, err := json.Marshal(metadataFields)
 	if err != nil {
 		routeErr = fmt.Errorf("encode routing context: %w", err)
 		return
@@ -209,6 +203,8 @@ func (t *routing) executeActive(ctx context.Context, args routeArgs) (*aop.ToolR
 		}
 	}
 	action := args.Action
+	kind, _ := t.receipt.message.Meta["kind"].(string)
+	feedback := kind == "subagent_feedback" || t.receipt.message.Origin == mailbox.OriginPeer && kind == "task_result"
 	if action == "" {
 		action = "route"
 	}
@@ -216,12 +212,11 @@ func (t *routing) executeActive(ctx context.Context, args routeArgs) (*aop.ToolR
 		if args.SessionID != "" || args.TaskID != "" || args.NewTask != nil {
 			return nil, fmt.Errorf("record/reply cannot have a destination")
 		}
-		kind, _ := t.receipt.message.Meta["kind"].(string)
 		if action == "reply" && kind != "subagent_feedback" {
 			return nil, fmt.Errorf("reply requires subagent feedback")
 		}
-		if action == "record" && t.receipt.message.Origin != mailbox.OriginSystem {
-			return nil, fmt.Errorf("only system events may be recorded without delivery")
+		if action == "record" && t.receipt.message.Origin != mailbox.OriginSystem && !feedback {
+			return nil, fmt.Errorf("only system events or peer task results may be recorded without delivery")
 		}
 		if action != "reply" && action != "record" {
 			return nil, fmt.Errorf("unknown routing action %q", action)
@@ -245,15 +240,8 @@ func (t *routing) executeActive(ctx context.Context, args routeArgs) (*aop.ToolR
 	if count != 1 {
 		return nil, fmt.Errorf("choose exactly one of session_id, task_id, new_task")
 	}
-	kind, _ := t.receipt.message.Meta["kind"].(string)
-	if kind == "subagent_feedback" && args.NewTask != nil {
+	if feedback && args.NewTask != nil {
 		return nil, fmt.Errorf("feedback cannot implicitly create another task; use reply, record, or an existing task")
-	}
-	if kind == "subagent_feedback" && args.TaskID != "" {
-		chain := messageChain(t.receipt.message)
-		if slices.Contains(chain, args.TaskID) || len(chain) >= 16 {
-			return nil, fmt.Errorf("feedback cycle or hop limit; use reply or record")
-		}
 	}
 	if required, _ := t.receipt.message.Meta["task_id"].(string); required != "" && kind != "subagent_feedback" {
 		if args.TaskID != required {
@@ -279,6 +267,14 @@ func (t *routing) executeActive(ctx context.Context, args routeArgs) (*aop.ToolR
 			}
 		}
 	}
+	// target_session_id may resolve an execution to a persistent task only
+	// after explicit-address validation. Apply the same feedback guard there.
+	if feedback && args.TaskID != "" {
+		chain := messageChain(t.receipt.message)
+		if slices.Contains(chain, args.TaskID) || len(chain) >= 16 {
+			return nil, fmt.Errorf("feedback cycle or hop limit; use reply or record")
+		}
+	}
 	if args.NewTask != nil || args.TaskID != "" {
 		name, label := "", ""
 		if args.NewTask != nil {
@@ -298,11 +294,7 @@ func (t *routing) executeActive(ctx context.Context, args routeArgs) (*aop.ToolR
 	}
 	destination, err := t.router.resolve(args.SessionID)
 	if err != nil {
-		var taskID string
-		if lookup := a.store.db.QueryRow("SELECT task_id FROM attempts WHERE session_id=?", args.SessionID).Scan(&taskID); lookup != nil {
-			return nil, err
-		}
-		return t.executeActive(ctx, routeArgs{TaskID: taskID})
+		return nil, err
 	}
 	target := "session:" + destination.ID
 	if err = a.store.planRoute(key, target); err != nil {

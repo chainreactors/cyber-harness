@@ -6,18 +6,14 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/hooks"
-	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/ioa/protocols"
 )
 
 type sessionRoute struct {
-	deliver   func(context.Context, inbox.Message) error
-	primary   bool
-	delegated bool
-	space     string
-	dispatch  string
-	start     hooks.SessionEvent
+	space    string
+	dispatch string
+	start    hooks.SessionEvent
 }
 
 func (e *CollaborationExtension) sessionStart(ctx context.Context, ev hooks.SessionEvent) (struct{}, error) {
@@ -27,7 +23,7 @@ func (e *CollaborationExtension) sessionStart(ctx context.Context, ev hooks.Sess
 	if err != nil {
 		return struct{}{}, err
 	}
-	route := &sessionRoute{deliver: ev.Deliver, primary: ev.Primary, delegated: ev.Delegation != nil, space: space, start: ev}
+	route := &sessionRoute{space: space, start: ev}
 	e.mu.Lock()
 	if _, exists := e.routes[ev.SessionID]; exists {
 		e.mu.Unlock()
@@ -35,7 +31,7 @@ func (e *CollaborationExtension) sessionStart(ctx context.Context, ev hooks.Sess
 	}
 	// Reserve the identity; incoming messages cannot enter until recording succeeds.
 	e.routes[ev.SessionID] = route
-	route.deliver = nil
+	route.start.Deliver = nil
 	e.mu.Unlock()
 	if ev.Delegation != nil {
 		msg, err := e.service.Client().Send(ctx, space, handoffBody(ev, "delegate", "delegated", ""))
@@ -47,7 +43,7 @@ func (e *CollaborationExtension) sessionStart(ctx context.Context, ev hooks.Sess
 		e.mu.Unlock()
 	}
 	e.mu.Lock()
-	route.deliver = ev.Deliver
+	route.start.Deliver = ev.Deliver
 	e.mu.Unlock()
 	return struct{}{}, nil
 }
