@@ -102,7 +102,16 @@ func (r *Router) Submit(ctx context.Context, message mailbox.Message) (*Receipt,
 	}
 	sender, _ := message.Meta["sender"].(string)
 	source, _ := message.Meta["source_session_id"].(string)
-	key := [4]string{string(message.Origin), sender, source, id}
+	identity := id
+	// An outbox retry gets a new transport ID for the same logical result.
+	// Keep its wire identity for replies, but deduplicate its stable feedback ID
+	// within the original sender/session scope.
+	if message.Origin == mailbox.OriginPeer && message.Meta["kind"] == "task_result" {
+		if feedbackID, _ := message.Meta["feedback_id"].(string); feedbackID != "" {
+			identity = "feedback:" + feedbackID
+		}
+	}
+	key := [4]string{string(message.Origin), sender, source, identity}
 	if existing := r.receipts[key]; existing != nil {
 		return existing, nil
 	}

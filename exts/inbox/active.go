@@ -321,7 +321,9 @@ func (a *activeRuntime) schedule() {
 						}
 						selected := make([]taskInput, 0, len(ex.inputs))
 						for _, input := range ex.inputs {
-							if consumed[input.message.Message.Id] || status != "completed" {
+							// A failed request may leave accepted live inputs unread.
+							// Only explicit cancellation abandons those inputs.
+							if consumed[input.message.Message.Id] || status == "canceled" {
 								selected = append(selected, input)
 							}
 						}
@@ -337,7 +339,7 @@ func (a *activeRuntime) schedule() {
 							m := mailbox.NewMessage(mailbox.OriginSystem, "user", text)
 							m.Message.Id = "feedback-" + t.SessionID
 							m.Meta = map[string]any{"kind": "subagent_feedback", "task_id": t.ID, "execution_id": t.SessionID, "status": status}
-							m.Meta["feedback_chain"] = feedbackChain(ex.inputs, t.ID)
+							m.Meta["feedback_chain"] = feedbackChain(selected, t.ID)
 							feedback = &m
 							_, _ = fmt.Fprintln(w, text)
 						}

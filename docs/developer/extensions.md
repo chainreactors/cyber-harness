@@ -89,13 +89,13 @@ collaboration := ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
 
 Router 借用 `*sessionexec.Tool` 调用与模型 subagent 工具相同的 Prepare、定义租约和 Session 执行后端，以及内部 `*proc.Manager` 管理工作单元。Router 模型仅能分发，scheduler 负责并发与实例生命周期；不另建 Worker 进程或 worktree。
 
-其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；发送结果支持重发，使用反馈 Message ID 去重。存储失败取消宿主，不能返回虚假的成功确认。
+其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；重发时将稳定的反馈 Message ID 放入 `feedback_id`，并标记 `kind=task_result`。IOA adapter 保留该值；持久 Router 对 peer 结果以 sender/source_session/feedback_id 去重，保留首次 wire ID 作为 Receipt.ID 和回复引用。普通消息仍按传输 ID 去重，其他接收方需自行实现结果幂等。存储失败取消宿主，不能返回虚假的成功确认。
 
 路由投影只包含文本和媒体描述。执行输入保留媒体、附件与来源，但其内部 Message ID 按 origin/sender/source_session/id 规范化，避免不同来源相同 ID 在恢复时被误去重；原外部 ID 留在 `Meta.message_id` 和 Receipt。对 live Session 的直接投递仍保留原消息。明确的目标不能被模型改投：inbox 的 `task_id` 或历史 execution ID 可恢复原任务，非任务 Session 必须仍存活；重名 Session 拒绝。
 
 每个 inbox Profile 一个 Router，每个 Session 各自拥有 mailbox，IOA 承担跨节点传输。监控采集仍由 producer 或外部进程完成。IOA 先订阅再补读，持久游标只在按序 durable 准入后推进；首次读取全部保留历史，之后分页，并每秒补读以弥补在线 SSE 缺口。进程重启使用由 hostname 和状态目录派生的同一 IOA identity。已被来源删除的消息无法补齐。
 
-inbox 输入、路由、任务历史、执行 journal、反馈和 outbox 都在同一状态目录 SQLite 中保存。完成快照与输入消费原子提交，重启将旧执行置为 interrupted，恢复任务历史并核对外部副作用；不恢复旧进程，也不承诺副作用 exactly-once。关闭先停准入和调度，再取消／排空 Session 与所属后台工作，最后释放订阅、数据库和目录锁。
+inbox 输入、路由、任务历史、执行 journal、反馈和 outbox 都在同一状态目录 SQLite 中保存。完成快照与输入消费原子提交；执行失败只确认已读取的输入，未读取的实时追问保留 pending 并另起 execution 续接，反馈链也只记录已确认输入的来源。显式取消仍终止该次已认领输入。重启将旧执行置为 interrupted，恢复任务历史并核对外部副作用；不恢复旧进程，也不承诺副作用 exactly-once。关闭先停准入和调度，再取消／排空 Session 与所属后台工作，最后释放订阅、数据库和目录锁。
 
 空 `StateDir` 仍可选择原内存 Router，安装在消息源与会话之前以建立 live Session 目录。它只转发到存活 Session，消息与最近 1024 条完成回执仅在内存保留，没有持久任务调度、恢复与游标接口。`aiscan agent` 不安装 Router；独立的 `aiscan inbox` 子命令选择持久实现，宿主以运行期 `Option.Command` 识别入口，该字段不能由 YAML 或远程配置选择。Inbox 专属配置位于 `inbox` section。
 
@@ -108,6 +108,13 @@ go test -race ./exts/inbox -run '^TestActiveIOAMonitorRestartAndContinuous$' -co
 ```
 
 65 秒持续用例还会主动断开 SSE 并重启整个 inbox 宿主，检查离线事件补读与重复抑制。它不调用真实模型服务，不能替代真实模型的路由质量验证。
+
+`TestRepositoryCIContinuationAfterProviderFailure` 让 worker 实际运行仓库 Go 测试，插入实时追加的 CI 检查和模型请求失败，同时执行独立 revision 审计；核验追加检查最终执行、已完成工具不重跑以及重启后不重放。`TestRepositoryCIResultDeliveryRetryIsIdempotent` 用实际 git 结果和 HTTP/SSE，在接收方落盘后注入发送确认丢失，核验重试只写一条审计记录，且不同 sender、消息类型或 source_session 的独立事件不被误去重。两项用例都使用可控 Provider；业务工具、持久状态和 IOA 传输均为真实实现。设置 `CYBER_INBOX_CASES_OUTPUT` 可保留 SQLite、命令产物和 `case-summary.json`，用于内部复核：
+
+```powershell
+$env:CYBER_INBOX_CASES_OUTPUT = Join-Path (Get-Location) 'outputs/inbox-real-cases'
+go test -race ./exts/inbox -run '^TestRepositoryCI' -shuffle=on -count=10 -timeout 180s -v
+```
 
 离线复杂场景使用脚本 Provider 驱动真实 Agent Loop、HTTP IOA server/SDK 和 Session；执行 `go test -race ./exts/inbox ./exts/ioa/client`。`TestContinuousMonitorIOARouting` 覆盖忙碌接收者、独立任务、5 批监控事件、空闲后续跑、SSE 重连、中断纠正、结果交回协调者、IOA 回执和停止准入。设置 `CYBER_INBOX_MONITOR_INTERVAL=10s` 可把用例扩展为约 71 秒的持续验证，默认使用短间隔保持离线测试快速。
 

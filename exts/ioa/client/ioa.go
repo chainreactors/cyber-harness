@@ -142,7 +142,7 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
 	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
 	input.Message.Id = msg.ID
-	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"]}
+	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"], "feedback_id": msg.Meta["feedback_id"]}
 	var route *sessionRoute
 	if target != "" {
 		route = e.routes[target]
