@@ -649,6 +649,8 @@ func (s *Sessions) ListEvents(ctx context.Context, request *aop.ListEventsReques
 	return response, nil
 }
 
+const watchReplayBatchSize = 256
+
 func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequest, send func(*aop.EventDelivery) error) error {
 	if s == nil || s.store == nil || s.runtime == nil {
 		return Errorf(CodeFailedPrecondition, "session service is unavailable")
@@ -665,23 +667,42 @@ func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequ
 	}
 	live, unsubscribe := s.runtime.SubscribeSessionEvents(request.SessionId)
 	defer unsubscribe()
-	replayed, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, 0)
-	if err != nil {
-		return fmt.Errorf("replay events: %w", err)
-	}
-	for _, item := range replayed {
-		if item == nil || item.Event == nil {
-			continue
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		cursor, err := parseAOPCursor(item.Cursor)
+		replayed, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, watchReplayBatchSize)
 		if err != nil {
-			return err
+			return fmt.Errorf("replay events: %w", err)
 		}
-		if err := send(item); err != nil {
-			return err
+		if len(replayed) == 0 {
+			break
 		}
-		if cursor > after {
-			after = cursor
+		prevAfter := after
+		for _, item := range replayed {
+			if item == nil {
+				continue
+			}
+			if item.Event == nil {
+				// Still move past it, so a page of empty rows can't stop the replay early.
+				if cursor, err := parseAOPCursor(item.Cursor); err == nil && cursor > after {
+					after = cursor
+				}
+				continue
+			}
+			cursor, err := parseAOPCursor(item.Cursor)
+			if err != nil {
+				return err
+			}
+			if cursor > after {
+				after = cursor
+			}
+			if err := send(item); err != nil {
+				return err
+			}
+		}
+		if len(replayed) < watchReplayBatchSize || after == prevAfter {
+			break
 		}
 	}
 	for {
