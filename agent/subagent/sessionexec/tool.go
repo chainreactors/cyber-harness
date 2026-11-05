@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/subagent"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/resource"
 	coretool "github.com/chainreactors/cyber/core/tool"
+	"google.golang.org/protobuf/proto"
 )
 
 type Tool struct {
@@ -115,21 +117,11 @@ func (t *Tool) create(ctx context.Context, args Args) (string, error) {
 		messages = truncateToLastCompleteBoundary(cfg.Messages)
 	}
 	id := aop.EnvelopeID()
-	onClosed := t.track(id, task, cfg)
-	childCfg := task.Config.ForTask(detail.AgentName, callID, detail)
-	_, err = t.runtime.OpenSession(task.Context, session.SessionOptions{
+	_, run, err := t.open(task, cfg, callID, session.SessionOptions{
 		ID: id, ParentSessionID: cfg.SessionID, ParentToolCallID: callID,
-		AgentName: detail.AgentName, Messages: messages, Config: &childCfg,
-		Input: detail.Task, Attached: true, SingleTask: true, OnClosed: onClosed,
-	})
+		Messages: messages, Attached: true,
+	}, nil)
 	if err != nil {
-		onClosed(session.Outcome{})
-		finish()
-		return "", err
-	}
-	run, err := t.runtime.RunSession(task.Context, id, session.RunInput{Continue: true})
-	if err != nil {
-		_ = t.runtime.CloseSession(context.Background(), id, session.SessionCloseError)
 		finish()
 		return "", err
 	}
@@ -146,6 +138,98 @@ func (t *Tool) create(ctx context.Context, args Args) (string, error) {
 	}
 	go func() { _, _ = wait() }()
 	return fmt.Sprintf("Started subagent %q (session=%s, mode=%s, name=%s). Will notify on completion.", detail.AgentName, id, task.Mode, detail.AgentType), nil
+}
+
+// Dispatch runs a host-owned task through the same preparation and Session
+// backend as the model tool. Checkpoint runs before releasing its Session and
+// lease. Preparation changes only the first seed's text; envelope identity and
+// attachments are preserved. Restored history is supplied separately.
+func (t *Tool) Dispatch(ctx context.Context, request subagent.Request, options session.SessionOptions, inputs []inbox.Message, checkpoint func([]*aop.Message, *agent.Result, error) error) (*agent.Result, error) {
+	options.Messages = truncateToLastCompleteBoundary(options.Messages)
+	restored := make(map[string]bool)
+	for _, m := range options.Messages {
+		restored[m.Id] = true
+	}
+	if inputs != nil {
+		fresh := make([]inbox.Message, 0, len(inputs))
+		for _, m := range inputs {
+			if !restored[m.Message.Id] {
+				fresh = append(fresh, m)
+			}
+		}
+		inputs = fresh
+	}
+	cfg, err := t.runtime.TaskConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Lifetime = ctx
+	task, finish, err := t.prepare(ctx, cfg, request)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	if len(options.Messages) == 0 && len(inputs) > 0 && task.Detail.Task != request.Input.Prompt {
+		// Prepare transforms the seed task, not its envelope identity or media.
+		seed := proto.CloneOf(inputs[0].Message)
+		content := []*aop.Content{aop.Text(task.Detail.Task)}
+		for _, part := range seed.Content {
+			if part.GetText() == nil {
+				content = append(content, part)
+			}
+		}
+		seed.Content = content
+		inputs[0].Message = seed
+	}
+	s, run, err := t.open(task, cfg, "", options, inputs)
+	if err != nil {
+		return nil, err
+	}
+	result, runErr := run.Wait()
+	var saved error
+	if checkpoint != nil {
+		saved = checkpoint(s.MessagesSnapshot(), result, runErr)
+	}
+	reason := session.SessionCloseCompleted
+	if runErr != nil {
+		reason = session.SessionCloseError
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+			reason = session.SessionCloseCanceled
+		}
+	}
+	closeErr := t.runtime.CloseSession(context.Background(), s.ID(), reason)
+	return result, errors.Join(runErr, saved, closeErr)
+}
+
+func (t *Tool) open(task *subagent.Run, cfg agent.Config, callID string, options session.SessionOptions, inputs []inbox.Message) (*session.Session, *session.Run, error) {
+	if options.ID == "" {
+		options.ID = aop.EnvelopeID()
+	}
+	onClosed := t.track(options.ID, task, cfg)
+	childCfg := task.Config.ForTask(task.Detail.AgentName, callID, task.Detail)
+	options.AgentName, options.Config, options.SingleTask, options.OnClosed = task.Detail.AgentName, &childCfg, true, onClosed
+	if inputs == nil {
+		options.Input = task.Detail.Task
+	}
+	s, err := t.runtime.OpenSession(task.Context, options)
+	if err != nil {
+		onClosed(session.Outcome{})
+		return nil, nil, err
+	}
+	for _, message := range inputs {
+		if err = s.Deliver(task.Context, message); err != nil {
+			break
+		}
+	}
+	var run *session.Run
+	if err == nil {
+		run, err = t.runtime.RunSession(task.Context, s.ID(), session.RunInput{Continue: true})
+	}
+	if err != nil {
+		_ = t.runtime.CloseSession(context.Background(), s.ID(), session.SessionCloseError)
+		return nil, nil, err
+	}
+	return s, run, nil
 }
 
 func (t *Tool) list() string {

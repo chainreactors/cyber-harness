@@ -26,7 +26,12 @@ func ApplyDefaults(option *Option) {
 		}
 
 		if field.Name == "Timeout" {
-			value.SetInt(3600)
+			if option.Command != RunModeInbox {
+				value.SetInt(3600)
+			}
+		}
+		if field.Name == "MaxActive" {
+			value.SetInt(4)
 		}
 		if fallback, ok := defaults[field.Name]; ok {
 			value.SetString(fallback)

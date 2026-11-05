@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func runLiveSiblings(t *testing.T, memory bool) {
 	common := `Use only bash IOA commands, timeout=10. Ongoing messages arrive as user messages with origin="peer", message_id, and source_session_id. Send exactly with:
 ioa send --content '{"text":"TEXT"}' --target-session SESSION --ref-messages MESSAGE
 For the initial offer omit --ref-messages. While awaiting an Inbox message, call ioa space nodes to keep running; do not return final text until the exchange is complete. Never invent IDs or nonce. No shell operators, files, external hosts, or extra tools.`
-	jobA := "HARNESS_A\n" + common + "\nUse ioa read --all --limit 20 to find worker-b's delegate handoff meta.subagent.session_id. Send offer:" + nonce + " targeted to that Session. Await reply:" + nonce + " in your peer Inbox. Send ack:" + nonce + " targeted to reply's source_session_id and referencing its message_id. Finish A_DONE:" + nonce + "."
+	jobA := "HARNESS_A\n" + common + "\nUse ioa read --all --limit 20 to find worker-b's delegate handoff meta.target.session_id. Send offer:" + nonce + " targeted to that Session. Await reply:" + nonce + " in your peer Inbox. Send ack:" + nonce + " targeted to reply's source_session_id and referencing its message_id. Finish A_DONE:" + nonce + "."
 	jobB := "HARNESS_B\n" + common + "\nDo not use ioa read: discover the nonce only from offer:NONCE in your peer Inbox. Send reply:NONCE targeted to its source_session_id and referencing its message_id. Await ack:NONCE in peer Inbox, then finish B_DONE:NONCE."
 	prompt := "HARNESS_PARENT\nExecute this bounded communication task. First bash: ioa space " + space + " harness. Create exactly two async subagents, worker-b first then worker-a, name omitted and labels worker-b and worker-a, with the exact respective tasks below. Use subagent create, not IOA, to dispatch. Do not give A's nonce to B. Wait for BOTH actual subagent_completion notifications, then verify A_DONE and B_DONE, bash ioa read --all --limit 20, and finish PARENT_DONE:" + nonce + ". Do not send peer messages yourself.\nWorker B task:\n" + jobB + "\nWorker A task:\n" + jobA
 	r := p.request(t, "aop.ProtocolMessage", "runTurnRequest", map[string]any{"sessionId": "operator", "turnId": "delegation-task", "maxTurns": 16, "input": map[string]any{"role": "user", "content": []any{map[string]any{"text": map[string]any{"text": prompt}}}}})
@@ -226,7 +227,8 @@ func assertSiblingEvents(t *testing.T, events []map[string]any, offer, reply, ac
 		message        ioaMessage
 		source, target string
 	}{{offer, a.Session, b.Session}, {reply, b.Session, a.Session}, {ack, a.Session, b.Session}} {
-		if expected.message.Meta["source_session_id"] != expected.source || expected.message.Meta["target_session_id"] != expected.target {
+		record, parseErr := harness.Parse(expected.message.Meta)
+		if parseErr != nil || record == nil || record.Source.SessionID != expected.source || record.Target.SessionID != expected.target {
 			t.Fatalf("incorrect Session addressing: %+v", expected.message)
 		}
 	}
@@ -291,19 +293,27 @@ func waitSiblingHandoffs(t *testing.T, p *stdioClient, proof map[string]siblingS
 			for name, child := range proof {
 				var delegate, returned map[string]any
 				for _, message := range messages {
-					meta, _ := field(message, "meta", "subagent").(map[string]any)
-					if meta["name"] != name {
+					wireMeta, _ := message["meta"].(map[string]any)
+					record, err := harness.Parse(wireMeta)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if record == nil || record.Agent == nil || record.Agent.Name != name {
 						continue
 					}
-					if meta["session_id"] != child.Session || meta["parent_tool_call_id"] != child.ParentCall || meta["parent_session_id"] != "operator" || meta["mode"] != "async" || message["content_type"] != "handoff" {
+					source, target := record.Source.SessionID, record.Target.SessionID
+					if record.Event == harness.SubagentReturn {
+						source, target = target, source
+					}
+					if target != child.Session || record.CallID != child.ParentCall || source != "operator" || record.Agent.Mode != "async" {
 						t.Fatalf("handoff identity mismatch: %v", message)
 					}
-					switch meta["phase"] {
-					case "delegate":
+					switch record.Event {
+					case harness.SubagentDelegate:
 						delegate = message
-					case "return":
-						if meta["status"] != "completed" {
-							t.Fatalf("unsuccessful child handoff: %v", message)
+					case harness.SubagentReturn:
+						if record.Status != "completed" {
+							t.Fatalf("handoff status mismatch: %v", record)
 						}
 						returned = message
 					}

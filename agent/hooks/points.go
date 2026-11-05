@@ -121,10 +121,21 @@ type RunEndEvent struct {
 
 var RunEnd = corehooks.NewPoint[RunEndEvent, struct{}]("run_end")
 
+// InboxWait pairs a cooperative suspension with admission before resuming.
+// Resume uses the run context, not the mailbox timeout: timing out does not
+// authorize executing beyond the host's concurrency limit.
+type InboxWaitEvent struct {
+	SessionID string
+	Waiting   bool
+}
+
+var InboxWait = corehooks.NewPoint[InboxWaitEvent, struct{}]("inbox_wait").WithErrorPolicy(corehooks.FailClosed)
+
 // SessionEvent lends Deliver only for this execution's lifetime. The owner
 // closes admission before SessionEnd; extensions never own or close the Inbox.
 type SessionEvent struct {
 	ParentToolCallID string
+	TaskID           string
 	Delegation       *types.DelegationDetail
 	Input            string
 	Primary          bool

@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -45,50 +44,37 @@ func consoleBindings(reader ioatools.Reader, space, endpoint string) *consoleapi
 	}
 }
 func commandBindings(reader ioatools.Reader, view consoleapi.View) []*cobra.Command {
-	r := &presentation{view: view, stdout: view.Out, stderr: view.Err}
 	return []*cobra.Command{
 		{
 			Use: "/spaces", Short: "List all spaces",
 			Args: cobra.NoArgs,
 			RunE: func(c *cobra.Command, _ []string) error {
-				ctx := c.Context()
-				client := reader
-				return r.renderIOASpaces(ctx, client)
+				return renderIOASpaces(c.Context(), reader, view)
 			},
 		},
 		{
 			Use: "/messages", Short: "List start messages in a space",
 			Args: cobra.ExactArgs(1), DisableFlagParsing: true,
 			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				client := reader
-				return r.renderIOAMessages(ctx, client, args[0])
+				return renderIOAMessages(c.Context(), reader, view, args[0])
 			},
 		},
 		{
 			Use: "/context", Short: "View message thread/context", Args: cobra.ExactArgs(2),
 			DisableFlagParsing: true,
 			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				fields := args
-				if len(fields) < 2 {
-					return fmt.Errorf("usage: /context <space> <message-id>")
-				}
-				client := reader
-				return RunIOAContext(ctx, client, &ConsoleOptions{}, ConsoleArgs{Space: fields[0], MessageID: fields[1]}, r.stdout, r.stderr)
+				return RunIOAContext(c.Context(), reader, &ConsoleOptions{}, ConsoleArgs{Space: args[0], MessageID: args[1]}, view.Out, view.Err)
 			},
 		},
 		{
 			Use: "/nodes", Short: "List nodes (optionally scoped to a space)", Args: cobra.MaximumNArgs(1),
 			DisableFlagParsing: true,
 			RunE: func(c *cobra.Command, args []string) error {
-				ctx := c.Context()
-				client := reader
 				space := ""
 				if len(args) > 0 {
 					space = args[0]
 				}
-				return r.renderIOANodes(ctx, client, space)
+				return renderIOANodes(c.Context(), reader, view, space)
 			},
 		},
 	}

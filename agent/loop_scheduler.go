@@ -194,10 +194,6 @@ func (s *LoopScheduler) fire(ctx context.Context, state *loopState) {
 		entry.Name, entry.Schedule(), count, entry.Prompt)
 	msg := inbox.NewMessage(inbox.OriginSystem, "user", content)
 	msg.Priority = inbox.PriorityLow
-	msg.Meta = map[string]any{
-		"loop_name":  entry.Name,
-		"fire_count": count,
-	}
 	if err := s.inbox.Push(msg); err != nil {
 		s.log.Warnf("loop=%s fire=%d inbox push failed: %s", entry.Name, count, err)
 	}

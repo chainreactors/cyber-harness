@@ -53,7 +53,7 @@ func TestBackgroundOutputPublishesBoundedCompletionAndOriginalFile(t *testing.T)
 			if !utf8.ValidString(text) || len(text) > 60<<10 {
 				t.Fatalf("unbounded/invalid background preview: %d bytes", len(text))
 			}
-			if message.Meta["type"] == "completion" {
+			if strings.Contains(text, "<session_completion") {
 				completion = text
 			}
 		}
@@ -736,7 +736,7 @@ func TestBashExplicitWaitMovesRunningCommandToBackground(t *testing.T) {
 	foundCompletion := false
 	for !foundCompletion && scoped.Wait(waitCtx) {
 		for _, msg := range scoped.Drain() {
-			if msg.Meta["type"] == "completion" {
+			if strings.Contains(msg.Message.GetContent()[0].GetText().GetText(), "<session_completion") {
 				foundCompletion = true
 			}
 		}
@@ -883,7 +883,7 @@ func TestBashBackgroundMonitorUsesInvocationInbox(t *testing.T) {
 	}
 	receivedCompletion := false
 	for _, msg := range scoped.Drain() {
-		if msg.Meta["type"] == "completion" {
+		if strings.Contains(msg.Message.GetContent()[0].GetText().GetText(), "<session_completion") {
 			receivedCompletion = true
 		}
 	}
@@ -926,7 +926,7 @@ func TestBashBackgroundMonitorDeliversConcurrentCompletions(t *testing.T) {
 	}
 	completions := 0
 	for _, msg := range scoped.Drain() {
-		if msg.Meta["type"] == "completion" {
+		if strings.Contains(msg.Message.GetContent()[0].GetText().GetText(), "<session_completion") {
 			completions++
 		}
 	}

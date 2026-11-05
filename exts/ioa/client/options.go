@@ -1,11 +1,15 @@
 package client
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	service "github.com/chainreactors/cyber/tools/ioa"
 	"github.com/chainreactors/ioa/protocols"
 	"net/url"
+	"os"
+	"runtime"
 	"strings"
 )
 
@@ -35,11 +39,8 @@ func Section() cfg.Section {
 	}}
 }
 
+// ReadOptions resolves the non-nil configuration supplied by the host.
 func ReadOptions(option *cfg.Option) (Options, error) {
-	value := Options{URL: DefaultURL, Space: DefaultSpace}
-	if option == nil {
-		return value, nil
-	}
 	var decoded *Options
 	var err error
 	if option.Resolved != nil {
@@ -58,7 +59,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 	if err != nil {
 		return Options{}, err
 	}
-	value = *decoded
+	value := *decoded
 	if value.NodeName == "" {
 		value.NodeName = option.NodeName
 	}
@@ -76,15 +77,37 @@ type localIdentity struct{ ref protocols.NodeRef }
 func (i localIdentity) IOABinding() protocols.IdentityBinding {
 	return protocols.IdentityBinding{Namespace: "cyber.memory", Subject: i.ref.URI()}
 }
+
+// Active hosts keep their IOA address across restarts. This identity is scoped
+// to the host and state directory; it contains no credentials.
+type activeIdentity string
+
+func (i activeIdentity) IOABinding() protocols.IdentityBinding {
+	return protocols.IdentityBinding{Namespace: "cyber.active", Subject: string(i)}
+}
 func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 	value, err := ReadOptions(option)
 	if err != nil {
 		return nil, err
 	}
-	if option == nil {
-		option = &cfg.Option{}
+	var identity protocols.Identity = localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}
+	if option.Command == cfg.RunModeInbox {
+		directory, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		directory = cfg.InboxStateDir(option, directory)
+		if runtime.GOOS == "windows" {
+			directory = strings.ToLower(directory)
+		}
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256([]byte(hostname + "\x00" + directory))
+		identity = activeIdentity(hex.EncodeToString(digest[:]))
 	}
-	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: localIdentity{ref: protocols.NodeRef{ID: protocols.NewID(), Authority: "memory://cyber"}}}, nil
+	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: identity}, nil
 }
 
 // accessKeyURL folds the configured credential into the endpoint as userinfo.

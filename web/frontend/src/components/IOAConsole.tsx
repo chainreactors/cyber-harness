@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Clock3, GitBranch, Link2, MessageSquare, Network, RefreshCw, UserRound } from 'lucide-react'
 import {
-  GraphPanel,
   HandoffCard,
   MessageContent,
   detectContentType,
@@ -21,6 +20,8 @@ import { cn } from '@cyber/theme'
 import { getIOAOverview, type IOAMessage, type IOAOverview, type IOASpace } from '../api'
 import { usePolling } from '../hooks/usePolling'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
+import { HarnessGraph } from './HarnessGraph'
+import { parseHarness } from '../lib/ioa-harness'
 import { ToolDrawer } from './layout/ToolDrawer'
 
 interface IOAConsoleProps {
@@ -198,7 +199,7 @@ export default function IOAConsole({ open, onClose, initialSpaceID, initialMessa
                 {t('loading')}
               </div>
             ) : thread ? (
-              <GraphPanel
+              <HarnessGraph
                 thread={thread}
                 selectedMessageId={selectedMessageID}
                 onSelectMessage={setSelectedMessageID}
@@ -265,6 +266,7 @@ function MessageInspector({
   const kind = detectContentType(message.content, message.content_type)
   const refs = message.refs?.messages ?? []
   const handoff = kind === 'handoff' ? message.content as unknown as HandoffContent : null
+  const application = parseHarness(message.meta)
 
   return (
     <aside className="min-h-0 overflow-y-auto rounded-lg border border-border bg-card">
@@ -319,6 +321,20 @@ function MessageInspector({
           </div>
         </div>
 
+        {application && (
+          <dl className="space-y-2 border-t border-border pt-3 text-[11px]">
+            {[['Event ID', application.id],
+              ['Source', application.source && Object.entries(application.source).map(([key, value]) => key + '=' + value).join(' · ')],
+              ['Target', application.target && Object.entries(application.target).map(([key, value]) => key + '=' + value).join(' · ')],
+            ].filter(([, value]) => value).map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 break-all font-mono text-[10px]">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
         <div className="border-t border-border pt-4">
           {handoff ? (
             <HandoffCard message={handoff.message} />
@@ -347,7 +363,7 @@ function MessageFrontMatter({
     ? content as Record<string, unknown>
     : null
   const contentType = typeof record?.type === 'string' ? record.type : ''
-  const metaKind = typeof meta?.kind === 'string' ? meta.kind : ''
+  const metaKind = parseHarness(meta)?.event ?? ''
   const metaLabels = Array.isArray(meta?.labels)
     ? meta.labels.filter((label): label is string => typeof label === 'string')
     : []

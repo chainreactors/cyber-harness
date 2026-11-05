@@ -100,6 +100,20 @@ type Config struct {
 // PrimarySessionID identifies the session that receives restored history.
 func (rt *Runtime) PrimarySessionID() string { return rt.primarySessionID }
 
+// TaskConfig returns an execution configuration without borrowing a live
+// parent's conversation or mailbox. Provider selection follows the profile.
+func (rt *Runtime) TaskConfig() (agent.Config, error) {
+	if err := rt.ready(); err != nil {
+		return agent.Config{}, err
+	}
+	value := rt.agentConfig.WithStream(true)
+	current, settings := rt.providers.Current()
+	value.Provider = current
+	value.Model, value.MaxTokens, value.ContextWindow = settings.Model, settings.MaxTokens, settings.ContextWindow
+	value.Lifetime = rt.ctx
+	return value, nil
+}
+
 func (rt *Runtime) Skills() *skills.Store {
 	if rt == nil {
 		return nil
