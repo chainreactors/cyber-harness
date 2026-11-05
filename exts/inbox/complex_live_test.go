@@ -631,7 +631,7 @@ func TestLiveComplexIOAInventoryReplay(t *testing.T) {
 		}
 		originals = append(originals, m)
 	}
-	router, set, connection = open()
+	_, set, connection = open()
 	if connection.Service().Client().NodeID() != node {
 		t.Fatal("offline identity changed")
 	}

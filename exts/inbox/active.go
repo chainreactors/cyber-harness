@@ -623,8 +623,8 @@ func (a *activeRuntime) sendResults() error {
 			return nil
 		}
 		if err = notify(a.ctx, message); err != nil {
-			if a.ctx.Err() != nil {
-				return nil
+			if canceled := a.ctx.Err(); canceled != nil {
+				return canceled
 			}
 			a.agent.Cfg.Logger.Warnf("active result %s delivery will retry: %v", id, err)
 			if _, err = a.store.db.Exec("INSERT OR REPLACE INTO retries(message_key,attempts,due) VALUES(?,1,?)", "outbox:"+id, time.Now().Add(time.Second).UnixMilli()); err != nil {
@@ -647,7 +647,9 @@ func (a *activeRuntime) deliverResults() {
 	defer ticker.Stop()
 	for a.ctx.Err() == nil {
 		if err := a.sendResults(); err != nil {
-			a.fail(err)
+			if a.ctx.Err() == nil {
+				a.fail(err)
+			}
 			return
 		}
 		select {

@@ -107,9 +107,10 @@ func TestInboxHostInputLifecycle(t *testing.T) {
 			defer cancel()
 			var input io.Reader = strings.NewReader("")
 			var pipe *io.PipeReader
-			if scenario == "exit" {
+			switch scenario {
+			case "exit":
 				input = strings.NewReader("/exit\n")
-			} else if scenario == "blocked reader" {
+			case "blocked reader":
 				var writer *io.PipeWriter
 				pipe, writer = io.Pipe()
 				input = pipe

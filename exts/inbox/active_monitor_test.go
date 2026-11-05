@@ -120,7 +120,7 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 		}
 		return f, router.Router(), set
 	}
-	f, router, set := open()
+	_, _, set := open()
 	defer func() { closeActive(t, set) }()
 	send := func(text, task string) protocols.Message {
 		m, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiverID}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "external-feed"}, Target: harness.Address{TaskID: task}}.Meta()})
@@ -142,7 +142,8 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 	closeActive(t, set)
 	// An event produced while the entire host is down is replayed on startup.
 	offline := send("observation while host offline", task)
-	f, router, set = open()
+	f, router, reopened := open()
+	set = reopened
 	m = waitFor(t, ctx, feedback)
 	if m.Meta.TaskID != task || m.Meta.ReplyMessage != first.ID {
 		t.Fatalf("restored task/source=%v", m.Meta)

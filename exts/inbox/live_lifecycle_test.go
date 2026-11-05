@@ -293,7 +293,7 @@ func TestLiveActiveIOAClosedLoop(t *testing.T) {
 		receiver = id
 		return router.Router(), set, connection
 	}
-	router, set, connection := open()
+	_, set, _ := open()
 	defer func() { closeActive(t, set) }()
 	send := func(text, task string) protocols.Message {
 		record := harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "external-live-review"}, Target: harness.Address{TaskID: task}}
@@ -345,9 +345,8 @@ func TestLiveActiveIOAClosedLoop(t *testing.T) {
 	t.Logf("IOA initial->router->wait->followup->same execution->feedback->peer: task=%s execution=%s", task, execution)
 	closeActive(t, set)
 	offline := send("Continue your previous task after host restart. Recall the token from your history; answer exactly RESTORED 73129. Do not use tools.", task)
-	router, set, connection = open()
-	_ = router
-	_ = connection
+	router, reopened, _ := open()
+	set = reopened
 	reply = waitReply(offline.ID, "RESTORED 73129")
 	record, parseErr = harness.Parse(reply.Meta)
 	if parseErr != nil || record == nil || record.Source.TaskID != task || record.Source.SessionID == execution {

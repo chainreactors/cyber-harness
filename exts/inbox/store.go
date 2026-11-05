@@ -225,7 +225,7 @@ func (s *activeStore) routeDone(r *Receipt, targets []string, history []*aop.Mes
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	state, detail := "done", ""
 	if problem != nil {
 		state, detail = "pending", problem.Error()
@@ -326,7 +326,7 @@ func (s *activeStore) enqueue(r *Receipt, id, name, label string) (string, error
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if creating {
 		if _, err = tx.Exec("INSERT OR IGNORE INTO tasks(id,name,label,state,source) VALUES(?,?,?,'queued',?)", id, name, label, body); err != nil {
 			return "", err
@@ -381,7 +381,7 @@ func (s *activeStore) claim(t taskRecord, sessionID string, maxInputs int) ([]ta
 	if err != nil {
 		return nil, nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var data []byte
 	var previous string
 	if err = tx.QueryRow("SELECT history,session_id FROM tasks WHERE id=?", t.ID).Scan(&data, &previous); err != nil {
@@ -466,7 +466,7 @@ func (s *activeStore) complete(t taskRecord, inputs []taskInput, history []*aop.
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	b, err := encodeHistory(history)
 	if err != nil {
 		return err
