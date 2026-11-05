@@ -161,7 +161,7 @@ func sendIOAFromProcess(t *testing.T, p *stdioClient, line string) ioaMessage {
 	if err = json.Unmarshal([]byte(output), &raw); err != nil {
 		t.Fatal(err)
 	}
-	if field(raw, "meta", "source_session_id") != "operator" {
+	if field(raw, "meta", "source", "session_id") != "operator" {
 		t.Fatalf("missing invocation provenance: %v", raw)
 	}
 	return message

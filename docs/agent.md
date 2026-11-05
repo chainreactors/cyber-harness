@@ -26,6 +26,12 @@ aiscan inbox --ioa-url http://127.0.0.1:8765 --space team -p "分析当前待处
 
 向执行实例输入会关联其稳定 task ID；向 Router 输入则重新判断目标。停止 Router 会结束主动宿主。执行实例结束后释放，后续定向消息可恢复该任务历史并创建新实例。任务历史隔离，文件与工作目录共享。`.cyber/active` 保存任务、路由、结果和 IOA 游标；重启须使用相同目录，一个目录只能由一个宿主持有。内部 tmux 随宿主退出；再次启动恢复任务进度，不恢复旧 OS 进程。副作用中断后的核对与来源历史保留限制见[架构说明](architecture.md#inbox-与后台生产者)。
 
+Worker 可单独调用 `inbox_wait` 等待消息；自动等待后台 producer 也使用相同生命周期。等待期间保留原执行和 tmux 工作单元，释放 `max-active` 名额；消息到达或等待超时后，先重新取得名额再继续，避免一批 Worker 同时唤醒突破上限。这是协作式挂起，不会暂停正在运行的 shell 命令或任意 OS 进程。等待执行仍占内存，`max-active` 也不限制 Worker 自行创建的子 Agent 数量。
+
+Worker 完成反馈必须回复原请求者，或交给已有协调任务继续处理；对本地 `subagent_feedback` 选择 `record` 也会进入结果 outbox。普通系统事件和无需继续处理的远端 `task_result` 仍可只记录。发送失败保留 outbox 并在重启后重试。
+
+配置 IOA 后，subagent Session 的开始/结束会自动记为 delegate/return；active inbox 的 Router 每次向 task 或 live Session 投递也会自动写入 IOA handoff 记录，包含输入、来源、目标与稳定 handoff ID。它覆盖 Router 的初次派发、后续纠正和 worker 间转交，无需 agent 再调用 `ioa send`。记录使用现有 SQLite outbox，IOA 不可用时会重试；网络确认丢失时允许重发，使用 handoff ID 识别同一逻辑交接。
+
 ## 交互模式
 
 配置模型后，运行：

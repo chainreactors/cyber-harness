@@ -20,6 +20,7 @@ import (
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	loopext "github.com/chainreactors/cyber/exts/agent"
 	inboxext "github.com/chainreactors/cyber/exts/inbox"
@@ -134,7 +135,7 @@ func TestRepositoryCIResultDeliveryRetryIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	collector := activeSubmit(t, ctx, router, mailbox.NewUserMessage("Collect the next finished build evidence in the release audit."))
-	if m := waitFor(t, ctx, collectorFeedback); m.Meta["status"] != "completed" {
+	if m := waitFor(t, ctx, collectorFeedback); m.Meta.Status != "completed" {
 		t.Fatalf("collector did not start: %v", m.Meta)
 	}
 	producerModel := modelFunc(func(_ context.Context, r *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
@@ -158,7 +159,7 @@ func TestRepositoryCIResultDeliveryRetryIsIdempotent(t *testing.T) {
 		return toolResponse("bash", map[string]any{"command": fmt.Sprintf("cd %s && git rev-parse HEAD > %s && cat %s", quote(root), quote(filepath.Join(dir, "producer-revision.txt")), quote(filepath.Join(dir, "producer-revision.txt"))), "timeout": 10}), nil
 	})
 	_, producer, _, producerSet := activeHost(t, producerModel, inboxext.Config{StateDir: filepath.Join(dir, "producer-state"), Notify: func(callCtx context.Context, m mailbox.Message) error {
-		_, err := sender.Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{connection.Service().Client().NodeID()}}, Meta: map[string]any{"task_id": collector, "feedback_id": m.Message.Id, "kind": "task_result"}})
+		_, err := sender.Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{connection.Service().Client().NodeID()}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.TaskResult, ID: m.Message.Id, Target: harness.Address{TaskID: collector}}.Meta()})
 		if err != nil {
 			return err
 		}
@@ -166,7 +167,7 @@ func TestRepositoryCIResultDeliveryRetryIsIdempotent(t *testing.T) {
 		if sends.Add(1) == 1 {
 			select {
 			case recorded := <-collectorFeedback:
-				if recorded.Meta["task_id"] != collector || recorded.Meta["status"] != "completed" {
+				if recorded.Meta.TaskID != collector || recorded.Meta.Status != "completed" {
 					return fmt.Errorf("collector failed to record result: %v", recorded.Meta)
 				}
 			case <-callCtx.Done():
@@ -183,7 +184,7 @@ func TestRepositoryCIResultDeliveryRetryIsIdempotent(t *testing.T) {
 		t.Fatal("retry did not produce distinct IOA transport message IDs")
 	}
 	feedbackID, retryID := waitFor(t, ctx, feedbackIDs), waitFor(t, ctx, feedbackIDs)
-	if feedbackID != retryID || first.Meta["feedback_id"] != feedbackID || second.Meta["feedback_id"] != feedbackID || first.Meta["message_id"] != first.Message.Id || second.Meta["message_id"] != second.Message.Id {
+	if feedbackID != retryID || first.Meta.FeedbackID != feedbackID || second.Meta.FeedbackID != feedbackID || first.Meta.MessageID != first.Message.Id || second.Meta.MessageID != second.Message.Id {
 		t.Fatalf("transport/result identity was lost: feedback=%s retry=%s first=%v second=%v", feedbackID, retryID, first.Meta, second.Meta)
 	}
 	receipt, err := router.Submit(ctx, second)
@@ -245,11 +246,15 @@ func TestRepositoryCIResultDeliveryRetryIsIdempotent(t *testing.T) {
 		kind    string
 		session string
 	}{{other, "task_result", ""}, {sender, "ci_notice", ""}, {sender, "task_result", "independent-source-session"}} {
-		if _, err := spec.client.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "release-ci-result:" + strings.TrimSpace(string(revision))}, Refs: &protocols.Ref{Nodes: []string{connection.Service().Client().NodeID()}}, Meta: map[string]any{"task_id": collector, "feedback_id": feedbackID, "kind": spec.kind, "source_session_id": spec.session}}); err != nil {
+		event := harness.Message
+		if spec.kind == "task_result" {
+			event = harness.TaskResult
+		}
+		if _, err := spec.client.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "release-ci-result:" + strings.TrimSpace(string(revision))}, Refs: &protocols.Ref{Nodes: []string{connection.Service().Client().NodeID()}}, Meta: harness.Envelope{Version: harness.Version, Event: event, ID: feedbackID, Target: harness.Address{TaskID: collector}, Source: harness.Address{SessionID: spec.session}}.Meta()}); err != nil {
 			t.Fatal(err)
 		}
 		waitFor(t, ctx, wires)
-		if result := waitFor(t, ctx, collectorFeedback); result.Meta["task_id"] != collector || result.Meta["status"] != "completed" {
+		if result := waitFor(t, ctx, collectorFeedback); result.Meta.TaskID != collector || result.Meta.Status != "completed" {
 			t.Fatalf("independent result was suppressed: %v", result.Meta)
 		}
 	}

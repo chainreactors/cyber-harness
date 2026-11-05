@@ -26,7 +26,7 @@ type storedMessage struct {
 	Priority    mailbox.Priority
 	Interrupt   bool
 	Attachments []mailbox.Attachment
-	Meta        map[string]any
+	Meta        mailbox.Metadata
 	CreatedAt   time.Time
 }
 
@@ -118,8 +118,8 @@ func openActiveStore(dir string) (_ *activeStore, err error) {
 	if err = s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return nil, err
 	}
-	if version > 1 {
-		return nil, fmt.Errorf("unsupported active state schema %d (maximum 1)", version)
+	if version != 0 && version != 2 {
+		return nil, fmt.Errorf("unsupported active state schema %d: Harness protocol requires schema 2; use a new state directory", version)
 	}
 	_, err = s.db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,key TEXT UNIQUE NOT NULL,id TEXT NOT NULL,body BLOB NOT NULL,state TEXT NOT NULL DEFAULT 'pending',targets TEXT NOT NULL DEFAULT '[]',error TEXT NOT NULL DEFAULT '');
@@ -131,7 +131,7 @@ func openActiveStore(dir string) (_ *activeStore, err error) {
  CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value BLOB NOT NULL);
  CREATE TABLE IF NOT EXISTS retries(message_key TEXT PRIMARY KEY,attempts INTEGER NOT NULL,due INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS execution_events(session_id TEXT NOT NULL,seq INTEGER NOT NULL,event BLOB NOT NULL,PRIMARY KEY(session_id,seq));
- PRAGMA user_version=1;
+ PRAGMA user_version=2;
  UPDATE messages SET state='pending' WHERE state='routing';
  UPDATE tasks SET state='interrupted' WHERE state='running';
  UPDATE inputs SET state='pending' WHERE state='running';
@@ -352,11 +352,8 @@ func (s *activeStore) enqueue(r *Receipt, id, name, label string) (string, error
 	input := cloneMessage(r.message)
 	inputID := sha256.Sum256([]byte(key))
 	input.Message.Id = "input-" + hex.EncodeToString(inputID[:])
-	if input.Meta == nil {
-		input.Meta = make(map[string]any)
-	}
-	if input.Meta["message_id"] == nil {
-		input.Meta["message_id"] = r.ID
+	if input.Meta.MessageID == "" {
+		input.Meta.MessageID = r.ID
 	}
 	body, err = encodeMessage(input)
 	if err != nil {

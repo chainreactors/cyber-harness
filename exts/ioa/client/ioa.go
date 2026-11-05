@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/ioa/protocols"
 )
 
@@ -115,9 +116,6 @@ func (e *CollaborationExtension) switchSpace(ctx context.Context, space string) 
 }
 
 func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Message) error {
-	if _, recorded := msg.Meta["subagent"]; recorded && msg.ContentType == "handoff" {
-		return nil
-	}
 	node := e.service.Client().NodeID()
 	if len(msg.Refs.Nodes) > 0 {
 		targeted := false
@@ -130,80 +128,140 @@ func (e *CollaborationExtension) deliver(ctx context.Context, msg protocols.Mess
 			return nil
 		}
 	}
-	target, _ := msg.Meta["target_session_id"].(string)
+	envelope, err := collaboration.Parse(msg.Meta)
+	if err != nil {
+		// Invalid application data is terminal for this record. Keep it in IOA for
+		// inspection and surface the error, but do not let it poison durable replay.
+		e.Service().ReportError(fmt.Errorf("reject IOA message %s: %w", msg.ID, err))
+		return nil
+	}
+	if envelope == nil {
+		return nil // Other applications' IOA records are not Harness work.
+	}
+	switch envelope.Event {
+	case collaboration.InboxRoute, collaboration.SubagentDelegate, collaboration.SubagentReturn:
+		return nil // Recorded facts are never executable input.
+	}
+	if envelope.Target.NodeID != "" && envelope.Target.NodeID != node {
+		return nil
+	}
+	target := envelope.Target.SessionID
 	if msg.Sender == node && target == "" {
 		return nil
 	}
-	e.mu.Lock()
-	if e.seen[msg.ID] {
-		e.mu.Unlock()
-		return nil
-	}
-	input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg))
-	input.Interrupt, _ = msg.Meta["interrupt"].(bool)
-	input.Message.Id = msg.ID
-	input.Meta = map[string]any{"sender": msg.Sender, "message_id": msg.ID, "source_session_id": msg.Meta["source_session_id"], "target_session_id": target, "space": msg.SpaceID, "task_id": msg.Meta["task_id"], "kind": msg.Meta["kind"], "feedback_id": msg.Meta["feedback_id"], "feedback_chain": msg.Meta["feedback_chain"], "source_task_id": msg.Meta["source_task_id"]}
-	var route *sessionRoute
-	if target != "" {
-		route = e.routes[target]
-		if route == nil {
-			for _, candidate := range e.routes {
-				if candidate.start.AgentName == target && candidate.start.Deliver != nil {
-					if route != nil {
-						e.mu.Unlock()
-						return fmt.Errorf("IOA session name %q is ambiguous; use its Session ID", target)
+	for {
+		e.mu.Lock()
+		if e.seen[msg.ID] {
+			e.mu.Unlock()
+			return nil
+		}
+		if pending := e.inflight[msg.ID]; pending != nil {
+			e.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-pending:
+				continue
+			}
+		}
+		pending := make(chan struct{})
+		e.inflight[msg.ID] = pending
+		finish := func(err error) {
+			if err == nil {
+				e.markSeen(msg.ID)
+			}
+			delete(e.inflight, msg.ID)
+			close(pending)
+		}
+		input := inbox.NewMessage(inbox.OriginPeer, "user", formatIOAMessage(msg, envelope))
+		input.Interrupt = envelope.Interrupt
+		input.Message.Id = msg.ID
+		kind := ""
+		if envelope.Event == collaboration.TaskResult {
+			kind = "task_result"
+		}
+		input.Meta = inbox.Metadata{
+			Sender: msg.Sender, MessageID: msg.ID, SourceSessionID: envelope.Source.SessionID,
+			TargetSessionID: target, Space: msg.SpaceID, TaskID: envelope.Target.TaskID,
+			Kind: kind, FeedbackID: envelope.ID,
+			FeedbackChain: append([]string(nil), envelope.Chain...), SourceTaskID: envelope.Source.TaskID,
+		}
+		var route *sessionRoute
+		if target != "" {
+			route = e.routes[target]
+			if route == nil {
+				for _, candidate := range e.routes {
+					if candidate.start.AgentName == target && candidate.start.Deliver != nil {
+						if route != nil {
+							err := fmt.Errorf("IOA session name %q is ambiguous; use its Session ID", target)
+							finish(err)
+							e.mu.Unlock()
+							return err
+						}
+						route = candidate
 					}
-					route = candidate
 				}
 			}
-		}
-	} else if e.options.Receive == nil {
-		for _, candidate := range e.routes {
-			if candidate.start.Primary {
-				route = candidate
-				break
-			}
-		}
-		if route == nil {
-			count := 0
+		} else if e.options.Receive == nil {
 			for _, candidate := range e.routes {
-				if candidate.start.Delegation == nil {
+				if candidate.start.Primary {
 					route = candidate
-					count++
+					break
 				}
 			}
-			if count != 1 {
-				route = nil
+			if route == nil {
+				count := 0
+				for _, candidate := range e.routes {
+					if candidate.start.Delegation == nil {
+						route = candidate
+						count++
+					}
+				}
+				if count != 1 {
+					route = nil
+				}
 			}
 		}
-	}
-	if (target != "" && e.options.LoadCursor == nil || e.options.Receive == nil) && (route == nil || route.start.Deliver == nil) {
-		e.mu.Unlock()
-		return fmt.Errorf("no active IOA receiver for session %q", target)
-	}
-	var deliver func(context.Context, inbox.Message) error
-	if receive := e.options.Receive; receive != nil {
-		// Explicit addressing is validated above without starting a model turn.
-		// Unaddressed messages are selected by the router, not a default route.
-		// Admission and deduplication share the gate; failure stays retryable.
-		if err := receive(ctx, input); err != nil {
+		if (target != "" && e.options.LoadCursor == nil || e.options.Receive == nil) && (route == nil || route.start.Deliver == nil) {
+			err := fmt.Errorf("no active IOA receiver for session %q", target)
+			finish(err)
 			e.mu.Unlock()
 			return err
 		}
-	} else {
-		deliver = route.start.Deliver
+		var deliver func(context.Context, inbox.Message) error
+		if e.options.Receive == nil {
+			deliver = route.start.Deliver
+		}
+		e.mu.Unlock()
+		if receive := e.options.Receive; receive != nil {
+			// Explicit addressing is validated above; unaddressed messages go to
+			// the router, which chooses a destination without a default route.
+			if err := receive(ctx, input); err != nil {
+				e.mu.Lock()
+				finish(err)
+				e.mu.Unlock()
+				return err
+			}
+		} else if err := deliver(ctx, input); err != nil {
+			e.mu.Lock()
+			finish(err)
+			e.mu.Unlock()
+			return err
+		}
+		e.mu.Lock()
+		finish(nil)
+		e.mu.Unlock()
+		return nil
 	}
-	e.seen[msg.ID] = true
-	e.recent = append(e.recent, msg.ID)
+}
+
+func (e *CollaborationExtension) markSeen(id string) {
+	e.seen[id] = true
+	e.recent = append(e.recent, id)
 	if len(e.recent) > 1024 {
 		delete(e.seen, e.recent[0])
 		e.recent = e.recent[1:]
 	}
-	e.mu.Unlock()
-	if deliver == nil {
-		return nil
-	}
-	return deliver(ctx, input)
 }
 
 // Subscribe before replaying; the persisted cursor only advances through
@@ -262,14 +320,13 @@ func (e *CollaborationExtension) replay(ctx context.Context, space string) error
 	}
 }
 
-func formatIOAMessage(msg protocols.Message) string {
+func formatIOAMessage(msg protocols.Message, envelope *collaboration.Envelope) string {
 	text, ok := msg.Content["text"].(string)
 	if !ok {
 		data, _ := json.Marshal(msg.Content)
 		text = string(data)
 	}
-	source, _ := msg.Meta["source_session_id"].(string)
-	target, _ := msg.Meta["target_session_id"].(string)
+	source, target := envelope.Source.SessionID, envelope.Target.SessionID
 	if source != "" || target != "" {
 		text = fmt.Sprintf("[IOA source_session_id=%s target_session_id=%s]\n%s", source, target, text)
 	}

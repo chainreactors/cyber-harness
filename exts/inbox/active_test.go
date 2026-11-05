@@ -46,27 +46,28 @@ func activeDecision(request *provider.ChatCompletionRequest) (*provider.ChatComp
 	input := lastInput(request)
 	metaText := strings.Split(strings.TrimPrefix(input, "Current routing context:\n"), "\nOriginal message:\n")[0]
 	var routing struct {
-		Meta map[string]any `json:"meta"`
+		Meta mailbox.Metadata `json:"meta"`
 	}
 	if err := json.Unmarshal([]byte(metaText), &routing); err != nil {
 		return response("invalid routing metadata: " + err.Error()), true
 	}
-	if routing.Meta["kind"] == "subagent_feedback" {
+	if routing.Meta.Kind == "subagent_feedback" {
 		return toolResponse("inbox_route", map[string]any{"action": "reply"}), true
 	}
-	if task, _ := routing.Meta["task_id"].(string); task != "" {
+	if task := routing.Meta.TaskID; task != "" {
 		return toolResponse("inbox_route", map[string]any{"task_id": task}), true
 	}
 	return toolResponse("inbox_route", map[string]any{"new_task": map[string]any{}}), true
 }
 
-func activeHost(t *testing.T, p provider.Provider, config inboxext.Config) (*apptest.Fixture, *inboxext.Router, *session.Runtime, *extension.Set) {
+func activeHost(t *testing.T, p provider.Provider, config inboxext.Config, extra ...extension.Extension) (*apptest.Fixture, *inboxext.Router, *session.Runtime, *extension.Set) {
 	t.Helper()
 	f := apptest.NewFixture(t, nil, nil)
 	f.Providers.Set(p, provider.ProviderConfig{Model: "scenario", ContextWindow: 200000})
 	router := inboxext.New(config)
 	sessions := sessionext.New(session.Config{})
 	entries := append(apptest.Entries(t, f), promptext.New(), loopext.New(agent.StandardLoop{}), subagentext.New(), sessions, subagentext.NewTools(), router)
+	entries = append(entries, extra...)
 	set := hosttest.Load(t, t.Context(), entries...)
 	return f, router.Router(), sessions.Runtime(), set
 }
@@ -112,7 +113,7 @@ func TestActiveHistoryDedupAndRestart(t *testing.T) {
 	initial.Message.Id = "initial"
 	task := activeSubmit(t, ctx, router, initial)
 	first := waitFor(t, ctx, requests)
-	if m := waitFor(t, ctx, completed); m.Meta["task_id"] != task {
+	if m := waitFor(t, ctx, completed); m.Meta.TaskID != task {
 		t.Fatalf("wrong feedback: %v", m.Meta)
 	}
 	if err := router.SaveCursor("test-feed", "cursor-7"); err != nil {
@@ -136,7 +137,7 @@ func TestActiveHistoryDedupAndRestart(t *testing.T) {
 	}
 	next := mailbox.NewUserMessage("continue alpha")
 	next.Message.Id = "initial" // scoped IDs from different senders are distinct inputs
-	next.Meta = map[string]any{"task_id": task, "sender": "second-source"}
+	next.Meta = mailbox.Metadata{TaskID: task, Sender: "second-source"}
 	activeSubmit(t, ctx, router, next)
 	restored := waitFor(t, ctx, requests)
 	if restored.SessionID == first.SessionID {
@@ -194,7 +195,7 @@ func TestActiveBoundedConcurrencyAndCorrection(t *testing.T) {
 	correction := mailbox.NewUserMessage("correct the first task")
 	correction.Interrupt = true
 	correction.Priority = mailbox.PriorityHigh
-	correction.Meta = map[string]any{"task_id": task}
+	correction.Meta = mailbox.Metadata{TaskID: task}
 	activeSubmit(t, ctx, router, correction)
 	if text := waitFor(t, ctx, started); !strings.Contains(text, "correct the first") {
 		t.Fatalf("correction=%s", text)
@@ -220,10 +221,10 @@ func TestActiveRetryFairnessAndFeedbackCycle(t *testing.T) {
 				if feedbackAttempts.Add(1) == 1 {
 					text := strings.Split(strings.TrimPrefix(lastInput(r), "Current routing context:\n"), "\nOriginal message:\n")[0]
 					var value struct {
-						Meta map[string]any `json:"meta"`
+						Meta mailbox.Metadata `json:"meta"`
 					}
 					_ = json.Unmarshal([]byte(text), &value)
-					return toolResponse("inbox_route", map[string]any{"task_id": value.Meta["task_id"]}), nil
+					return toolResponse("inbox_route", map[string]any{"task_id": value.Meta.TaskID}), nil
 				}
 				if r.Messages[len(r.Messages)-1].Role == "tool" && feedbackAttempts.Load() == 2 {
 					return toolResponse("inbox_route", map[string]any{"action": "reply"}), nil
@@ -290,7 +291,7 @@ func TestActiveCancellationStopsOwnedBackgroundJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := waitFor(t, ctx, completed)
-	if result.Meta["status"] != "canceled" {
+	if result.Meta.Status != "canceled" {
 		t.Fatalf("status=%v", result.Meta)
 	}
 	for _, info := range f.Shell.Manager().List() {
@@ -298,7 +299,7 @@ func TestActiveCancellationStopsOwnedBackgroundJobs(t *testing.T) {
 			t.Fatalf("execution left owned process running: %+v", info)
 		}
 	}
-	if _, err := rt.RunSession(ctx, result.Meta["execution_id"].(string), session.RunInput{Continue: true}); err == nil {
+	if _, err := rt.RunSession(ctx, result.Meta.ExecutionID, session.RunInput{Continue: true}); err == nil {
 		t.Fatal("finished execution was not released")
 	}
 }
@@ -377,10 +378,10 @@ func TestActiveTmuxWorkerFollowupAndCancellation(t *testing.T) {
 	}
 	for {
 		feedback := waitFor(t, ctx, completed)
-		if feedback.Meta["task_id"] != task {
+		if feedback.Meta.TaskID != task {
 			t.Fatalf("operator created an unrelated task: %v", feedback.Meta)
 		}
-		if feedback.Meta["status"] == "canceled" {
+		if feedback.Meta.Status == "canceled" {
 			break
 		}
 	}
@@ -416,7 +417,7 @@ func TestActiveOutboxSurvivesRestart(t *testing.T) {
 	_, _, _, set = activeHost(t, p, inboxext.Config{StateDir: dir, Notify: func(_ context.Context, m mailbox.Message) error { delivered <- m; return nil }})
 	defer closeActive(t, set)
 	m := waitFor(t, ctx, delivered)
-	if workers.Load() != 1 || m.Meta["task_id"] != task || provider.MessageText(m.Message) != "durable result" {
+	if workers.Load() != 1 || m.Meta.TaskID != task || provider.MessageText(m.Message) != "durable result" {
 		t.Fatalf("reexecuted task or lost result: workers=%d result=%+v", workers.Load(), m)
 	}
 }

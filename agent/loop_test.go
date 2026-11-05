@@ -1209,7 +1209,6 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 		tail := sessMgr.PeekOrEmpty(info.ID, 20)
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
 			terminaltool.FormatCompletion(info, tail))
-		msg.Meta = map[string]any{"session_id": info.ID}
 		ib.Push(msg)
 	})
 
@@ -1276,58 +1275,6 @@ func TestSessionCompletionInjectedIntoAgentLoop(t *testing.T) {
 			contents = append(contents, provider.MessageText(m))
 		}
 		t.Fatalf("turn 2 missing session_completion message.\nMessages:\n%s", strings.Join(contents, "\n---\n"))
-	}
-}
-
-func TestSessionCompletionMetadata(t *testing.T) {
-	ib := inbox.NewBuffered(4)
-	sessMgr := procbus.NewManager()
-	sessMgr.SetOnDone(func(info proc.Info) {
-		tail := sessMgr.PeekOrEmpty(info.ID, 20)
-		msg := inbox.NewMessage(inbox.OriginSession, "user",
-			terminaltool.FormatCompletion(info, tail))
-		msg.Meta = map[string]any{
-			"session_id":   info.ID,
-			"session_name": info.Name,
-			"exit_code":    info.ExitStatus(),
-		}
-		ib.Push(msg)
-	})
-
-	dir := t.TempDir()
-	_, err := sessMgr.Start(t.Context(), proc.Spec{Name: "test-session", Command: "echo done", Timeout: 10 * time.Second},
-		proc.TTY(proc.ProcOptions{Line: "echo done", Dir: dir}))
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer waitCancel()
-	if !ib.Wait(waitCtx) {
-		t.Fatal("timed out waiting for session completion")
-	}
-
-	received := ib.Drain()
-	if len(received) == 0 {
-		t.Fatal("expected at least 1 inbox message from session completion")
-	}
-
-	msg := received[0]
-	if msg.Origin != inbox.OriginSession {
-		t.Errorf("origin = %q, want %q", msg.Origin, inbox.OriginSession)
-	}
-	if msg.Meta["session_name"] != "test-session" {
-		t.Errorf("session_name = %v, want test-session", msg.Meta["session_name"])
-	}
-	if msg.Meta["exit_code"] != 0 {
-		t.Errorf("exit_code = %v, want 0", msg.Meta["exit_code"])
-	}
-
-	cms := msg.ToMessages()
-	if len(cms) != 1 {
-		t.Fatalf("expected 1 chat message, got %d", len(cms))
-	}
-	if !strings.Contains(provider.MessageText(cms[0]), "session_completion") {
-		t.Errorf("chat message should contain session_completion XML, got: %s", provider.MessageText(cms[0]))
 	}
 }
 

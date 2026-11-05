@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	peerclient "github.com/chainreactors/ioa/client"
 	"github.com/chainreactors/ioa/protocols"
 	ioaserver "github.com/chainreactors/ioa/server"
@@ -198,7 +199,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 		t.Helper()
 		wait(done, log, func(string) bool {
 			var n int
-			return db.QueryRow("SELECT count(*) FROM outbox WHERE state='sent'").Scan(&n) == nil && n == count
+			return db.QueryRow("SELECT count(*) FROM outbox WHERE state='sent'").Scan(&n) == nil && n >= count
 		})
 	}
 	if _, err := io.WriteString(input, "e2e-alpha\ne2e-beta\n!tmux ls\n"); err != nil {
@@ -217,7 +218,24 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if _, err := fmt.Fprintf(input, "!tmux capture-pane -t %s --full\n", router[1]); err != nil {
 		t.Fatal(err)
 	}
-	wait(done, log, func(s string) bool { return strings.Contains(s, "routed") })
+	for {
+		b, _ := os.ReadFile(log)
+		if strings.Contains(string(b), "routed") {
+			break
+		}
+		if _, err := fmt.Fprintf(input, "!tmux capture-pane -t %s --full\n", router[1]); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("CLI exited before router output was visible: %v\n%s", err, b)
+		case err := <-failures:
+			t.Fatal(err)
+		case <-ctx.Done():
+			t.Fatalf("router output timed out: %v\n%s", ctx.Err(), b)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	nodes, err := monitor.ListNodes(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -231,27 +249,63 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if receiver == "" {
 		t.Fatal("CLI inbox did not register its IOA identity")
 	}
-	request, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "e2e-delta"}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: map[string]any{"source_session_id": "release-monitor"}})
+	request, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "e2e-delta"}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "release-monitor"}}.Meta()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitCompleted(4)
-	transcript, err := monitor.ReadPublic(ctx, space.ID, protocols.ReadOptions{All: true})
-	if err != nil {
-		t.Fatal(err)
+	var transcript []protocols.Message
+	for {
+		transcript, err = monitor.ReadPublic(ctx, space.ID, protocols.ReadOptions{All: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		results := 0
+		for _, message := range transcript {
+			record, parseErr := harness.Parse(message.Meta)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if record != nil && record.Event == harness.TaskResult {
+				results++
+			}
+		}
+		if results > 0 {
+			break
+		}
+		select {
+		case err := <-done:
+			b, _ := os.ReadFile(log)
+			t.Fatalf("CLI exited before IOA feedback arrived: %v\n%s", err, b)
+		case err := <-failures:
+			t.Fatal(err)
+		case <-ctx.Done():
+			t.Fatalf("IOA feedback timed out: %v; transcript=%v", ctx.Err(), transcript)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	results := 0
+	handoffs := 0
 	for _, message := range transcript {
-		if message.Meta["kind"] != "task_result" {
+		record, parseErr := harness.Parse(message.Meta)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		if record == nil {
+			continue
+		}
+		if record.Event == harness.InboxRoute {
+			handoffs++
+		}
+		if record.Event != harness.TaskResult {
 			continue
 		}
 		results++
-		chain, ok := message.Meta["feedback_chain"].([]any)
+		chain := record.Chain
 		var execution string
-		if err := db.QueryRow("SELECT session_id FROM tasks WHERE id=?", message.Meta["source_task_id"]).Scan(&execution); err != nil {
+		if err := db.QueryRow("SELECT session_id FROM tasks WHERE id=?", record.Source.TaskID).Scan(&execution); err != nil {
 			t.Fatal(err)
 		}
-		if !ok || len(chain) != 1 || chain[0] != message.Meta["source_task_id"] || message.Meta["source_session_id"] != execution || message.Meta["target_session_id"] != "release-monitor" || message.Meta["feedback_id"] != "feedback-"+execution {
+		if len(chain) != 1 || chain[0] != record.Source.TaskID || record.Source.SessionID != execution || record.Target.SessionID != "release-monitor" || record.ID != "feedback-"+execution {
 			t.Fatalf("CLI result lost execution identity or feedback ancestry: %v", message.Meta)
 		}
 		if len(message.Refs.Nodes) != 1 || message.Refs.Nodes[0] != monitor.NodeID() || len(message.Refs.Messages) != 1 || message.Refs.Messages[0] != request.ID {
@@ -260,6 +314,9 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	}
 	if results != 1 {
 		t.Fatalf("external check received %d results, want one", results)
+	}
+	if handoffs < 4 {
+		t.Fatalf("IOA recorded %d router handoffs, want at least 4", handoffs)
 	}
 	secondInput, secondLog, secondDone := start("competing", "5")
 	_ = secondInput.Close()

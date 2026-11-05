@@ -12,6 +12,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	provider "github.com/chainreactors/cyber/agent/provider"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/operation"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	"github.com/chainreactors/cyber/pkg/testutil/hosttest"
@@ -237,7 +238,8 @@ func TestSendPositionalRecipientWithJSON(t *testing.T) {
 	err := findSubCmd(t, cmds, "send").Execute(context.Background(), []string{
 		"nosuchproto", "--content", `{"content":"x"}`,
 	})
-	if err != nil || client.lastSentBody.Meta["target_session_id"] != "nosuchproto" {
+	record, parseErr := harness.Parse(client.lastSentBody.Meta)
+	if err != nil || parseErr != nil || record == nil || record.Target.SessionID != "nosuchproto" {
 		t.Fatalf("expected positional recipient, got: %v", err)
 	}
 }
@@ -745,7 +747,7 @@ func TestSendAddsSessionProvenance(t *testing.T) {
 	defer resource.Close(context.Background())
 	commands := resource.Service.Commands()
 	ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{SessionID: "source"})
-	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"--target-session", "child", "--content", `{"text":"hello"}`, "--meta", `{"source_session_id":"forged","target_session_id":"wrong"}`}); err != nil {
+	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"--target-session", "child", "--content", `{"text":"hello"}`, "--meta", `{"version":99,"event":"task.result","id":"forged","source":{"task_id":"forged","session_id":"forged"},"target":{"session_id":"wrong"},"interrupt":true,"chain":["cycle"],"agent":{"name":"forged"},"status":"completed","call_id":"forged","other.app":{"tag":"preserved"}}`}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
@@ -753,17 +755,25 @@ func TestSendAddsSessionProvenance(t *testing.T) {
 		t.Fatalf("messages: %v %v", messages, err)
 	}
 	m := messages[0]
-	if m.Meta["source_session_id"] != "source" || m.Meta["target_session_id"] != "child" || len(m.Refs.Nodes) != 1 || m.Refs.Nodes[0] != nodeID {
+	record, parseErr := harness.Parse(m.Meta)
+	if parseErr != nil || record == nil || record.Event != harness.Message || record.ID == "" || record.ID == "forged" || record.Source.SessionID != "source" || record.Target.SessionID != "child" || len(m.Meta) != 6 || m.Meta["other.app"] == nil || len(m.Refs.Nodes) != 1 || m.Refs.Nodes[0] != nodeID {
 		t.Fatalf("provenance: %#v", m)
 	}
-	if m.Meta["interrupt"] != nil {
+	if record.Interrupt {
 		t.Fatal("ordinary send requests interruption")
+	}
+	if record.Agent != nil || record.Status != "" || record.CallID != "" || len(record.Chain) != 0 || record.Source.TaskID != "" {
+		t.Fatalf("CLI metadata forged automatic lifecycle fields: %#v", record)
 	}
 	if err := findSubCmd(t, commands, "send").Execute(ctx, []string{"handoff", "--target-session=child", "--interrupt", "--title", "task", "--message", "work"}); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = resource.Service.Client().Read(ctx, resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
-	if err != nil || len(messages) != 2 || messages[1].Meta["source_session_id"] != "source" || messages[1].Meta["interrupt"] != true {
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages: %v %v", messages, err)
+	}
+	record, parseErr = harness.Parse(messages[1].Meta)
+	if parseErr != nil || record == nil || record.Source.SessionID != "source" || !record.Interrupt {
 		t.Fatalf("typed send: %v %v", messages, err)
 	}
 }
@@ -810,8 +820,11 @@ func TestSendShortForm(t *testing.T) {
 				t.Fatalf("messages: %v %v", messages, err)
 			}
 			m := messages[0]
-			urgent, _ := m.Meta["interrupt"].(bool)
-			if m.Content["text"] != tt.text || m.Meta["target_session_id"] != tt.args[0] || m.Meta["source_session_id"] != "black" || urgent != tt.interrupt {
+			record, err := harness.Parse(m.Meta)
+			if err != nil || record == nil {
+				t.Fatalf("protocol: %v", err)
+			}
+			if m.Content["text"] != tt.text || record.Target.SessionID != tt.args[0] || record.Source.SessionID != "black" || record.Interrupt != tt.interrupt {
 				t.Fatalf("wrong message: %#v", m)
 			}
 		})
@@ -829,7 +842,11 @@ func TestSendProtocolBooleanAndHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := resource.Service.Client().Read(t.Context(), resource.Service.ReceiveSpace(), protocols.ReadOptions{All: true})
-	if err != nil || len(rows) != 1 || rows[0].Meta["interrupt"] != true || rows[0].Content["content"] != "--interrupt" {
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows: %v %v", rows, err)
+	}
+	record, parseErr := harness.Parse(rows[0].Meta)
+	if parseErr != nil || record == nil || !record.Interrupt || rows[0].Content["content"] != "--interrupt" {
 		t.Fatalf("protocol flags: %v %v", rows, err)
 	}
 	if err := command.Execute(t.Context(), []string{"handoff", "--help"}); err != nil {

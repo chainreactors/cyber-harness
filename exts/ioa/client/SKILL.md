@@ -16,4 +16,6 @@ The configured space is already joined. Every sent message stays in its shared h
 
 Names must be unique among active Sessions on the addressed node; IDs take precedence. A saved message is not a delivery receipt. Finished child tasks cannot receive more messages. Initial subagent dispatch and final results are recorded automatically; do not duplicate them.
 
+CLI sends and automatic lifecycle records use direct meta.version, meta.event, meta.id, meta.source and meta.target fields. Read delegation targets from meta.target.session_id and reply sources from meta.source.session_id. Do not invent protocol fields or manually duplicate automatic records. Explicit message references stay in refs.messages. Unrelated dynamic metadata keys remain available; records without meta.event do not execute.
+
 Run `ioa` for help. For cross-node delivery, JSON or typed messages, see `cyber://skills/cyber/okf/runtime/ioa-send.md`. For scan findings, see `cyber://skills/cyber/okf/runtime/ioa-finding.md`.

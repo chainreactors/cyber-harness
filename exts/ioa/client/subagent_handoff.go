@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent/hooks"
+	mailbox "github.com/chainreactors/cyber/agent/inbox"
+	"github.com/chainreactors/cyber/agent/provider"
+	"github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/types"
 	"github.com/chainreactors/ioa/protocols"
 )
@@ -36,6 +39,11 @@ func (e *CollaborationExtension) sessionStart(ctx context.Context, ev hooks.Sess
 	if ev.Delegation != nil {
 		msg, err := e.service.Client().Send(ctx, space, handoffBody(ev, "delegate", "delegated", ""))
 		if err != nil {
+			e.mu.Lock()
+			if e.routes[ev.SessionID] == route {
+				delete(e.routes, ev.SessionID)
+			}
+			e.mu.Unlock()
 			return struct{}{}, e.recordError(err)
 		}
 		e.mu.Lock()
@@ -69,21 +77,61 @@ func (e *CollaborationExtension) sessionEnd(ctx context.Context, ev hooks.Sessio
 	return struct{}{}, e.recordError(err)
 }
 
+// RecordInboxHandoff writes a router-to-agent transfer to the same IOA handoff
+// history used by SessionStart/SessionEnd. The stable application ID correlates
+// retries; source IOA messages are referenced rather than copied as new input.
+func (e *CollaborationExtension) RecordInboxHandoff(ctx context.Context, message mailbox.Message) error {
+	if e.service == nil || message.Message == nil {
+		return fmt.Errorf("IOA inbox handoff recorder is unavailable")
+	}
+	space := message.Meta.Space
+	if space == "" {
+		space = e.service.ReceiveSpace()
+	}
+	inputID := message.Meta.MessageID
+	record := message.Meta.Record
+	if record == nil || record.Event != collaboration.InboxRoute {
+		return fmt.Errorf("IOA inbox route record is missing")
+	}
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	targetName := record.Target.SessionID
+	if targetName == "" {
+		targetName = record.Target.TaskID
+	}
+	if record.Agent != nil && record.Agent.Name != "" {
+		targetName = record.Agent.Name
+	}
+	content := map[string]any{
+		"title":   fmt.Sprintf("Inbox handoff to %q", targetName),
+		"message": provider.MessageText(message.Message),
+	}
+	body := protocols.SendMessage{ContentType: "handoff", Content: content, Meta: record.Meta()}
+	if inputID != "" && message.Meta.Space == space {
+		body.Refs = &protocols.Ref{Messages: []string{inputID}}
+	}
+	_, err := e.service.Client().Send(ctx, space, body)
+	return err
+}
+
 func handoffBody(ev hooks.SessionEvent, phase, status, ref string) protocols.SendMessage {
 	detail := ev.Delegation
-	body := protocols.SendMessage{ContentType: "handoff", Content: map[string]any{}, Meta: map[string]any{
-		"source_session_id": ev.ParentID,
-		"subagent": map[string]any{
-			"phase": phase, "status": status, "name": ev.AgentName, "type": detail.AgentType, "mode": handoffMode(detail), "model": ev.Model,
-			"parent_session_id": ev.ParentID, "parent_tool_call_id": ev.ParentToolCallID, "session_id": ev.SessionID,
-		},
-	}}
+	record := collaboration.Envelope{
+		Version: collaboration.Version, Event: collaboration.SubagentDelegate,
+		ID: "delegate-" + ev.SessionID, Status: status, CallID: ev.ParentToolCallID,
+		Source: collaboration.Address{SessionID: ev.ParentID},
+		Target: collaboration.Address{TaskID: ev.TaskID, SessionID: ev.SessionID},
+		Agent:  &collaboration.Agent{Name: ev.AgentName, Type: detail.AgentType, Mode: handoffMode(detail), Model: ev.Model},
+	}
+	body := protocols.SendMessage{ContentType: "handoff", Content: map[string]any{}}
 	if phase == "delegate" {
 		body.Content["title"] = fmt.Sprintf("Delegate to subagent %q", ev.AgentName)
 		body.Content["message"] = detail.Task
 		body.Content["input"] = ev.Input
 	} else {
-		body.Meta["source_session_id"] = ev.SessionID
+		record.Event, record.ID = collaboration.SubagentReturn, "return-"+ev.SessionID
+		record.Source, record.Target = record.Target, record.Source
 		body.Content["title"] = fmt.Sprintf("Return from subagent %q (%s)", ev.AgentName, status)
 		body.Content["message"] = ev.Output
 		if ev.Err != nil {
@@ -91,6 +139,7 @@ func handoffBody(ev hooks.SessionEvent, phase, status, ref string) protocols.Sen
 		}
 		body.Refs = &protocols.Ref{Messages: []string{ref}}
 	}
+	body.Meta = record.Meta()
 	return body
 }
 

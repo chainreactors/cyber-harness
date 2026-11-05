@@ -80,7 +80,7 @@ func TestBackgroundCompletionReportsErrorWithoutResult(t *testing.T) {
 			closed(session.Outcome{Started: true, Err: errors.New("child failed before producing output")})
 			closed(session.Outcome{Started: true, Err: errors.New("duplicate")})
 			messages := ib.Drain()
-			if len(messages) != 1 || messages[0].Meta["status"] != "failed" || !strings.Contains(provider.MessageText(messages[0].Message), "child failed before producing output") || ib.ActiveProducers() != 0 || tool.list() != "No subagents running." {
+			if len(messages) != 1 || !strings.Contains(provider.MessageText(messages[0].Message), `status="failed"`) || !strings.Contains(provider.MessageText(messages[0].Message), "child failed before producing output") || ib.ActiveProducers() != 0 || tool.list() != "No subagents running." {
 				t.Fatalf("messages=%+v active=%d", messages, ib.ActiveProducers())
 			}
 		})
@@ -111,7 +111,7 @@ func TestBackgroundChildFailureNotifiesParent(t *testing.T) {
 			messages := cfg.Inbox.Drain()
 			found := false
 			for _, m := range messages {
-				if m.Meta["status"] == "failed" && strings.Contains(provider.MessageText(m.Message), "child task failed") {
+				if strings.Contains(provider.MessageText(m.Message), `status="failed"`) && strings.Contains(provider.MessageText(m.Message), "child task failed") {
 					found = true
 				}
 			}

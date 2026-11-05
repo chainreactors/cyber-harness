@@ -172,7 +172,7 @@ func TestActiveBacklogLargerThanMailbox(t *testing.T) {
 	const count = agent.DefaultInboxCapacity + 7
 	for i := 1; i < count; i++ {
 		m := mailbox.NewUserMessage(fmt.Sprintf("backlog-%03d", i))
-		m.Meta = map[string]any{"task_id": task}
+		m.Meta = mailbox.Metadata{TaskID: task}
 		activeSubmit(t, ctx, router, m)
 	}
 	close(release)
@@ -187,8 +187,8 @@ func TestActiveBacklogLargerThanMailbox(t *testing.T) {
 				}
 			}
 		case m := <-completed:
-			if m.Meta["task_id"] == task {
-				if m.Meta["status"] != "completed" {
+			if m.Meta.TaskID == task {
+				if m.Meta.Status != "completed" {
 					t.Fatalf("durable backlog failed before execution: status=%v output=%s", m.Meta, provider.MessageText(m.Message))
 				}
 				var finished int
@@ -233,7 +233,7 @@ func TestActiveLateUnconsumedCorrectionIsRequeued(t *testing.T) {
 	first := waitFor(t, ctx, requests)
 	waitFor(t, ctx, ended)
 	m := mailbox.NewUserMessage("arrived after final drain")
-	m.Meta = map[string]any{"task_id": task}
+	m.Meta = mailbox.Metadata{TaskID: task}
 	activeSubmit(t, ctx, router, m)
 	close(release)
 	next := waitFor(t, ctx, requests)
@@ -241,7 +241,7 @@ func TestActiveLateUnconsumedCorrectionIsRequeued(t *testing.T) {
 		t.Fatalf("unconsumed input was acknowledged or misrouted: session=%s input=%s", next.SessionID, lastInput(next))
 	}
 	for range 2 {
-		if m := waitFor(t, ctx, completed); m.Meta["task_id"] != task || m.Meta["status"] != "completed" {
+		if m := waitFor(t, ctx, completed); m.Meta.TaskID != task || m.Meta.Status != "completed" {
 			t.Fatalf("unexpected feedback: %v", m.Meta)
 		}
 	}
@@ -277,13 +277,13 @@ func TestActiveFollowupBeforeWorkerReady(t *testing.T) {
 	waitFor(t, ctx, opening)
 	for i := range agent.DefaultInboxCapacity {
 		m := mailbox.NewUserMessage(fmt.Sprintf("followup-%03d", i))
-		m.Meta = map[string]any{"task_id": task}
+		m.Meta = mailbox.Metadata{TaskID: task}
 		activeSubmit(t, ctx, router, m)
 	}
 	close(release)
 	for {
 		m := waitFor(t, ctx, completed)
-		if m.Meta["status"] != "completed" {
+		if m.Meta.Status != "completed" {
 			t.Fatalf("followups filled mailbox before initial seed: status=%v output=%s", m.Meta, provider.MessageText(m.Message))
 		}
 		select {
@@ -333,7 +333,7 @@ func TestActiveCompactionDoesNotReplayConsumedInput(t *testing.T) {
 	activeSubmit(t, ctx, router, mailbox.NewUserMessage("original input: perform diagnostics then finish once"))
 	waitFor(t, ctx, started)
 	result := waitFor(t, ctx, completed)
-	if result.Meta["status"] != "completed" || summaries.Load() == 0 {
+	if result.Meta.Status != "completed" || summaries.Load() == 0 {
 		t.Fatalf("compaction was not exercised: status=%v summaries=%d output=%s", result.Meta, summaries.Load(), provider.MessageText(result.Message))
 	}
 	select {
@@ -381,13 +381,13 @@ func TestActiveMailboxPressureRetriesDurableCorrections(t *testing.T) {
 	for i := range agent.DefaultInboxCapacity {
 		m := mailbox.NewUserMessage("queued observation " + strings.Repeat("x", i%3))
 		m.Priority = mailbox.PriorityHigh // Equal priorities force rejection instead of eviction.
-		m.Meta = map[string]any{"task_id": task}
+		m.Meta = mailbox.Metadata{TaskID: task}
 		activeSubmit(t, ctx, router, m)
 	}
 	last := mailbox.NewUserMessage("URGENT final correction")
 	last.Interrupt = true
 	last.Priority = mailbox.PriorityHigh
-	last.Meta = map[string]any{"task_id": task}
+	last.Meta = mailbox.Metadata{TaskID: task}
 	activeSubmit(t, ctx, router, last)
 	close(release)
 	select {

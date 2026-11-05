@@ -114,29 +114,29 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 	task := activeSubmit(t, ctx, router, mailbox.NewUserMessage("Release CI: run the actual mailbox interrupt test and retain the Go test evidence."))
 	first := waitFor(t, ctx, blocked)
 	notes := activeSubmit(t, ctx, router, mailbox.NewUserMessage("Run an independent release-notes audit: record the current repository revision and commit subject while CI is waiting."))
-	if result := waitFor(t, ctx, feedback); result.Meta["task_id"] != notes || result.Meta["status"] != "completed" || notes == task {
+	if result := waitFor(t, ctx, feedback); result.Meta.TaskID != notes || result.Meta.Status != "completed" || notes == task {
 		t.Fatalf("unrelated release-notes audit blocked behind CI: %v", result.Meta)
 	}
 	update := mailbox.NewMessage(mailbox.OriginPeer, "user", "CI monitor scope update: also require the Session delivery suite before declaring this release check complete.")
 	update.Message.Id = "ci-scope-update"
-	update.Meta = map[string]any{"task_id": task, "sender": "ci-monitor", "source_session_id": "release-check", "feedback_chain": []string{"unconsumed-scope-origin"}}
+	update.Meta = mailbox.Metadata{TaskID: task, Sender: "ci-monitor", SourceSessionID: "release-check", FeedbackChain: []string{"unconsumed-scope-origin"}}
 	activeSubmit(t, ctx, router, update)
 	close(failRequest)
 	failed := waitFor(t, ctx, feedback)
-	if failed.Meta["task_id"] != task || failed.Meta["status"] != "failed" {
+	if failed.Meta.TaskID != task || failed.Meta.Status != "failed" {
 		t.Fatalf("transport fault was not exercised: %v", failed.Meta)
 	}
-	if strings.Contains(fmt.Sprint(failed.Meta["feedback_chain"]), "unconsumed-scope-origin") {
+	if strings.Contains(fmt.Sprint(failed.Meta.FeedbackChain), "unconsumed-scope-origin") {
 		t.Fatal("failed CI feedback claimed ancestry from an unread scope update")
 	}
 	deadline, stop := context.WithTimeout(ctx, 15*time.Second)
 	defer stop()
 	select {
 	case result := <-feedback:
-		if result.Meta["task_id"] != task || result.Meta["status"] != "completed" || result.Meta["execution_id"] == first {
+		if result.Meta.TaskID != task || result.Meta.Status != "completed" || result.Meta.ExecutionID == first {
 			t.Fatalf("CI scope update resumed incorrectly: %v", result.Meta)
 		}
-		if !strings.Contains(fmt.Sprint(result.Meta["feedback_chain"]), "unconsumed-scope-origin") {
+		if !strings.Contains(fmt.Sprint(result.Meta.FeedbackChain), "unconsumed-scope-origin") {
 			t.Fatal("resumed CI feedback lost the processed scope update ancestry")
 		}
 	case <-deadline.Done():

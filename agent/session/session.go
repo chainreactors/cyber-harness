@@ -31,6 +31,7 @@ const DefaultSessionPendingLimit = 64
 type SessionOptions struct {
 	ID               string
 	LogicalID        string
+	TaskID           string
 	ParentSessionID  string
 	ParentToolCallID string
 	AgentName        string
@@ -474,6 +475,7 @@ type sessionState struct {
 	runtime          *Runtime
 	id               string
 	logicalID        string
+	taskID           string
 	agentName        string
 	parentSessionID  string
 	parentToolCallID string
@@ -600,7 +602,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		ag.LoadMessages(cloneSessionMessages(rt.resumeMessages))
 	}
 	state := &sessionState{
-		runtime: rt, id: id, logicalID: logicalID, agentName: agentName, starting: true,
+		runtime: rt, id: id, logicalID: logicalID, taskID: options.TaskID, agentName: agentName, starting: true,
 		parentSessionID: options.ParentSessionID, parentToolCallID: options.ParentToolCallID,
 		agent: ag, providers: providers, inbox: mailbox, delegation: agentCfg.Delegation, input: options.Input,
 		scheduler: scheduler, ctx: sessionCtx, cancel: cancel,
@@ -631,7 +633,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	}
 	startDone := make(chan struct{})
 	go func() { <-startDone; rt.runSession(state) }()
-	ev := agenthooks.SessionEvent{SessionID: id, ParentID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID, AgentName: agentName, Model: agentCfg.Model, Primary: logicalID == rt.primarySessionID, Deliver: state.deliver, Input: options.Input, Delegation: state.delegation}
+	ev := agenthooks.SessionEvent{SessionID: id, TaskID: options.TaskID, ParentID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID, AgentName: agentName, Model: agentCfg.Model, Primary: logicalID == rt.primarySessionID, Deliver: state.deliver, Input: options.Input, Delegation: state.delegation}
 	_, startErr := agenthooks.SessionStart.Emit(sessionCtx, rt.hooks, ev)
 	if startErr == nil {
 		startErr = sessionCtx.Err()
@@ -768,7 +770,7 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 			state.scheduler.Stop()
 			state.inbox.Close()
 			endCtx, endCancel := context.WithTimeout(context.WithoutCancel(state.ctx), 5*time.Second)
-			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.hooks, agenthooks.SessionEvent{SessionID: state.id, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Model(), Reason: string(state.closeReason), Input: state.input, Output: resultOutput(state.result), Stop: sessionStop(state.result, state.runErr), Err: state.runErr, Delegation: state.delegation})
+			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.hooks, agenthooks.SessionEvent{SessionID: state.id, TaskID: state.taskID, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Model(), Reason: string(state.closeReason), Input: state.input, Output: resultOutput(state.result), Stop: sessionStop(state.result, state.runErr), Err: state.runErr, Delegation: state.delegation})
 			endCancel()
 			if state.closeErr != nil {
 				state.closeErr = fmt.Errorf("session end hooks failed: %v", state.closeErr)
@@ -1170,7 +1172,7 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	}
 	newID := rt.nextContinuationID(logicalID)
 	continuation, err := rt.OpenSession(ctx, SessionOptions{
-		ID: newID, LogicalID: logicalID, ParentSessionID: parentSessionID,
+		ID: newID, LogicalID: logicalID, TaskID: oldState.taskID, ParentSessionID: parentSessionID,
 		AgentName: agentName, Messages: prepared, HistorySnapshot: reason == SessionCloseCompacted, Config: &config, providers: providers,
 	})
 	if err != nil {

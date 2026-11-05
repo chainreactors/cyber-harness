@@ -15,6 +15,7 @@ import (
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	loopext "github.com/chainreactors/cyber/exts/agent"
 	inboxext "github.com/chainreactors/cyber/exts/inbox"
@@ -94,9 +95,9 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 		}
 		connection := ioaclient.New(*ioaConfig)
 		router := inboxext.New(inboxext.Config{StateDir: dir, MaxActive: 2, Notify: func(callCtx context.Context, m mailbox.Message) error {
-			peer, _ := m.Meta["reply_node"].(string)
-			ref, _ := m.Meta["reply_message"].(string)
-			_, err := connection.Service().Client().Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{peer}, Messages: []string{ref}}, Meta: map[string]any{"feedback_id": m.Message.Id}})
+			peer := m.Meta.ReplyNode
+			ref := m.Meta.ReplyMessage
+			_, err := connection.Service().Client().Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{peer}, Messages: []string{ref}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, ID: m.Message.Id}.Meta()})
 			if err == nil {
 				select {
 				case feedback <- m:
@@ -122,7 +123,7 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 	f, router, set := open()
 	defer func() { closeActive(t, set) }()
 	send := func(text, task string) protocols.Message {
-		m, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiverID}}, Meta: map[string]any{"source_session_id": "external-feed", "task_id": task}})
+		m, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiverID}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "external-feed"}, Target: harness.Address{TaskID: task}}.Meta()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -130,8 +131,8 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 	}
 	first := send("initial observation", "")
 	m := waitFor(t, ctx, feedback)
-	task, _ := m.Meta["task_id"].(string)
-	if task == "" || m.Meta["reply_message"] != first.ID {
+	task := m.Meta.TaskID
+	if task == "" || m.Meta.ReplyMessage != first.ID {
 		t.Fatalf("source correlation=%v", m.Meta)
 	}
 	// Cut the actual SSE connection. Source history must cover the gap.
@@ -143,13 +144,13 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 	offline := send("observation while host offline", task)
 	f, router, set = open()
 	m = waitFor(t, ctx, feedback)
-	if m.Meta["task_id"] != task || m.Meta["reply_message"] != first.ID {
+	if m.Meta.TaskID != task || m.Meta.ReplyMessage != first.ID {
 		t.Fatalf("restored task/source=%v", m.Meta)
 	}
 	// Re-submit the source envelope already admitted via replay; no new run.
 	duplicate := mailbox.NewMessage(mailbox.OriginPeer, "user", "observation while host offline")
 	duplicate.Message.Id = offline.ID
-	duplicate.Meta = map[string]any{"sender": monitor.NodeID(), "message_id": offline.ID, "source_session_id": "external-feed", "task_id": task}
+	duplicate.Meta = mailbox.Metadata{Sender: monitor.NodeID(), MessageID: offline.ID, SourceSessionID: "external-feed", TaskID: task}
 	activeSubmit(t, ctx, router, duplicate)
 	started := time.Now()
 	n := 0
@@ -160,7 +161,7 @@ func TestActiveIOAMonitorRestartAndContinuous(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 		}
 		send(fmt.Sprintf("continuous observation %d", n), task)
-		if m := waitFor(t, ctx, feedback); m.Meta["task_id"] != task {
+		if m := waitFor(t, ctx, feedback); m.Meta.TaskID != task {
 			t.Fatal("monitor spawned a different task")
 		}
 		n++

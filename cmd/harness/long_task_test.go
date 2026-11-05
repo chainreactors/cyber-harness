@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -540,15 +541,20 @@ func assertLongCollaboration(t *testing.T, events, history []map[string]any, mod
 	for _, msg := range history {
 		nodes[fmt.Sprint(msg["sender"])] = true
 		meta, _ := msg["meta"].(map[string]any)
-		if sub, ok := meta["subagent"].(map[string]any); ok && msg["content_type"] == "handoff" {
-			sid := fmt.Sprint(sub["session_id"])
-			if sub["phase"] == "delegate" {
-				delegates[sid] = msg
-			} else if sub["phase"] == "return" {
-				returns[sid] = msg
-			}
-		} else {
-			source, target := fmt.Sprint(meta["source_session_id"]), fmt.Sprint(meta["target_session_id"])
+		record, parseErr := harness.Parse(meta)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		if record == nil {
+			continue
+		}
+		switch record.Event {
+		case harness.SubagentDelegate:
+			delegates[record.Target.SessionID] = msg
+		case harness.SubagentReturn:
+			returns[record.Source.SessionID] = msg
+		case harness.Message:
+			source, target := record.Source.SessionID, record.Target.SessionID
 			if children[source] != nil && children[target] != nil && source != target {
 				peerIDs[fmt.Sprint(msg["id"])] = target
 			}

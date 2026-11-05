@@ -24,6 +24,7 @@ import (
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	loopext "github.com/chainreactors/cyber/exts/agent"
@@ -103,6 +104,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 	roles := regexp.MustCompile(`\bROLE=(ledger|quality|reporter)\b`)
 	versions := regexp.MustCompile(`\bVERSION=([12])\b`)
 	var commands atomic.Int32
+	var liveCalls atomic.Int32
 	var restored atomic.Bool
 	p := modelFunc(func(callCtx context.Context, r *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 		isRouter := len(r.Tools) == 1 && r.Tools[0].Name == "inbox_route"
@@ -117,7 +119,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 			}
 			contextText := parts[0]
 			var routing struct {
-				Meta  map[string]any `json:"meta"`
+				Meta  mailbox.Metadata `json:"meta"`
 				Tasks []struct {
 					ID    string `json:"task_id"`
 					Label string `json:"label"`
@@ -126,10 +128,10 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 			if err := json.Unmarshal([]byte(contextText), &routing); err != nil {
 				return nil, err
 			}
-			if routing.Meta["kind"] == "subagent_feedback" {
+			if routing.Meta.Kind == "subagent_feedback" {
 				var source, reporter string
 				for _, task := range routing.Tasks {
-					if task.ID == routing.Meta["task_id"] {
+					if task.ID == routing.Meta.TaskID {
 						source = task.Label
 					}
 					if task.Label == "reporter" {
@@ -144,7 +146,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 				}
 				return toolResponse("inbox_route", map[string]any{"task_id": reporter}), nil
 			}
-			if task, _ := routing.Meta["task_id"].(string); task != "" {
+			if task := routing.Meta.TaskID; task != "" {
 				return toolResponse("inbox_route", map[string]any{"task_id": task}), nil
 			}
 			role := roles.FindStringSubmatch(parts[1])
@@ -176,6 +178,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 			}
 		}
 		if live != nil {
+			liveCalls.Add(1)
 			return live.ChatCompletion(callCtx, r)
 		}
 		if role == "" {
@@ -224,7 +227,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 			t.Fatal(err)
 		}
 		connection := ioaclient.New(*ioaConfig)
-		router := inboxext.New(inboxext.Config{StateDir: state, MaxActive: 2, Instructions: `User requests identify ROLE=reporter, ROLE=ledger or ROLE=quality. Create one new_task for each distinct initial role, with label equal to that role; omit name. Honor explicit task_id on follow-ups. Route subagent_feedback from ledger/quality to the EXISTING reporter task, including waiting or failure evidence. For reporter feedback use action=reply. Never create a task from feedback; never route feedback back to its source. Do not execute work or answer on behalf of workers.`, Notify: func(_ context.Context, m mailbox.Message) error {
+		router := inboxext.New(inboxext.Config{StateDir: state, MaxActive: 2, Instructions: `User requests identify ROLE=reporter, ROLE=ledger or ROLE=quality. Create one new_task for each distinct initial role, with label equal to that role; omit name. Honor explicit task_id on follow-ups. For EACH ledger/quality subagent_feedback make EXACTLY ONE inbox_route call with task_id equal to the EXISTING reporter task (action omitted or route), then end your routing turn. Never additionally route that evidence to ledger or quality, even if the text mentions missing/stale evidence; only the external monitor may schedule their revisions. For reporter feedback use action=reply with no destination, then end. Never create a task from feedback; never route feedback back to its source. Do not execute work or answer on behalf of workers.`, Notify: func(_ context.Context, m mailbox.Message) error {
 			select {
 			case feedback <- m:
 				return nil
@@ -248,6 +251,7 @@ func reconciliationScenario(t *testing.T, live provider.Provider) {
 	router, set := open()
 	defer func() { closeActive(t, set) }()
 	contract := fmt.Sprintf(`Work only in %q. Use bash to read CSVs and implement your own local solution; do not create subagents or access external services. Amounts are integer minor units, separately by currency. Expected = total_minor - approved_refund_minor. Deduplicate event_id; conflicting duplicates are errors. capture adds money, refund/void subtract. Validate void references to a same-order/currency/amount capture and reject repeated voids. Unknown orders and currency mismatches are quarantined and excluded from valid balances. Row order is not transaction order.
+Each worker owns ONLY its assigned ROLE. Ledger may write ledger-vN.json, quality may write quality-vN.json, reporter may write report-vN.json and report-vN.md. Never generate, repair, or update another role's evidence; missing evidence must arrive from its owner. You may create uniquely role-prefixed scripts for your own computation. Input CSVs are read-only.
 For version one use orders.csv and events.csv. On a future version update also use late.csv and recompute. fingerprint is lowercase SHA-256 of the exact raw bytes of the applicable CSV files joined by one newline, in that order.
 All JSON artifacts include integer version and string fingerprint. ledger-vN.json contains orders, discrepancies (nonzero difference only) and totals keyed by currency; every order has order_id, currency, expected_minor, actual_minor, difference_minor. quality-vN.json contains source_rows, unique_events, duplicate_rows, orphan_events (sorted event IDs), currency_mismatches (sorted event IDs), quarantined_minor (by currency), void_events, errors (list).
 reporter reads both evidence files and rechecks arithmetic, matching version/fingerprint and errors. Missing or stale evidence means finish with EVIDENCE role=reporter VERSION=N status=waiting, with no final report for that version. Do not wait or poll; incoming feedback will resume you. Once complete, write report-vN.json with status=ready, totals, discrepancies, quality (the complete quality document), version/fingerprint, plus a human readable report-vN.md listing unresolved order IDs and amounts.
@@ -266,12 +270,15 @@ Ledger/quality finish with EVIDENCE role=YOUR_ROLE VERSION=N status=ready after 
 		t.Helper()
 		for {
 			m := waitFor(t, ctx, feedback)
-			if m.Meta["status"] != "completed" {
+			if m.Meta.Status != "completed" {
 				t.Fatalf("report task failed: %v %s", m.Meta, provider.MessageText(m.Message))
 			}
 			text := provider.MessageText(m.Message)
+			if version == 2 && status == "waiting" && strings.Contains(text, "VERSION=2") && strings.Contains(text, "status=ready") {
+				t.Fatalf("report became ready before stale-evidence gate: %v %s", m.Meta, text)
+			}
 			if strings.Contains(text, fmt.Sprintf("VERSION=%d", version)) && strings.Contains(text, "status="+status) {
-				if m.Meta["task_id"] != tasks["reporter"] || m.Meta["reply_message"] != reporterMessage {
+				if m.Meta.TaskID != tasks["reporter"] || m.Meta.ReplyMessage != reporterMessage {
 					t.Fatalf("report feedback lost requester: %v; want task=%s message=%s", m.Meta, tasks["reporter"], reporterMessage)
 				}
 				return m
@@ -318,7 +325,7 @@ Ledger/quality finish with EVIDENCE role=YOUR_ROLE VERSION=N status=ready after 
 	send := func(role string) protocols.Message {
 		t.Helper()
 		text := fmt.Sprintf("ROLE=%s VERSION=2\nLate settlement events are now available in late.csv. Correction/clarification: compare after approved refunds, not gross order totals. Recompute your evidence from all input files and keep currency separation. %s", role, contract)
-		m, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: map[string]any{"source_session_id": "settlement-monitor", "task_id": tasks[role]}})
+		m, err := monitor.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "settlement-monitor"}, Target: harness.Address{TaskID: tasks[role]}}.Meta()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -327,19 +334,24 @@ Ledger/quality finish with EVIDENCE role=YOUR_ROLE VERSION=N status=ready after 
 	offline := send("ledger")
 	router, set = open()
 	waitReport(2, "waiting")
+	unchanged, err := os.ReadFile(filepath.Join(dir, "quality-v2.json"))
+	if err != nil || !bytes.Equal(unchanged, stale) {
+		t.Fatalf("another role rewrote quality evidence before its owner was resumed: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "report-v2.json")); !os.IsNotExist(err) {
 		t.Fatalf("stale evidence produced final report: %v", err)
 	}
 	idle()
 	before := commands.Load()
+	beforeLive := liveCalls.Load()
 	duplicate := mailbox.NewMessage(mailbox.OriginPeer, "user", "same admitted source envelope")
 	duplicate.Message.Id = offline.ID
-	duplicate.Meta = map[string]any{"sender": monitor.NodeID(), "message_id": offline.ID, "source_session_id": "settlement-monitor", "task_id": tasks["ledger"]}
+	duplicate.Meta = mailbox.Metadata{Sender: monitor.NodeID(), MessageID: offline.ID, SourceSessionID: "settlement-monitor", TaskID: tasks["ledger"]}
 	if got := activeSubmit(t, ctx, router, duplicate); got != tasks["ledger"] {
 		t.Fatalf("duplicate changed task: %s", got)
 	}
 	idle()
-	if commands.Load() != before {
+	if commands.Load() != before || liveCalls.Load() != beforeLive {
 		t.Fatal("duplicate replay reexecuted a worker")
 	}
 	send("quality")

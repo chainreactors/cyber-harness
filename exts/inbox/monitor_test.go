@@ -17,6 +17,7 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/events"
 	loopext "github.com/chainreactors/cyber/exts/agent"
 	inboxext "github.com/chainreactors/cyber/exts/inbox"
@@ -178,7 +179,7 @@ func continuousMonitorScenario(t *testing.T, routingModel provider.Provider, int
 		t.Helper()
 		message, err := monitor.Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text},
 			Refs: &protocols.Ref{Nodes: []string{connection.Service().Client().NodeID()}},
-			Meta: map[string]any{"source_session_id": "payment-monitor", "target_session_id": target, "interrupt": interrupt}})
+			Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "payment-monitor"}, Target: harness.Address{SessionID: target}, Interrupt: interrupt}.Meta()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +276,7 @@ waitingForInvestigator:
 	waitTurns(router.Router().SessionID(), "coordinator")
 	ack, err := connection.Service().Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": "review received the monitoring result"},
 		Refs: &protocols.Ref{Nodes: []string{monitor.NodeID()}, Messages: []string{result.ID}},
-		Meta: map[string]any{"source_session_id": "coordinator"}})
+		Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "coordinator"}}.Meta()})
 	if err != nil {
 		t.Fatal(err)
 	}

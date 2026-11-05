@@ -3,7 +3,9 @@ package inbox
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,12 +15,14 @@ import (
 	"time"
 
 	"github.com/chainreactors/cyber/agent"
+	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/agent/subagent"
 	"github.com/chainreactors/cyber/agent/subagent/sessionexec"
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
@@ -31,22 +35,24 @@ import (
 
 type activeExecution struct {
 	task     taskRecord
-	procID   string
 	inputs   []taskInput
 	ready    bool
 	settling bool
+	waiting  bool
 	jobs     []string
 }
 type activeRuntime struct {
 	extension  *Extension
 	store      *activeStore
 	dispatcher *sessionexec.Tool
+	executor   subagent.Executor
 	manager    *procbus.Manager
 	agent      *agent.Agent
 	ctx        context.Context
 	cancel     context.CancelFunc
 	mu         sync.Mutex
 	running    map[string]*activeExecution
+	slots      chan struct{}
 	wake       chan struct{}
 	work       chan struct{}
 	notify     chan struct{}
@@ -65,6 +71,10 @@ func (e *Extension) loadActive(scope *extension.Scope, ag *agent.Agent, provider
 	if err != nil {
 		return err
 	}
+	executor, err := extension.Use[subagent.Executor](scope)
+	if err != nil {
+		return err
+	}
 	manager, err := extension.Use[*procbus.Manager](scope)
 	if err != nil {
 		return err
@@ -75,6 +85,8 @@ func (e *Extension) loadActive(scope *extension.Scope, ag *agent.Agent, provider
 	}
 	ctx, cancel := context.WithCancel(scope.Lifetime())
 	a := &activeRuntime{extension: e, store: store, dispatcher: dispatcher, manager: manager, agent: ag, ctx: ctx, cancel: cancel, running: make(map[string]*activeExecution), owners: make(map[string]string), wake: make(chan struct{}, 1), work: make(chan struct{}, 1), notify: make(chan struct{}, 1), notified: make(chan struct{}), done: make(chan struct{})}
+	a.executor = executor
+	a.slots = make(chan struct{}, e.config.MaxActive)
 	history, err := store.value("router_history")
 	if err == nil {
 		var messages []*aop.Message
@@ -96,6 +108,7 @@ func (e *Extension) loadActive(scope *extension.Scope, ag *agent.Agent, provider
 	}
 	a.observer = stream.Observe(a.observe)
 	e.subs = append(e.subs, toolhooks.ProcessStartedObserved.On(registry, "inbox.task-jobs", a.processStarted))
+	e.subs = append(e.subs, agenthooks.InboxWait.On(registry, "inbox.task-capacity", a.inboxWait))
 	e.router.mu.Lock()
 	e.router.active = a
 	e.router.ctx = ctx
@@ -199,7 +212,7 @@ func (a *activeRuntime) readInput(ctx context.Context, r io.Reader, taskID strin
 		}
 		message := mailbox.NewUserMessage(scanner.Text())
 		if taskID != "" {
-			message.Meta = map[string]any{"task_id": taskID}
+			message.Meta.TaskID = taskID
 		}
 		for {
 			_, err := a.extension.router.Submit(ctx, message)
@@ -241,7 +254,13 @@ func (a *activeRuntime) schedule() {
 				continue
 			}
 			a.mu.Lock()
-			if a.running[t.ID] != nil || len(a.running) >= a.extension.config.MaxActive {
+			if a.running[t.ID] != nil {
+				a.mu.Unlock()
+				continue
+			}
+			select {
+			case a.slots <- struct{}{}:
+			default:
 				a.mu.Unlock()
 				continue
 			}
@@ -249,6 +268,7 @@ func (a *activeRuntime) schedule() {
 			// Leave one mailbox slot for the interrupted-execution warning.
 			inputs, history, err := a.store.claim(t, t.SessionID, agent.DefaultInboxCapacity-1)
 			if err != nil {
+				<-a.slots
 				a.mu.Unlock()
 				if !errors.Is(err, sql.ErrNoRows) {
 					a.fail(err)
@@ -266,6 +286,9 @@ func (a *activeRuntime) schedule() {
 					a.stopJobs(ex)
 					a.mu.Lock()
 					delete(a.running, t.ID)
+					if !ex.waiting {
+						<-a.slots
+					}
 					for id, owner := range a.owners {
 						if owner == t.ID {
 							delete(a.owners, id)
@@ -289,7 +312,7 @@ func (a *activeRuntime) schedule() {
 				}
 				checkpointed := false
 				_, runErr := a.dispatcher.Dispatch(ctx, subagent.Request{Name: t.Name, Label: t.Label, Mode: subagent.Async, Input: subagent.Input{Prompt: prompt}},
-					session.SessionOptions{ID: t.SessionID, Messages: history, HistorySnapshot: len(history) > 0}, messages,
+					session.SessionOptions{ID: t.SessionID, TaskID: t.ID, Messages: history, HistorySnapshot: len(history) > 0}, messages,
 					func(snapshot []*aop.Message, result *agent.Result, runErr error) error {
 						a.mu.Lock()
 						defer a.mu.Unlock()
@@ -338,8 +361,7 @@ func (a *activeRuntime) schedule() {
 							}
 							m := mailbox.NewMessage(mailbox.OriginSystem, "user", text)
 							m.Message.Id = "feedback-" + t.SessionID
-							m.Meta = map[string]any{"kind": "subagent_feedback", "task_id": t.ID, "execution_id": t.SessionID, "status": status}
-							m.Meta["feedback_chain"] = feedbackChain(selected, t.ID)
+							m.Meta = mailbox.Metadata{Kind: "subagent_feedback", TaskID: t.ID, ExecutionID: t.SessionID, Status: status, FeedbackChain: feedbackChain(selected, t.ID)}
 							feedback = &m
 							_, _ = fmt.Fprintln(w, text)
 						}
@@ -362,8 +384,7 @@ func (a *activeRuntime) schedule() {
 					}
 					m := mailbox.NewMessage(mailbox.OriginSystem, "user", fmt.Sprint(runErr))
 					m.Message.Id = "feedback-" + t.SessionID
-					m.Meta = map[string]any{"kind": "subagent_feedback", "task_id": t.ID, "execution_id": t.SessionID, "status": status}
-					m.Meta["feedback_chain"] = feedbackChain(pending, t.ID)
+					m.Meta = mailbox.Metadata{Kind: "subagent_feedback", TaskID: t.ID, ExecutionID: t.SessionID, Status: status, FeedbackChain: feedbackChain(pending, t.ID)}
 					var feedback *mailbox.Message
 					if status != "interrupted" {
 						feedback = &m
@@ -378,14 +399,12 @@ func (a *activeRuntime) schedule() {
 				workers.Done()
 				a.mu.Lock()
 				delete(a.running, t.ID)
+				<-a.slots
 				a.mu.Unlock()
 				if err := a.store.complete(t, inputs, history, "interrupted", nil); err != nil {
 					a.fail(err)
 				}
 			} else {
-				a.mu.Lock()
-				ex.procID = info.ID
-				a.mu.Unlock()
 				if _, err := a.store.db.Exec("UPDATE attempts SET proc_id=? WHERE session_id=?", info.ID, t.SessionID); err != nil {
 					a.fail(err)
 				}
@@ -397,6 +416,35 @@ func (a *activeRuntime) schedule() {
 		case <-a.work:
 		case <-ticker.C:
 		}
+	}
+}
+
+func (a *activeRuntime) inboxWait(ctx context.Context, event agenthooks.InboxWaitEvent) (struct{}, error) {
+	a.mu.Lock()
+	ex := a.running[a.owners[event.SessionID]]
+	// A descendant waiting does not suspend its independently running parent.
+	if ex == nil || ex.task.SessionID != event.SessionID || ex.waiting == event.Waiting {
+		a.mu.Unlock()
+		return struct{}{}, nil
+	}
+	if event.Waiting {
+		ex.waiting = true
+		<-a.slots
+		a.mu.Unlock()
+		a.signal()
+		return struct{}{}, nil
+	}
+	a.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return struct{}{}, ctx.Err()
+	case <-a.ctx.Done():
+		return struct{}{}, a.ctx.Err()
+	case a.slots <- struct{}{}:
+		a.mu.Lock()
+		ex.waiting = false
+		a.mu.Unlock()
+		return struct{}{}, nil
 	}
 }
 
@@ -448,7 +496,7 @@ func (a *activeRuntime) deliverLive(taskID string) {
 	}
 }
 func (a *activeRuntime) reply(r *Receipt) error {
-	id, _ := r.message.Meta["task_id"].(string)
+	id := r.message.Meta.TaskID
 	var source []byte
 	if err := a.store.db.QueryRow("SELECT source FROM tasks WHERE id=?", id).Scan(&source); err != nil {
 		return err
@@ -458,13 +506,13 @@ func (a *activeRuntime) reply(r *Receipt) error {
 		return err
 	}
 	output := cloneMessage(r.message)
-	output.Meta["reply_node"] = original.Meta["sender"]
-	output.Meta["reply_session"] = original.Meta["source_session_id"]
-	output.Meta["reply_message"] = original.Meta["message_id"]
-	if output.Meta["reply_message"] == nil {
-		output.Meta["reply_message"] = original.Message.Id
+	output.Meta.ReplyNode = original.Meta.Sender
+	output.Meta.ReplySession = original.Meta.SourceSessionID
+	output.Meta.ReplyMessage = original.Meta.MessageID
+	if output.Meta.ReplyMessage == "" {
+		output.Meta.ReplyMessage = original.Message.Id
 	}
-	output.Meta["space"] = original.Meta["space"]
+	output.Meta.Space = original.Meta.Space
 	b, err := encodeMessage(output)
 	if err != nil {
 		return err
@@ -473,25 +521,108 @@ func (a *activeRuntime) reply(r *Receipt) error {
 	a.signal()
 	return err
 }
-func (a *activeRuntime) sendResults() error {
-	if a.extension.config.Notify == nil {
+
+func (a *activeRuntime) recordHandoff(receipt *Receipt, target string) error {
+	if a.extension.config.Record == nil {
 		return nil
 	}
+	sourceTask := receipt.message.Meta.SourceTaskID
+	sourceSession := receipt.message.Meta.ExecutionID
+	kind := receipt.message.Meta.Kind
+	if sourceTask == "" && kind == "subagent_feedback" {
+		sourceTask = receipt.message.Meta.TaskID
+	}
+	if sourceSession == "" {
+		sourceSession = receipt.message.Meta.SourceSessionID
+	}
+	if sourceSession == "" {
+		sourceSession = a.extension.router.sessionID
+	}
+	targetTask, targetSession, targetName, targetType := "", "", "", ""
+	switch {
+	case strings.HasPrefix(target, "task:"):
+		targetTask = strings.TrimPrefix(target, "task:")
+		if err := a.store.db.QueryRow("SELECT label,name,session_id FROM tasks WHERE id=?", targetTask).Scan(&targetName, &targetType, &targetSession); err != nil {
+			return err
+		}
+		if targetName == "" {
+			targetName = targetType
+		}
+	case strings.HasPrefix(target, "session:"):
+		targetSession = strings.TrimPrefix(target, "session:")
+		destination, err := a.extension.router.resolve(targetSession)
+		if err != nil {
+			return err
+		}
+		targetName, targetType = destination.Name, destination.AgentType
+	default:
+		return fmt.Errorf("cannot record inbox handoff to %q", target)
+	}
+	inputID := receipt.message.Meta.MessageID
+	if inputID == "" {
+		inputID = receipt.message.Message.Id
+	}
+	identity := sha256.Sum256([]byte(messageKey(receipt.key) + "\x00" + target))
+	input := receipt.message.ToMessages()[0]
+	message := mailbox.NewMessage(mailbox.OriginSystem, "user", provider.MessageText(input))
+	message.Message.Id = "inbox-handoff-" + hex.EncodeToString(identity[:16])
+	message.Meta = mailbox.Metadata{
+		Kind: "inbox_handoff", MessageID: inputID, SourceSessionID: sourceSession,
+		Space: receipt.message.Meta.Space,
+		Record: &collaboration.Envelope{
+			Version: collaboration.Version, Event: collaboration.InboxRoute, ID: message.Message.Id, Status: "routed",
+			Source: collaboration.Address{NodeID: receipt.message.Meta.Sender, TaskID: sourceTask, SessionID: sourceSession},
+			Target: collaboration.Address{TaskID: targetTask, SessionID: targetSession},
+			Agent:  &collaboration.Agent{Name: targetName, Type: targetType, Mode: "active"},
+		},
+	}
+	encoded, err := encodeMessage(message)
+	if err != nil {
+		return err
+	}
+	if _, err = a.store.db.Exec("INSERT OR IGNORE INTO outbox(id,body) VALUES(?,?)", message.Message.Id, encoded); err != nil {
+		return err
+	}
+	a.signal()
+	return nil
+}
+
+func (a *activeRuntime) sendResults() error {
 	for {
+		rows, err := a.store.db.Query("SELECT id,body FROM outbox LEFT JOIN retries ON retries.message_key='outbox:'||outbox.id WHERE state='pending' AND COALESCE(due,0)<=? ORDER BY outbox.rowid", time.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
 		var id string
-		var b []byte
-		err := a.store.db.QueryRow("SELECT id,body FROM outbox LEFT JOIN retries ON retries.message_key='outbox:'||outbox.id WHERE state='pending' AND COALESCE(due,0)<=? ORDER BY outbox.rowid LIMIT 1", time.Now().UnixMilli()).Scan(&id, &b)
-		if errors.Is(err, sql.ErrNoRows) {
+		var message mailbox.Message
+		var notify func(context.Context, mailbox.Message) error
+		for rows.Next() {
+			var body []byte
+			if err = rows.Scan(&id, &body); err != nil {
+				break
+			}
+			message, err = decodeMessage(body)
+			if err != nil {
+				break
+			}
+			if message.Meta.Kind == "inbox_handoff" {
+				notify = a.extension.config.Record
+			} else {
+				notify = a.extension.config.Notify
+			}
+			if notify != nil {
+				break
+			}
+			id = ""
+		}
+		err = errors.Join(err, rows.Err(), rows.Close())
+		if err != nil {
+			return err
+		}
+		if id == "" {
 			return nil
 		}
-		if err != nil {
-			return err
-		}
-		message, err := decodeMessage(b)
-		if err != nil {
-			return err
-		}
-		if err = a.extension.config.Notify(a.ctx, message); err != nil {
+		if err = notify(a.ctx, message); err != nil {
 			if a.ctx.Err() != nil {
 				return nil
 			}
@@ -638,20 +769,11 @@ func feedbackChain(inputs []taskInput, taskID string) []string {
 
 func messageChain(message mailbox.Message) []string {
 	var chain []string
-	switch values := message.Meta["feedback_chain"].(type) {
-	case []string:
-		chain = append(chain, values...)
-	case []any:
-		for _, value := range values {
-			if id, ok := value.(string); ok {
-				chain = append(chain, id)
-			}
-		}
-	}
-	if id, _ := message.Meta["task_id"].(string); id != "" && message.Meta["kind"] == "subagent_feedback" && !slices.Contains(chain, id) {
+	chain = append(chain, message.Meta.FeedbackChain...)
+	if id := message.Meta.TaskID; id != "" && message.Meta.Kind == "subagent_feedback" && !slices.Contains(chain, id) {
 		chain = append(chain, id)
 	}
-	if id, _ := message.Meta["source_task_id"].(string); id != "" && message.Origin == mailbox.OriginPeer && message.Meta["kind"] == "task_result" && !slices.Contains(chain, id) {
+	if id := message.Meta.SourceTaskID; id != "" && message.Origin == mailbox.OriginPeer && message.Meta.Kind == "task_result" && !slices.Contains(chain, id) {
 		chain = append(chain, id)
 	}
 	return chain

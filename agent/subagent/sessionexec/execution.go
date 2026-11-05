@@ -79,7 +79,6 @@ func (t *Tool) track(id string, task *subagent.Run, cfg agent.Config) func(sessi
 			}
 			status, content := subagentCompletion(outcome.Result, outcome.Err)
 			msg := inbox.NewMessage(inbox.OriginSystem, "user", fmt.Sprintf("<subagent_completion name=%q label=%q session_id=%q status=%q>\n%s\n</subagent_completion>", detail.AgentType, detail.AgentName, id, status, content))
-			msg.Meta = map[string]any{"subagent": detail.AgentName, "name": detail.AgentType, "session_id": id, "status": status}
 			if err := completion.Push(msg); err != nil && cfg.Logger != nil {
 				cfg.Logger.Warnf("inbox push subagent completion %s: %s", detail.AgentName, err)
 			}

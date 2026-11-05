@@ -20,6 +20,7 @@ import (
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/session"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	loopext "github.com/chainreactors/cyber/exts/agent"
@@ -102,21 +103,21 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 			}
 			text := strings.SplitN(strings.TrimPrefix(lastInput(r), "Current routing context:\n"), "\nOriginal message:\n", 2)[0]
 			var routing struct {
-				Meta map[string]any `json:"meta"`
+				Meta mailbox.Metadata `json:"meta"`
 			}
 			if err := json.Unmarshal([]byte(text), &routing); err != nil {
 				return nil, err
 			}
-			if routing.Meta["kind"] == "subagent_feedback" {
+			if routing.Meta.Kind == "subagent_feedback" {
 				return toolResponse("inbox_route", map[string]any{"action": "reply"}), nil
 			}
 			if strings.Contains(lastInput(r), "SUGGEST_NEW_WORK") {
 				return toolResponse("inbox_route", map[string]any{"new_task": map[string]any{}}), nil
 			}
-			if task, _ := routing.Meta["task_id"].(string); task != "" {
+			if task := routing.Meta.TaskID; task != "" {
 				return toolResponse("inbox_route", map[string]any{"task_id": task}), nil
 			}
-			if execution, _ := routing.Meta["target_session_id"].(string); execution != "" {
+			if execution := routing.Meta.TargetSessionID; execution != "" {
 				return toolResponse("inbox_route", map[string]any{"session_id": execution}), nil
 			}
 			return toolResponse("inbox_route", map[string]any{"new_task": map[string]any{"label": "release-reviewer"}}), nil
@@ -171,11 +172,14 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 	task := activeSubmit(t, ctx, router, mailbox.NewUserMessage("Prepare the release evidence reviewer."))
 	initial := waitFor(t, ctx, feedback)
 	send := func(id, kind, text string, chain []string, target bool) protocols.Message {
-		meta := map[string]any{"feedback_id": id, "kind": kind, "source_session_id": "builder-execution", "feedback_chain": chain}
-		if target {
-			meta["task_id"] = task
+		record := harness.Envelope{Version: harness.Version, Event: harness.Message, ID: id, Source: harness.Address{SessionID: "builder-execution"}}
+		if kind == "task_result" {
+			record.Event, record.Chain = harness.TaskResult, chain
 		}
-		m, err := builder.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: meta})
+		if target {
+			record.Target.TaskID = task
+		}
+		m, err := builder.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: record.Meta()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +202,7 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 		return toolResponse("bash", map[string]any{"command": fmt.Sprintf("git -C %s show HEAD:go.mod | sha256sum > %s && cat %s", quote(root), quote(filepath.Join(dir, "source.sha256")), quote(filepath.Join(dir, "source.sha256"))), "timeout": 10}), nil
 	})
 	_, producer, _, producerSet := activeHost(t, buildModel, inboxext.Config{StateDir: filepath.Join(dir, "builder-state"), Notify: func(callCtx context.Context, m mailbox.Message) error {
-		_, err := builder.Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: map[string]any{"task_id": task, "kind": "task_result", "feedback_id": m.Message.Id, "source_session_id": "builder-execution", "feedback_chain": m.Meta["feedback_chain"]}})
+		_, err := builder.Send(callCtx, space.ID, protocols.SendMessage{Content: map[string]any{"text": provider.MessageText(m.Message)}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.TaskResult, ID: m.Message.Id, Source: harness.Address{SessionID: "builder-execution"}, Target: harness.Address{TaskID: task}, Chain: m.Meta.FeedbackChain}.Meta()})
 		return err
 	}})
 	defer closeActive(t, producerSet)
@@ -208,7 +212,7 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 		t.Fatalf("valid release evidence changed task: %s", got)
 	}
 	result := waitFor(t, ctx, feedback)
-	if !strings.Contains(fmt.Sprint(result.Meta["feedback_chain"]), buildTask) || !strings.Contains(fmt.Sprint(result.Meta["feedback_chain"]), task) {
+	if !strings.Contains(fmt.Sprint(result.Meta.FeedbackChain), buildTask) || !strings.Contains(fmt.Sprint(result.Meta.FeedbackChain), task) {
 		t.Fatalf("review result lost builder/reviewer ancestry: %v", result.Meta)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "review-audit.txt")); err != nil || string(b) != digest+"\n" {
@@ -220,7 +224,7 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 	router, set = open()
 	checkRecorded := func(id string) {
 		m := waitFor(t, ctx, wires)
-		for m.Meta["feedback_id"] != id {
+		for m.Meta.FeedbackID != id {
 			m = waitFor(t, ctx, wires)
 		}
 		r, err := router.Submit(ctx, m)
@@ -242,19 +246,19 @@ func TestReleaseReviewFeedbackSafetyAcrossIOA(t *testing.T) {
 	send("overlong-chain", "task_result", "SOURCE_DIGEST="+digest, long, true)
 	checkRecorded("overlong-chain")
 	for _, spec := range []struct {
-		id   string
-		meta map[string]any
+		id     string
+		record harness.Envelope
 	}{
-		{"execution-echo", map[string]any{"target_session_id": initial.Meta["execution_id"], "feedback_chain": []string{task}}},
-		{"source-task-echo", map[string]any{"task_id": task, "source_task_id": task}},
+		{"execution-echo", harness.Envelope{Version: harness.Version, Event: harness.TaskResult, Target: harness.Address{SessionID: initial.Meta.ExecutionID}, Chain: []string{task}}},
+		{"source-task-echo", harness.Envelope{Version: harness.Version, Event: harness.TaskResult, Source: harness.Address{TaskID: task}, Target: harness.Address{TaskID: task}}},
 	} {
-		spec.meta["kind"], spec.meta["feedback_id"] = "task_result", spec.id
-		if _, err := builder.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "SOURCE_DIGEST=" + digest}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: spec.meta}); err != nil {
+		spec.record.ID = spec.id
+		if _, err := builder.Send(ctx, space.ID, protocols.SendMessage{Content: map[string]any{"text": "SOURCE_DIGEST=" + digest}, Refs: &protocols.Ref{Nodes: []string{receiver}}, Meta: spec.record.Meta()}); err != nil {
 			t.Fatal(err)
 		}
 		checkRecorded(spec.id)
 	}
-	// A genuine operator update is not feedback, even with a copied chain/ID.
+	// A genuine operator update is not feedback, even with a copied result ID.
 	send("echoed-review", "ci_notice", "SOURCE_DIGEST="+digest, []string{task}, true)
 	ordinary := waitFor(t, ctx, wires)
 	if got := activeSubmit(t, ctx, router, ordinary); got != task {

@@ -69,16 +69,32 @@ extension.Add(scope, subagent.Subagent{
 
 ## Inbox 路由 Agent
 
+运行时 `inbox.Message.Meta` 是固定 `mailbox.Metadata`，只承载明确的寻址、来源、反馈、回复及恢复字段。IOA wire 使用独立的 [Harness 应用协议](ioa-harness.md)，字段直接存放在动态 `meta` 中，不增加命名空间包装；内部 Meta.Record 持有其 typed envelope，旧 Handoff DTO 已删除。来源消息继续通过 IOA refs.messages 关联。持久状态 schema=2，拒绝读取 schema=1；没有兼容解码。
+
+`agenthooks.InboxWait` 成对通知协作式等待与恢复；显式 `inbox_wait` 和 producer 自动等待共用此边界。scheduler 释放当前根执行持有的名额，恢复时通过同一有界通道重新准入；超时仅结束 mailbox 等待，不取消恢复准入。等待和其他工具不能在同一模型工具批次中并行调用。此上限不包含独立运行的 descendant，挂起的会话也不会被卸载。命名 Prepare 返回的任务文本作用于首次 seed，保留原 envelope 身份、媒体、附件与来源；续接不重复注入 seed。
+
+名称、当前 execution ID 和历史 attempt ID 统一解析后，再执行显式寻址检查、防环和持久 admission。属于任务的 live 名称必须写入 inputs；只有不属于持久任务的 Session 才直接投递。owned `subagent_feedback` 选择 `reply` 或 `record` 都创建 durable outbox，路由到已有协调任务则由后续反馈完成回复。peer `task_result` 与普通系统事件保留仅 record 的语义。
+
+`reply/record` 不允许 destination；转交协调者使用 `task_id`（`action=route` 或省略）。错误会提示保留目标并改用 route，而不是删掉目标。Router context 提供 `registered_subagents`；`new_task.name` 在写任务前通过现有 Executor Catalog 检查，未知名称应省略并把角色写入 label。这里不提前运行 Prepare 或持有注册租约，后续注销/准备失败仍走正常 Dispatch 失败合同。
+
+`TestLiveComplex*` 是五类业务端到端验证：版本化对账汇聚、单槽位 DAG 分析与 tmux 唤醒、紧急约束最优化、IOA 离线库存流/背压、跨节点发布审计 ACK 丢失重试。所有 Router/worker 成功响应来自真实模型，业务工具实际执行，Go 独立核对产物和 SQLite 收敛状态；设置 `CYBER_INBOX_COMPLEX_OUTPUT` 保留证据。密钥只经 `CYBER_API_KEY` 环境变量传入，普通测试默认跳过。
+
+`go test -race ./exts/inbox -run '^TestLiveComplex' -count=1 -shuffle=on -v -timeout 25m`
+
 `exts/inbox` 借用 Agent Loop、Provider、hooks 与事件流，拥有一个跨 Run 保留上下文的路由 Agent。它只安装私有的 `inbox_route` 工具执行器，宿主的 shell、文件和 subagent 工具不会进入路由模型。接收者目录由实际 SessionStart/SessionEnd 构成，回调仍由 Session 控制准入和取消。
 
 inbox 组合在 Session、subagent tools 和 IOA collaboration hooks 之后启动 Router，确保恢复任务发出的事件能被全部观察：
 
 ```go
+var collaboration *ioaclient.CollaborationExtension
 router := inboxext.New(inboxext.Config{
     StateDir: ".cyber/active", MaxActive: 4,
+    Record: func(ctx context.Context, message inbox.Message) error {
+        return collaboration.RecordInboxHandoff(ctx, message)
+    },
     Notify: notifyResult, // 返回错误会保留在 durable outbox 重试
 })
-collaboration := ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
+collaboration = ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
     Receive: router.Router().Deliver,
     LoadCursor: router.Router().LoadCursor,
     SaveCursor: router.Router().SaveCursor,
@@ -89,7 +105,7 @@ collaboration := ioaclient.NewCollaboration(ioaclient.CollaborationOptions{
 
 Router 借用 `*sessionexec.Tool` 调用与模型 subagent 工具相同的 Prepare、定义租约和 Session 执行后端，以及内部 `*proc.Manager` 管理工作单元。Router 模型仅能分发，scheduler 负责并发与实例生命周期；不另建 Worker 进程或 worktree。
 
-其他入口调用 `Router.Submit(ctx, message)`，成功即完成 durable 准入，Receipt 的 `Wait(ctx)` 只观察路由目标与准入结果，不等待业务执行；取消 Wait 不撤销输入。调用方必须提供非 nil context 和从 `New` 获取的 Router。持久 Router 的失败路由持久退避重试，无最大次数；已经确认的目标不会再次投递。`Notify` 是结果发送边界，必须只在外部发送成功后返回 nil；重发时将稳定的反馈 Message ID 放入 `feedback_id`，并标记 `kind=task_result`，同时转发 `source_task_id`、execution 对应的 `source_session_id` 和 `feedback_chain`。IOA adapter 保留这些字段；持久 Router 对 peer 结果以 sender/source_session/feedback_id 去重，保留首次 wire ID 作为 Receipt.ID 和回复引用。peer 结果也受禁止 new_task、反馈环路及 16 跳上限约束；无需执行时可 record，普通 peer 消息不允许直接 record。普通消息仍按传输 ID 去重，其他接收方需自行实现结果幂等。存储失败取消宿主，不能返回虚假的成功确认。
+其他入口调用 `Router.Submit(ctx, message)`，成功表示 durable 准入；Receipt.Wait 观察路由和准入，不等于完成。失败路由持久退避重试，已确认目标不再投递。Notify 只在外部发送成功后返回 nil；IOA Notify 构造 task.result envelope，转发稳定 id、source.task_id/source.session_id、target 和 chain。adapter 映射到固定运行时 Meta；peer 结果按 sender/source-session/id 去重，并保留首次 wire ID 供回复。反馈禁止新任务、回投和超过 16 跳；普通消息按传输 ID 去重。存储失败取消宿主，不能返回虚假确认。
 
 路由投影只包含文本和媒体描述。执行输入保留媒体、附件与来源，但其内部 Message ID 按 origin/sender/source_session/id 规范化，避免不同来源相同 ID 在恢复时被误去重；原外部 ID 留在 `Meta.message_id` 和 Receipt。对 live Session 的直接投递仍保留原消息。明确的目标不能被模型改投：inbox 的 `task_id` 或历史 execution ID 可恢复原任务，非任务 Session 必须仍存活；重名 Session 拒绝。
 

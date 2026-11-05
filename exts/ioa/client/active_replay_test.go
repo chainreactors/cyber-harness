@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/chainreactors/cyber/agent/inbox"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -34,9 +35,17 @@ func TestActiveReplayFullHistoryCursorFailureAndStaleCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 300; i++ {
-		if err := store.AppendMessage(protocols.Message{ID: fmt.Sprintf("%032x", i), SpaceID: space.ID, Sender: producer.NodeID(), Content: map[string]any{"text": fmt.Sprintf("event-%d", i)}, Meta: map[string]any{"target_session_id": "old-execution", "task_id": "durable-task"}}); err != nil {
+		if err := store.AppendMessage(protocols.Message{ID: fmt.Sprintf("%032x", i), SpaceID: space.ID, Sender: producer.NodeID(), Content: map[string]any{"text": fmt.Sprintf("event-%d", i)}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Target: harness.Address{TaskID: "durable-task", SessionID: "old-execution"}}.Meta()}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A malformed application record between valid records is retained and
+	// reported, but must not prevent subsequent durable history from draining.
+	if err := store.AppendMessage(protocols.Message{ID: fmt.Sprintf("%032x", 301), SpaceID: space.ID, Sender: producer.NodeID(), Meta: map[string]any{"version": 99, "event": "message"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendMessage(protocols.Message{ID: fmt.Sprintf("%032x", 302), SpaceID: space.ID, Sender: producer.NodeID(), Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Target: harness.Address{TaskID: "durable-task", SessionID: "old-execution"}}.Meta()}); err != nil {
+		t.Fatal(err)
 	}
 	server := httptest.NewServer(ioaserver.NewHTTPHandler(svc))
 	defer server.Close()
@@ -59,7 +68,7 @@ func TestActiveReplayFullHistoryCursorFailureAndStaleCursor(t *testing.T) {
 				failedAdmission = true
 				return inbox.ErrInboxFull
 			}
-			if m.Meta["task_id"] != "durable-task" || m.Meta["target_session_id"] != "old-execution" {
+			if m.Meta.TaskID != "durable-task" || m.Meta.TargetSessionID != "old-execution" {
 				return errors.New("source correlation lost")
 			}
 			accepted[m.Message.Id]++
@@ -77,7 +86,7 @@ func TestActiveReplayFullHistoryCursorFailureAndStaleCursor(t *testing.T) {
 	if err := adapter.replay(ctx, space.ID); err != nil {
 		t.Fatal(err)
 	}
-	if len(accepted) != 300 || cursor != fmt.Sprintf("%032x", 300) {
+	if len(accepted) != 301 || cursor != fmt.Sprintf("%032x", 302) {
 		t.Fatalf("initial history was truncated: count=%d cursor=%s", len(accepted), cursor)
 	}
 	cursor = "deleted-cursor"
@@ -89,7 +98,7 @@ func TestActiveReplayFullHistoryCursorFailureAndStaleCursor(t *testing.T) {
 			t.Fatalf("duplicate delivery %s count=%d", id, count)
 		}
 	}
-	if cursor != fmt.Sprintf("%032x", 300) {
+	if cursor != fmt.Sprintf("%032x", 302) {
 		t.Fatalf("stale cursor did not recover: %s", cursor)
 	}
 	empty, err := producer.Space(ctx, "empty-history", "empty-history")

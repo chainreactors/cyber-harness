@@ -77,7 +77,7 @@ aiscan doctor --online
 ```yaml
 inbox:
   state_dir: .cyber/active
-  max_active: 4         # 最大并发任务数，同一任务始终串行
+  max_active: 4         # 正在执行的根任务数；Inbox 等待释放名额，同一任务始终串行
 agent:
   timeout: 0           # 共用执行设置，秒；inbox 默认 0，agent 默认 3600
 ```

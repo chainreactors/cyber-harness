@@ -16,6 +16,7 @@ import (
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/aop"
 	toolpb "github.com/chainreactors/cyber/aop/tool"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/eventbus"
 	"github.com/chainreactors/cyber/core/events"
 	"github.com/chainreactors/cyber/core/extension"
@@ -222,34 +223,48 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	// Install session tools and source hooks before starting the active router.
 	var router *inboxext.Extension
 	var ioa *ioaclient.Extension
+	var collaboration *ioaclient.CollaborationExtension
 	if config.Option.Command == cfg.RunModeInbox && config.Session != nil {
 		dir := cfg.InboxStateDir(config.Option, workDir)
-		router = inboxext.New(inboxext.Config{StateDir: dir, MaxActive: config.Option.MaxActive, Notify: func(ctx context.Context, m inbox.Message) error {
+		var record func(context.Context, inbox.Message) error
+		if config.IOA != nil {
+			record = func(ctx context.Context, m inbox.Message) error {
+				if collaboration == nil {
+					return fmt.Errorf("IOA inbox handoff recorder is unavailable")
+				}
+				return collaboration.RecordInboxHandoff(ctx, m)
+			}
+		}
+		router = inboxext.New(inboxext.Config{StateDir: dir, MaxActive: config.Option.MaxActive, Record: record, Notify: func(ctx context.Context, m inbox.Message) error {
 			text := provider.MessageText(m.Message)
-			if node, _ := m.Meta["reply_node"].(string); node != "" {
+			if node := m.Meta.ReplyNode; node != "" {
 				if ioa == nil || ioa.Service() == nil {
 					return fmt.Errorf("IOA reply transport is unavailable")
 				}
 				svc := ioa.Service()
-				space, _ := m.Meta["space"].(string)
+				space := m.Meta.Space
 				if space == "" {
 					space = svc.ReceiveSpace()
 				}
-				source, _ := m.Meta["reply_session"].(string)
-				reference, _ := m.Meta["reply_message"].(string)
+				source, reference := m.Meta.ReplySession, m.Meta.ReplyMessage
 				refs := &protocols.Ref{Nodes: []string{node}}
 				if reference != "" {
 					refs.Messages = []string{reference}
 				}
-				_, err := svc.Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: refs, Meta: map[string]any{"source_task_id": m.Meta["task_id"], "source_session_id": m.Meta["execution_id"], "target_session_id": source, "feedback_id": m.Message.Id, "feedback_chain": m.Meta["feedback_chain"], "kind": "task_result"}})
+				record := harness.Envelope{Version: harness.Version, Event: harness.TaskResult, ID: m.Message.Id,
+					Source: harness.Address{TaskID: m.Meta.TaskID, SessionID: m.Meta.ExecutionID},
+					Target: harness.Address{SessionID: source}, Chain: m.Meta.FeedbackChain, Status: m.Meta.Status}
+				if err := record.Validate(); err != nil {
+					return err
+				}
+				_, err := svc.Client().Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": text}, Refs: refs, Meta: record.Meta()})
 				return err
 			}
-			config.Base.Logger.Importantf("task=%v status=%v\n%s", m.Meta["task_id"], m.Meta["status"], text)
+			config.Base.Logger.Importantf("task=%s status=%s\n%s", m.Meta.TaskID, m.Meta.Status, text)
 			return nil
 		}})
 		p.router = router.Router()
 	}
-	var collaboration *ioaclient.CollaborationExtension
 	if config.IOA != nil {
 		bundle, diagnostics := ioaclient.Skills()
 		if len(diagnostics) > 0 {

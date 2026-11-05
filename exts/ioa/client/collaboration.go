@@ -40,13 +40,14 @@ type CollaborationExtension struct {
 	mu            sync.Mutex
 	routes        map[string]*sessionRoute
 	seen          map[string]bool
+	inflight      map[string]chan struct{}
 	recent        []string
 	outputErr     error
 }
 
 func NewCollaboration(options CollaborationOptions) *CollaborationExtension {
 	options.Skills = append([]skills.Bundle(nil), options.Skills...)
-	return &CollaborationExtension{options: options, routes: make(map[string]*sessionRoute), seen: make(map[string]bool)}
+	return &CollaborationExtension{options: options, routes: make(map[string]*sessionRoute), seen: make(map[string]bool), inflight: make(map[string]chan struct{})}
 }
 func (e *CollaborationExtension) Service() *service.Service { return e.service }
 
@@ -65,7 +66,7 @@ func (e *CollaborationExtension) Load(scope *extension.Scope) error {
 		Apply: func(_ context.Context, document *prompt.Document, _ prompt.Context) error {
 			return document.After(prompt.SectionIdentity, "ioa.collaboration", prompt.Static(`IOA is ready in the configured space.
 Send: ioa send <session-id-or-name> "message". Reply: add --ref-messages <message-id>.
-New messages arrive automatically; call inbox_wait to wait without ending the task.
+New messages arrive automatically. Call inbox_wait only when the current task explicitly requires waiting for future messages. Otherwise return a final response when the requested work is complete; do not wait merely because IOA is connected.
 Recover history when needed: ioa read --all [--after <message-id>].
 Redirect current work: add --interrupt; running commands continue.`))
 		},

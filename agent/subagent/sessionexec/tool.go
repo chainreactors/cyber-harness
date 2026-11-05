@@ -18,6 +18,7 @@ import (
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/resource"
 	coretool "github.com/chainreactors/cyber/core/tool"
+	"google.golang.org/protobuf/proto"
 )
 
 type Tool struct {
@@ -141,20 +142,23 @@ func (t *Tool) create(ctx context.Context, args Args) (string, error) {
 
 // Dispatch runs a host-owned task through the same preparation and Session
 // backend as the model tool. Checkpoint runs before releasing its Session and
-// lease. Inputs retain their original envelopes; history is supplied separately.
+// lease. Preparation changes only the first seed's text; envelope identity and
+// attachments are preserved. Restored history is supplied separately.
 func (t *Tool) Dispatch(ctx context.Context, request subagent.Request, options session.SessionOptions, inputs []inbox.Message, checkpoint func([]*aop.Message, *agent.Result, error) error) (*agent.Result, error) {
 	options.Messages = truncateToLastCompleteBoundary(options.Messages)
 	restored := make(map[string]bool)
 	for _, m := range options.Messages {
 		restored[m.Id] = true
 	}
-	fresh := make([]inbox.Message, 0, len(inputs))
-	for _, m := range inputs {
-		if !restored[m.Message.Id] {
-			fresh = append(fresh, m)
+	if inputs != nil {
+		fresh := make([]inbox.Message, 0, len(inputs))
+		for _, m := range inputs {
+			if !restored[m.Message.Id] {
+				fresh = append(fresh, m)
+			}
 		}
+		inputs = fresh
 	}
-	inputs = fresh
 	cfg, err := t.runtime.TaskConfig()
 	if err != nil {
 		return nil, err
@@ -165,6 +169,18 @@ func (t *Tool) Dispatch(ctx context.Context, request subagent.Request, options s
 		return nil, err
 	}
 	defer finish()
+	if len(options.Messages) == 0 && len(inputs) > 0 && task.Detail.Task != request.Input.Prompt {
+		// Prepare transforms the seed task, not its envelope identity or media.
+		seed := proto.CloneOf(inputs[0].Message)
+		content := []*aop.Content{aop.Text(task.Detail.Task)}
+		for _, part := range seed.Content {
+			if part.GetText() == nil {
+				content = append(content, part)
+			}
+		}
+		seed.Content = content
+		inputs[0].Message = seed
+	}
 	s, run, err := t.open(task, cfg, "", options, inputs)
 	if err != nil {
 		return nil, err

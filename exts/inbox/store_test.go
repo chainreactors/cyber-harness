@@ -2,11 +2,47 @@ package inbox
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	mailbox "github.com/chainreactors/cyber/agent/inbox"
 	aop "github.com/chainreactors/cyber/aop"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 )
+
+func TestStoredMessageMetadataRoundTrip(t *testing.T) {
+	message := mailbox.NewMessage(mailbox.OriginSystem, "user", "completed")
+	message.Meta = mailbox.Metadata{MessageID: "source-id", TaskID: "task-id", FeedbackChain: []string{"ancestor"},
+		Record: &harness.Envelope{Version: harness.Version, Event: harness.InboxRoute, ID: "route-id", Target: harness.Address{TaskID: "task-id", SessionID: "worker-session"}, Status: "routed"}}
+	encoded, err := encodeMessage(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeMessage(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Meta.MessageID != "source-id" || decoded.Meta.TaskID != "task-id" || len(decoded.Meta.FeedbackChain) != 1 || decoded.Meta.Record == nil || decoded.Meta.Record.Target.SessionID != "worker-session" {
+		t.Fatalf("metadata round trip: %+v", decoded.Meta)
+	}
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		t.Fatal(err)
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal(stored["Meta"], &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := metadata["record"]; !ok {
+		t.Fatalf("missing typed application record: %s", stored["Meta"])
+	}
+	if _, ok := metadata["handoff"]; ok {
+		t.Fatalf("obsolete handoff DTO persisted: %s", stored["Meta"])
+	}
+}
 
 func TestRecoveredJournalIsRetiredWithSnapshot(t *testing.T) {
 	dir := t.TempDir()
@@ -178,5 +214,27 @@ func TestActiveTasksOrderByOldestPendingInput(t *testing.T) {
 	}
 	if len(tasks) != 2 || tasks[0].ID != b || tasks[1].ID != a {
 		t.Fatalf("older task jumped ahead of pending work: %+v", tasks)
+	}
+}
+
+func TestActiveStateRejectsOldSchema(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "active.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("PRAGMA user_version=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openActiveStore(dir)
+	if err == nil {
+		store.close()
+		t.Fatal("old state accepted without an application protocol migration")
+	}
+	if !strings.Contains(err.Error(), "requires schema 2") {
+		t.Fatal(err)
 	}
 }

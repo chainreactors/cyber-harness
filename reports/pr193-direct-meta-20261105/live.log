@@ -1,0 +1,18 @@
+=== RUN   TestLiveComplexVersionedReconciliation
+    complex_live_test.go:194: complex live evidence: D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\versioned-reconciliation-1483877563
+    complex_live_test.go:197: reconciliation solved: CNY 63000/56000/-7000, USD 7200/7300/+100; 3 unresolved orders; 25 rows/21 events/4 duplicates; 3 stable tasks; offline IOA replay, stale-evidence gate and duplicate suppression passed; artifacts=D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\versioned-reconciliation-1483877563\work
+--- PASS: TestLiveComplexVersionedReconciliation (159.36s)
+=== RUN   TestLiveComplexDAGCapacityAndTmux
+    complex_live_test.go:213: complex live evidence: D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\dag-3623890401
+--- PASS: TestLiveComplexDAGCapacityAndTmux (48.73s)
+=== RUN   TestLiveComplexUrgentAllocation
+    complex_live_test.go:366: complex live evidence: D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\urgent-allocation-1794465431
+--- PASS: TestLiveComplexUrgentAllocation (44.34s)
+=== RUN   TestLiveComplexIOAInventoryReplay
+    complex_live_test.go:559: complex live evidence: D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\ioa-inventory-4182589034
+--- PASS: TestLiveComplexIOAInventoryReplay (49.60s)
+=== RUN   TestLiveComplexIOAReleaseAckLoss
+    complex_live_test.go:793: complex live evidence: D:\Programing\go\chainreactors\aiscan\exts\inbox\reports\pr193-direct-meta-20261105\release-ack-loss-3353517787
+--- PASS: TestLiveComplexIOAReleaseAckLoss (60.17s)
+PASS
+ok  	github.com/chainreactors/cyber/exts/inbox	362.349s

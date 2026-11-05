@@ -43,7 +43,7 @@ func liveRoutingModel(t *testing.T) provider.Provider {
 	}
 	return modelFunc(func(ctx context.Context, request *provider.ChatCompletionRequest) (*provider.ChatCompletionResponse, error) {
 		copy := *request
-		copy.Model, copy.MaxTokens = config.Model, 2048
+		copy.Model, copy.MaxTokens = config.Model, 8192
 		return model.ChatCompletion(ctx, &copy)
 	})
 }
@@ -68,7 +68,7 @@ func TestLiveRouterInterleavedTasks(t *testing.T) {
 	submit(t, ctx, router, mailbox.NewUserMessage("Separately, prepare the documentation migration guide for release R42."), "writer")
 	submit(t, ctx, router, mailbox.NewUserMessage("Correction to the retry race investigation: reproduce with two concurrent retries, not one. Give this to the agent handling that investigation."), "investigator")
 	result := mailbox.NewSystemMessage("Investigation result for R42: two concurrent retries both observed the unpaid state. Hand this finding to the owner integrating the release review.")
-	result.Meta = map[string]any{"source_session_id": "investigator"}
+	result.Meta = mailbox.Metadata{SourceSessionID: "investigator"}
 	submit(t, ctx, router, result, "coordinator")
 }
 
@@ -102,7 +102,7 @@ func TestLiveActiveWorkersFileTasksAndRestart(t *testing.T) {
 	}
 	for range 2 {
 		result := waitFor(t, ctx, completed)
-		if result.Meta["status"] != "completed" {
+		if result.Meta.Status != "completed" {
 			t.Fatalf("worker failed: %v: %s", result.Meta, provider.MessageText(result.Message))
 		}
 	}
@@ -116,12 +116,12 @@ func TestLiveActiveWorkersFileTasksAndRestart(t *testing.T) {
 	_, router, _, set = activeHost(t, model, config)
 	path := strings.ReplaceAll(filepath.ToSlash(filepath.Join(dir, "alpha.txt")), "'", "'\"'\"'")
 	followup := mailbox.NewUserMessage(fmt.Sprintf("Continue your previous file task. Use bash to append exactly the line continued and a newline to '%s', preserving the previous line. Read it back, then finish. Touch only this file; do not create subagents.", path))
-	followup.Meta = map[string]any{"task_id": tasks["alpha"]}
+	followup.Meta = mailbox.Metadata{TaskID: tasks["alpha"]}
 	if got := activeSubmit(t, ctx, router, followup); got != tasks["alpha"] {
 		t.Fatalf("follow-up changed task: %s", got)
 	}
 	result := waitFor(t, ctx, completed)
-	if result.Meta["status"] != "completed" || result.Meta["task_id"] != tasks["alpha"] {
+	if result.Meta.Status != "completed" || result.Meta.TaskID != tasks["alpha"] {
 		t.Fatalf("follow-up failed: %v: %s", result.Meta, provider.MessageText(result.Message))
 	}
 	for name, expected := range map[string]string{"alpha": "alpha\ncontinued\n", "beta": "beta\n"} {

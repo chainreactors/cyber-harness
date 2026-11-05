@@ -90,19 +90,18 @@ func TestInboxInterruptDetachesTmuxExecution(t *testing.T) {
 			wait, stop := context.WithTimeout(t.Context(), 3*time.Second)
 			defer stop()
 			completions := 0
+			var completion string
 			for ib.WaitWhileActive(wait) {
 				for _, msg := range ib.Drain() {
-					if msg.Meta["type"] == "completion" {
+					text := msg.Message.GetContent()[0].GetText().GetText()
+					if strings.Contains(text, "<session_completion") {
 						completions++
-						id, _ := msg.Meta["session_id"].(string)
-						if !strings.Contains(result, id) {
-							t.Fatalf("foreground/background identity changed: %q -> %q", result, id)
-						}
+						completion = text
 					}
 				}
 			}
-			if completions != 1 || ib.ActiveProducers() != 0 {
-				t.Fatalf("completions=%d producers=%d", completions, ib.ActiveProducers())
+			if completions != 1 || ib.ActiveProducers() != 0 || !strings.Contains(completion, "finished once") {
+				t.Fatalf("completions=%d producers=%d completion=%q", completions, ib.ActiveProducers(), completion)
 			}
 		})
 	}

@@ -571,7 +571,6 @@ func (t *BashTool) startMonitor(info proc.Info, workDir string, targetInbox inbo
 		msg := inbox.NewMessage(inbox.OriginSession, "user",
 			fmt.Sprintf("<session_output id=%q name=%q>\n%s\n</session_output>", info.ID, info.Name, output))
 		msg.Priority = inbox.PriorityLow
-		msg.Meta = map[string]any{"session_id": info.ID, "session_name": info.Name, "type": "incremental"}
 		// Incremental output is best-effort. Completion below is high priority
 		// and retried so a full inbox cannot make a background task disappear.
 		_ = targetInbox.Push(msg)
@@ -588,12 +587,6 @@ func (t *BashTool) startMonitor(info proc.Info, workDir string, targetInbox inbo
 		tail := truncate.Tail(strings.ToValidUTF8(t.tasks.PeekOrEmpty(info.ID, 20), "�"), truncate.Options{MaxLines: 20}).Content
 		msg := inbox.NewMessage(inbox.OriginSession, "user", FormatCompletion(final, tail)+t.outputFileHint(final.ID, workDir))
 		msg.Priority = inbox.PriorityHigh
-		msg.Meta = map[string]any{
-			"session_id":   final.ID,
-			"session_name": final.Name,
-			"exit_code":    final.ExitStatus(),
-			"type":         "completion",
-		}
 		pushCompletion(targetInbox, msg)
 	}()
 }

@@ -14,6 +14,7 @@ import (
 
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/agent/inbox"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -41,7 +42,7 @@ func TestRouterAdmissionFailureRemainsRetryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	message := protocols.Message{ID: "retry-id", Sender: "peer", Content: map[string]any{"text": "work"},
-		Meta: map[string]any{"target_session_id": "receiver", "source_session_id": "sender-session", "interrupt": true}}
+		Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Source: harness.Address{SessionID: "sender-session"}, Target: harness.Address{SessionID: "receiver"}, Interrupt: true}.Meta()}
 	if err := adapter.deliver(t.Context(), message); !errors.Is(err, inbox.ErrInboxFull) {
 		t.Fatalf("first admission=%v", err)
 	}
@@ -50,8 +51,50 @@ func TestRouterAdmissionFailureRemainsRetryable(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if attempts.Load() != 2 || !admitted.Interrupt || admitted.Meta["message_id"] != message.ID || admitted.Meta["target_session_id"] != "receiver" {
+	if attempts.Load() != 2 || !admitted.Interrupt || admitted.Message.Id != message.ID || admitted.Meta.MessageID != message.ID || admitted.Meta.TargetSessionID != "receiver" {
 		t.Fatalf("attempts=%d admitted=%#v", attempts.Load(), admitted)
+	}
+}
+
+func TestConcurrentDuplicateAdmissionIsCoalesced(t *testing.T) {
+	var attempts atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	connection := New(service.Config{})
+	adapter := NewCollaboration(CollaborationOptions{Receive: func(_ context.Context, _ inbox.Message) error {
+		if attempts.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return nil
+	}})
+	hosttest.Load(t, t.Context(), extension.Provided[*hooks.Registry](hooks.New()), promptext.New(),
+		extension.Provided[telemetry.Logger](telemetry.NopLogger()), connection, adapter)
+	message := protocols.Message{ID: "concurrent-duplicate", Sender: "peer", Meta: harness.Envelope{Version: harness.Version, Event: harness.Message}.Meta(), Content: map[string]any{"text": "work"}}
+	results := make(chan error, 2)
+	go func() { results <- adapter.deliver(t.Context(), message) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first admission did not start")
+	}
+	go func() { results <- adapter.deliver(t.Context(), message) }()
+	time.Sleep(30 * time.Millisecond)
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("concurrent duplicate reached receiver %d times", got)
+	}
+	close(release)
+	for range 2 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("duplicate delivery did not finish")
+		}
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("receiver calls=%d want=1", got)
 	}
 }
 
@@ -76,7 +119,7 @@ func TestRouterDrainsEventsBeforeReconnect(t *testing.T) {
 		}
 		for i := range 12 {
 			data, _ := json.Marshal(protocols.Message{ID: fmt.Sprintf("event-%02d", i), Sender: "external-monitor",
-				Content: map[string]any{"text": "observation"}})
+				Content: map[string]any{"text": "observation"}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message}.Meta()})
 			fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
 		}
 		// The SDK reports a decode error and closes both channels with the
@@ -88,7 +131,7 @@ func TestRouterDrainsEventsBeforeReconnect(t *testing.T) {
 	accepted := make(chan string, 12)
 	connection := New(service.Config{URL: strings.Replace(server.URL, "http://", "http://test@", 1), Space: "drain", AutoRegister: true})
 	adapter := NewCollaboration(CollaborationOptions{Receive: func(_ context.Context, message inbox.Message) error {
-		accepted <- message.Meta["message_id"].(string)
+		accepted <- message.Message.Id
 		return nil
 	}})
 	set := hosttest.Load(t, ctx, extension.Provided[*hooks.Registry](hooks.New()), promptext.New(),
@@ -123,7 +166,7 @@ func TestSubscriptionRetriesRouterBackpressure(t *testing.T) {
 					}
 					return inbox.ErrInboxFull
 				}
-				accepted <- message.Meta["message_id"].(string)
+				accepted <- message.Message.Id
 				return nil
 			}})
 			registry := hooks.New()
@@ -141,7 +184,7 @@ func TestSubscriptionRetriesRouterBackpressure(t *testing.T) {
 			var ids []string
 			for range 2 {
 				message, err := client.Send(ctx, space, protocols.SendMessage{Content: map[string]any{"text": "monitor event"},
-					Refs: &protocols.Ref{Nodes: []string{client.NodeID()}}, Meta: map[string]any{"target_session_id": "receiver"}})
+					Refs: &protocols.Ref{Nodes: []string{client.NodeID()}}, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message, Target: harness.Address{SessionID: "receiver"}}.Meta()})
 				if err != nil {
 					t.Fatal(err)
 				}

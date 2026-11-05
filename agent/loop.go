@@ -251,7 +251,10 @@ func (StandardLoop) Run(ctx context.Context, cfg Config) (*Result, error) {
 			if ib != nil && !ib.Closed() {
 				cfg.Logger.Debugf("[turn %d] waiting for inbox (producers=%d)",
 					turn, ib.ActiveProducers())
-				hasMessage := ib.WaitWhileActive(ctx)
+				hasMessage, err := waitInbox(ctx, ctx, cfg, ib, true)
+				if err != nil {
+					return end(nil, err, agenthooks.StopReasonError)
+				}
 				if hasMessage {
 					continue
 				}
@@ -502,6 +505,10 @@ func executeToolCalls(ctx context.Context, cfg Config, em *aopEmitter, assistant
 		interrupt = cfg.Inbox.InterruptSignal()
 	}
 	for i, tc := range toolCalls {
+		if tc.Name == "inbox_wait" && len(toolCalls) > 1 {
+			results[i] = rejectedToolResult(tc, "Call inbox_wait alone after other tools complete; waiting cannot run in parallel with work.")
+			continue
+		}
 		if reason := assistant.rejected[i]; reason != "" {
 			results[i] = rejectedToolResult(tc, reason)
 			cfg.Logger.Warnf("[turn %d] rejected unsafe tool call name=%s reason=%s", turn, tc.Name, reason)
