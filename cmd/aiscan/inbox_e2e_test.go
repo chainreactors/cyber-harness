@@ -29,7 +29,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("CLI subprocess integration")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	dir := t.TempDir()
 	config := filepath.Join(dir, "cyber.yaml")
@@ -131,14 +131,18 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}})
 		}
 	}))
-	defer model.Close()
+	defer func() {
+		// Stop child processes before closing servers they may still be polling.
+		cancel()
+		model.Close()
+	}()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := func(name, timeout string) (io.WriteCloser, string, <-chan error) {
 		t.Helper()
-		cmd := exec.CommandContext(ctx, executable, "-test.run=^TestInboxCLIProcessChild$", "-test.timeout=40s", "--",
+		cmd := exec.CommandContext(ctx, executable, "-test.run=^TestInboxCLIProcessChild$", "-test.timeout=2m", "--",
 			"--config", config, "--data-dir", filepath.Join(dir, "data"), "--no-color", "inbox",
 			"--base-url", model.URL+"/v1", "--provider", "openai", "--model", "scenario", "--api-key", "local-test-key",
 			"--state-dir", filepath.Join(dir, "state"), "--max-active", "2", "--timeout", timeout,
@@ -188,7 +192,9 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 			}
 		}
 	}
-	input, log, done := start("first", "30")
+	// The scenario context bounds initialization and work; neither lock owner
+	// should expire while a competing process initializes under race/coverage.
+	input, log, done := start("first", "0")
 	wait(done, log, func(s string) bool { return strings.Contains(s, "Inbox router listening") })
 	db, err := sql.Open("sqlite", filepath.Join(dir, "state", "active.sqlite"))
 	if err != nil {
@@ -318,7 +324,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	if handoffs < 4 {
 		t.Fatalf("IOA recorded %d router handoffs, want at least 4", handoffs)
 	}
-	secondInput, secondLog, secondDone := start("competing", "5")
+	secondInput, secondLog, secondDone := start("competing", "0")
 	_ = secondInput.Close()
 	select {
 	case err := <-secondDone:
@@ -341,7 +347,7 @@ func TestInboxCLIProcessWorkflow(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	input, log, done = start("restarted", "8")
+	input, log, done = start("restarted", "30")
 	_ = input.Close()
 	wait(done, log, func(s string) bool { return strings.Contains(s, "Inbox router listening") })
 	before := calls.Load()

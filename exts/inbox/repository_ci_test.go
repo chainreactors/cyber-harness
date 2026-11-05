@@ -32,7 +32,8 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("requires Go toolchain")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	// Both real Go commands may compile cold packages alongside the CI suite.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -57,7 +58,7 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 		return "'" + strings.ReplaceAll(filepath.ToSlash(path), "'", "'\"'\"'") + "'"
 	}
 	command := func(pkg, name, artifact string) *provider.ChatCompletionResponse {
-		return toolResponse("bash", map[string]any{"command": fmt.Sprintf("cd %s && go test -json -count=1 -run '^%s$' %s > %s && cat %s", quote(root), name, pkg, quote(filepath.Join(dir, artifact)), quote(filepath.Join(dir, artifact))), "timeout": 25})
+		return toolResponse("bash", map[string]any{"command": fmt.Sprintf("cd %s && go test -json -count=1 -run '^%s$' %s > %s && cat %s", quote(root), name, pkg, quote(filepath.Join(dir, artifact)), quote(filepath.Join(dir, artifact))), "timeout": 45})
 	}
 	blocked := make(chan string, 1)
 	failRequest := make(chan struct{})
@@ -129,8 +130,6 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 	if strings.Contains(fmt.Sprint(failed.Meta.FeedbackChain), "unconsumed-scope-origin") {
 		t.Fatal("failed CI feedback claimed ancestry from an unread scope update")
 	}
-	deadline, stop := context.WithTimeout(ctx, 15*time.Second)
-	defer stop()
 	select {
 	case result := <-feedback:
 		if result.Meta.TaskID != task || result.Meta.Status != "completed" || result.Meta.ExecutionID == first {
@@ -139,7 +138,7 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 		if !strings.Contains(fmt.Sprint(result.Meta.FeedbackChain), "unconsumed-scope-origin") {
 			t.Fatal("resumed CI feedback lost the processed scope update ancestry")
 		}
-	case <-deadline.Done():
+	case <-ctx.Done():
 		db, err := sql.Open("sqlite", filepath.Join(dir, "state", "active.sqlite"))
 		if err != nil {
 			t.Fatal(err)
@@ -149,7 +148,7 @@ func TestRepositoryCIContinuationAfterProviderFailure(t *testing.T) {
 		var done int
 		_ = db.QueryRow("SELECT state FROM tasks WHERE id=?", task).Scan(&state)
 		_ = db.QueryRow("SELECT count(*) FROM inputs WHERE task_id=? AND state='done'", task).Scan(&done)
-		t.Fatalf("accepted CI scope update never executed after model failure: task=%s acknowledged_inputs=%d", state, done)
+		t.Fatalf("CI continuation timed out: %v; task=%s acknowledged_inputs=%d mailbox_commands=%d session_commands=%d", ctx.Err(), state, done, mailboxCommands.Load(), sessionCommands.Load())
 	}
 	for artifact, testName := range map[string]string{"mailbox.jsonl": "TestInterruptAdmissionAndDrain", "session.jsonl": "TestDeliveryGatesRoutingAndCapacity"} {
 		f, err := os.Open(filepath.Join(dir, artifact))
