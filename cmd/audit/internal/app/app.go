@@ -46,7 +46,8 @@ type options struct {
 	DataDir     string `long:"data-dir" description:"Data directory"`
 	WorkDir     string `long:"workdir" description:"Workspace exposed to file and bash tools"`
 	BashTimeout int    `long:"bash-timeout" description:"Default bash timeout in seconds" default:"600"`
-	Format      string `long:"output-format" description:"One-shot output: text, json, or stream-json" default:"text"`
+	Format      string `short:"o" long:"output-format" description:"Output format: text, json, jsonl, markdown, csv" default:"text"`
+	File        string `short:"f" long:"file" description:"Output destination (default: stdout)"`
 	JSON        bool   `long:"json" description:"Alias for --output-format=json"`
 	NodeName    string `long:"node-name" description:"Agent node name"`
 	NodeID      string `long:"node-id" description:"Existing node ID"`
@@ -89,6 +90,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 		fmt.Fprintf(stdout, "cyber-audit v%s\n", cfg.Version)
 		return nil
 	}
+	if err := output.Open(); err != nil {
+		return err
+	}
 	if _, err := cfg.ResolveAgentRuntimeConfig(&option); err != nil {
 		return err
 	}
@@ -122,6 +126,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 	task, oneShot, err := resolveAuditTask(&option)
 	if err != nil {
 		return err
+	}
+	if transport == cfg.AgentTransportWeb && (option.OutputFormat != "text" || option.OutputFile != "") {
+		return fmt.Errorf("-o/-f select task output; the server exposes events through its transport")
+	}
+	if !oneShot && transport != cfg.AgentTransportWeb {
+		if option.OutputFile != "" && option.OutputFormat != "jsonl" {
+			return fmt.Errorf("interactive output stays in the terminal; use -o jsonl -f <file> to record events")
+		}
+		if option.OutputFormat != "text" && !(option.OutputFormat == "jsonl" && option.OutputFile != "") {
+			return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
+		}
 	}
 	if transport != cfg.AgentTransportWeb && option.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -160,6 +175,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, ensure fu
 	if err := profile.Load(ctx); err != nil {
 		return finish(err)
 	}
+	if option.OutputFormat == "jsonl" {
+		output.Observe(profile.runtime)
+	}
 	if !oneShot {
 		if _, err := profile.runtime.Skills().ApplySelected("", option.Skills); err != nil {
 			return finish(err)
@@ -192,10 +210,10 @@ func parseOptions(args []string, helpOutput io.Writer) (options, cfg.Option, err
 		if errors.As(err, &flagErr) && flagErr.Type == flags.ErrHelp && helpOutput != nil {
 			parser.WriteHelp(helpOutput)
 		}
-		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, JSON: parsed.JSON}}, err
+		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON}}, err
 	}
 	if len(rest) != 0 {
-		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, JSON: parsed.JSON}}, fmt.Errorf("unexpected arguments: %s", strings.Join(rest, " "))
+		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON}}, fmt.Errorf("unexpected arguments: %s", strings.Join(rest, " "))
 	}
 	option := cfg.Option{
 		Context:    &cfg.Context{Directory: parsed.WorkDir, UserLLMOnly: true},
@@ -209,7 +227,7 @@ func parseOptions(args []string, helpOutput io.Writer) (options, cfg.Option, err
 		NodeOptions: cfg.NodeOptions{NodeID: parsed.NodeID, NodeName: parsed.NodeName},
 		MiscOptions: cfg.MiscOptions{
 			ConfigFile: parsed.ConfigFile, DataDir: parsed.DataDir,
-			OutputFormat: parsed.Format, JSON: parsed.JSON, Debug: parsed.Debug,
+			OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON, Debug: parsed.Debug,
 			Verbose: parsed.Verbose, Quiet: parsed.Quiet, NoColor: parsed.NoColor, Version: parsed.Version,
 		},
 	}
@@ -233,7 +251,7 @@ func resolveAuditTask(option *cfg.Option) (string, bool, error) {
 	return task, explicit, nil
 }
 
-func runToolCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (bool, error) {
+func runToolCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (handled bool, resultErr error) {
 	if len(args) == 0 || args[0] != "doctor" && args[0] != "tools" {
 		return false, nil
 	}
@@ -254,8 +272,14 @@ func runToolCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	format := option.OutputFormat
 	if format != "text" && format != "json" {
-		return true, fmt.Errorf("tool commands support --output-format text or json")
+		return true, fmt.Errorf("tool commands support -o text or -o json")
 	}
+	output := taskcli.NewOutput(&option, stdout, stderr)
+	if err := output.Open(); err != nil {
+		return true, err
+	}
+	defer func() { resultErr = output.Finish(resultErr) }()
+	stdout = output.Stdout()
 	if option.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(option.Timeout)*time.Second)

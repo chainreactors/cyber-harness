@@ -149,11 +149,11 @@ func TestParseCLIIOAKeepsQueryJSONFlag(t *testing.T) {
 }
 
 func TestParseCLIAgentMachineOutput(t *testing.T) {
-	parsed, err := parseCLI([]string{"agent", "-p", "hello", "--json", "--observe=files,http", "-o", "run.jsonl"})
+	parsed, err := parseCLI([]string{"agent", "-p", "hello", "-o", "json", "--observe=files,http", "-f", "run.json"})
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
-	if parsed.Option.OutputFormat != "json" || parsed.Option.Observe != "files,http" || parsed.Option.OutputFile != "run.jsonl" {
+	if parsed.Option.OutputFormat != "json" || parsed.Option.Observe != "files,http" || parsed.Option.OutputFile != "run.json" {
 		t.Fatalf("machine output options = %#v", parsed.Option.MiscOptions)
 	}
 	if _, err := parseCLI([]string{"agent", "-p", "hello", "--output-format", "yaml"}); err == nil {
@@ -166,8 +166,8 @@ func TestParseCLIExtractsOutputForAgentAndScan(t *testing.T) {
 		args     []string
 		wantArgs []string
 	}{
-		{args: []string{"agent", "-p", "hello", "-o", "agent.jsonl"}},
-		{args: []string{"scan", "-i", "127.0.0.1", "-o", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
+		{args: []string{"agent", "-p", "hello", "-o", "jsonl", "-f", "agent.jsonl"}},
+		{args: []string{"scan", "-i", "127.0.0.1", "-o", "jsonl", "-f", "scan.jsonl"}, wantArgs: []string{"scan", "-i", "127.0.0.1"}},
 	}
 	for _, test := range tests {
 		t.Run(test.args[0], func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestParseCLIDirectScannerOwnsPostCommandOutputFlag(t *testing.T) {
 }
 
 func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
-	parsed, err := parseCLI([]string{"-o", "events.jsonl", "gogo", "-i", "127.0.0.1", "-o", "jl"})
+	parsed, err := parseCLI([]string{"-o", "jsonl", "-f", "events.jsonl", "gogo", "-i", "127.0.0.1", "-o", "jl"})
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
@@ -225,11 +225,11 @@ func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
 }
 
 func TestParseCLIViewUsesUnifiedInputAndFileFlags(t *testing.T) {
-	parsed, err := parseCLI([]string{"-F", "session.jsonl", "--view-format", "markdown", "-f", "session.md"})
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "markdown", "-f", "session.md"})
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
-	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.ViewFormat != "markdown" || parsed.Option.ViewOutput != "session.md" || parsed.Option.OutputFile != "" {
+	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.OutputFormat != "markdown" || parsed.Option.OutputFile != "session.md" {
 		t.Fatalf("view options = %#v", parsed.Option.MiscOptions)
 	}
 }
@@ -241,26 +241,46 @@ func TestParseCLIReplayOutputSelectsFormat(t *testing.T) {
 	}{
 		{[]string{"-F", "session.jsonl", "-o", "csv", "-f", "results.csv"}, "csv"},
 		{[]string{"-o", "csv", "-F", "session.jsonl", "-f", "results.csv"}, "csv"},
-		{[]string{"--view=session.jsonl", "--output=CSV", "-f", "results.csv"}, "csv"},
+		{[]string{"--view=session.jsonl", "--output-format=CSV", "-f", "results.csv"}, "csv"},
 		{[]string{"-F", "session.jsonl", "-o", "markdown", "-f", "results.csv"}, "markdown"},
-		{[]string{"-F", "session.jsonl", "-o", "md", "-f", "results.csv"}, "md"},
-		{[]string{"-F", "session.jsonl", "-o", "terminal", "-f", "results.csv"}, "terminal"},
-		{[]string{"-F", "session.jsonl", "-o", "csv", "--view-format", "csv", "-f", "results.csv"}, "csv"},
+		{[]string{"-F", "session.jsonl", "-o", "md", "-f", "results.csv"}, "markdown"},
+		{[]string{"-F", "session.jsonl", "-o", "terminal", "-f", "results.csv"}, "text"},
 	} {
 		parsed, err := parseCLI(test.args)
 		if err != nil {
 			t.Fatalf("parseCLI(%q): %v", test.args, err)
 		}
-		if parsed.Option.ViewFormat != test.format || parsed.Option.OutputFile != "" || parsed.Option.ViewOutput != "results.csv" {
+		if parsed.Option.OutputFormat != test.format || parsed.Option.OutputFile != "results.csv" {
 			t.Fatalf("parseCLI(%q): replay options=%+v", test.args, parsed.Option.MiscOptions)
 		}
 	}
 	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv"})
-	if err != nil || parsed.Option.ViewFormat != "csv" || parsed.Option.ViewOutput != "" || parsed.Option.OutputFile != "" {
+	if err != nil || parsed.Option.OutputFormat != "csv" || parsed.Option.OutputFile != "" {
 		t.Fatalf("stdout replay: parsed=%+v err=%v", parsed.Option.MiscOptions, err)
 	}
-	if _, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv", "--view-format", "markdown"}); err == nil || !strings.Contains(err.Error(), "conflicting replay formats") {
-		t.Fatalf("format conflict: %v", err)
+	if _, err := parseCLI([]string{"-F", "session.jsonl", "--view-format", "csv"}); err == nil {
+		t.Fatal("removed replay-specific format flag was accepted")
+	}
+}
+
+func TestParseCLIUsesTheSameOutputFlagsAcrossModes(t *testing.T) {
+	for _, mode := range [][]string{{"agent", "-p", "task"}, {"scan", "-i", "127.0.0.1"}, {"-F", "events.jsonl"}} {
+		for _, test := range []struct{ input, want string }{
+			{"text", "text"}, {"json", "json"}, {"jsonl", "jsonl"}, {"stream-json", "jsonl"},
+			{"markdown", "markdown"}, {"md", "markdown"}, {"CSV", "csv"},
+		} {
+			args := append(append([]string(nil), mode...), "-o", test.input, "-f", "result.out")
+			parsed, err := parseCLI(args)
+			if err != nil || parsed.Option.OutputFormat != test.want || parsed.Option.OutputFile != "result.out" {
+				t.Fatalf("%v: options=%+v error=%v", args, parsed.Option.MiscOptions, err)
+			}
+		}
+		if _, err := parseCLI(append(append([]string(nil), mode...), "-o", "events.jsonl")); err == nil {
+			t.Fatalf("%v interpreted -o as a filename", mode)
+		}
+	}
+	if _, err := parseCLI([]string{"agent", "-p", "task", "-o", "csv", "--json"}); err == nil {
+		t.Fatal("conflicting format aliases were accepted")
 	}
 }
 
@@ -291,7 +311,7 @@ func TestCLIReplaysScannerArtifactsAsCSVWithoutRuntimeConfiguration(t *testing.T
 	if err != nil || len(records) != 2 || records[1][0] != "127.0.0.1:80" || records[1][1] != "gogo" {
 		t.Fatalf("CSV replay: records=%v err=%v", records, err)
 	}
-	if err := runCLI(t.Context(), []string{"-F", input, "-o", "cvs", "-f", output}, strings.NewReader(""), &stdout, &stderr, nil); err == nil || !strings.Contains(err.Error(), "unsupported view format") {
+	if err := runCLI(t.Context(), []string{"-F", input, "-o", "cvs", "-f", output}, strings.NewReader(""), &stdout, &stderr, nil); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
 		t.Fatalf("invalid replay format error=%v", err)
 	}
 	if preserved, _ := os.ReadFile(output); !bytes.Equal(preserved, data) {
@@ -301,8 +321,8 @@ func TestCLIReplaysScannerArtifactsAsCSVWithoutRuntimeConfiguration(t *testing.T
 
 func TestParseCLIAllowsIndependentResumeAndOutput(t *testing.T) {
 	for _, args := range [][]string{
-		{"agent", "-r", "session.jsonl", "-o", "other.jsonl"},
-		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-o", "other.jsonl"},
+		{"agent", "-r", "session.jsonl", "-o", "jsonl", "-f", "other.jsonl"},
+		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-o", "jsonl", "-f", "other.jsonl"},
 	} {
 		parsed, err := parseCLI(args)
 		if err != nil {

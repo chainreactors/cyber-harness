@@ -152,8 +152,8 @@ misc:
 | `-e, --eval` | 目标评估标准 — 独立 LLM 判断任务是否达成 |
 | `--eval-rounds` | 数字设定评估硬上限，自然语言提供评估节奏指导；默认上限 20 |
 | `--observe <列表>` | 安装指定观测处理器：`tools,commands,processes,files,http` |
-| `-o, --output <路径>` | 将 canonical AOP 事件流写入新的 ProtoJSONL 文件 |
-| `--output-format <格式>` | One-shot stdout：`text`、`json` 或 `stream-json` |
+| `-o, --output-format <格式>` | 统一选择 `text`（默认）、`json`、`jsonl`、`markdown` 或 `csv` |
+| `-f, --file <路径>` | 将所选格式写入文件；省略则输出到 stdout |
 | `--json` | One-shot `--output-format=json` 的别名 |
 | `-r, --resume <路径>` | 只读 AOP 历史并创建 continuation，不修改源文件或隐式开启输出 |
 
@@ -163,7 +163,9 @@ misc:
 
 ### Scanner 参数
 
-全局参数应放在 scanner 命令之前；命令之后的参数由该 scanner 自己解释。例如，`aiscan -o events.jsonl gogo ... -o jl` 会把 canonical AOP 事件写入 `events.jsonl`，同时让 gogo 以 JSON Lines 输出原生结果。
+`json` 输出单个任务结果文档，扫描结果保存在 `artifacts` 中，使用现有 Artifact 结构（`data` 为 Base64 编码的原生 JSON）。`jsonl` 逐行输出完整 canonical AOP 事件，适合记录与回放。
+
+内置 `scan` 与 Agent 共用 `-o/-f`。调用 gogo、curl 等原生 scanner 时，全局参数应放在命令之前；命令之后的参数由该 scanner 自己解释。例如，`aiscan -o jsonl -f events.jsonl gogo ...` 保存 canonical AOP 事件；`aiscan gogo ... -o jl` 保留 gogo 的原生结果输出。选择全局事件格式时，原生终端文本不会混入结果。
 
 | 参数 | 说明 |
 | --- | --- |
@@ -339,7 +341,7 @@ aiscan neutron -u http://target.example -t ./pocs --id shiro-detect -j
 | `--tags` | 按 tag 过滤 |
 | `-s, --severity` | 按严重性过滤 |
 | `-j, --json` | JSON Lines 输出 |
-| `-o, --output` | 将 proton 原生结果写入文件；canonical AOP 输出使用命令前的全局 `-o` |
+| `-o, --output` | 将 proton 原生结果写入文件；canonical AOP 输出使用命令前的全局 `-o jsonl -f events.jsonl` |
 | `--template-list` | 列出匹配规则（不执行） |
 
 ```bash
@@ -432,7 +434,7 @@ aiscan cyberhub id tomcat
 | `--trace`、`--debug` | 调度观察、底层日志 | 关闭 |
 | `--no-color` | 关闭终端颜色 | 关闭 |
 
-运行任务时 `-o events.jsonl` 保存全局 AOP 事件。`-F` 读取历史，此时 `-o markdown -f report.md` 输出回放的 Markdown，`-o csv -f results.csv` 导出扫描原生产物及其验证标记；省略 `-f` 输出到标准输出。原 `--view-format` 参数继续兼容。`--report` 不是当前 scan 解析器接受的参数。
+运行任务时 `-o jsonl -f events.jsonl` 保存全局 AOP 事件。`-F` 读取历史，此时 `-o markdown -f report.md` 输出回放的 Markdown，`-o csv -f results.csv` 导出扫描原生产物及其验证标记；省略 `-f` 输出到标准输出。`stream-json` 是 `jsonl` 的别名，`md` 是 `markdown` 的别名。`--report` 不是当前 scan 解析器接受的参数。
 
 ## 扫描默认值
 

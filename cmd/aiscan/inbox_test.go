@@ -13,6 +13,7 @@ import (
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/telemetry"
+	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 )
@@ -128,7 +129,9 @@ func TestInboxHostInputLifecycle(t *testing.T) {
 				return product, err
 			}
 			done := make(chan error, 1)
-			go func() { done <- runInbox(ctx, factory, option, telemetry.NopLogger(), input, writer) }()
+			go func() {
+				done <- runInbox(ctx, factory, option, telemetry.NopLogger(), input, writer, taskcli.NewOutput(option, writer, io.Discard))
+			}()
 			ready := make(chan error, 1)
 			go func() { _, err := bufio.NewReader(output).ReadString('\n'); ready <- err }()
 			select {

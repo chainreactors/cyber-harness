@@ -37,7 +37,6 @@ import (
 	recapext "github.com/chainreactors/cyber/exts/recap"
 	sessionext "github.com/chainreactors/cyber/exts/session"
 	subagentext "github.com/chainreactors/cyber/exts/subagent"
-	telemetryext "github.com/chainreactors/cyber/exts/telemetry"
 	tuiext "github.com/chainreactors/cyber/exts/tui"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -55,7 +54,6 @@ type config struct {
 	// Session nil creates the application-only profile used by the Web service.
 	Session *agentsession.Config
 	Observe []observeext.Kind
-	Output  string
 }
 
 func configFromOption(option *cfg.Option, providerMode provider.StartupMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (config, error) {
@@ -70,7 +68,7 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	return config{
 		Option: option, Base: application,
 		IOA: ioaConfig, Session: sessionConfig,
-		Observe: parseObserve(option.Observe), Output: strings.TrimSpace(option.OutputFile),
+		Observe: parseObserve(option.Observe),
 	}, nil
 }
 
@@ -186,13 +184,6 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 			value.Directory = filepath.Join(workDir, ".cyber", "jev")
 		}
 		values = append(values, jevext.New(value))
-	}
-	if strings.TrimSpace(config.Output) != "" {
-		output, err := telemetryext.New(telemetryext.Options{Path: config.Output})
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, output)
 	}
 	lookup := envLookup(config.Option)
 	options, err := otelext.OptionsFromEnv(lookup)

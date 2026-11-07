@@ -150,10 +150,8 @@ type MiscOptions struct {
 	ConfigFile   string `short:"c" long:"config" description:"Load only this config file (default: project over ~/.cyber/cyber.yaml)"`
 	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory (default: existing local/portable .cyber, then ~/.cyber)"`
 	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
-	ViewFormat   string `long:"view-format" description:"Replay format (compatibility flag; prefer -F input -o terminal|markdown|csv)" default:"terminal"`
-	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
-	OutputFile   string `short:"o" long:"output" description:"Event JSONL destination; with -F, replay format: terminal (default), markdown, csv"`
-	OutputFormat string `long:"output-format" description:"One-shot agent output format: text, json, stream-json" default:"text"`
+	OutputFile   string `short:"f" long:"file" description:"Output destination (default: stdout)"`
+	OutputFormat string `short:"o" long:"output-format" description:"Output format: text, json, jsonl, markdown, csv (stream-json aliases jsonl)" default:"text"`
 	JSON         bool   `long:"json" description:"Alias for one-shot agent --output-format=json"`
 	Observe      string `long:"observe" description:"Comma-separated observations: tools,commands,processes,files,http"`
 	Debug        bool   `long:"debug" config:"debug" description:"Enable debug logging"`

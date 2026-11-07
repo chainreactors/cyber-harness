@@ -1,4 +1,4 @@
-package console
+package output
 
 import (
 	"context"
@@ -12,15 +12,16 @@ import (
 
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/events"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
-// machineOutput is the non-interactive stdout renderer. stream-json is the
-// canonical typed AOP stream; json is a compact result document intended for
-// shell pipelines. Durable event persistence remains the telemetry
-// extension selected by -o/--output.
-type machineOutput struct {
+// EventWriter renders the same typed events for live tasks, scanners and replay.
+// JSONL streams immediately; document formats finish when Close is called.
+type EventWriter struct {
 	mu     sync.Mutex
 	writer io.Writer
 	format string
@@ -34,17 +35,20 @@ type machineOutput struct {
 	turnUsage map[string]*aop.TokenUsage
 	err       error
 	closed    bool
+	events    []*aop.Event
+	artifacts []*toolpb.Artifact
 }
 
 type machineResult struct {
-	Type       string          `json:"type"`
-	SessionID  string          `json:"session_id,omitempty"`
-	TurnID     string          `json:"turn_id,omitempty"`
-	IsError    bool            `json:"is_error"`
-	StopReason string          `json:"stop_reason,omitempty"`
-	Result     string          `json:"result,omitempty"`
-	Error      *machineFailure `json:"error,omitempty"`
-	Usage      *machineUsage   `json:"usage,omitempty"`
+	Type       string             `json:"type"`
+	SessionID  string             `json:"session_id,omitempty"`
+	TurnID     string             `json:"turn_id,omitempty"`
+	IsError    bool               `json:"is_error"`
+	StopReason string             `json:"stop_reason,omitempty"`
+	Result     string             `json:"result,omitempty"`
+	Error      *machineFailure    `json:"error,omitempty"`
+	Usage      *machineUsage      `json:"usage,omitempty"`
+	Artifacts  []*toolpb.Artifact `json:"artifacts,omitempty"`
 }
 
 type machineFailure struct {
@@ -61,23 +65,24 @@ type machineUsage struct {
 	Detail       map[string]uint64 `json:"detail,omitempty"`
 }
 
-func newMachineOutput(writer io.Writer, format string) *machineOutput {
+func NewEventWriter(writer io.Writer, format string) *EventWriter {
 	if writer == nil {
 		writer = io.Discard
 	}
-	return &machineOutput{writer: writer, format: strings.ToLower(strings.TrimSpace(format))}
+	normalized, err := cfg.NormalizeOutputFormat(format)
+	return &EventWriter{writer: writer, format: normalized, err: err}
 }
 
 // WriteStartupError preserves the one-shot output contract before RunTask owns
 // presentation. No session has started, so the failure has no session/turn ID.
 // Text-mode errors remain the caller's responsibility.
 func WriteStartupError(writer io.Writer, format string, err error) error {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if err == nil || format != "json" && format != "stream-json" {
+	format, _ = cfg.NormalizeOutputFormat(format)
+	if err == nil || format != "json" && format != "jsonl" {
 		return nil
 	}
-	output := newMachineOutput(writer, format)
-	if format == "stream-json" {
+	output := NewEventWriter(writer, format)
+	if format == "jsonl" {
 		event := &aop.Event{Payload: &aop.Event_Error{Error: &aop.ProtocolError{Code: "startup_error", Message: err.Error()}}}
 		// A standalone stream stamps this pre-session failure's envelope.
 		events.New().Publish(event)
@@ -89,7 +94,7 @@ func WriteStartupError(writer io.Writer, format string, err error) error {
 	return output.Close()
 }
 
-func (o *machineOutput) HandleEvent(event *aop.Event) {
+func (o *EventWriter) HandleEvent(event *aop.Event) {
 	if o == nil || event == nil {
 		return
 	}
@@ -98,18 +103,30 @@ func (o *machineOutput) HandleEvent(event *aop.Event) {
 	if o.closed || o.err != nil {
 		return
 	}
-	if o.format == "stream-json" {
+	if o.format == "jsonl" {
 		line, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(event)
 		if err == nil {
 			line = append(line, '\n')
 			err = writeMachineOutput(o.writer, line)
 		}
 		if err != nil {
-			o.err = fmt.Errorf("write stream-json output: %w", err)
+			o.err = fmt.Errorf("write jsonl output: %w", err)
 		}
 		return
 	}
 
+	if o.format != "json" {
+		o.events = append(o.events, proto.Clone(event).(*aop.Event))
+		return
+	}
+	artifact, _, found, err := toolpb.FromEvent(event)
+	if err != nil {
+		o.err = err
+		return
+	}
+	if found {
+		o.artifacts = append(o.artifacts, artifact)
+	}
 	o.sessionID = event.SessionId
 	if event.TurnId != "" {
 		o.turnID = event.TurnId
@@ -118,7 +135,13 @@ func (o *machineOutput) HandleEvent(event *aop.Event) {
 		o.result, o.stop, o.failure = "", "", nil
 	}
 	if message := event.GetMessage(); message != nil && message.Role == "assistant" {
-		o.result = strings.TrimSpace(messagePartText(message, false))
+		var text []string
+		for _, content := range message.Content {
+			if value := content.GetText().GetText(); value != "" {
+				text = append(text, value)
+			}
+		}
+		o.result = strings.TrimSpace(strings.Join(text, "\n"))
 	}
 	if usage := event.GetUsage(); usage != nil {
 		o.updateUsage(o.turnID, usage, false)
@@ -134,7 +157,7 @@ func (o *machineOutput) HandleEvent(event *aop.Event) {
 
 // Usage events report provider calls; TurnEnded supplies the authoritative turn
 // total. Replace that turn at its end and add distinct repair turns exactly once.
-func (o *machineOutput) updateUsage(turnID string, usage *aop.TokenUsage, final bool) {
+func (o *EventWriter) updateUsage(turnID string, usage *aop.TokenUsage, final bool) {
 	if o.turnUsage == nil {
 		o.turnUsage = make(map[string]*aop.TokenUsage)
 	}
@@ -163,7 +186,7 @@ func (o *machineOutput) updateUsage(turnID string, usage *aop.TokenUsage, final 
 	o.usage = total
 }
 
-func (o *machineOutput) SetError(err error) {
+func (o *EventWriter) SetError(err error) {
 	if o == nil || err == nil {
 		return
 	}
@@ -182,7 +205,7 @@ func (o *machineOutput) SetError(err error) {
 	}
 }
 
-func (o *machineOutput) Close() error {
+func (o *EventWriter) Close() error {
 	if o == nil {
 		return nil
 	}
@@ -192,7 +215,19 @@ func (o *machineOutput) Close() error {
 		return o.err
 	}
 	o.closed = true
-	if o.format == "stream-json" {
+	if o.err != nil || o.format == "jsonl" {
+		return o.err
+	}
+	switch o.format {
+	case "text":
+		o.err = RenderEvents(o.writer, o.events)
+	case "markdown":
+		o.err = RenderEventsMarkdown(o.writer, o.events)
+	case "csv":
+		o.err = renderEventsCSV(o.writer, o.events)
+	}
+	if o.format != "json" {
+		o.events = nil
 		return o.err
 	}
 
@@ -202,6 +237,7 @@ func (o *machineOutput) Close() error {
 		TurnID:     o.turnID,
 		StopReason: o.stop,
 		Result:     o.result,
+		Artifacts:  o.artifacts,
 	}
 	if o.failure != nil {
 		result.Error = &machineFailure{Code: o.failure.Code, Message: o.failure.Message, Retryable: o.failure.Retryable}

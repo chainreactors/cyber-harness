@@ -36,14 +36,6 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 			},
 		},
 		{
-			name: "with event output",
-			build: func(t *testing.T) config {
-				config := minimalConfig(&agentsession.Config{})
-				config.Output = t.TempDir() + "/events.jsonl"
-				return config
-			},
-		},
-		{
 			name: "with observation",
 			build: func(*testing.T) config {
 				config := minimalConfig(&agentsession.Config{})

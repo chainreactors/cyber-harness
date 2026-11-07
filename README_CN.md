@@ -37,7 +37,7 @@ cyber-harness 是用于 cyber 场景的通用 Agent 运行框架。它把模型�
 
 ```sh
 # 已配置模型后：完成一次 Agent 任务，保存事件记录
-aiscan agent -p "只读查看当前目录并解释文件结构" -o first-run.jsonl
+aiscan agent -p "只读查看当前目录并解释文件结构" -o jsonl -f first-run.jsonl
 
 # 审计本地代码仓库
 cyber-audit --workdir /path/to/repository -p "审计认证逻辑与租户隔离"

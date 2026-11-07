@@ -16,11 +16,12 @@ import (
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	inboxext "github.com/chainreactors/cyber/exts/inbox"
+	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/profile"
 )
 
-func runInbox(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
+func runInbox(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer, outputTask *taskcli.Output) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p, _, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
@@ -29,6 +30,14 @@ func runInbox(ctx context.Context, newProfile func(profile.Request) (profile.Pro
 	}
 	finish := profile.CloseOnce(ctx, p.Close)
 	defer func() { runErr = finish(runErr) }()
+	stream, err := p.Events()
+	if err != nil {
+		return err
+	}
+	outputTask.Observe(stream)
+	if option.OutputFormat != "" && option.OutputFormat != "text" {
+		output = io.Discard
+	}
 	active, ok := p.(interface{ InboxRouter() *inboxext.Router })
 	if !ok || active.InboxRouter() == nil {
 		return fmt.Errorf("profile does not provide an inbox router")

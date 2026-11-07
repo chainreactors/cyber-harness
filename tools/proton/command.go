@@ -215,14 +215,17 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 		}
 		stdinPath := stdinFile.Name()
 		defer os.Remove(stdinPath)
-		if _, stdinErr = io.Copy(stdinFile, execution.Stdin); stdinErr != nil {
+		stdinBytes, stdinErr := io.Copy(stdinFile, execution.Stdin)
+		if stdinErr != nil {
 			stdinFile.Close()
 			return nil, fmt.Errorf("proton: read stdin: %w", stdinErr)
 		}
 		if stdinErr = stdinFile.Close(); stdinErr != nil {
 			return nil, fmt.Errorf("proton: close stdin file: %w", stdinErr)
 		}
-		inputs = append(inputs, stdinPath)
+		if stdinBytes > 0 {
+			inputs = append(inputs, stdinPath)
+		}
 	}
 	if len(inputs) == 0 && len(flags.Expressions) == 0 {
 		return nil, fmt.Errorf("proton: target required (-i <path>, -l <file>, -e <regex>, or pipe: <cmd> | proton)")

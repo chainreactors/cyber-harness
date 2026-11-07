@@ -1,4 +1,4 @@
-package console
+package output
 
 import (
 	"bytes"
@@ -8,12 +8,15 @@ import (
 	"testing"
 
 	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestMachineOutputAggregatesRepairTurnsWithoutDoubleCounting(t *testing.T) {
 	var output bytes.Buffer
-	renderer := newMachineOutput(&output, "json")
+	renderer := NewEventWriter(&output, "json")
 	for _, id := range []string{"initial", "repair"} {
 		renderer.HandleEvent(&aop.Event{TurnId: id, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 		usage := &aop.TokenUsage{InputTokens: 10, OutputTokens: 3, TotalTokens: 13, Model: "fixture", Detail: map[string]uint64{"cached_tokens": 4}}
@@ -35,7 +38,7 @@ func TestMachineOutputAggregatesRepairTurnsWithoutDoubleCounting(t *testing.T) {
 
 func TestMachineOutputDoesNotCarryPreviousAnswerIntoFailedRepair(t *testing.T) {
 	var output bytes.Buffer
-	renderer := newMachineOutput(&output, "json")
+	renderer := NewEventWriter(&output, "json")
 	renderer.HandleEvent(&aop.Event{TurnId: "initial", Payload: &aop.Event_Message{Message: &aop.Message{Role: "assistant", Content: []*aop.Content{aop.Text("obsolete success")}}}})
 	renderer.HandleEvent(&aop.Event{TurnId: "repair", Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 	renderer.SetError(io.ErrUnexpectedEOF)
@@ -53,7 +56,7 @@ func TestMachineOutputDoesNotCarryPreviousAnswerIntoFailedRepair(t *testing.T) {
 
 func TestMachineOutputJSONProducesOneResultDocument(t *testing.T) {
 	var output bytes.Buffer
-	renderer := newMachineOutput(&output, "json")
+	renderer := NewEventWriter(&output, "json")
 	renderer.HandleEvent(&aop.Event{
 		SessionId: "session-1", TurnId: "turn-1",
 		Payload: &aop.Event_Message{Message: &aop.Message{
@@ -90,7 +93,7 @@ func TestMachineOutputJSONProducesOneResultDocument(t *testing.T) {
 
 func TestMachineOutputJSONReportsExecutionFailure(t *testing.T) {
 	var output bytes.Buffer
-	renderer := newMachineOutput(&output, "json")
+	renderer := NewEventWriter(&output, "json")
 	renderer.SetError(io.ErrUnexpectedEOF)
 	if err := renderer.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -106,7 +109,7 @@ func TestMachineOutputJSONReportsExecutionFailure(t *testing.T) {
 
 func TestMachineOutputStreamJSONWritesTypedAOPJSONL(t *testing.T) {
 	var output bytes.Buffer
-	renderer := newMachineOutput(&output, "stream-json")
+	renderer := NewEventWriter(&output, "stream-json")
 	events := []*aop.Event{
 		{Id: "event-1", SessionId: "session-1", Seq: 1, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}},
 		{Id: "event-2", SessionId: "session-1", Seq: 2, Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}},
@@ -137,9 +140,32 @@ type shortMachineWriter struct{}
 func (shortMachineWriter) Write(data []byte) (int, error) { return len(data) - 1, nil }
 
 func TestMachineOutputReportsShortWrite(t *testing.T) {
-	renderer := newMachineOutput(shortMachineWriter{}, "stream-json")
+	renderer := NewEventWriter(shortMachineWriter{}, "stream-json")
 	renderer.HandleEvent(&aop.Event{Id: "event-1", Payload: &aop.Event_Status{Status: &aop.Status{State: "ready"}}})
 	if err := renderer.Close(); !strings.Contains(err.Error(), io.ErrShortWrite.Error()) {
 		t.Fatalf("Close error = %v", err)
+	}
+}
+
+func TestJSONPreservesNativeScannerArtifacts(t *testing.T) {
+	artifact := &toolpb.Artifact{ResultId: "result", Tool: "gogo", Kind: "service", Target: "127.0.0.1:80", Data: []byte(`{"port":80,"serial":9007199254740993}`)}
+	extension, err := anypb.New(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	renderer := NewEventWriter(&output, "json")
+	renderer.HandleEvent(&aop.Event{SessionId: "scan", Payload: &aop.Event_Extension{Extension: extension}})
+	// An observer must retain its own artifact snapshot.
+	extension.Value = nil
+	if err := renderer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var result machineResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Artifacts) != 1 || !proto.Equal(result.Artifacts[0], artifact) {
+		t.Fatalf("lost native scanner result: %s", output.String())
 	}
 }

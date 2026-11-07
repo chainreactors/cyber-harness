@@ -95,10 +95,10 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 	}
 	invocations := []invocation{
 		{name: "text", format: "text", prompt: "text format prompt"},
-		{name: "json-and-history", format: "json", prompt: "persist this turn", extra: []string{"--output", historyPath}},
+		{name: "jsonl-history", format: "jsonl", prompt: "persist this turn", extra: []string{"-f", historyPath}},
 		{name: "stream-json", format: "stream-json", prompt: "stream this turn"},
 		{name: "local-skill", format: "json", prompt: "apply the selected local skill", extra: []string{"--skill", skillPath}},
-		{name: "resume", format: "json", prompt: "continue with prior context", extra: []string{"--resume", historyPath, "--output", continuedPath}},
+		{name: "resume", format: "jsonl", prompt: "continue with prior context", extra: []string{"--resume", historyPath, "-f", continuedPath}},
 	}
 
 	for _, invocation := range invocations {
@@ -107,7 +107,7 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 				"--config", w.config, "--data-dir", filepath.Join(w.dir, "data"), "--no-color",
 				"agent", "--provider", "openai", "--base-url", gateway.URL + "/v1",
 				"--api-key", apiKey, "--model", "fixture", "--timeout", "30", "--quiet",
-				"--output-format", invocation.format, "--prompt", invocation.prompt,
+				"-o", invocation.format, "--prompt", invocation.prompt,
 			}
 			args = append(args, invocation.extra...)
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -142,6 +142,10 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 				}
 			case "stream-json":
 				assertStrictJSONLines(t, stdout.Bytes(), "stream-json stdout")
+			case "jsonl":
+				if stdout.Len() != 0 {
+					t.Fatalf("history output leaked to stdout: %s", stdout.String())
+				}
 			}
 		})
 	}

@@ -32,7 +32,6 @@ type SprayCheckOptions struct {
 	MaxDuration   time.Duration
 	Proxy         string
 	Debug         bool
-	Quiet         bool
 	OnStats       func(sdktypes.Stats)
 }
 
@@ -114,11 +113,9 @@ func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
 func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 	sprayOpt := spray.NewDefaultOption()
 	coreOpt := sprayOpt.Option
-	// The SDK configures its shared logger once when the engine is initialized.
-	// JSON mode opts into quiet per-run output so progress banners cannot corrupt
-	// the command's JSONL stdout contract; ordinary terminal mode keeps the
-	// existing progress output.
-	coreOpt.Quiet = opts.Quiet
+	// The scan command owns presentation; embedded engines must not print
+	// banners or progress directly to the process stdout.
+	coreOpt.Quiet = true
 	coreOpt.Threads = opts.Threads
 	coreOpt.Timeout = opts.Timeout
 	coreOpt.Host = opts.Host

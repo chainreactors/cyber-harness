@@ -94,7 +94,7 @@ func TestReplayRejectsInvalidFormatAndPreservesSourceAndDestination(t *testing.T
 	if err := os.WriteFile(output, []byte("preserve"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderEventFile(input, "cvs", output); err == nil || !strings.Contains(err.Error(), "unsupported view format") {
+	if err := RenderEventFile(input, "cvs", output); err == nil || !strings.Contains(err.Error(), "unsupported output format") {
 		t.Fatalf("format error=%v", err)
 	}
 	if data, _ := os.ReadFile(output); string(data) != "preserve" {

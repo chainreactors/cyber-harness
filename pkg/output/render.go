@@ -14,6 +14,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
 )
@@ -33,17 +34,10 @@ func RenderEventsMarkdown(w io.Writer, events []*aop.Event) error {
 }
 
 // RenderEventFile renders an AOP Event ProtoJSONL file.
-func RenderEventFile(path, format, outputPath string) error {
-	var render func(io.Writer, []*aop.Event) error
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "terminal":
-		render = RenderEvents
-	case "markdown", "md":
-		render = RenderEventsMarkdown
-	case "csv":
-		render = renderEventsCSV
-	default:
-		return fmt.Errorf("unsupported view format %q: use terminal, markdown, or csv", format)
+func RenderEventFile(path, format, outputPath string, stdout ...io.Writer) error {
+	format, err := cfg.NormalizeOutputFormat(format)
+	if err != nil {
+		return err
 	}
 	events, err := eventjsonl.ReadJSONL(path)
 	if err != nil {
@@ -59,13 +53,21 @@ func RenderEventFile(path, format, outputPath string) error {
 		}
 	}
 	var rendered bytes.Buffer
-	if err := render(&rendered, events); err != nil {
+	renderer := NewEventWriter(&rendered, format)
+	for _, event := range events {
+		renderer.HandleEvent(event)
+	}
+	if err := renderer.Close(); err != nil {
 		return err
 	}
 	if outputPath != "" {
 		return os.WriteFile(outputPath, rendered.Bytes(), 0o644)
 	}
-	_, err = rendered.WriteTo(os.Stdout)
+	var writer io.Writer = os.Stdout
+	if len(stdout) > 0 && stdout[0] != nil {
+		writer = stdout[0]
+	}
+	_, err = rendered.WriteTo(writer)
 	return err
 }
 
