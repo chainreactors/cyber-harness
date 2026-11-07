@@ -22,7 +22,6 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/namespaces"
 	"github.com/chainreactors/cyber/core/proc"
-	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	guardrailext "github.com/chainreactors/cyber/exts/guardrail"
 	inboxext "github.com/chainreactors/cyber/exts/inbox"
@@ -53,21 +52,6 @@ type config struct {
 	IOA    *ioatools.Config
 	// Session nil creates the application-only profile used by the Web service.
 	Session *agentsession.Config
-}
-
-func configFromOption(option *cfg.Option, providerMode provider.StartupMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (config, error) {
-	if option == nil {
-		return config{}, fmt.Errorf("cyber profile option is required")
-	}
-	ioaConfig, err := ioaclient.ConfigFromOption(option)
-	if err != nil {
-		return config{}, err
-	}
-	application := appConfigFromOption(option, providerMode, logger)
-	return config{
-		Option: option, Base: application,
-		IOA: ioaConfig, Session: sessionConfig,
-	}, nil
 }
 
 // aiscanProfile owns one reference-distribution extension graph.

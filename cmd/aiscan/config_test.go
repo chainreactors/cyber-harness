@@ -28,7 +28,11 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 		PlaywrightSession: "browser-1",
 		TrafficOptions:    cfg.TrafficOptions{BodyStorage: "disk"},
 	}
-	config := appConfigFromOption(option, provider.StartupDisabled, telemetry.NopLogger())
+	profile, err := configFromOption(option, provider.StartupDisabled, nil, telemetry.NopLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := profile.Base
 	if config.Provider.Config.Model != "gpt-4o" || config.Provider.Mode != provider.StartupDisabled {
 		t.Fatalf("provider config = %+v", config.Provider)
 	}
@@ -63,7 +67,11 @@ func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
 
 	option := &cfg.Option{}
 	cfg.ApplyDefaults(option)
-	config := appConfigFromOption(option, provider.StartupOptional, telemetry.NopLogger())
+	profile, err := configFromOption(option, provider.StartupOptional, nil, telemetry.NopLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := profile.Base
 	if config.Scanner.Resources.CyberhubURL != scannerext.DefaultCyberhubURL || config.Scanner.Resources.APIKey != scannerext.DefaultCyberhubKey || config.Scanner.Resources.Mode != scannerext.DefaultCyberhubMode {
 		t.Fatalf("scanner cyberhub config = %#v", config.Scanner)
 	}
@@ -72,5 +80,16 @@ func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
 	}
 	if config.Provider.Mode != provider.StartupOptional {
 		t.Fatalf("provider config = %#v", config.Provider)
+	}
+}
+
+func TestProfileConfigRejectsInvalidExtensionSettings(t *testing.T) {
+	for _, section := range []string{scannerext.CyberhubConfigKey, passiveconfig.ReconConfigKey, searchext.ConfigKey, scannerext.ScanConfigKey} {
+		t.Run(section, func(t *testing.T) {
+			option := &cfg.Option{Extensions: cfg.Values{section: {"retired_field": true}}}
+			if _, err := configFromOption(option, provider.StartupDisabled, nil, telemetry.NopLogger()); err == nil {
+				t.Fatal("invalid extension settings were replaced with zero values")
+			}
+		})
 	}
 }
