@@ -66,7 +66,7 @@ func TestJEVLibraryQueryUsesBoundNodeWithoutStartingWork(t *testing.T) {
 				t.Fatalf("query reply=%v err=%v", reply, err)
 			}
 			worker.mu.Lock()
-			active := len(worker.state().tasks)
+			active := len(worker.tasks)
 			worker.mu.Unlock()
 			events, err := store.ListAOPEvents(t.Context(), session.GetSession().GetId(), 10)
 			if err != nil || len(events) != 0 || len(queue) != 0 || active != 0 {

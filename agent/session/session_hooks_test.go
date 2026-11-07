@@ -12,11 +12,11 @@ import (
 
 func TestSessionHookFailureRollsBack(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	rt.hooks = hooks.New()
+	rt.config.Hooks = hooks.New()
 	failure := errors.New("denied")
 	ends := 0
-	agenthooks.SessionStart.On(rt.hooks, "fail", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { return struct{}{}, failure })
-	agenthooks.SessionEnd.On(rt.hooks, "cleanup", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { ends++; return struct{}{}, nil })
+	agenthooks.SessionStart.On(rt.config.Hooks, "fail", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { return struct{}{}, failure })
+	agenthooks.SessionEnd.On(rt.config.Hooks, "cleanup", func(context.Context, agenthooks.SessionEvent) (struct{}, error) { ends++; return struct{}{}, nil })
 	if _, err := rt.OpenSession(t.Context(), SessionOptions{ID: "failed"}); !errors.Is(err, failure) {
 		t.Fatalf("open: %v", err)
 	}
@@ -29,9 +29,9 @@ func TestSessionHookFailureRollsBack(t *testing.T) {
 }
 func TestSessionReceiverCannotReachReplacement(t *testing.T) {
 	rt := newBareRuntime(t, nil, nil)
-	rt.hooks = hooks.New()
+	rt.config.Hooks = hooks.New()
 	var first func(context.Context, inbox.Message) error
-	agenthooks.SessionStart.On(rt.hooks, "borrow", func(_ context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
+	agenthooks.SessionStart.On(rt.config.Hooks, "borrow", func(_ context.Context, ev agenthooks.SessionEvent) (struct{}, error) {
 		if first == nil {
 			first = ev.Deliver
 		}

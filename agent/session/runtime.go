@@ -27,18 +27,9 @@ import (
 type Runtime struct {
 	// Logger is borrowed from the installation; SetOutput keeps existing consumers attached.
 	Logger           telemetry.Logger
-	commands         []Command
 	commandIndex     map[string]Command
-	history          HistoryStore
 	config           Config
 	primarySessionID string
-	providers        *provider.State
-	events           *events.Stream
-	hooks            *hooks.Registry
-	tools            coretool.Executor
-	commandRegistry  coretool.CommandExecutor
-	skills           *skills.Store
-	shell            coretool.Tool
 	nodeName         string
 	promptTarget     prompt.Target
 	commandName      string
@@ -107,7 +98,7 @@ func (rt *Runtime) TaskConfig() (agent.Config, error) {
 		return agent.Config{}, err
 	}
 	value := rt.agentConfig.WithStream(true)
-	current, settings := rt.providers.Current()
+	current, settings := rt.config.Providers.Current()
 	value.Provider = current
 	value.Model, value.MaxTokens, value.ContextWindow = settings.Model, settings.MaxTokens, settings.ContextWindow
 	value.Lifetime = rt.ctx
@@ -118,28 +109,28 @@ func (rt *Runtime) Skills() *skills.Store {
 	if rt == nil {
 		return nil
 	}
-	return rt.skills
+	return rt.config.Skills
 }
 
 func (rt *Runtime) CommandRegistry() coretool.CommandExecutor {
 	if rt == nil {
 		return nil
 	}
-	return rt.commandRegistry
+	return rt.config.CommandRegistry
 }
 
 func (rt *Runtime) Hooks() *hooks.Registry {
 	if rt == nil {
 		return nil
 	}
-	return rt.hooks
+	return rt.config.Hooks
 }
 
 func (rt *Runtime) Tools() coretool.Executor {
 	if rt == nil {
 		return nil
 	}
-	return rt.tools
+	return rt.config.Tools
 }
 
 // NodeName is the profile-selected name shared by sessions and node transports.
@@ -185,13 +176,13 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		rt.primarySessionID = "task"
 	}
 	rt.heartbeat = rc.Heartbeat
-	modelProvider, providerConfig := rt.providers.Current()
+	modelProvider, providerConfig := rc.Providers.Current()
 	var resumeCounter int64
 	if rc.Resume != "" {
-		if rt.history == nil {
+		if rc.History == nil {
 			return fmt.Errorf("session history is not installed")
 		}
-		data, err := rt.history.Load(ctx, rc.Resume)
+		data, err := rc.History.Load(ctx, rc.Resume)
 		if err != nil {
 			return fmt.Errorf("resume session: %w", err)
 		}
@@ -215,7 +206,7 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 		if promptHasLoadedSkill(rt.loadedSkills, name) {
 			continue
 		}
-		body := rt.skills.ReadBody(name)
+		body := rc.Skills.ReadBody(name)
 		if body != "" {
 			rt.loadedSkills = append(rt.loadedSkills, prompt.LoadedSkill{Name: name, Body: body})
 		}
@@ -224,14 +215,14 @@ func (rt *Runtime) start(ctx, lifetime context.Context) error {
 	rt.agentConfig = agent.Config{
 		Loop:                  rc.Loop,
 		Provider:              modelProvider,
-		Tools:                 rt.tools,
+		Tools:                 rc.Tools,
 		Model:                 providerConfig.Model,
 		MaxTokens:             providerConfig.MaxTokens,
 		ContextWindow:         providerConfig.ContextWindow,
 		Logger:                logger,
 		CacheRetention:        provider.CacheShort,
-		Bus:                   rt.events,
-		Hooks:                 rt.hooks,
+		Bus:                   rc.Events,
+		Hooks:                 rc.Hooks,
 		CaptureProviderFrames: rc.CaptureProviderFrames,
 		MessageCounter:        resumeCounter,
 		SystemPromptFn:        rt.resolveSystemPrompt,
@@ -293,11 +284,11 @@ func (rt *Runtime) resolveSystemPrompt(ctx context.Context, config *agent.Config
 			}
 		}
 	}
-	if rt.commandRegistry != nil {
-		input.Agent.CommandDocs = rt.commandRegistry.UsageDocs()
+	if rt.config.CommandRegistry != nil {
+		input.Agent.CommandDocs = rt.config.CommandRegistry.UsageDocs()
 	}
-	if rt.skills != nil {
-		for _, value := range rt.skills.All() {
+	if rt.config.Skills != nil {
+		for _, value := range rt.config.Skills.All() {
 			if !value.Internal {
 				input.Agent.Skills = append(input.Agent.Skills, prompt.Skill{Name: value.Name, Description: value.Description, Location: value.Location})
 			}
@@ -382,18 +373,18 @@ func (rt *Runtime) Active() bool {
 
 // ProviderState is the model this runtime reasons with, and its configuration.
 func (rt *Runtime) ProviderState() (provider.Provider, provider.ProviderConfig) {
-	if rt == nil || rt.providers == nil {
+	if rt == nil || rt.config.Providers == nil {
 		return nil, provider.ProviderConfig{}
 	}
-	return rt.providers.Current()
+	return rt.config.Providers.Current()
 }
 
 // ProviderFallbacks are the configured alternatives to the active model.
 func (rt *Runtime) ProviderFallbacks() []provider.Entry {
-	if rt == nil || rt.providers == nil {
+	if rt == nil || rt.config.Providers == nil {
 		return nil
 	}
-	return rt.providers.Fallbacks()
+	return rt.config.Providers.Fallbacks()
 }
 
 // Context ends when the runtime shuts down. It is nil before Load.

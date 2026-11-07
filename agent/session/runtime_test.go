@@ -535,7 +535,7 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	}
 	large := strings.Repeat("x", 4<<20)
 	oldID := root.ID()
-	runtime.events.Publish(&aop.Event{
+	runtime.config.Events.Publish(&aop.Event{
 		SessionId: root.ID(), TurnId: "turn-1", Emitter: "cyber",
 		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
 	})
@@ -968,9 +968,9 @@ func TestRuntimesShareOneAppEventSequenceAndOutput(t *testing.T) {
 func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
 	old := &runtimeSemanticProvider{}
 	rt := newBareRuntime(t, nil, old)
-	_, original := rt.providers.Current()
+	_, original := rt.config.Providers.Current()
 	original.Provider, original.APIKey = "openai", "test"
-	rt.providers.Set(old, original)
+	rt.config.Providers.Set(old, original)
 	started, release := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
@@ -1022,7 +1022,7 @@ func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
 	if err != nil || result.Output != "next-model" {
 		t.Fatalf("next run=%v, error=%v", result, err)
 	}
-	p, config := rt.providers.Current()
+	p, config := rt.config.Providers.Current()
 	fresh, err := rt.OpenSession(t.Context(), SessionOptions{ID: "fresh"})
 	if err != nil {
 		t.Fatal(err)
@@ -1035,11 +1035,11 @@ func TestSessionModelChangeKeepsOtherSessionsAndInFlightSnapshot(t *testing.T) {
 	}
 	invalid := original
 	invalid.Provider = "unsupported"
-	rt.providers.Set(old, invalid)
+	rt.config.Providers.Set(old, invalid)
 	if err := session.SetModel("failed-model"); err == nil || session.Model() != "next-model" {
 		t.Fatal("failed client construction changed the session")
 	}
-	rt.providers.Set(old, original)
+	rt.config.Providers.Set(old, original)
 	if _, err := session.Command(t.Context(), "/clear"); err != nil {
 		t.Fatal(err)
 	}
