@@ -71,21 +71,6 @@ import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
 const webUserAgent = 'cyber.web'
 
-function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
-  switch (item.kind) {
-    case 'scan_complete':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'scan_complete',
-        data: { scanID: item.scanID || '' },
-      }
-    default:
-      return null
-  }
-}
-
 // Agent and evaluator prompts also use role=user in AOP, but they are internal
 // execution inputs, not operator-authored chat messages. The hub is the sole
 // author of user messages on this surface, so keep only its canonical copy.
@@ -404,7 +389,13 @@ function toViewerTimelineItem(
         content: item.content || '',
       }
     case 'scan_complete':
-      return toExtensionItem(item)
+      return {
+        id: item.id,
+        kind: 'extension',
+        timestamp: item.timestamp,
+        extensionType: 'scan_complete',
+        data: { scanID: item.scanID || '' },
+      }
     default:
       return null
   }

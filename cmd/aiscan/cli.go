@@ -97,7 +97,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		writeHelp(newCLIParser(&cli, goflags.Default&^goflags.PrintErrors), stdout)
 		return nil
 	}
-	parsed, err := parseCLIWithOutput(args, stdout)
+	parsed, err := parseCLI(args, stdout)
 	option := parsed.Option
 	taskOutput := taskcli.NewOutput(&option, stdout, stderr)
 	defer func() {
@@ -172,9 +172,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return nil
 }
 
-func parseCLI(args []string) (parsedCLI, error) { return parseCLIWithOutput(args, os.Stdout) }
-
-func parseCLIWithOutput(args []string, stdout io.Writer) (parsedCLI, error) {
+func parseCLI(args []string, stdout io.Writer) (parsedCLI, error) {
 	if scannerName, rootArgs, scannerRest, ok := splitScannerCommand(args); ok {
 		return parseScannerCLI(scannerName, rootArgs, scannerRest, stdout)
 	}

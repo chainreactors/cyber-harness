@@ -35,6 +35,7 @@ import (
 	sdktypes "github.com/chainreactors/sdk/pkg/types"
 	"github.com/chainreactors/sdk/spray"
 	sdkzombie "github.com/chainreactors/sdk/zombie"
+	spraypkg "github.com/chainreactors/spray/pkg"
 	"github.com/chainreactors/utils/parsers"
 )
 
@@ -208,35 +209,6 @@ func TestScanWarnsWhenWebFlagsCannotAffectSprayCapability(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "option=dict,rule,word,default-dict,advance status=ignored reason=engine_unavailable") {
 		t.Fatalf("warning log missing web ignore message: %q", logBuf.String())
-	}
-}
-
-func TestApplyWebStrategyOptionsEnablesReconAndPreservesCapabilityDefaults(t *testing.T) {
-	flags := flags{
-		Dictionaries: []string{"paths.txt"},
-		Rules:        []string{"rules.txt"},
-		Word:         "admin",
-		Advance:      true,
-		SprayThreads: 7,
-		Timeout:      9,
-	}
-	opts := applyWebStrategyOptions(flags, engine.SprayCheckOptions{DefaultDict: true, BakPlugin: true})
-	if !opts.ReconPlugin || !opts.DefaultDict || !opts.BakPlugin {
-		t.Fatalf("spray options should preserve capability defaults and enable recon: %#v", opts)
-	}
-	if opts.FuzzuliPlugin {
-		t.Fatalf("backup capability should not enable fuzzuli by default: %#v", opts)
-	}
-	if opts.Threads != 7 || opts.Timeout != 9 || opts.Word != "admin" || !opts.Advance {
-		t.Fatalf("spray runtime options = %#v", opts)
-	}
-	if !reflect.DeepEqual(opts.Dictionaries, flags.Dictionaries) || !reflect.DeepEqual(opts.Rules, flags.Rules) {
-		t.Fatalf("spray dictionaries/rules = %#v/%#v", opts.Dictionaries, opts.Rules)
-	}
-	flags.Dictionaries[0] = "mutated"
-	flags.Rules[0] = "mutated"
-	if opts.Dictionaries[0] != "paths.txt" || opts.Rules[0] != "rules.txt" {
-		t.Fatalf("spray options alias flag slices: %#v", opts)
 	}
 }
 
@@ -504,7 +476,7 @@ func TestHTTPBasicAuthCapabilityEmitsWeakpassOnlyForBasicChallenge(t *testing.T)
 	cmd := New(&engine.Set{})
 	run := func(rawURL string, status int) []event {
 		var events []event
-		cmd.runHTTPBasicAuthCapability(context.Background(), flags{Timeout: 1}, targetEvent(capSprayCheck, newWebProbeTarget("", &parsers.SprayResult{
+		cmd.checkBasicAuth(context.Background(), flags{Timeout: 1}, targetEvent(capSprayCheck, newWebProbeTarget("", &parsers.SprayResult{
 			IsValid:   true,
 			UrlString: rawURL,
 			Status:    status,
@@ -631,7 +603,7 @@ func TestWebProbeEventKeyIncludesSource(t *testing.T) {
 func TestPOCCapabilitySkipsUnfingerprintedTargetsByDefault(t *testing.T) {
 	cmd := New(&engine.Set{})
 	var events []event
-	cmd.runPOCCapability(context.Background(), flags{}, newPOCTarget("http://127.0.0.1", nil), func(event event) {
+	cmd.checkPOCs(context.Background(), flags{}, newPOCTarget("http://127.0.0.1", nil), func(event event) {
 		events = append(events, event)
 	})
 
@@ -647,7 +619,7 @@ func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
 	cmd := New(&engine.Set{Neutron: neutronEngine, Index: index})
 
 	var events []event
-	cmd.runPOCCapability(context.Background(), flags{}, newPOCTarget("http://127.0.0.1", []string{"unknown"}), func(event event) {
+	cmd.checkPOCs(context.Background(), flags{}, newPOCTarget("http://127.0.0.1", []string{"unknown"}), func(event event) {
 		events = append(events, event)
 	})
 
@@ -692,14 +664,19 @@ func TestScanPipelineDoesNotDispatchLootOrError(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	var runs int
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("web", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
-			runs++
-		}),
+		{
+			Name:   "web",
+			Routes: routes(acceptsTarget(targetWeb), ""),
+			Worker: 1,
+			Run: func(_ context.Context, _ event, _ func(event)) {
+				runs++
+			},
+		},
 	}
 	p := newTestPipeline(t, context.Background(), capabilities, coll)
 	p.Run(testSeeds(
 		lootEvent("test", fingerprintLoot("http://127.0.0.1", []string{"nginx"}, false)),
-		errorEventOf("test", "boom"),
+		event{Kind: eventError, Source: "test", Error: "boom"},
 	))
 
 	if runs != 0 {
@@ -766,26 +743,36 @@ func TestScanPipelineFanoutAndDedup(t *testing.T) {
 	seen := make([]string, 0)
 
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("service-to-web", routes(acceptsTarget(targetService), ""), 1, func(_ context.Context, e event, emit func(event)) {
-			mu.Lock()
-			seen = append(seen, "service-to-web")
-			mu.Unlock()
-			service, ok := e.Target.(serviceTarget)
-			if !ok || service.Result == nil {
-				return
-			}
-			emit(targetEvent("test", newWebTarget(service.Result.GetBaseURL(), "")))
-		}),
-		scanCapability("web-to-finger", routes(acceptsTarget(targetWeb), "service-to-web"), 1, func(_ context.Context, e event, emit func(event)) {
-			mu.Lock()
-			seen = append(seen, "web-to-finger")
-			mu.Unlock()
-			web, ok := e.Target.(webTarget)
-			if !ok {
-				return
-			}
-			emit(lootEvent("test", fingerprintLoot(web.URL, []string{"nginx"}, false)))
-		}),
+		{
+			Name:   "service-to-web",
+			Routes: routes(acceptsTarget(targetService), ""),
+			Worker: 1,
+			Run: func(_ context.Context, e event, emit func(event)) {
+				mu.Lock()
+				seen = append(seen, "service-to-web")
+				mu.Unlock()
+				service, ok := e.Target.(serviceTarget)
+				if !ok || service.Result == nil {
+					return
+				}
+				emit(targetEvent("test", newWebTarget(service.Result.GetBaseURL(), "")))
+			},
+		},
+		{
+			Name:   "web-to-finger",
+			Routes: routes(acceptsTarget(targetWeb), "service-to-web"),
+			Worker: 1,
+			Run: func(_ context.Context, e event, emit func(event)) {
+				mu.Lock()
+				seen = append(seen, "web-to-finger")
+				mu.Unlock()
+				web, ok := e.Target.(webTarget)
+				if !ok {
+					return
+				}
+				emit(lootEvent("test", fingerprintLoot(web.URL, []string{"nginx"}, false)))
+			},
+		},
 	}
 
 	p := newTestPipeline(t, context.Background(), capabilities, coll)
@@ -879,7 +866,12 @@ func hasTargetKind(events []event, kind targetKind) bool {
 func TestScanPipelineDebugTrace(t *testing.T) {
 	coll := newCollector([]string{"seed"}, nil, false, true)
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("noop", routes(acceptsTarget(targetWeb), ""), 1, func(context.Context, event, func(event)) {}),
+		{
+			Name:   "noop",
+			Routes: routes(acceptsTarget(targetWeb), ""),
+			Worker: 1,
+			Run:    func(context.Context, event, func(event)) {},
+		},
 	}
 	p := newTestPipeline(t, context.Background(), capabilities, coll)
 	p.Run(testSeeds(targetEvent("test", newWebTarget("http://127.0.0.1", ""))))
@@ -900,10 +892,15 @@ func TestScanPipelineCancelReturns(t *testing.T) {
 
 	coll := newCollector([]string{"seed"}, nil, false, false)
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("wait", routes(acceptsTarget(targetWeb), ""), 1, func(ctx context.Context, _ event, _ func(event)) {
-			once.Do(func() { close(started) })
-			<-ctx.Done()
-		}),
+		{
+			Name:   "wait",
+			Routes: routes(acceptsTarget(targetWeb), ""),
+			Worker: 1,
+			Run: func(ctx context.Context, _ event, _ func(event)) {
+				once.Do(func() { close(started) })
+				<-ctx.Done()
+			},
+		},
 	}
 	p := newTestPipeline(t, ctx, capabilities, coll)
 
@@ -1370,16 +1367,26 @@ func TestPipelinePerRouteDedupIsolation(t *testing.T) {
 	runs := make(map[string]int)
 
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("cap-a", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
-			mu.Lock()
-			runs["cap-a"]++
-			mu.Unlock()
-		}),
-		scanCapability("cap-b", routes(acceptsTarget(targetWeb), ""), 1, func(_ context.Context, _ event, _ func(event)) {
-			mu.Lock()
-			runs["cap-b"]++
-			mu.Unlock()
-		}),
+		{
+			Name:   "cap-a",
+			Routes: routes(acceptsTarget(targetWeb), ""),
+			Worker: 1,
+			Run: func(_ context.Context, _ event, _ func(event)) {
+				mu.Lock()
+				runs["cap-a"]++
+				mu.Unlock()
+			},
+		},
+		{
+			Name:   "cap-b",
+			Routes: routes(acceptsTarget(targetWeb), ""),
+			Worker: 1,
+			Run: func(_ context.Context, _ event, _ func(event)) {
+				mu.Lock()
+				runs["cap-b"]++
+				mu.Unlock()
+			},
+		},
 	}
 
 	p := newTestPipeline(t, context.Background(), capabilities, nil)
@@ -1456,14 +1463,24 @@ func TestPipelineRouteDedupPreventsRedundantWork(t *testing.T) {
 	// producer emits the same webTarget 3 times; consumer should only run once.
 	var consumerRuns int
 	capabilities := []pipeline.Capability[event]{
-		scanCapability("producer", routes(acceptsTarget(targetScan), ""), 1, func(_ context.Context, _ event, emit func(event)) {
-			for i := 0; i < 3; i++ {
-				emit(targetEvent("producer", newWebTarget("http://dup.example.com", "")))
-			}
-		}),
-		scanCapability("consumer", routes(acceptsTarget(targetWeb), "producer"), 1, func(_ context.Context, _ event, _ func(event)) {
-			consumerRuns++
-		}),
+		{
+			Name:   "producer",
+			Routes: routes(acceptsTarget(targetScan), ""),
+			Worker: 1,
+			Run: func(_ context.Context, _ event, emit func(event)) {
+				for i := 0; i < 3; i++ {
+					emit(targetEvent("producer", newWebTarget("http://dup.example.com", "")))
+				}
+			},
+		},
+		{
+			Name:   "consumer",
+			Routes: routes(acceptsTarget(targetWeb), "producer"),
+			Worker: 1,
+			Run: func(_ context.Context, _ event, _ func(event)) {
+				consumerRuns++
+			},
+		},
 	}
 
 	p := newTestPipeline(t, context.Background(), capabilities, nil)
@@ -1537,7 +1554,8 @@ func TestAcceptedArtifactsPublishScannerFacts(t *testing.T) {
 		targetEvent(capSprayCheck, newWebProbeTarget("", &parsers.SprayResult{IsValid: true, UrlString: "http://127.0.0.1:8080/", Status: 200})),
 	}
 	for _, input := range inputs {
-		if err := cmd.emitAcceptedArtifact(ctx, input.Artifact); err != nil {
+		artifact := input.Artifact
+		if err := cmd.EmitArtifactJSONCtx(ctx, artifact.ResultID, artifact.Tool, artifact.Kind, artifact.Target, artifact.Data); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1580,7 +1598,7 @@ func TestAcceptedArtifactAndFinalLootShareResultIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifactRecord.ResultID = "result-1"
-	if err := cmd.emitAcceptedArtifact(ctx, artifactRecord); err != nil {
+	if err := cmd.EmitArtifactJSONCtx(ctx, artifactRecord.ResultID, artifactRecord.Tool, artifactRecord.Kind, artifactRecord.Target, artifactRecord.Data); err != nil {
 		t.Fatal(err)
 	}
 	coll := &collector{
@@ -1610,5 +1628,73 @@ func TestAcceptedArtifactAndFinalLootShareResultIdentity(t *testing.T) {
 	}
 	if loot.Tool != "neutron" || loot.ResultId != artifact.ResultId || loot.VerificationStatus != "confirmed" {
 		t.Fatalf("loot = %#v", loot)
+	}
+}
+
+func TestWebProbeUsesConfiguredDictionaryAndCrawl(t *testing.T) {
+	var mu sync.Mutex
+	requests := make(map[string]string)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests[r.URL.Path] = r.Host
+		mu.Unlock()
+		if r.URL.Path == "/" {
+			_, _ = w.Write([]byte("<title>Public home page</title><a href=\"/linked\">Linked page</a>"))
+			return
+		}
+		if r.URL.Path != "/private" && r.URL.Path != "/linked" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("<title>Private dictionary result</title>"))
+	}))
+	defer server.Close()
+	dictionary := filepath.Join(t.TempDir(), "paths.txt")
+	if err := os.WriteFile(dictionary, []byte("private\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	defer spraypkg.ResetResourceProvider()
+	sdk, err := spray.NewEngine(spray.NewConfig().WithResourceProvider(func(name string) []byte {
+		if name == "http" || name == "socket" {
+			return []byte("[]")
+		}
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdk.Close()
+	command := New(&engine.Set{Spray: sdk})
+	for _, test := range []struct {
+		name, path   string
+		dictionaries []string
+		options      engine.SprayCheckOptions
+	}{
+		{name: "dictionary", path: "/private", dictionaries: []string{dictionary}},
+		{name: "crawl", path: "/linked", options: engine.SprayCheckOptions{Crawl: true, CrawlDepth: 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mu.Lock()
+			clear(requests)
+			mu.Unlock()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			var failures []string
+			command.probeWeb(ctx, flags{Dictionaries: test.dictionaries, SprayThreads: 2, Timeout: 1},
+				newWebTarget(server.URL, "app.local"), capSprayBrute, test.options,
+				func(e event) {
+					if e.Kind == eventError {
+						failures = append(failures, e.Error)
+					}
+				})
+			if ctx.Err() != nil || len(failures) > 0 {
+				t.Fatalf("web probe failed: context=%v failures=%v", ctx.Err(), failures)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if requests[test.path] != "app.local" {
+				t.Fatalf("configured discovery or host was lost: %v", requests)
+			}
+		})
 	}
 }

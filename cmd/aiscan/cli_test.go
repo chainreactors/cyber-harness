@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -46,7 +47,7 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 		"--context-window=1000000",
 		"--base-url", "https://api.deepseek.com",
 		"--cyberhub-key=HUBKEY",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -74,7 +75,7 @@ func TestParseCLIScanExtractsLLMAndPassesScannerArgs(t *testing.T) {
 }
 
 func TestParseCLIScannerDebugEnablesGlobalDebugAndPreservesArg(t *testing.T) {
-	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--debug"})
+	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--debug"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -93,7 +94,7 @@ func TestParseCLIScannerExtractsRootTimeout(t *testing.T) {
 		{"--timeout=45", "gogo", "-i", "127.0.0.1", "-p", "80"},
 	} {
 		t.Run(strings.Join(args[:1], "_"), func(t *testing.T) {
-			parsed, err := parseCLI(args)
+			parsed, err := parseCLI(args, io.Discard)
 			if err != nil {
 				t.Fatalf("parseCLI() error = %v", err)
 			}
@@ -109,7 +110,7 @@ func TestParseCLIScannerExtractsRootTimeout(t *testing.T) {
 }
 
 func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
-	parsed, err := parseCLI([]string{"gogo", "-i", "127.0.0.1", "--timeout", "5"})
+	parsed, err := parseCLI([]string{"gogo", "-i", "127.0.0.1", "--timeout", "5"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -123,7 +124,7 @@ func TestParseCLIScannerKeepsToolTimeoutAfterCommand(t *testing.T) {
 }
 
 func TestParseCLIScanKeepsNativeJSONFlag(t *testing.T) {
-	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--json"})
+	parsed, err := parseCLI([]string{"scan", "-i", "127.0.0.1", "--json"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestParseCLIScanKeepsNativeJSONFlag(t *testing.T) {
 }
 
 func TestParseCLIIOAKeepsQueryJSONFlag(t *testing.T) {
-	parsed, err := parseCLI([]string{"ioa", "spaces", "--json"})
+	parsed, err := parseCLI([]string{"ioa", "spaces", "--json"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
@@ -149,14 +150,14 @@ func TestParseCLIIOAKeepsQueryJSONFlag(t *testing.T) {
 }
 
 func TestParseCLIAgentMachineOutput(t *testing.T) {
-	parsed, err := parseCLI([]string{"agent", "-p", "hello", "-o", "json", "--observe=files,http", "-f", "run.json"})
+	parsed, err := parseCLI([]string{"agent", "-p", "hello", "-o", "json", "--observe=files,http", "-f", "run.json"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
 	if parsed.Option.OutputFormat != "json" || parsed.Option.Observe != "files,http" || parsed.Option.OutputFile != "run.json" {
 		t.Fatalf("machine output options = %#v", parsed.Option.MiscOptions)
 	}
-	if _, err := parseCLI([]string{"agent", "-p", "hello", "--output-format", "yaml"}); err == nil {
+	if _, err := parseCLI([]string{"agent", "-p", "hello", "--output-format", "yaml"}, io.Discard); err == nil {
 		t.Fatal("unsupported agent output format was accepted")
 	}
 }
@@ -171,7 +172,7 @@ func TestParseCLIExtractsOutputForAgentAndScan(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.args[0], func(t *testing.T) {
-			parsed, err := parseCLI(test.args)
+			parsed, err := parseCLI(test.args, io.Discard)
 			if err != nil {
 				t.Fatalf("parseCLI: %v", err)
 			}
@@ -196,7 +197,7 @@ func TestParseCLIDirectScannerOwnsPostCommandOutputFlag(t *testing.T) {
 		{name: "neutron", args: []string{"neutron", "-i", "http://127.0.0.1", "-o", "result.jsonl"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			parsed, err := parseCLI(test.args)
+			parsed, err := parseCLI(test.args, io.Discard)
 			if err != nil {
 				t.Fatalf("parseCLI: %v", err)
 			}
@@ -211,7 +212,7 @@ func TestParseCLIDirectScannerOwnsPostCommandOutputFlag(t *testing.T) {
 }
 
 func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
-	parsed, err := parseCLI([]string{"-o", "jsonl", "-f", "events.jsonl", "gogo", "-i", "127.0.0.1", "-o", "jl"})
+	parsed, err := parseCLI([]string{"-o", "jsonl", "-f", "events.jsonl", "gogo", "-i", "127.0.0.1", "-o", "jl"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
 }
 
 func TestParseCLIViewUsesUnifiedInputAndFileFlags(t *testing.T) {
-	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "markdown", "-f", "session.md"})
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "markdown", "-f", "session.md"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestParseCLIReplayOutputSelectsFormat(t *testing.T) {
 		{[]string{"-F", "session.jsonl", "-o", "md", "-f", "results.csv"}, "markdown"},
 		{[]string{"-F", "session.jsonl", "-o", "terminal", "-f", "results.csv"}, "text"},
 	} {
-		parsed, err := parseCLI(test.args)
+		parsed, err := parseCLI(test.args, io.Discard)
 		if err != nil {
 			t.Fatalf("parseCLI(%q): %v", test.args, err)
 		}
@@ -254,11 +255,11 @@ func TestParseCLIReplayOutputSelectsFormat(t *testing.T) {
 			t.Fatalf("parseCLI(%q): replay options=%+v", test.args, parsed.Option.MiscOptions)
 		}
 	}
-	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv"})
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv"}, io.Discard)
 	if err != nil || parsed.Option.OutputFormat != "csv" || parsed.Option.OutputFile != "" {
 		t.Fatalf("stdout replay: parsed=%+v err=%v", parsed.Option.MiscOptions, err)
 	}
-	if _, err := parseCLI([]string{"-F", "session.jsonl", "--view-format", "csv"}); err == nil {
+	if _, err := parseCLI([]string{"-F", "session.jsonl", "--view-format", "csv"}, io.Discard); err == nil {
 		t.Fatal("removed replay-specific format flag was accepted")
 	}
 }
@@ -270,16 +271,16 @@ func TestParseCLIUsesTheSameOutputFlagsAcrossModes(t *testing.T) {
 			{"markdown", "markdown"}, {"md", "markdown"}, {"CSV", "csv"},
 		} {
 			args := append(append([]string(nil), mode...), "-o", test.input, "-f", "result.out")
-			parsed, err := parseCLI(args)
+			parsed, err := parseCLI(args, io.Discard)
 			if err != nil || parsed.Option.OutputFormat != test.want || parsed.Option.OutputFile != "result.out" {
 				t.Fatalf("%v: options=%+v error=%v", args, parsed.Option.MiscOptions, err)
 			}
 		}
-		if _, err := parseCLI(append(append([]string(nil), mode...), "-o", "events.jsonl")); err == nil {
+		if _, err := parseCLI(append(append([]string(nil), mode...), "-o", "events.jsonl"), io.Discard); err == nil {
 			t.Fatalf("%v interpreted -o as a filename", mode)
 		}
 	}
-	if _, err := parseCLI([]string{"agent", "-p", "task", "-o", "csv", "--json"}); err == nil {
+	if _, err := parseCLI([]string{"agent", "-p", "task", "-o", "csv", "--json"}, io.Discard); err == nil {
 		t.Fatal("conflicting format aliases were accepted")
 	}
 }
@@ -324,7 +325,7 @@ func TestParseCLIAllowsIndependentResumeAndOutput(t *testing.T) {
 		{"agent", "-r", "session.jsonl", "-o", "jsonl", "-f", "other.jsonl"},
 		{"scan", "-i", "127.0.0.1", "-r", "session.jsonl", "-o", "jsonl", "-f", "other.jsonl"},
 	} {
-		parsed, err := parseCLI(args)
+		parsed, err := parseCLI(args, io.Discard)
 		if err != nil {
 			t.Fatalf("parseCLI(%v) error = %v", args, err)
 		}
@@ -335,7 +336,7 @@ func TestParseCLIAllowsIndependentResumeAndOutput(t *testing.T) {
 }
 
 func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
-	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"})
+	parsed, err := parseCLI([]string{"--timeout", "45", "agent", "-p", "test"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -343,7 +344,7 @@ func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 		t.Fatalf("timeout = %d, want 45", parsed.Option.Timeout)
 	}
 
-	parsed, err = parseCLI([]string{"agent", "--timeout", "30", "-p", "test"})
+	parsed, err = parseCLI([]string{"agent", "--timeout", "30", "-p", "test"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() subcommand timeout error = %v", err)
 	}
@@ -356,7 +357,7 @@ func TestParseCLIRootTimeoutAppliesToAgent(t *testing.T) {
 // AgentOptions, so the root --timeout is the only source of the overall
 // deadline. A zero value expires the context before the command can run.
 func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
-	parsed, err := parseCLI([]string{"ioa", "spaces"})
+	parsed, err := parseCLI([]string{"ioa", "spaces"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -367,7 +368,7 @@ func TestParseCLIDefaultsOverallTimeoutForExtensionCommands(t *testing.T) {
 		t.Fatalf("timeout = %d, want default 3600", parsed.Option.Timeout)
 	}
 
-	parsed, err = parseCLI([]string{"--timeout", "45", "ioa", "spaces"})
+	parsed, err = parseCLI([]string{"--timeout", "45", "ioa", "spaces"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -414,7 +415,7 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 		"--base-url", "https://api.deepseek.com",
 		"--api-key", "KEY",
 		"--model", "deepseek-v4-pro",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -502,7 +503,7 @@ func TestParseCLIProtonUsesDirectScannerMode(t *testing.T) {
 		}
 	}
 
-	parsed, err := parseCLI([]string{"proton", "-i", "config.yaml", "-j"})
+	parsed, err := parseCLI([]string{"proton", "-i", "config.yaml", "-j"}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -524,7 +525,7 @@ func TestParseCLIScanExtractsLLMFlags(t *testing.T) {
 		"--model", "deepseek-v4-pro",
 		"--verify=high",
 		"--sniper",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -555,7 +556,7 @@ func TestParseCLIScanAcceptsPromptShortFlagAfterCommand(t *testing.T) {
 		"-i", "127.0.0.1",
 		"-p", "review focus fingerprints",
 		"--sniper",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -576,7 +577,7 @@ func TestParseCLIScanPostAIIsNotExtracted(t *testing.T) {
 		"scan",
 		"-i", "127.0.0.1",
 		"--ai",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -594,7 +595,7 @@ func TestParseCLIRootPromptValueCanMatchScannerName(t *testing.T) {
 		"-p", "gogo",
 		"scan",
 		"-i", "127.0.0.1",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -612,7 +613,7 @@ func TestParseCLICyberhubModeRootAndPassthrough(t *testing.T) {
 		"--cyberhub-mode", "override",
 		"spray",
 		"-u", "http://127.0.0.1:5000",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -634,7 +635,7 @@ func TestParseCLINonScanScannerKeepsPostRootArgsIsolated(t *testing.T) {
 		"-i", "127.0.0.1",
 		"--cyberhub-url", "http://hub:8080",
 		"--cyberhub-key", "HUBKEY",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -653,7 +654,7 @@ func TestParseCLIScannerRootArgsBeforeCommandStillApply(t *testing.T) {
 		"--cyberhub-key", "HUBKEY",
 		"gogo",
 		"-i", "127.0.0.1",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -675,7 +676,7 @@ func TestParseCLIGogoKeepsPortShortFlagAfterCommand(t *testing.T) {
 		"gogo",
 		"-i", "127.0.0.1",
 		"-p", "top100",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -693,7 +694,7 @@ func TestParseCLINeutronKeepsConcurrencyShortFlagAfterCommand(t *testing.T) {
 		"neutron",
 		"-u", "http://127.0.0.1",
 		"-c", "10",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -713,7 +714,7 @@ func TestParseCLINonScanScannerDoesNotExtractPostAIFlags(t *testing.T) {
 		"--ai",
 		"--model", "deepseek-v4-pro",
 		"--prompt", "review focus fingerprints",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -736,7 +737,7 @@ func TestParseCLIPassthroughScannerExtractsAIIntentArgs(t *testing.T) {
 		"--skill=cyber",
 		"gogo",
 		"-i", "127.0.0.1",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -766,7 +767,7 @@ func TestParseCLIAgentIOAFlag(t *testing.T) {
 		"--space", "case-1",
 		"--heartbeat", "5",
 		"--model", "gpt-4o",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -793,7 +794,7 @@ func TestParseCLIAgentServerURL(t *testing.T) {
 		"--ioa-url", "http://ioa-token@ioa.example:8765",
 		"--space", "case-1",
 		"--node-name", "worker-1",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}
@@ -811,7 +812,7 @@ func TestParseCLIRejectsRemovedServerURLAliases(t *testing.T) {
 		{"agent", "--web-url", "http://127.0.0.1:8080"},
 		{"ioa", "serve", "--server-url", "http://127.0.0.1:9999"},
 	} {
-		if _, err := parseCLI(args); err == nil {
+		if _, err := parseCLI(args, io.Discard); err == nil {
 			t.Fatalf("parseCLI(%q) accepted a removed flag", args)
 		}
 	}
@@ -822,7 +823,7 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 		"ioa",
 		"serve",
 		"--ioa-url", "http://127.0.0.1:9999",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}

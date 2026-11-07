@@ -47,7 +47,7 @@ type machineResult struct {
 	StopReason string             `json:"stop_reason,omitempty"`
 	Result     string             `json:"result,omitempty"`
 	Error      *machineFailure    `json:"error,omitempty"`
-	Usage      *machineUsage      `json:"usage,omitempty"`
+	Usage      *aop.TokenUsage    `json:"usage,omitempty"`
 	Artifacts  []*toolpb.Artifact `json:"artifacts,omitempty"`
 }
 
@@ -55,14 +55,6 @@ type machineFailure struct {
 	Code      string `json:"code,omitempty"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable,omitempty"`
-}
-
-type machineUsage struct {
-	InputTokens  uint64            `json:"input_tokens,omitempty"`
-	OutputTokens uint64            `json:"output_tokens,omitempty"`
-	TotalTokens  uint64            `json:"total_tokens,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Detail       map[string]uint64 `json:"detail,omitempty"`
 }
 
 func NewEventWriter(writer io.Writer, format string) *EventWriter {
@@ -243,12 +235,8 @@ func (o *EventWriter) Close() error {
 		result.Error = &machineFailure{Code: o.failure.Code, Message: o.failure.Message, Retryable: o.failure.Retryable}
 	}
 	result.IsError = result.Error != nil || o.stop == string(agenthooks.StopReasonError) || o.stop == string(agenthooks.StopReasonCanceled) || o.stop == string(agenthooks.StopReasonBudget)
-	if o.usage != nil {
-		result.Usage = &machineUsage{
-			InputTokens: o.usage.InputTokens, OutputTokens: o.usage.OutputTokens,
-			TotalTokens: o.usage.TotalTokens, Model: o.usage.Model, Detail: o.usage.Detail,
-		}
-	}
+	result.Usage = o.usage
+
 	data, err := json.Marshal(result)
 	if err == nil {
 		data = append(data, '\n')

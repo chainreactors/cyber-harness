@@ -15,7 +15,7 @@ import (
 	zombiepkg "github.com/chainreactors/zombie/pkg"
 )
 
-func (c *Command) runPortDiscoveryCapability(ctx context.Context, flags flags, input target, emit func(event)) {
+func (c *Command) scanPorts(ctx context.Context, flags flags, input target, emit func(event)) {
 	target, ok := input.(scanTarget)
 	if !ok {
 		return
@@ -58,12 +58,20 @@ func (c *Command) runPortDiscoveryCapability(ctx context.Context, flags flags, i
 	}
 }
 
-func (c *Command) runSprayCapability(ctx context.Context, flags flags, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
+func (c *Command) probeWeb(ctx context.Context, flags flags, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
 	target, ok := input.(webTarget)
 	if !ok || target.URL == "" {
 		return
 	}
-	opts = applyWebStrategyOptions(flags, opts)
+	opts.Dictionaries = append([]string(nil), flags.Dictionaries...)
+	opts.Rules = append([]string(nil), flags.Rules...)
+	opts.Word = flags.Word
+	opts.DefaultDict = opts.DefaultDict || flags.DefaultDict
+	opts.Advance = opts.Advance || flags.Advance
+	opts.ReconPlugin = true
+	opts.Threads = flags.SprayThreads
+	opts.Timeout = flags.Timeout
+	opts.Debug = flags.Debug
 	opts.Proxy = c.proxyForContext(ctx)
 	opts.URLs = []string{target.URL}
 	opts.Host = target.HostHeader
@@ -92,20 +100,7 @@ func (c *Command) runSprayCapability(ctx context.Context, flags flags, input tar
 	}
 }
 
-func applyWebStrategyOptions(flags flags, opts engine.SprayCheckOptions) engine.SprayCheckOptions {
-	opts.Dictionaries = append([]string(nil), flags.Dictionaries...)
-	opts.Rules = append([]string(nil), flags.Rules...)
-	opts.Word = flags.Word
-	opts.DefaultDict = opts.DefaultDict || flags.DefaultDict
-	opts.Advance = opts.Advance || flags.Advance
-	opts.ReconPlugin = true
-	opts.Threads = flags.SprayThreads
-	opts.Timeout = flags.Timeout
-	opts.Debug = flags.Debug
-	return opts
-}
-
-func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, input target, emit func(event)) {
+func (c *Command) checkCredentials(ctx context.Context, flags flags, input target, emit func(event)) {
 	target, ok := input.(weakpassTarget)
 	if !ok || target.Target.Service == "" || target.Target.Address() == ":" {
 		return
@@ -139,7 +134,7 @@ func (c *Command) runWeakpassCapability(ctx context.Context, flags flags, input 
 	}
 }
 
-func (c *Command) runPOCCapability(ctx context.Context, flags flags, input target, emit func(event)) {
+func (c *Command) checkPOCs(ctx context.Context, flags flags, input target, emit func(event)) {
 	target, ok := input.(pocTarget)
 	if !ok || target.Target == "" {
 		return
@@ -175,7 +170,7 @@ func (c *Command) runPOCCapability(ctx context.Context, flags flags, input targe
 			continue
 		}
 		loot := bindLoot(vulnLoot(record), artifact.ResultID, "neutron")
-		emit(artifactLootEvent(capNeutronPOC, loot, *artifact))
+		emit(event{Kind: eventLoot, Source: capNeutronPOC, Loot: &loot, Artifact: artifact})
 	}
 }
 
@@ -210,7 +205,7 @@ func deriveServiceResult(broadPOC bool, source string, input event, emit func(ev
 	}
 }
 
-func (c *Command) runHTTPBasicAuthCapability(ctx context.Context, flags flags, input event, emit func(event)) {
+func (c *Command) checkBasicAuth(ctx context.Context, flags flags, input event, emit func(event)) {
 	target, ok := input.Target.(webProbeTarget)
 	if !ok || !reportableSprayResultForCapability(target.Result, input.Source) || target.Result.Status != 401 {
 		return
@@ -333,7 +328,7 @@ func deriveWeakpassResult(source string, result *parsers.ZombieResult, emit func
 		return
 	}
 	loot := bindLoot(weakpassLoot(result), artifact.ResultID, "zombie")
-	emit(artifactLootEvent(source, loot, *artifact))
+	emit(event{Kind: eventLoot, Source: source, Loot: &loot, Artifact: artifact})
 }
 
 func zombieTargetFromGogo(result *parsers.GOGOResult) (sdkzombie.Target, bool) {

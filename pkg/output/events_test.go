@@ -86,6 +86,11 @@ func TestMachineOutputJSONProducesOneResultDocument(t *testing.T) {
 	if result.IsError || result.StopReason != "completed" || result.Result != "final answer" {
 		t.Fatalf("result = %#v", result)
 	}
+	// The public result uses snake_case keys and JSON numbers, including after
+	// replacing the redundant projection with the canonical usage type.
+	if !strings.Contains(output.String(), `"usage":{"input_tokens":10,"output_tokens":3,"total_tokens":13,"model":"test-model"}`) {
+		t.Fatalf("usage wire contract changed: %s", output.String())
+	}
 	if result.Usage == nil || result.Usage.TotalTokens != 13 || result.Usage.Model != "test-model" {
 		t.Fatalf("usage = %#v", result.Usage)
 	}
