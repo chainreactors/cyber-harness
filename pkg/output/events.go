@@ -26,17 +26,17 @@ type EventWriter struct {
 	writer io.Writer
 	format string
 
-	sessionID string
-	turnID    string
-	result    string
-	stop      string
-	failure   *aop.ProtocolError
-	usage     *aop.TokenUsage
-	turnUsage map[string]*aop.TokenUsage
-	err       error
-	closed    bool
-	events    []*aop.Event
-	artifacts []*toolpb.Artifact
+	sessionID  string
+	turnID     string
+	result     string
+	stop       string
+	failure    *aop.ProtocolError
+	usageModel string
+	turnUsage  map[string]*aop.TokenUsage
+	err        error
+	closed     bool
+	events     []*aop.Event
+	artifacts  []*toolpb.Artifact
 }
 
 type machineResult struct {
@@ -166,16 +166,7 @@ func (o *EventWriter) updateUsage(turnID string, usage *aop.TokenUsage, final bo
 		}
 	}
 	o.turnUsage[turnID] = snapshot
-	total := &aop.TokenUsage{Model: usage.Model, Detail: make(map[string]uint64)}
-	for _, snapshot := range o.turnUsage {
-		total.InputTokens += snapshot.InputTokens
-		total.OutputTokens += snapshot.OutputTokens
-		total.TotalTokens += snapshot.TotalTokens
-		for key, value := range snapshot.Detail {
-			total.Detail[key] += value
-		}
-	}
-	o.usage = total
+	o.usageModel = usage.Model
 }
 
 func (o *EventWriter) SetError(err error) {
@@ -235,7 +226,17 @@ func (o *EventWriter) Close() error {
 		result.Error = &machineFailure{Code: o.failure.Code, Message: o.failure.Message, Retryable: o.failure.Retryable}
 	}
 	result.IsError = result.Error != nil || o.stop == string(agenthooks.StopReasonError) || o.stop == string(agenthooks.StopReasonCanceled) || o.stop == string(agenthooks.StopReasonBudget)
-	result.Usage = o.usage
+	if len(o.turnUsage) > 0 {
+		result.Usage = &aop.TokenUsage{Model: o.usageModel, Detail: make(map[string]uint64)}
+		for _, usage := range o.turnUsage {
+			result.Usage.InputTokens += usage.InputTokens
+			result.Usage.OutputTokens += usage.OutputTokens
+			result.Usage.TotalTokens += usage.TotalTokens
+			for key, value := range usage.Detail {
+				result.Usage.Detail[key] += value
+			}
+		}
+	}
 
 	data, err := json.Marshal(result)
 	if err == nil {

@@ -7,7 +7,6 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/telemetry"
-	observeext "github.com/chainreactors/cyber/exts/observe"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
@@ -39,7 +38,7 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 			name: "with observation",
 			build: func(*testing.T) config {
 				config := minimalConfig(&agentsession.Config{})
-				config.Observe = []observeext.Kind{observeext.Tools}
+				config.Option.Observe = " , tools , "
 				return config
 			},
 		},

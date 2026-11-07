@@ -36,6 +36,37 @@ func TestMachineOutputAggregatesRepairTurnsWithoutDoubleCounting(t *testing.T) {
 	}
 }
 
+// Interrupted turns have no TurnEnded total; their provider-call snapshots must
+// still contribute, even if the publisher reuses its message after delivery.
+func TestMachineOutputRetainsPartialUsageSnapshots(t *testing.T) {
+	var output bytes.Buffer
+	renderer := NewEventWriter(&output, "json")
+	usage := &aop.TokenUsage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3, Model: "initial", Detail: map[string]uint64{"cached_tokens": 1}}
+	renderer.HandleEvent(&aop.Event{TurnId: "initial", Payload: &aop.Event_Usage{Usage: usage}})
+	usage.InputTokens, usage.TotalTokens = 4, 5
+	renderer.HandleEvent(&aop.Event{TurnId: "initial", Payload: &aop.Event_Usage{Usage: usage}})
+	// The authoritative final total replaces both initial call snapshots.
+	renderer.HandleEvent(&aop.Event{TurnId: "initial", Payload: &aop.Event_TurnEnded{TurnEnded: &aop.TurnEnded{Usage: usage}}})
+	usage.InputTokens, usage.TotalTokens, usage.Model = 7, 8, "repair"
+	renderer.HandleEvent(&aop.Event{TurnId: "repair", Payload: &aop.Event_Usage{Usage: usage}})
+	usage.InputTokens, usage.TotalTokens = 99, 100
+	usage.Detail["cached_tokens"] = 99
+	renderer.SetError(io.ErrUnexpectedEOF)
+	if err := renderer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var result machineResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Usage == nil || result.Usage.InputTokens != 11 || result.Usage.OutputTokens != 2 || result.Usage.TotalTokens != 13 || result.Usage.Detail["cached_tokens"] != 2 || result.Usage.Model != "repair" {
+		t.Fatalf("usage=%+v", result.Usage)
+	}
+	if !result.IsError {
+		t.Fatal("interrupted repair must report failure")
+	}
+}
+
 func TestMachineOutputDoesNotCarryPreviousAnswerIntoFailedRepair(t *testing.T) {
 	var output bytes.Buffer
 	renderer := NewEventWriter(&output, "json")
