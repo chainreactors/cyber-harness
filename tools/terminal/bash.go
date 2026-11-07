@@ -39,6 +39,7 @@ const (
 // agent-facing Execute method applies the explicit wait/background contract.
 type BashExecOptions struct {
 	interactive bool
+	keepStdin   bool
 	route       coretool.Egress
 	Name        string
 	WorkDir     string
@@ -232,7 +233,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*aop.ToolResu
 		return t.RunForegroundTool(ctx, command, options)
 	}
 
-	options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, "")}
+	options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, ""), keepStdin: args.Wait > 0}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true

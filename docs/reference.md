@@ -432,7 +432,7 @@ aiscan cyberhub id tomcat
 | `--trace`、`--debug` | 调度观察、底层日志 | 关闭 |
 | `--no-color` | 关闭终端颜色 | 关闭 |
 
-`-o` 保存全局 AOP 事件；`-F` 读取历史，`--view-format markdown -f report.md` 输出回放的 Markdown。`--report` 不是当前 scan 解析器接受的参数。
+运行任务时 `-o events.jsonl` 保存全局 AOP 事件。`-F` 读取历史，此时 `-o markdown -f report.md` 输出回放的 Markdown，`-o csv -f results.csv` 导出扫描原生产物及其验证标记；省略 `-f` 输出到标准输出。原 `--view-format` 参数继续兼容。`--report` 不是当前 scan 解析器接受的参数。
 
 ## 扫描默认值
 

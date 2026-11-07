@@ -22,6 +22,10 @@ func (t *BashTool) interpreterAttachment(script *syntax.File, execution *coretoo
 		stdin := io.Reader(input)
 		if options.Stdin != nil {
 			stdin = options.Stdin
+		} else if !options.keepStdin && !options.interactive {
+			// Foreground commands have no input producer. Deliver EOF immediately;
+			// only explicit background/interactive sessions accept later tmux input.
+			_ = inputWriter.Close()
 		}
 		done := make(chan proc.Result, 1)
 		go func() {

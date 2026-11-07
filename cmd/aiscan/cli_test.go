@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	provider "github.com/chainreactors/cyber/agent/provider"
+	aop "github.com/chainreactors/cyber/aop"
+	toolpb "github.com/chainreactors/cyber/aop/tool"
 	"github.com/chainreactors/cyber/core/telemetry"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
@@ -16,6 +21,8 @@ import (
 	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	goflags "github.com/jessevdk/go-flags"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func containsAny(value string, candidates ...string) bool {
@@ -224,6 +231,71 @@ func TestParseCLIViewUsesUnifiedInputAndFileFlags(t *testing.T) {
 	}
 	if parsed.Option.ViewFile != "session.jsonl" || parsed.Option.ViewFormat != "markdown" || parsed.Option.ViewOutput != "session.md" || parsed.Option.OutputFile != "" {
 		t.Fatalf("view options = %#v", parsed.Option.MiscOptions)
+	}
+}
+
+func TestParseCLIReplayOutputSelectsFormat(t *testing.T) {
+	for _, test := range []struct {
+		args   []string
+		format string
+	}{
+		{[]string{"-F", "session.jsonl", "-o", "csv", "-f", "results.csv"}, "csv"},
+		{[]string{"-o", "csv", "-F", "session.jsonl", "-f", "results.csv"}, "csv"},
+		{[]string{"--view=session.jsonl", "--output=CSV", "-f", "results.csv"}, "csv"},
+		{[]string{"-F", "session.jsonl", "-o", "markdown", "-f", "results.csv"}, "markdown"},
+		{[]string{"-F", "session.jsonl", "-o", "md", "-f", "results.csv"}, "md"},
+		{[]string{"-F", "session.jsonl", "-o", "terminal", "-f", "results.csv"}, "terminal"},
+		{[]string{"-F", "session.jsonl", "-o", "csv", "--view-format", "csv", "-f", "results.csv"}, "csv"},
+	} {
+		parsed, err := parseCLI(test.args)
+		if err != nil {
+			t.Fatalf("parseCLI(%q): %v", test.args, err)
+		}
+		if parsed.Option.ViewFormat != test.format || parsed.Option.OutputFile != "" || parsed.Option.ViewOutput != "results.csv" {
+			t.Fatalf("parseCLI(%q): replay options=%+v", test.args, parsed.Option.MiscOptions)
+		}
+	}
+	parsed, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv"})
+	if err != nil || parsed.Option.ViewFormat != "csv" || parsed.Option.ViewOutput != "" || parsed.Option.OutputFile != "" {
+		t.Fatalf("stdout replay: parsed=%+v err=%v", parsed.Option.MiscOptions, err)
+	}
+	if _, err := parseCLI([]string{"-F", "session.jsonl", "-o", "csv", "--view-format", "markdown"}); err == nil || !strings.Contains(err.Error(), "conflicting replay formats") {
+		t.Fatalf("format conflict: %v", err)
+	}
+}
+
+func TestCLIReplaysScannerArtifactsAsCSVWithoutRuntimeConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	input, output := filepath.Join(dir, "scan.jsonl"), filepath.Join(dir, "scan.csv")
+	extension, err := anypb.New(&toolpb.Artifact{Tool: "gogo", Kind: "service", Target: "127.0.0.1:80", ResultId: "result",
+		Data: []byte(`{"ip":"127.0.0.1","port":"80"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := protojson.Marshal(&aop.Event{Id: "artifact", SessionId: "scan", Payload: &aop.Event_Extension{Extension: extension}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input, append(event, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runCLI(t.Context(), []string{"-F", input, "-o", "csv", "-f", output}, strings.NewReader(""), &stdout, &stderr, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := csv.NewReader(bytes.NewReader(data)).ReadAll()
+	if err != nil || len(records) != 2 || records[1][0] != "127.0.0.1:80" || records[1][1] != "gogo" {
+		t.Fatalf("CSV replay: records=%v err=%v", records, err)
+	}
+	if err := runCLI(t.Context(), []string{"-F", input, "-o", "cvs", "-f", output}, strings.NewReader(""), &stdout, &stderr, nil); err == nil || !strings.Contains(err.Error(), "unsupported view format") {
+		t.Fatalf("invalid replay format error=%v", err)
+	}
+	if preserved, _ := os.ReadFile(output); !bytes.Equal(preserved, data) {
+		t.Fatal("invalid format changed the previous export")
 	}
 }
 

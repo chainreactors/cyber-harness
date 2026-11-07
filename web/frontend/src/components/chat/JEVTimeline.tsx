@@ -13,7 +13,7 @@ import { DecisionBatch } from './JEVDecision'
 import { TokenUsageBadge } from './TokenUsageBadge'
 import { JEVDefinition } from './JEVDefinition'
 import { JEVReference } from './JEVReference'
-import { recordWorkflows, type WorkflowNode } from '../../lib/workflow-view'
+import { recordWorkflows, workflowNodeUsage, type WorkflowNode } from '../../lib/workflow-view'
 import { Workflow } from './Workflow'
 import type { ControlStage } from '../../lib/jev-control-flow'
 import { WorkflowToolContent } from './WorkflowToolContent'
@@ -104,14 +104,9 @@ export function WorkflowNodeContent({ node, nodes, stage }: { node: WorkflowNode
       }))
       const published = generation.state === 'finished' && !generation.error && drafts.length > 0 && targets.every(Boolean)
       const publications = [...new Map(targets.filter((target): target is WorkflowNode => !!target).map(target => [target.id, target])).values()]
-      // Compiler rounds own their individual counters; the parent includes
-      // those same calls and already contributes to the panel's aggregate.
-      const hasRounds = generation.kind === 'reflex_llm' && generation.requestId && nodes.some(other => other.sessionId === node.sessionId
-        && other.turnId === node.turnId && other.related?.some(record => record.value.payload.case === 'generation'
-          && record.value.payload.value.parentRequestId === generation.requestId && record.value.payload.value.usage))
       return <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span>{t(generation.state === 'started' ? 'generationStarted' : generation.error ? 'generationFailed' : 'generationFinished')}</span>
-          {generation.state === 'finished' && generation.kind !== 'reflex_validation' && !hasRounds && <TokenUsageBadge usage={generation.usage} />}</div>
+          {generation.state === 'finished' && <TokenUsageBadge usage={workflowNodeUsage(node, nodes)} />}</div>
         {(generation.attempt > 0 || generation.errorStage) && <p className="text-[11px] text-muted-foreground" data-generation-request-id={generation.requestId}>{t('generationAttempt', { count: generation.attempt })}{generation.errorStage && ` · ${t('errorStage', { stage: generation.errorStage })}`}</p>}
         {generation.error && generation.error !== diagnosticMessage && <CompilationFeedback reason={generation.error} />}
         {generation.kind === 'reflex_validation' && generation.output && <CompilerDiagnosticView output={generation.output} />}

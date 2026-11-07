@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,23 +34,39 @@ func RenderEventsMarkdown(w io.Writer, events []*aop.Event) error {
 
 // RenderEventFile renders an AOP Event ProtoJSONL file.
 func RenderEventFile(path, format, outputPath string) error {
-	var writer io.Writer = os.Stdout
-	if outputPath != "" {
-		file, err := os.Create(outputPath)
-		if err != nil {
-			return fmt.Errorf("create output file: %w", err)
-		}
-		defer file.Close()
-		writer = file
+	var render func(io.Writer, []*aop.Event) error
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "", "terminal":
+		render = RenderEvents
+	case "markdown", "md":
+		render = RenderEventsMarkdown
+	case "csv":
+		render = renderEventsCSV
+	default:
+		return fmt.Errorf("unsupported view format %q: use terminal, markdown, or csv", format)
 	}
 	events, err := eventjsonl.ReadJSONL(path)
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(format, "markdown") || strings.EqualFold(format, "md") {
-		return RenderEventsMarkdown(writer, events)
+	if outputPath != "" {
+		input, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if output, err := os.Stat(outputPath); err == nil && os.SameFile(input, output) {
+			return fmt.Errorf("rendered output must differ from the input event file")
+		}
 	}
-	return RenderEvents(writer, events)
+	var rendered bytes.Buffer
+	if err := render(&rendered, events); err != nil {
+		return err
+	}
+	if outputPath != "" {
+		return os.WriteFile(outputPath, rendered.Bytes(), 0o644)
+	}
+	_, err = rendered.WriteTo(os.Stdout)
+	return err
 }
 
 func BuildEventMarkdown(events []*aop.Event) string {

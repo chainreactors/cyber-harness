@@ -59,6 +59,7 @@ import SubagentRunCard from './chat/SubagentRunCard'
 import { GuardrailReviewCard } from './GuardrailReviews'
 import { groupGuardrailTurns, guardrailTimelineEvents, isGuardrailBoundary, withGuardrailReviews } from '../lib/guardrail-view'
 import { withRecaps } from '../lib/recap-view'
+import { modelTimelineEvents } from '../lib/model-timeline'
 import { isJEVBoundary, jevTimelineEvents, projectJEV, runtimeEvents, withJEV } from '../lib/jev-view'
 import { withWorkflows, type WorkflowTurn } from '../lib/workflow-view'
 import { Workflow } from './chat/Workflow'
@@ -285,11 +286,11 @@ function reduceConversationAOP(
       reducer = createAOPTimelineReducer({
         lifecycle: 'errors',
         responseBoundary: event => isGuardrailBoundary(event) || isJEVBoundary(event) || (event.payload.case === 'status'
-          && ['eval_start', 'compact_start'].includes(event.payload.value.state)),
+          && ['llm_request', 'eval_start', 'compact_start'].includes(event.payload.value.state)),
       })
       reducers.set(key, reducer)
     }
-    return reducer(jevTimelineEvents(guardrailTimelineEvents(batch)), live) as ViewerTimelineItem[]
+    return reducer(modelTimelineEvents(jevTimelineEvents(guardrailTimelineEvents(batch))), live) as ViewerTimelineItem[]
   }
   const childStarts = new Map<string, AOPEvent>()
   const bySession = new Map<string, AOPEvent[]>()

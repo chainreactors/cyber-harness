@@ -10,6 +10,7 @@ import { RuntimeEventSchema } from '../src/gen/types/jev_pb'
 import { reduceAOPToTimeline } from '../cyber-ui/packages/viewer/src/lib/aop-reducer'
 import { projectJEV, withJEV } from '../src/lib/jev-view'
 import { withWorkflows, type WorkflowTurn } from '../src/lib/workflow-view'
+import { EvalDetailSchema } from '../src/gen/types/agent_pb'
 
 function event(seq: number, payload: any, sessionId = 'session-1', turnId = 'turn-1') {
   return create(EventSchema, { id: `${sessionId}-${turnId}-${seq}`, seq: BigInt(seq), sessionId, turnId, emitter: 'agent',
@@ -35,6 +36,55 @@ async function render(page: Page, events: ReturnType<typeof event>[], append = f
   await page.evaluate(({ values, append }) => (window as any).renderJEVEvents(values, append), { values: events.map(e => [...toBinary(EventSchema, e)]), append })
 }
 
+for (const width of [390, 1280]) test(`execution review retains each model step, receipts and usage through replay ${width}`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await mount(page)
+  const reasoning = (seq: number, text: string) => event(seq, { case: 'message', value: { id: `thought-${seq}`, role: 'assistant',
+    content: [{ value: { case: 'reasoning', value: { text } } }] } })
+  const first = [event(1, { case: 'turnStarted', value: {} }), event(2, { case: 'status', value: { state: 'llm_request' } }),
+    reasoning(3, 'Inspect the service before attempting verification.'),
+    event(4, { case: 'toolCall', value: { id: 'inspect', name: 'bash', arguments: { data: new TextEncoder().encode('{"command":"curl http://lab/"}') } } }),
+    event(5, { case: 'toolResult', value: { callId: 'inspect', name: 'bash', durationMs: 250n, output: [{ value: { case: 'text', value: { text: 'HTTP 200 service found' } } }] } }),
+    event(6, { case: 'usage', value: { inputTokens: 1000n, outputTokens: 200n, totalTokens: 1200n, detail: { cache_read: 800n } } })]
+  await render(page, first)
+  const review = page.getByTestId('workflow-review')
+  await review.locator('summary').click()
+  await expect(review).toContainText('1 次工具已返回')
+  const rest = [event(7, { case: 'status', value: { state: 'llm_request' } }), reasoning(8, 'Attempt verification and record the actual failure.'),
+    event(9, { case: 'toolCall', value: { id: 'verify', name: 'bash', arguments: { data: new TextEncoder().encode('{"command":"curl http://lab/verify"}') } } }),
+    event(10, { case: 'toolCall', value: { id: 'unfinished', name: 'read', arguments: { data: new TextEncoder().encode('{"path":"evidence.txt"}') } } }),
+    event(11, { case: 'toolResult', value: { callId: 'verify', name: 'bash', isError: true, durationMs: 1250n, output: [{ value: { case: 'text', value: { text: 'HTTP 502 verification unavailable' } } }] } }),
+    event(12, { case: 'usage', value: { inputTokens: 2000n, outputTokens: 400n, totalTokens: 2400n, detail: { cache_read: 400n } } }),
+    event(13, { case: 'status', value: { state: 'llm_request' } }),
+    event(14, { case: 'message', value: { id: 'answer', role: 'assistant', content: [{ value: { case: 'text', value: { text: 'Service found; verification remains incomplete.' } } }] } }),
+    event(15, { case: 'usage', value: { inputTokens: 300n, outputTokens: 10n, totalTokens: 310n } }),
+    { ...event(16, { case: 'status', value: { state: 'eval_end' } }), extensions: [anyPack(EvalDetailSchema, create(EvalDetailSchema, { pass: false, reason: 'Missing verification evidence' }))] },
+    event(17, { case: 'turnEnded', value: { stopReason: 'completed', usage: { inputTokens: 3300n, outputTokens: 610n, totalTokens: 3910n } } })]
+  await render(page, rest, true)
+  await expect(page.locator('[data-kind=reasoning]')).toHaveCount(2)
+  await expect(review.getByTestId('workflow-review-usage')).toHaveCount(3)
+  await expect(review.locator('summary')).toContainText('3.9k tok')
+  await expect(review.locator('summary')).toContainText('1 次工具失败')
+  await expect(review.locator('summary')).toContainText('1 次工具未收到结果')
+  await expect(review).toContainText('HTTP 502 verification unavailable')
+  await expect(review).toContainText('1.3s')
+  await expect(review).toContainText('缓存 80%')
+  await expect(review.locator('[data-state=failed]')).toContainText(['bash', '完成评估'])
+  await review.getByRole('button', { name: 'Token 用量', exact: true }).click()
+  const highest = review.locator('[data-review-node]').first()
+  await expect(highest).toContainText('Attempt verification and record the actual failure.')
+  await highest.getByRole('button').click()
+  await expect(page.locator('[data-control-current=true]')).toContainText('Attempt verification and record the actual failure.')
+  await render(page, [...first, ...rest, ...first, ...rest])
+  await expect(review.getByTestId('workflow-review-usage')).toHaveCount(3)
+  await expect(review.locator('summary')).toContainText('3.9k tok')
+  await expect(page.locator('[data-kind=reasoning]')).toHaveCount(2)
+  const overflow = await review.evaluate(element => element.scrollWidth > element.clientWidth)
+  expect(overflow).toBe(false)
+  await page.screenshot({ path: info.outputPath(`execution-review-${width}.png`), fullPage: true })
+})
+
 test('one turn owns ordinary tools and JEV calls, even with duplicated native and runtime deliveries', () => {
   const events = [event(1, { case: 'turnStarted', value: {} }), event(2, { case: 'toolCall', value: { ...call, id: 'ordinary' } }),
     event(3, { case: 'toolResult', value: { callId: 'ordinary', name: call.name } }), trace(4, { case: 'takeover', value: { definition } }),
@@ -47,6 +97,46 @@ test('one turn owns ordinary tools and JEV calls, even with duplicated native an
   expect(workflows[0].nodes.filter(node => node.kind === 'tool')).toHaveLength(2)
   expect(new Set(workflows[0].nodes.map(node => node.id)).size).toBe(workflows[0].nodes.length)
   expect(workflows[0].nodes[workflows[0].nodes.length - 1].kind).toBe('response')
+})
+
+test('stream retries keep their message identity, request counts and final usage', async ({ page }) => {
+  await mount(page)
+  const values = [event(1, { case: 'turnStarted', value: {} }), event(2, { case: 'status', value: { state: 'llm_request' } }),
+    event(3, { case: 'messageDelta', value: { messageId: 'retried', value: { case: 'reasoning', value: 'Discarded partial thought' } } }),
+    event(4, { case: 'message', value: { id: 'retried', role: 'assistant', content: [] } }),
+    event(5, { case: 'status', value: { state: 'llm_request' } }),
+    event(6, { case: 'message', value: { id: 'retried', role: 'assistant', content: [{ value: { case: 'reasoning', value: { text: 'Recovered reasoning after retry' } } }] } }),
+    event(7, { case: 'toolCall', value: call }), event(8, { case: 'toolResult', value: { callId: call.id, name: call.name } }),
+    event(9, { case: 'usage', value: { inputTokens: 600n, outputTokens: 60n, totalTokens: 660n, detail: { requests: 2n } } }),
+    event(10, { case: 'status', value: { state: 'llm_request' } }),
+    event(11, { case: 'message', value: { id: 'final', role: 'assistant', content: [{ value: { case: 'text', value: { text: 'Final response after tool receipt' } } }] } }),
+    event(12, { case: 'usage', value: { inputTokens: 100n, outputTokens: 10n, totalTokens: 110n, detail: { requests: 1n } } }),
+    event(13, { case: 'turnEnded', value: { usage: { totalTokens: 770n } } })]
+  await render(page, values.slice(0, 4))
+  await render(page, values.slice(4), true)
+  await expect(page.locator('[data-kind=reasoning]')).toHaveCount(1)
+  await expect(page.locator('[data-kind=reasoning]')).toContainText('Recovered reasoning after retry')
+  await expect(page.getByText('Discarded partial thought', { exact: true })).toHaveCount(0)
+  const review = page.getByTestId('workflow-review')
+  await review.locator('summary').click()
+  await expect(review.locator('summary')).toContainText('770 tok')
+  await expect(review).toContainText('2 次请求（含重试）')
+  await expect(review.getByTestId('workflow-review-usage')).toHaveCount(2)
+  await render(page, [...values, ...values])
+  await expect(review.locator('summary')).toContainText('770 tok')
+  await expect(review.getByTestId('workflow-review-usage')).toHaveCount(2)
+})
+
+test('review excludes compiler aggregate counters when individual rounds are recorded', async ({ page }) => {
+  await mount(page)
+  await render(page, [event(1, { case: 'turnStarted', value: {} }),
+    trace(2, { case: 'generation', value: { kind: 'compiler_round', state: 'finished', requestId: 'round', parentRequestId: 'compiler', usage: { inputTokens: 100n, outputTokens: 10n } } }, true),
+    trace(3, { case: 'generation', value: { kind: 'reflex_llm', state: 'finished', requestId: 'compiler', usage: { inputTokens: 100n, outputTokens: 10n } } }, true),
+    trace(4, { case: 'decisionResult', value: { requestId: 'judge', usage: { inputTokens: 20n, outputTokens: 2n } } }, true)])
+  const review = page.getByTestId('workflow-review')
+  await expect(review.locator('summary')).toContainText('132 tok')
+  await review.locator('summary').click()
+  await expect(review.getByTestId('workflow-review-usage')).toHaveCount(2)
 })
 
 test('reused request and call IDs stay separate across sessions and turns', () => {

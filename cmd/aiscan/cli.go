@@ -300,6 +300,14 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout 
 }
 
 func validateOutputFlags(option *cfg.Option) error {
+	if option.ViewFile != "" && option.OutputFile != "" {
+		format := strings.ToLower(strings.TrimSpace(option.OutputFile))
+		if option.Explicit["view-format"] && !strings.EqualFold(strings.TrimSpace(option.ViewFormat), format) {
+			return fmt.Errorf("conflicting replay formats: -o %s and --view-format %s", option.OutputFile, option.ViewFormat)
+		}
+		option.ViewFormat = format
+		option.OutputFile = ""
+	}
 	if err := cfg.ResolveOutputFormat(option); err != nil {
 		return err
 	}

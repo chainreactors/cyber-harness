@@ -20,6 +20,25 @@
 .workflow-visual > .control-playback { padding: 10px 14px; margin-top: 0; background: hsl(var(--muted) / .16); }
 .workflow-node-content { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); font-size: 12px; line-height: 1.6; }
 .workflow-node-content > * { min-width: 0; }
+.workflow-review { border-top: 1px solid hsl(var(--border)); font-size: 11px; }
+.workflow-review > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 14px; cursor: pointer; color: hsl(var(--muted-foreground)); }
+.workflow-review > summary strong { color: hsl(var(--foreground)); }
+.workflow-review-total { margin-left: auto; font-variant-numeric: tabular-nums; }
+.workflow-review-order { display: flex; gap: 4px; padding: 0 14px 8px; }
+.workflow-review-order button { padding: 4px 8px; border-radius: 4px; color: hsl(var(--muted-foreground)); }
+.workflow-review-order button[aria-pressed=true] { color: hsl(var(--foreground)); background: hsl(var(--muted)); }
+.workflow-review-list { max-height: 320px; overflow: auto; padding: 0 8px; }
+.workflow-review-entry { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 9px 6px; text-align: left; border-top: 1px solid hsl(var(--border) / .5); }
+.workflow-review-entry:hover { background: hsl(var(--muted) / .4); }
+.workflow-review-entry:focus-visible, .workflow-review-order button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+.workflow-review-index { width: 20px; flex-shrink: 0; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+.workflow-review-description { display: grid; flex: 1; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.workflow-review-description > span { color: hsl(var(--muted-foreground)); }
+.workflow-review-description small { color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 400; }
+.workflow-review-evidence { border-left: 2px solid hsl(var(--border)); padding-left: 6px; }
+.workflow-review-metrics { display: grid; justify-items: end; gap: 4px; flex-shrink: 0; color: hsl(var(--muted-foreground)); font-size: 10px; font-variant-numeric: tabular-nums; }
+.workflow-review [data-state=failed] .workflow-review-metrics { color: hsl(var(--destructive)); }
+.workflow-review-note { padding: 8px 14px; color: hsl(var(--muted-foreground)); font-size: 10px; }
 .workflow-content-label { display: block; color: hsl(var(--muted-foreground)); font-size: 10px; }
 .workflow-reflex-context { display: grid; gap: 4px; }
 .workflow-reflex-context code { color: hsl(var(--muted-foreground)); font-size: 10px; }
