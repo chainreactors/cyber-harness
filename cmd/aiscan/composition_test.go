@@ -6,8 +6,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/core/telemetry"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // Every capability a profile publishes is resolved by type at load, not by the
@@ -88,6 +86,3 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 		t.Error("the session runtime is missing capabilities its extensions published")
 	}
 }
-
-var _ = cfg.Option{}
-var _ = telemetry.NopLogger
