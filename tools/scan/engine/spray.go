@@ -32,7 +32,6 @@ type SprayCheckOptions struct {
 	MaxDuration   time.Duration
 	Proxy         string
 	Debug         bool
-	Quiet         bool
 	OnStats       func(sdktypes.Stats)
 }
 
@@ -57,13 +56,9 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 		WithOption(buildSprayOption(opts)).
 		WithStatsHandler(opts.OnStats)
 
-	var resultCh <-chan sdktypes.Result
-	if needsBruteMode(opts) {
-		// BruteTask.Validate requires a seed; spray loads requested dictionaries itself.
-		resultCh, err = eng.Execute(sprayCtx, spray.NewBruteTasks(opts.URLs, []string{"/"}))
-	} else {
-		resultCh, err = eng.Execute(sprayCtx, spray.NewCheckTask(opts.URLs))
-	}
+	// Let the runner's options select check/brute mode. A BruteTask wordlist
+	// would replace the dictionary/word DSL already loaded by NewRunner.
+	resultCh, err := eng.Execute(sprayCtx, spray.NewCheckTask(opts.URLs))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -95,7 +90,7 @@ func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
 		timeout = 5
 	}
 	multiplier := 4
-	if needsBruteMode(opts) || opts.CommonPlugin || opts.ActivePlugin || opts.BakPlugin || opts.FuzzuliPlugin || opts.ReconPlugin {
+	if opts.Crawl || opts.DefaultDict || len(opts.Dictionaries) > 0 || opts.Word != "" || opts.CommonPlugin || opts.ActivePlugin || opts.BakPlugin || opts.FuzzuliPlugin || opts.ReconPlugin {
 		multiplier = 12
 	}
 	seconds := timeout * multiplier
@@ -114,17 +109,19 @@ func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
 func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 	sprayOpt := spray.NewDefaultOption()
 	coreOpt := sprayOpt.Option
-	// The SDK configures its shared logger once when the engine is initialized.
-	// JSON mode opts into quiet per-run output so progress banners cannot corrupt
-	// the command's JSONL stdout contract; ordinary terminal mode keeps the
-	// existing progress output.
-	coreOpt.Quiet = opts.Quiet
+	// The scan command owns presentation; embedded engines must not print
+	// banners or progress directly to the process stdout.
+	coreOpt.Quiet = true
 	coreOpt.Threads = opts.Threads
 	coreOpt.Timeout = opts.Timeout
 	coreOpt.Host = opts.Host
 	coreOpt.Dictionaries = append([]string(nil), opts.Dictionaries...)
 	coreOpt.Rules = append([]string(nil), opts.Rules...)
 	coreOpt.Word = opts.Word
+	if opts.Crawl && !opts.DefaultDict && len(opts.Dictionaries) == 0 && opts.Word == "" {
+		// Crawl plugins require a brute pool even without dictionary input.
+		coreOpt.Word = "/"
+	}
 	coreOpt.Scope = append([]string(nil), opts.Scope...)
 	coreOpt.DefaultDict = opts.DefaultDict
 	coreOpt.Advance = opts.Advance
@@ -143,13 +140,6 @@ func buildSprayOption(opts SprayCheckOptions) *spray.Option {
 		coreOpt.Proxies = []string{opts.Proxy}
 	}
 	return sprayOpt
-}
-
-// needsBruteMode returns true when the requested options require the brute
-// pool (which hosts the crawl plugin, dict/rule bruting, etc.) instead of
-// the lightweight check-only path.
-func needsBruteMode(opts SprayCheckOptions) bool {
-	return opts.Crawl || opts.DefaultDict || len(opts.Dictionaries) > 0 || opts.Word != ""
 }
 
 // Spray's native parser and SDK runner both mutate upstream global options,

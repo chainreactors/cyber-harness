@@ -2,6 +2,12 @@
 
 本页保留各版本的用户可见变化与兼容信息，旧命令、配置和包路径仅表示当时的行为。当前操作见[使用者指南](README.md#使用者指南)，构建见[构建与嵌入](../README_CN.md#构建与嵌入)，历史实现请查阅对应 Git tag。
 
+## 未发布
+
+- 扫描、Agent 和回放统一使用 `-o <格式>`、`-f <文件>`；支持 `text`、`json`、`jsonl`、`markdown` 和 `csv`，省略文件时写入 stdout。
+- 原历史记录命令 `-o run.jsonl` 改为 `-o jsonl -f run.jsonl`。移除回放专用格式参数，`stream-json`、`md` 分别保留为 `jsonl`、`markdown` 的格式别名。
+- 原生 scanner 子命令之后的参数继续遵循其自身契约。
+
 ## v1.0.0-rc9 — Reflex 反馈闭环、MCP 接入与可观测性
 
 rc9 完善 Reflex 从真实任务学习、编译修复到验证复用的流程，统一 Claim 与持久库结构；新增 MCP 工具命令接入和 OpenTelemetry 三信号导出，并改善 Web 中的执行回放、模型用量与远程终端体验。

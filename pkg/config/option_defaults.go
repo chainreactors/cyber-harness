@@ -14,7 +14,7 @@ func ResolveString(value, fallback string) string {
 
 func ApplyDefaults(option *Option) {
 	defaults := map[string]string{
-		"Transport": "auto", "OutputFormat": "text", "ViewFormat": "terminal",
+		"Transport": "auto", "OutputFormat": "text",
 		"NodeID": DefaultNodeID, "NodeName": DefaultNodeName, "Model": DefaultModel,
 	}
 	visitOptions(option, func(field reflect.StructField, value reflect.Value, path string, _ bool) {

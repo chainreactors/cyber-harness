@@ -38,24 +38,24 @@ func (c *Command) buildKatanaCapabilities(p profile) []pipeline.Capability[event
 		if depth <= 0 {
 			depth = 2
 		}
-		caps = append(caps, scanCapability(
-			capKatanaCrawl,
-			katanaWebRoutes,
-			2,
-			func(ctx context.Context, e event, emit func(event)) {
+		caps = append(caps, pipeline.Capability[event]{
+			Name:   capKatanaCrawl,
+			Routes: katanaWebRoutes,
+			Worker: 2,
+			Run: func(ctx context.Context, e event, emit func(event)) {
 				runKatanaCrawl(ctx, c, e, depth, false, emit)
 			},
-		))
+		})
 	}
 	if p.Enabled(capKatanaDeep) {
-		caps = append(caps, scanCapability(
-			capKatanaDeep,
-			katanaWebRoutes,
-			1,
-			func(ctx context.Context, e event, emit func(event)) {
+		caps = append(caps, pipeline.Capability[event]{
+			Name:   capKatanaDeep,
+			Routes: katanaWebRoutes,
+			Worker: 1,
+			Run: func(ctx context.Context, e event, emit func(event)) {
 				runKatanaCrawl(ctx, c, e, 3, true, emit)
 			},
-		))
+		})
 	}
 	return caps
 }

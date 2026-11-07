@@ -37,7 +37,6 @@ import (
 	recapext "github.com/chainreactors/cyber/exts/recap"
 	sessionext "github.com/chainreactors/cyber/exts/session"
 	subagentext "github.com/chainreactors/cyber/exts/subagent"
-	telemetryext "github.com/chainreactors/cyber/exts/telemetry"
 	tuiext "github.com/chainreactors/cyber/exts/tui"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	consoleapi "github.com/chainreactors/cyber/pkg/console/api"
@@ -54,8 +53,6 @@ type config struct {
 	IOA    *ioatools.Config
 	// Session nil creates the application-only profile used by the Web service.
 	Session *agentsession.Config
-	Observe []observeext.Kind
-	Output  string
 }
 
 func configFromOption(option *cfg.Option, providerMode provider.StartupMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (config, error) {
@@ -70,18 +67,7 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	return config{
 		Option: option, Base: application,
 		IOA: ioaConfig, Session: sessionConfig,
-		Observe: parseObserve(option.Observe), Output: strings.TrimSpace(option.OutputFile),
 	}, nil
-}
-
-func parseObserve(value string) []observeext.Kind {
-	var result []observeext.Kind
-	for item := range strings.SplitSeq(value, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			result = append(result, observeext.Kind(item))
-		}
-	}
-	return result
 }
 
 // aiscanProfile owns one reference-distribution extension graph.
@@ -107,10 +93,6 @@ var _ profilepkg.Profile = (*aiscanProfile)(nil)
 func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if config.Option == nil {
 		return nil, fmt.Errorf("cyber profile option is required")
-	}
-	config.Session = cloneConfig(config.Session)
-	if config.Session != nil {
-		config.Session.BaseSkills = append([]string{"cyber"}, config.Session.BaseSkills...)
 	}
 	p := &aiscanProfile{}
 	nodeName := config.Option.NodeName
@@ -187,13 +169,6 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		}
 		values = append(values, jevext.New(value))
 	}
-	if strings.TrimSpace(config.Output) != "" {
-		output, err := telemetryext.New(telemetryext.Options{Path: config.Output})
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, output)
-	}
 	lookup := envLookup(config.Option)
 	options, err := otelext.OptionsFromEnv(lookup)
 	if err != nil {
@@ -208,7 +183,12 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 		}
 		values = append(values, observer)
 	}
-	observeKinds := config.Observe
+	var observeKinds []observeext.Kind
+	for item := range strings.SplitSeq(config.Option.Observe, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			observeKinds = append(observeKinds, observeext.Kind(item))
+		}
+	}
 	// Export existing operation facts whenever any OTel signal is configured.
 	if otelEnabled && len(observeKinds) == 0 {
 		observeKinds = []observeext.Kind{observeext.Tools, observeext.Commands, observeext.Processes}
@@ -291,6 +271,7 @@ func buildAIScanProfile(config config) (*aiscanProfile, error) {
 	if config.Session != nil {
 		values = append(values, ptyext.New(), recapext.New())
 		agentConfig := *config.Session
+		agentConfig.BaseSkills = append([]string{"cyber"}, agentConfig.BaseSkills...)
 		agentConfig.NodeName = nodeName
 		agentConfig = sessionext.ConfigFromOption(config.Option, agentConfig)
 		values = append(values, sessionext.New(agentConfig), subagentext.NewTools())
@@ -397,15 +378,6 @@ func (p *aiscanProfile) Close(ctx context.Context) error {
 		return nil
 	}
 	return p.extensions.Close(ctx)
-}
-
-func cloneConfig(config *agentsession.Config) *agentsession.Config {
-	if config == nil {
-		return nil
-	}
-	cloned := *config
-	cloned.BaseSkills = append([]string(nil), config.BaseSkills...)
-	return &cloned
 }
 
 func (p *aiscanProfile) AgentStatus() *aop.AgentStatus {

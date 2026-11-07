@@ -37,7 +37,7 @@ Download the archive matching your operating system and architecture from [GitHu
 
 ```sh
 # With an LLM configured: run a local task and save its events
-aiscan agent -p "Read the current directory and explain its structure; do not modify files" -o first-run.jsonl
+aiscan agent -p "Read the current directory and explain its structure; do not modify files" -o jsonl -f first-run.jsonl
 
 # Audit a local repository
 cyber-audit --workdir /path/to/repository -p "Audit authentication and tenant isolation"

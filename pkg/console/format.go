@@ -97,7 +97,7 @@ func buildFetchToolResultPreview(lines []string, debug bool) toolResultPreview {
 	}
 	display := make([]string, 0, len(selected))
 	for _, line := range selected {
-		display = append(display, truncateToolResultLine(line, toolResultPreviewWidth))
+		display = append(display, truncate.ClipRunes(line, toolResultPreviewWidth))
 	}
 	return toolResultPreview{lines: display, truncated: hidden > 0, hidden: hidden}
 }
@@ -111,7 +111,7 @@ func selectToolResultLines(lines []string, maxLines int) toolResultPreview {
 	}
 	display := make([]string, 0, len(selected))
 	for _, line := range selected {
-		display = append(display, truncateToolResultLine(line, toolResultPreviewWidth))
+		display = append(display, truncate.ClipRunes(line, toolResultPreviewWidth))
 	}
 	return toolResultPreview{lines: display, truncated: hidden > 0, hidden: hidden}
 }
@@ -140,10 +140,6 @@ func normalizeToolResultLines(result string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
-}
-
-func truncateToolResultLine(value string, limit int) string {
-	return truncate.ClipRunes(value, limit)
 }
 
 // ---------------------------------------------------------------------------

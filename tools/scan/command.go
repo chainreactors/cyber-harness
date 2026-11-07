@@ -171,7 +171,8 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	acceptedCtx := context.WithoutCancel(ctx)
 	observe := func(observation pipeline.Observation[event]) {
 		if observation.Action == pipeline.ActionAccept && observation.Event.Artifact != nil {
-			if err := c.emitAcceptedArtifact(acceptedCtx, observation.Event.Artifact); err != nil {
+			artifact := observation.Event.Artifact
+			if err := c.EmitArtifactJSONCtx(acceptedCtx, artifact.ResultID, artifact.Tool, artifact.Kind, artifact.Target, artifact.Data); err != nil {
 				coll.mu.Lock()
 				coll.errors = append(coll.errors, err.Error())
 				coll.mu.Unlock()
@@ -188,7 +189,7 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 	seeds := buildSeedEvents(rawInputs, func(raw string) {
 		observe(pipeline.Observation[event]{
 			Action: pipeline.ActionAccept,
-			Event:  errorEventOf("", fmt.Sprintf("skip invalid input: %s", raw)),
+			Event:  event{Kind: eventError, Error: fmt.Sprintf("skip invalid input: %s", raw)},
 		})
 	})
 	if len(seeds) == 0 {
@@ -257,10 +258,6 @@ func (c *Command) execute(ctx context.Context, args []string, stream io.Writer) 
 		out = formatSummary(coll, stream != nil && !flags.NoColor)
 	}
 	return out, runErr
-}
-
-func (c *Command) emitAcceptedArtifact(ctx context.Context, artifact *artifactResult) error {
-	return c.EmitArtifactJSONCtx(ctx, artifact.ResultID, artifact.Tool, artifact.Kind, artifact.Target, artifact.Data)
 }
 
 func (c *Command) emitLoots(ctx context.Context, coll *collector) (err error) {

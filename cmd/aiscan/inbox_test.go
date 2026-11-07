@@ -13,12 +13,13 @@ import (
 
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/telemetry"
+	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	profilepkg "github.com/chainreactors/cyber/pkg/profile"
 )
 
 func TestParseCLIInboxHost(t *testing.T) {
-	parsed, err := parseCLI([]string{"inbox", "--state-dir", "state", "--max-active", "2", "--timeout", "19", "--ioa-url", "http://localhost:8765", "--space", "team"})
+	parsed, err := parseCLI([]string{"inbox", "--state-dir", "state", "--max-active", "2", "--timeout", "19", "--ioa-url", "http://localhost:8765", "--space", "team"}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func TestInboxCommandOwnsRouterFlagsAndHelp(t *testing.T) {
 		{"agent", "--max-active", "2"},
 		{"inbox", "--mode", "active"},
 	} {
-		if _, err := parseCLIWithOutput(args, io.Discard); err == nil {
+		if _, err := parseCLI(args, io.Discard); err == nil {
 			t.Fatalf("unexpected flags accepted: %v", args)
 		}
 	}
@@ -73,7 +74,7 @@ func TestInboxCommandTimeoutDefaults(t *testing.T) {
 		{[]string{"inbox", "--timeout=19"}, 19},
 		{[]string{"inbox", "--timeout=0"}, 0},
 	} {
-		parsed, err := parseCLI(test.args)
+		parsed, err := parseCLI(test.args, io.Discard)
 		if err != nil || parsed.Option.Timeout != test.timeout {
 			t.Fatalf("args=%v timeout=%d error=%v", test.args, parsed.Option.Timeout, err)
 		}
@@ -128,7 +129,9 @@ func TestInboxHostInputLifecycle(t *testing.T) {
 				return product, err
 			}
 			done := make(chan error, 1)
-			go func() { done <- runInbox(ctx, factory, option, telemetry.NopLogger(), input, writer) }()
+			go func() {
+				done <- runInbox(ctx, factory, option, telemetry.NopLogger(), input, writer, taskcli.NewOutput(option, writer, io.Discard))
+			}()
 			ready := make(chan error, 1)
 			go func() { _, err := bufio.NewReader(output).ReadString('\n'); ready <- err }()
 			select {

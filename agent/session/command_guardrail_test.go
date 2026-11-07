@@ -27,7 +27,7 @@ func (e *deniedCommandExecutor) ExecuteTool(ctx context.Context, name, arguments
 func TestDirectCommandCannotBypassToolExecutor(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
 	executor := &deniedCommandExecutor{}
-	runtime.tools = executor
+	runtime.config.Tools = executor
 	session, err := runtime.OpenSession(t.Context(), SessionOptions{ID: "guardrail-command"})
 	if err != nil {
 		t.Fatal(err)

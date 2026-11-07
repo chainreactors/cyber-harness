@@ -57,7 +57,11 @@ func TestRunTaskFinalizesOnceBeforeResult(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var result machineResult
+			var result struct {
+				IsError    bool             `json:"is_error"`
+				Error      *json.RawMessage `json:"error"`
+				StopReason string           `json:"stop_reason"`
+			}
 			if err := json.Unmarshal(body, &result); err != nil {
 				t.Fatal(err)
 			}

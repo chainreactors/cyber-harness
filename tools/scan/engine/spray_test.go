@@ -24,8 +24,8 @@ func TestBuildSprayOptionAppliesDebugAndRuntimeOptions(t *testing.T) {
 	if !opt.Debug {
 		t.Fatal("debug = false, want true")
 	}
-	if opt.Quiet {
-		t.Fatal("quiet = true, want false in debug mode")
+	if !opt.Quiet {
+		t.Fatal("embedded engine must stay quiet even in debug mode")
 	}
 	if opt.Threads != 7 || opt.Timeout != 9 || opt.Host != "vhost.example" {
 		t.Fatalf("runtime options = threads:%d timeout:%d host:%q", opt.Threads, opt.Timeout, opt.Host)
@@ -38,19 +38,13 @@ func TestBuildSprayOptionAppliesDebugAndRuntimeOptions(t *testing.T) {
 	}
 }
 
-func TestBuildSprayOptionAvoidsPerRunGlobalLoggerMutation(t *testing.T) {
+func TestBuildSprayOptionLeavesPresentationToScan(t *testing.T) {
 	opt := buildSprayOption(SprayCheckOptions{})
-	if opt.Quiet {
-		t.Fatal("quiet = true; upstream NewRunner would mutate the shared logger")
+	if !opt.Quiet {
+		t.Fatal("embedded engine must not print directly to process stdout")
 	}
 	if !opt.NoBar {
 		t.Fatal("no bar = false; SDK runs must not install a global progress writer")
-	}
-}
-
-func TestBuildSprayOptionHonorsQuiet(t *testing.T) {
-	if !buildSprayOption(SprayCheckOptions{Quiet: true}).Quiet {
-		t.Fatal("quiet option was not propagated")
 	}
 }
 

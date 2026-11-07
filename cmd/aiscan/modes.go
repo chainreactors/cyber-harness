@@ -35,10 +35,13 @@ import (
 
 func runAgentMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool), outputTask *taskcli.Output) error {
 	if !cfg.HasAgentOneShotInput(option) {
-		if option != nil && option.OutputFormat != "" && option.OutputFormat != "text" {
+		if option.OutputFile != "" && option.OutputFormat != "jsonl" {
+			return fmt.Errorf("interactive output stays in the terminal; use -o jsonl -f <file> to record events")
+		}
+		if option != nil && option.OutputFormat != "" && option.OutputFormat != "text" && !(option.OutputFormat == "jsonl" && option.OutputFile != "") {
 			return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
 		}
-		return runInteractiveMode(ctx, newProfile, option, logger, setInterrupt)
+		return runInteractiveMode(ctx, newProfile, option, logger, setInterrupt, outputTask)
 	}
 	return runOneShotMode(ctx, newProfile, option, logger, outputTask)
 }
@@ -60,6 +63,9 @@ func runOneShotMode(ctx context.Context, newProfile func(profile.Request) (profi
 	finish := profile.CloseOnce(ctx, p.Close)
 	defer func() { runErr = finish(runErr) }()
 
+	if option.OutputFormat == "jsonl" {
+		outputTask.Observe(rt)
+	}
 	task = skills.ExpandCommand(task, rt.Skills())
 	task, err = rt.Skills().ApplySelected(task, option.Skills)
 	if err != nil {
@@ -75,7 +81,7 @@ func runOneShotMode(ctx context.Context, newProfile func(profile.Request) (profi
 // Agent interactive (REPL)
 // ---------------------------------------------------------------------------
 
-func runInteractiveMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool)) (runErr error) {
+func runInteractiveMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, setInterrupt func(func() bool), outputTask *taskcli.Output) (runErr error) {
 	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{
 		PrimarySessionID: console.MainREPLName,
 		Loop:             agent.StandardLoop{},
@@ -85,6 +91,9 @@ func runInteractiveMode(ctx context.Context, newProfile func(profile.Request) (p
 	}
 	finish := profile.CloseOnce(ctx, p.Close)
 	defer func() { runErr = finish(runErr) }()
+	if option.OutputFormat == "jsonl" {
+		outputTask.Observe(rt)
+	}
 
 	if _, err := rt.Skills().ApplySelected("", option.Skills); err != nil {
 		return err
@@ -169,6 +178,8 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return err
 	}
 
+	outputTask.Observe(application)
+
 	// A host without a session runtime still runs commands: the registry and
 	// the tool are capabilities its graph publishes either way.
 	host, ok := p.(shellHost)
@@ -245,6 +256,10 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		})
 		emitSessionEnded(application, sessionID, emitter, string(closeReason))
 	}()
+	scannerOutput := outputTask.Stdout()
+	if option.OutputFormat != "" && option.OutputFormat != "text" {
+		scannerOutput = io.Discard
+	}
 	streaming := shouldStreamScannerOutput(scannerArgs)
 	var outputErr error
 	var captured strings.Builder
@@ -253,7 +268,7 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 			if streaming {
 				if outputErr == nil {
 					var n int
-					n, outputErr = outputTask.Stdout().Write(data)
+					n, outputErr = scannerOutput.Write(data)
 					if outputErr == nil && n != len(data) {
 						outputErr = io.ErrShortWrite
 					}
@@ -277,7 +292,7 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		if isDirectScannerJSONOutput(scannerArgs) {
 			output = filterScannerJSONLines(output)
 		}
-		if _, err := io.WriteString(outputTask.Stdout(), output); err != nil {
+		if _, err := io.WriteString(scannerOutput, output); err != nil {
 			return err
 		}
 	}

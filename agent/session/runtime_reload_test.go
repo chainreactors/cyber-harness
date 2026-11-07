@@ -23,7 +23,7 @@ func TestRuntimeProviderReloadPreservesSessionHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rt.providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Provider: "test", Model: "next-model"})
+	rt.config.Providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Provider: "test", Model: "next-model"})
 	if session.Model() != "next-model" {
 		t.Fatalf("session model = %q, want next-model", session.Model())
 	}
@@ -35,8 +35,8 @@ func TestRuntimeProviderReloadPreservesSessionHistory(t *testing.T) {
 
 func TestProviderReloadFollowsTurnBoundaryAndPreservesExplicitModels(t *testing.T) {
 	rt := newBareRuntime(t, nil, &runtimeSemanticProvider{})
-	old, _ := rt.providers.Current()
-	rt.providers.Set(old, provider.ProviderConfig{Provider: "openai", APIKey: "fixture", Model: "model-a", MaxTokens: 128, ContextWindow: 4096})
+	old, _ := rt.config.Providers.Current()
+	rt.config.Providers.Set(old, provider.ProviderConfig{Provider: "openai", APIKey: "fixture", Model: "model-a", MaxTokens: 128, ContextWindow: 4096})
 	started, release := make(chan struct{}), make(chan struct{})
 	var startOnce, releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
@@ -83,7 +83,7 @@ func TestProviderReloadFollowsTurnBoundaryAndPreservesExplicitModels(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Provider: "openai", APIKey: "fixture", Model: "model-b", MaxTokens: 256, ContextWindow: 8192})
+	rt.config.Providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Provider: "openai", APIKey: "fixture", Model: "model-b", MaxTokens: 256, ContextWindow: 8192})
 	releaseOnce.Do(func() { close(release) })
 	if result, err := first.Wait(); err != nil || result.Output != "model-a" {
 		t.Fatalf("active turn changed provider: %v %v", result, err)
@@ -105,7 +105,7 @@ func TestProviderReloadFollowsTurnBoundaryAndPreservesExplicitModels(t *testing.
 			t.Fatal(err)
 		}
 	}
-	rt.providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Model: "model-c", ContextWindow: 16384})
+	rt.config.Providers.Set(&runtimeSemanticProvider{}, provider.ProviderConfig{Model: "model-c", ContextWindow: 16384})
 	if conversation.Model() != "model-c" || conversation.ContextWindow() != 16384 || pinned.Model() != "local-model" || child.Model() != "child-model" {
 		t.Fatal("session rotation lost provider inheritance or its explicit model")
 	}

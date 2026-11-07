@@ -59,6 +59,7 @@ import SubagentRunCard from './chat/SubagentRunCard'
 import { GuardrailReviewCard } from './GuardrailReviews'
 import { groupGuardrailTurns, guardrailTimelineEvents, isGuardrailBoundary, withGuardrailReviews } from '../lib/guardrail-view'
 import { withRecaps } from '../lib/recap-view'
+import { modelTimelineEvents } from '../lib/model-timeline'
 import { isJEVBoundary, jevTimelineEvents, projectJEV, runtimeEvents, withJEV } from '../lib/jev-view'
 import { withWorkflows, type WorkflowTurn } from '../lib/workflow-view'
 import { Workflow } from './chat/Workflow'
@@ -69,21 +70,6 @@ import { ReviewState, type Review } from '../cyber-proto'
 import type { IOAConsoleTarget } from '../lib/ioa-navigation'
 
 const webUserAgent = 'cyber.web'
-
-function toExtensionItem(item: TimelineItem): ExtensionTimelineItem | null {
-  switch (item.kind) {
-    case 'scan_complete':
-      return {
-        id: item.id,
-        kind: 'extension',
-        timestamp: item.timestamp,
-        extensionType: 'scan_complete',
-        data: { scanID: item.scanID || '' },
-      }
-    default:
-      return null
-  }
-}
 
 // Agent and evaluator prompts also use role=user in AOP, but they are internal
 // execution inputs, not operator-authored chat messages. The hub is the sole
@@ -285,11 +271,11 @@ function reduceConversationAOP(
       reducer = createAOPTimelineReducer({
         lifecycle: 'errors',
         responseBoundary: event => isGuardrailBoundary(event) || isJEVBoundary(event) || (event.payload.case === 'status'
-          && ['eval_start', 'compact_start'].includes(event.payload.value.state)),
+          && ['llm_request', 'eval_start', 'compact_start'].includes(event.payload.value.state)),
       })
       reducers.set(key, reducer)
     }
-    return reducer(jevTimelineEvents(guardrailTimelineEvents(batch)), live) as ViewerTimelineItem[]
+    return reducer(modelTimelineEvents(jevTimelineEvents(guardrailTimelineEvents(batch))), live) as ViewerTimelineItem[]
   }
   const childStarts = new Map<string, AOPEvent>()
   const bySession = new Map<string, AOPEvent[]>()
@@ -403,7 +389,13 @@ function toViewerTimelineItem(
         content: item.content || '',
       }
     case 'scan_complete':
-      return toExtensionItem(item)
+      return {
+        id: item.id,
+        kind: 'extension',
+        timestamp: item.timestamp,
+        extensionType: 'scan_complete',
+        data: { scanID: item.scanID || '' },
+      }
     default:
       return null
   }

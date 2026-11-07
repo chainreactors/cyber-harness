@@ -164,7 +164,7 @@ func emitSessionEnded(application aop.EventPublisher, sessionID, agentName, reas
 }
 
 func (s *sessionState) emitTurnStarted(turnID string) {
-	s.runtime.events.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
+	s.runtime.config.Events.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnStarted{TurnStarted: &aop.TurnStarted{}}})
 }
 
 func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr error) {
@@ -172,7 +172,7 @@ func (s *sessionState) emitTurnEnded(turnID string, result *agent.Result, runErr
 	if runErr != nil {
 		ended.Error = &aop.ProtocolError{Message: runErr.Error()}
 	}
-	s.runtime.events.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
+	s.runtime.config.Events.Publish(&aop.Event{SessionId: s.id, TurnId: turnID, Emitter: s.agentName, Payload: &aop.Event_TurnEnded{TurnEnded: ended}})
 }
 
 type commandSession struct {
@@ -230,8 +230,8 @@ func (s *commandSession) statusText() string {
 	rt := s.state.runtime
 	s.state.refreshProvider()
 	rt.mu.RLock()
-	providers := rt.providers
-	tools, commandRegistry, store := rt.tools, rt.commandRegistry, rt.skills
+	providers := rt.config.Providers
+	tools, commandRegistry, store := rt.config.Tools, rt.config.CommandRegistry, rt.config.Skills
 	config := s.state.agent.ConfigSnapshot()
 	provider, model := config.Provider, config.Model
 	providerConfig := providerpkg.ProviderConfig{}
@@ -391,16 +391,16 @@ func (s *commandSession) executeBash(ctx context.Context, line, command string) 
 	if command == "" {
 		return commandOutcome{err: fmt.Errorf("command is required after the ! prefix")}
 	}
-	bash := s.state.runtime.shell
+	bash := s.state.runtime.config.Shell
 	if bash == nil {
 		return commandOutcome{err: fmt.Errorf("bash tool is not registered")}
 	}
-	if s.state.runtime.tools == nil {
+	if s.state.runtime.config.Tools == nil {
 		return commandOutcome{err: fmt.Errorf("tool executor is unavailable")}
 	}
 	payload, _ := json.Marshal(map[string]string{"command": command})
 	// Direct user commands enter the same admission boundary as model tool calls.
-	result, err := s.state.runtime.tools.ExecuteTool(ctx, bash.Name(), string(payload))
+	result, err := s.state.runtime.config.Tools.ExecuteTool(ctx, bash.Name(), string(payload))
 	if err != nil {
 		return commandOutcome{err: err}
 	}
@@ -579,7 +579,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	}
 	providers := options.providers
 	if options.Config == nil {
-		providers = rt.providers
+		providers = rt.config.Providers
 	}
 	if providers != nil {
 		p, config := providers.Current()
@@ -590,7 +590,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		WithInbox(mailbox).
 		WithSessionID(id).
 		WithAgentName(agentName).
-		WithBus(rt.events)
+		WithBus(rt.config.Events)
 	agentCfg.ParentSessionID = options.ParentSessionID
 	agentCfg.ParentToolCallID = options.ParentToolCallID
 	agentCfg.LoopScheduler = scheduler
@@ -634,7 +634,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	startDone := make(chan struct{})
 	go func() { <-startDone; rt.runSession(state) }()
 	ev := agenthooks.SessionEvent{SessionID: id, TaskID: options.TaskID, ParentID: options.ParentSessionID, ParentToolCallID: options.ParentToolCallID, AgentName: agentName, Model: agentCfg.Model, Primary: logicalID == rt.primarySessionID, Deliver: state.deliver, Input: options.Input, Delegation: state.delegation}
-	_, startErr := agenthooks.SessionStart.Emit(sessionCtx, rt.hooks, ev)
+	_, startErr := agenthooks.SessionStart.Emit(sessionCtx, rt.config.Hooks, ev)
 	if startErr == nil {
 		startErr = sessionCtx.Err()
 	}
@@ -652,7 +652,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 	if options.HistorySnapshot {
 		historyMode = types.SessionHistory_MODE_SNAPSHOT
 	}
-	emitSessionStarted(rt.events, id, agentName, &aop.SessionStarted{
+	emitSessionStarted(rt.config.Events, id, agentName, &aop.SessionStarted{
 		Model: agentCfg.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	}, historyMode, state.delegation)
 	if options.HistorySnapshot && len(options.Messages) > 0 {
@@ -770,14 +770,14 @@ func (rt *Runtime) CloseSession(ctx context.Context, sessionID string, reason Se
 			state.scheduler.Stop()
 			state.inbox.Close()
 			endCtx, endCancel := context.WithTimeout(context.WithoutCancel(state.ctx), 5*time.Second)
-			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.hooks, agenthooks.SessionEvent{SessionID: state.id, TaskID: state.taskID, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Model(), Reason: string(state.closeReason), Input: state.input, Output: resultOutput(state.result), Stop: sessionStop(state.result, state.runErr), Err: state.runErr, Delegation: state.delegation})
+			_, state.closeErr = agenthooks.SessionEnd.Emit(endCtx, rt.config.Hooks, agenthooks.SessionEvent{SessionID: state.id, TaskID: state.taskID, ParentID: state.parentSessionID, ParentToolCallID: state.parentToolCallID, AgentName: state.agentName, Model: state.agent.Model(), Reason: string(state.closeReason), Input: state.input, Output: resultOutput(state.result), Stop: sessionStop(state.result, state.runErr), Err: state.runErr, Delegation: state.delegation})
 			endCancel()
 			if state.closeErr != nil {
 				state.closeErr = fmt.Errorf("session end hooks failed: %v", state.closeErr)
 			}
 			// The canonical stream isolates and reports observer failures.
 			// Publication completes before this session identity is released.
-			emitSessionEnded(rt.events, state.id, state.agentName, string(state.closeReason))
+			emitSessionEnded(rt.config.Events, state.id, state.agentName, string(state.closeReason))
 			if state.onClosed != nil {
 				state.closeErr = errors.Join(state.closeErr, invokeOnClosed(state.onClosed, Outcome{SessionID: state.id, Started: !state.starting, Result: state.result, Err: errors.Join(state.runErr, state.closeErr)}))
 			}
@@ -818,19 +818,19 @@ func (rt *Runtime) findSessionLocked(sessionID string) (string, *sessionState) {
 }
 
 func (rt *Runtime) Observe(observer func(*aop.Event)) *eventbus.Subscription[*aop.Event] {
-	if rt == nil || rt.events == nil || observer == nil {
+	if rt == nil || rt.config.Events == nil || observer == nil {
 		return nil
 	}
-	return rt.events.Observe(observer)
+	return rt.config.Events.Observe(observer)
 }
 
 // Publish publishes an already-formed runtime event through the State-owned
 // AOP bus, applying the same timestamp and sequence stamping as agent events.
 func (rt *Runtime) Publish(event *aop.Event) {
-	if rt == nil || rt.events == nil || event == nil {
+	if rt == nil || rt.config.Events == nil || event == nil {
 		return
 	}
-	rt.events.Publish(event)
+	rt.config.Events.Publish(event)
 }
 
 func (rt *Runtime) session(sessionID string) (*Session, error) {
@@ -994,10 +994,10 @@ func (s *Session) SetModel(model string) error {
 		state.providers = nil
 		return nil
 	}
-	if state.runtime.providers == nil {
+	if state.runtime.config.Providers == nil {
 		return fmt.Errorf("provider is not configured")
 	}
-	p, config, err := state.runtime.providers.ForModel(model, state.runtime.Logger)
+	p, config, err := state.runtime.config.Providers.ForModel(model, state.runtime.Logger)
 	if err != nil {
 		return err
 	}
@@ -1137,14 +1137,14 @@ func (s *Session) Resume(ctx context.Context, path string) (int, error) {
 	if state.runtime.sessionRunActive(state.id) {
 		return 0, fmt.Errorf("task is running — use /stop first")
 	}
-	if state.runtime.history == nil {
+	if state.runtime.config.History == nil {
 		return 0, fmt.Errorf("session history is not installed")
 	}
-	data, err := state.runtime.history.Load(ctx, path)
+	data, err := state.runtime.config.History.Load(ctx, path)
 	if err != nil {
 		return 0, err
 	}
-	if err := state.runtime.history.Validate(path); err != nil {
+	if err := state.runtime.config.History.Validate(path); err != nil {
 		return 0, err
 	}
 	if _, err := s.rotate(ctx, SessionCloseResumed, data.SessionID, data.Messages); err != nil {
@@ -1238,7 +1238,7 @@ func emitContinuationMessages(state *sessionState, messages []*aop.Message) {
 		if message.Role == "tool" {
 			for _, content := range message.Content {
 				if result := content.GetToolResult(); result != nil {
-					state.runtime.events.Publish(&aop.Event{
+					state.runtime.config.Events.Publish(&aop.Event{
 						SessionId: state.id, Emitter: state.agentName,
 						Payload: &aop.Event_ToolResult{ToolResult: proto.CloneOf(result)},
 					})
@@ -1246,7 +1246,7 @@ func emitContinuationMessages(state *sessionState, messages []*aop.Message) {
 			}
 			continue
 		}
-		state.runtime.events.Publish(&aop.Event{
+		state.runtime.config.Events.Publish(&aop.Event{
 			SessionId: state.id, Emitter: state.agentName,
 			Payload: &aop.Event_Message{Message: proto.CloneOf(message)},
 		})
@@ -1364,7 +1364,7 @@ func (s *sessionState) executeRun(ctx context.Context, turnID string, input RunI
 		message.Role = "user"
 	}
 	if len(message.Content) == 1 && message.Content[0].GetText() != nil {
-		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.skills)
+		message.Content[0].GetText().Text = skills.ExpandCommand(message.Content[0].GetText().Text, s.runtime.config.Skills)
 	}
 	if input.EvalCriteria != "" {
 		config := s.agent.ConfigSnapshot()
@@ -1485,7 +1485,7 @@ func (s *sessionState) emitCommandResult(result *types.CommandResult) {
 		Id: s.runtime.nextRuntimeID("command"), Role: "assistant", Content: result.GetContent(),
 	}}}
 	_ = types.SetCommandDetail(event, &types.CommandDetail{Line: result.GetCommand(), Presentation: result.GetPresentation()})
-	s.runtime.events.Publish(event)
+	s.runtime.config.Events.Publish(event)
 }
 
 func (rt *Runtime) pendingLimit() int {

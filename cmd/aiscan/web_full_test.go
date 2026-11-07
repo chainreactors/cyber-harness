@@ -7,6 +7,7 @@ import (
 	types "github.com/chainreactors/cyber/core/types"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	webhost "github.com/chainreactors/cyber/pkg/web/host"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ func TestWebConfigStoreStagesBeforeAtomicCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := &webConfigStore{explicit: path}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Explicit: path}
 	incoming := configForWebStore("new-model", "")
 	prepared, err := store.PrepareDistributeConfig(context.Background(), incoming)
 	if err != nil {

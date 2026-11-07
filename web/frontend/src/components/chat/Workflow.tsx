@@ -6,6 +6,7 @@ import type { WorkflowNode, WorkflowTurn } from '../../lib/workflow-view'
 import { controlFrames, controlSnapshot } from '../../lib/jev-control-flow'
 import { isWorkflowAutomaticScroll, scrollWorkflowKey } from '../../lib/workflow-scroll'
 import { ControlPlayback, JEVControlFlow } from './JEVControlFlow'
+import { WorkflowReview } from './WorkflowReview'
 import './Workflow.css'
 
 const signature = (node: WorkflowNode) => `${node.state}:${node.related?.[node.related.length - 1]?.event.id || ''}`
@@ -154,6 +155,7 @@ export function Workflow({ workflow, renderItem }: { workflow: WorkflowTurn; ren
       </div>
       <button type="button" className="workflow-follow" aria-pressed={following && selected === undefined && !replaying} onClick={follow}><ArrowDownToLine />{t(liveNodes.length ? 'workflow.followLive' : 'workflow.latest')}</button>
     </div>
+    <WorkflowReview nodes={visible} onSelect={selectNode} />
     <div className="workflow-visual">
       <JEVControlFlow nodes={snapshot} edges={workflow.edges} current={current} frame={frame}
         moving={playing || !replaying && (current?.state === 'pending' || packets.some(packet => packet.target === current?.id))}

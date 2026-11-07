@@ -254,7 +254,7 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 				// task correlation cannot resolve them. Accept the event only
 				// when this exact agent has the Runtime session open; this keeps
 				// standalone scan telemetry from leaking into chat history.
-				if agent.state().sessionOpen(event.SessionId) {
+				if agent.sessionOpen(event.SessionId) {
 					sessionID = event.SessionId
 				} else {
 					sessionID = ""
@@ -294,9 +294,10 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:
-		agent.state().convergeOnTurnEnd(event.TurnId, event)
+		// Runtime already published the terminal error; release without a second terminal.
+		agent.finishTask(event.TurnId, nil)
 	case *aop.Event_ToolResult:
-		agent.state().convergeOnToolResult(correlationID, event)
+		agent.convergeOnToolResult(correlationID, event)
 	}
 }
 
