@@ -1,13 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
 	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 
 	"github.com/chainreactors/cyber/agent/provider"
+	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/telemetry"
+	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	cfg "github.com/chainreactors/cyber/pkg/config"
@@ -33,34 +36,53 @@ type appConfig struct {
 	SkipEngines       bool
 }
 
-func appConfigFromOption(option *cfg.Option, providerMode provider.StartupMode, logger telemetry.Logger) appConfig {
-	dataDir := cfg.ResolveDataDir(option.DataDir)
-	// Sections were resolved and validated during startup; a read error here is
-	// structurally impossible, so a zero section is the safe fallback.
-	hub, _ := scannerext.ReadCyberhub(option)
-	recon, _ := passiveconfig.ReadRecon(option)
-	searchKeys, _ := searchext.ReadKeys(option)
-	scanOptions, _ := scannerext.ReadScan(option)
-	return appConfig{
-		DataDir: dataDir, Resolved: option.Resolved,
-		Provider: provider.StartupConfig{
-			Mode: providerMode, Config: cfg.ProviderConfig(option),
-			Fallbacks: cfg.FallbackProviderConfigs(option),
-		},
-		Scanner: scannerext.Config{
-			AgentName: "cyber",
-			Verify:    scanOptions.Verify,
-			Resources: resources.Options{
-				CyberhubURL: hub.URL, APIKey: hub.Key,
-				Mode: hub.Mode, Proxy: hub.Proxy,
-			},
-		},
-		Recon: recon, ReconCredentials: passiveconfig.UncoverCredentials(envLookup(option)),
-		TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
-		PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
-		MitmCapture: cloneBool(hub.Mitm), TrafficStorage: option.TrafficOptions,
-		Logger: logger, CLISkillPaths: cfg.LocalSkillPaths(option.Skills),
+func configFromOption(option *cfg.Option, providerMode provider.StartupMode, sessionConfig *agentsession.Config, logger telemetry.Logger) (config, error) {
+	if option == nil {
+		return config{}, fmt.Errorf("cyber profile option is required")
 	}
+	hub, err := scannerext.ReadCyberhub(option)
+	if err != nil {
+		return config{}, err
+	}
+	recon, err := passiveconfig.ReadRecon(option)
+	if err != nil {
+		return config{}, err
+	}
+	searchKeys, err := searchext.ReadKeys(option)
+	if err != nil {
+		return config{}, err
+	}
+	scanOptions, err := scannerext.ReadScan(option)
+	if err != nil {
+		return config{}, err
+	}
+	ioaConfig, err := ioaclient.ConfigFromOption(option)
+	if err != nil {
+		return config{}, err
+	}
+	return config{
+		Option: option, IOA: ioaConfig, Session: sessionConfig,
+		Base: appConfig{
+			DataDir: cfg.ResolveDataDir(option.DataDir), Resolved: option.Resolved,
+			Provider: provider.StartupConfig{
+				Mode: providerMode, Config: cfg.ProviderConfig(option),
+				Fallbacks: cfg.FallbackProviderConfigs(option),
+			},
+			Scanner: scannerext.Config{
+				AgentName: "cyber",
+				Verify:    scanOptions.Verify,
+				Resources: resources.Options{
+					CyberhubURL: hub.URL, APIKey: hub.Key,
+					Mode: hub.Mode, Proxy: hub.Proxy,
+				},
+			},
+			Recon: recon, ReconCredentials: passiveconfig.UncoverCredentials(envLookup(option)),
+			TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
+			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
+			MitmCapture: hub.Mitm, TrafficStorage: option.TrafficOptions,
+			Logger: logger, CLISkillPaths: cfg.LocalSkillPaths(option.Skills),
+		},
+	}, nil
 }
 
 func envLookup(option *cfg.Option) func(string) (string, bool) {
@@ -78,12 +100,4 @@ func tavilyKeys(primary string, fallbacks ...string) string {
 		}
 	}
 	return strings.Join(keys, ",")
-}
-
-func cloneBool(source *bool) *bool {
-	if source == nil {
-		return nil
-	}
-	value := *source
-	return &value
 }

@@ -97,13 +97,11 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		writeHelp(newCLIParser(&cli, goflags.Default&^goflags.PrintErrors), stdout)
 		return nil
 	}
-	parsed, err := parseCLIWithOutput(args, stdout)
+	parsed, err := parseCLI(args, stdout)
 	option := parsed.Option
 	taskOutput := taskcli.NewOutput(&option, stdout, stderr)
 	defer func() {
-		if parsed.Mode == cfg.RunModeAgent || parsed.Mode == cfg.RunModeInbox || parsed.Mode == cfg.RunModeScanner && option.AI && len(parsed.ScannerArgs) > 0 && parsed.ScannerArgs[0] != "scan" {
-			resultErr = taskOutput.Finish(resultErr)
-		}
+		resultErr = taskOutput.Finish(resultErr)
 	}()
 	if err != nil {
 		return err
@@ -114,13 +112,19 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		return err
 	}
 	if option.ViewFile != "" {
-		return output.RenderEventFile(option.ViewFile, option.ViewFormat, option.ViewOutput)
+		return output.RenderEventFile(option.ViewFile, option.OutputFormat, option.OutputFile, stdout)
 	}
 	if parsed.Help {
 		return nil
 	}
 	if parsed.Mode == cfg.RunModeNoCommand && parsed.Action == nil {
 		return fmt.Errorf("missing subcommand: use %s", cliCommandSummary())
+	}
+	if (parsed.Mode == runModeWeb || parsed.Action != nil && parsed.Action.Persistent) && (option.OutputFormat != "text" || option.OutputFile != "") {
+		return fmt.Errorf("-o/-f select task or replay output; this server exposes events through its transport")
+	}
+	if err := taskOutput.Open(); err != nil {
+		return err
 	}
 	resolveConfig := cfg.ResolveRuntimeConfig
 	if parsed.Mode == cfg.RunModeAgent || parsed.Mode == cfg.RunModeInbox {
@@ -153,13 +157,13 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		defer cancel()
 	}
 	if parsed.Action != nil {
-		return parsed.Action.Run(ctx, hostcli.Environment{Config: &option, Logger: logger, Out: stdout, Err: stderr})
+		return parsed.Action.Run(ctx, hostcli.Environment{Config: &option, Logger: logger, Out: taskOutput.Stdout(), Err: stderr})
 	}
 	switch parsed.Mode {
 	case cfg.RunModeAgent:
 		return runAgentTransport(ctx, newAIScanProfile, &option, logger, stdin, stdout, setInterrupt, taskOutput)
 	case cfg.RunModeInbox:
-		return runInbox(ctx, newAIScanProfile, &option, logger, stdin, stdout)
+		return runInbox(ctx, newAIScanProfile, &option, logger, stdin, taskOutput.Stdout(), taskOutput)
 	case runModeWeb:
 		return serveWeb(ctx, &option, &explicitOption, parsed.WebOpts, logger)
 	case cfg.RunModeScanner:
@@ -168,9 +172,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return nil
 }
 
-func parseCLI(args []string) (parsedCLI, error) { return parseCLIWithOutput(args, os.Stdout) }
-
-func parseCLIWithOutput(args []string, stdout io.Writer) (parsedCLI, error) {
+func parseCLI(args []string, stdout io.Writer) (parsedCLI, error) {
 	if scannerName, rootArgs, scannerRest, ok := splitScannerCommand(args); ok {
 		return parseScannerCLI(scannerName, rootArgs, scannerRest, stdout)
 	}
@@ -213,7 +215,7 @@ func parseCLIWithOutput(args []string, stdout io.Writer) (parsedCLI, error) {
 		// command runs.
 		option.Timeout = 3600
 	}
-	if err := validateOutputFlags(&option); err != nil {
+	if err := cfg.ResolveOutputFormat(&option); err != nil {
 		return parsedCLI{Option: option, Mode: mode}, err
 	}
 
@@ -289,7 +291,7 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout 
 	if scannerBoolFlagEnabled(scannerArgs, "--debug") {
 		option.Debug = true
 	}
-	if err := validateOutputFlags(&option); err != nil {
+	if err := cfg.ResolveOutputFormat(&option); err != nil {
 		return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: []string{scannerName}}, err
 	}
 	return parsedCLI{
@@ -297,16 +299,6 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout 
 		Mode:        cfg.RunModeScanner,
 		ScannerArgs: append([]string{scannerName}, scannerArgs...),
 	}, nil
-}
-
-func validateOutputFlags(option *cfg.Option) error {
-	if err := cfg.ResolveOutputFormat(option); err != nil {
-		return err
-	}
-	if strings.TrimSpace(option.ViewOutput) != "" && strings.TrimSpace(option.ViewFile) == "" {
-		return fmt.Errorf("--file/-f is only valid with --view/-F")
-	}
-	return nil
 }
 
 func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
@@ -576,8 +568,8 @@ var scannerKnownFlags = []knownFlag{
 	}},
 	{names: []string{"--resume"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
 	{names: []string{"-r"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Resume = v }},
-	{names: []string{"--output", "-o"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
-	{names: []string{"--output-format"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFormat = v }},
+	{names: []string{"--file", "-f"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFile = v }},
+	{names: []string{"--output-format", "-o"}, arity: 1, apply: func(o *cfg.Option, v string) { o.OutputFormat = v }},
 	{names: []string{"--json"}, arity: 0, apply: func(o *cfg.Option, _ string) { o.JSON = true }},
 	{names: []string{"--observe"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Observe = v }},
 }
@@ -587,7 +579,6 @@ var rootOnlyFlagValueArity = map[string]int{
 	"-i":              1,
 	"--view":          1,
 	"-F":              1,
-	"--output":        1,
 	"-o":              1,
 	"--output-format": 1,
 	"--observe":       1,

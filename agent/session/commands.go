@@ -58,7 +58,7 @@ func (rt *Runtime) CommandSpecs(remote bool) []*types.CommandSpec {
 		return nil
 	}
 	var specs []*types.CommandSpec
-	for _, value := range rt.commands {
+	for _, value := range rt.config.Commands {
 		if !remote || value.AdvertiseRemote {
 			specs = append(specs, proto.CloneOf(value.Spec))
 		}

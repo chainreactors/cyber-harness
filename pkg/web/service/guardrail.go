@@ -48,7 +48,7 @@ func (s *Service) forwardGuardrail(ctx context.Context, request *guardrail.Proto
 	// submit another invocation as a consequence of a disconnected approval UI.
 	defer func() {
 		if agent := s.agents.get(nodeID); agent != nil {
-			agent.state().dropTask(id)
+			agent.dropTask(id)
 		}
 	}()
 	select {

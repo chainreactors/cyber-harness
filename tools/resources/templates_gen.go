@@ -20,20 +20,12 @@ var (
 	resultPath   string
 )
 
-func deflateCompress(input []byte) []byte {
-	return en.MustDeflateCompress(input)
-}
-
-func encode(input []byte) string {
-	return en.Base64Encode(deflateCompress(input))
-}
-
 func loadYAMLFile(filename string) []byte {
 	bs, err := os.ReadFile(filepath.Join(templatePath, filename))
 	if err != nil {
 		panic(err)
 	}
-	return deflateCompress(bs)
+	return en.MustDeflateCompress(bs)
 }
 
 func walkFiles(dir string) []string {
@@ -69,7 +61,7 @@ func loadRawFiles(dir string) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return deflateCompress(content)
+	return en.MustDeflateCompress(content)
 }
 
 func recuLoadPoc(dir string) []byte {
@@ -91,7 +83,7 @@ func recuLoadPoc(dir string) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return deflateCompress(content)
+	return en.MustDeflateCompress(content)
 }
 
 // loadZombieTemplates collects neutron POCs whose info.zombie field is non-empty
@@ -126,7 +118,7 @@ func loadZombieTemplates(dir string) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return deflateCompress(content)
+	return en.MustDeflateCompress(content)
 }
 
 func recuLoadFinger(dir string) []byte {
@@ -170,7 +162,7 @@ func recuLoadFinger(dir string) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return deflateCompress(content)
+	return en.MustDeflateCompress(content)
 }
 
 func parser(key string) []byte {
@@ -180,9 +172,9 @@ func parser(key string) []byte {
 	case "http":
 		return recuLoadFinger("fingers/http")
 	case "fingerprinthub_web":
-		return deflateCompress([]byte("[]"))
+		return en.MustDeflateCompress([]byte("[]"))
 	case "fingerprinthub_service":
-		return deflateCompress([]byte("[]"))
+		return en.MustDeflateCompress([]byte("[]"))
 	case "port":
 		return loadYAMLFile("port.yaml")
 	case "workflow":

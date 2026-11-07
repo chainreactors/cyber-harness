@@ -14,6 +14,7 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	outputpkg "github.com/chainreactors/cyber/pkg/output"
 	"golang.org/x/term"
 )
 
@@ -63,7 +64,7 @@ func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, 
 	}
 	var (
 		textOutput             *AgentOutput
-		machineOutput          *machineOutput
+		machineOutput          *outputpkg.EventWriter
 		textStdout, textStderr *errorWriter
 	)
 	if format == "text" {
@@ -71,7 +72,7 @@ func RunTask(ctx context.Context, rt *agentsession.Runtime, option *cfg.Option, 
 		textStdout, textStderr = &errorWriter{writer: settings.Stdout}, &errorWriter{writer: settings.Stderr}
 		textOutput = newAgentOutput(option, textStdout, textStderr, isTerminal(settings.Stdout), isTerminal(settings.Stderr), ModeStatic)
 	} else {
-		machineOutput = newMachineOutput(settings.Stdout, format)
+		machineOutput = outputpkg.NewEventWriter(settings.Stdout, format)
 	}
 	handle := func(event *aop.Event) {
 		if event == nil || isSessionBootstrapEvent(event) {

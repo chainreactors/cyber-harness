@@ -17,7 +17,7 @@ func TestAttachedSessionClosesBeforeParentInboxWithoutDelegation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ended atomic.Bool
-	rt.events.Observe(func(ev *aop.Event) {
+	rt.config.Events.Observe(func(ev *aop.Event) {
 		if ev.SessionId == "child" && ev.GetSessionEnded() != nil {
 			ended.Store(true)
 		}

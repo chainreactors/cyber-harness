@@ -14,7 +14,7 @@ func TestDirectCommandInheritsCurrentAgentConfig(t *testing.T) {
 	var observed agent.Config
 	var found bool
 	var err error
-	rt.commands, rt.commandIndex, err = commandDeclarations([]Command{{
+	rt.config.Commands, rt.commandIndex, err = commandDeclarations([]Command{{
 		Spec: &types.CommandSpec{Name: "/inspect-config"},
 		Handler: func(ctx context.Context, _ *Session, _ []string) (*types.CommandResult, error) {
 			observed, found = agent.ToolAgentConfig(ctx)
@@ -39,16 +39,18 @@ func TestDirectCommandInheritsCurrentAgentConfig(t *testing.T) {
 }
 
 func TestCommandDeclarationOwnsDispatchAliasesAndCatalog(t *testing.T) {
-	runtime := newBareRuntime(t, nil, nil)
 	spec := &types.CommandSpec{Name: "/inspect", Aliases: []string{"/peek"}, Description: "Inspect this session"}
 	owner, err := newUnitResource(t, nil, Config{Commands: []Command{{Spec: spec, AdvertiseRemote: true, Handler: func(_ context.Context, s *Session, args []string) (*types.CommandResult, error) {
 		return commandText("/inspect", CommandPresentationPlain, s.ID()+":"+strings.Join(args, "|")).result, nil
 	}}}})
-	// Use the already-loaded minimal test host; no provider or transport starts.
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.commands, runtime.commandIndex = owner.Runtime().commands, owner.Runtime().commandIndex
+	if err := owner.Start(t.Context(), t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close(context.Background()) })
+	runtime := owner.Runtime()
 	spec.Name, spec.Aliases[0] = "/mutated", "/changed"
 	session, err := runtime.EnsureSession(SessionOptions{ID: "declarations"})
 	if err != nil {
@@ -97,7 +99,7 @@ func TestCommandDeclarationsRejectAmbiguousNames(t *testing.T) {
 func TestCommandFailureDoesNotStrandSessionQueue(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
 	var err error
-	runtime.commands, runtime.commandIndex, err = commandDeclarations([]Command{{
+	runtime.config.Commands, runtime.commandIndex, err = commandDeclarations([]Command{{
 		Spec:    &types.CommandSpec{Name: "/broken"},
 		Handler: func(context.Context, *Session, []string) (*types.CommandResult, error) { panic("test handler") },
 	}})
@@ -138,11 +140,6 @@ func TestCommandCatalogPreservesExposureWithoutLoad(t *testing.T) {
 // session hands it to the next run.
 func TestEvalRoundsCommandSetsSessionPacing(t *testing.T) {
 	runtime := newBareRuntime(t, nil, nil)
-	owner, err := newUnitResource(t, nil, Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime.commands, runtime.commandIndex = owner.Runtime().commands, owner.Runtime().commandIndex
 	session, err := runtime.EnsureSession(SessionOptions{ID: "eval-rounds"})
 	if err != nil {
 		t.Fatal(err)

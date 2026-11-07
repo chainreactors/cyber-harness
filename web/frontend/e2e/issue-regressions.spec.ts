@@ -83,10 +83,13 @@ for (const scenario of ['retry', 'reconnect']) {
     await page.screenshot({ path: testInfo.outputPath(`${scenario}-active.png`) })
     await expect(page.getByText('Response complete', { exact: true })).toBeVisible()
     await expect(pause).toHaveCount(0)
-    await expect(content).toContainText(scenario === 'retry' ? 'Replacement answer' : 'Reconnect finished.')
+    const completedSteps = scenario === 'retry'
+      ? ['Replacement answer']
+      : ['Intermediate step before reconnect.', 'Reconnect finished.']
+    await expect(content).toContainText(completedSteps)
     await page.reload()
-    await expect(content).toContainText(scenario === 'retry' ? 'Replacement answer' : 'Reconnect finished.')
-    await expect(content).not.toContainText('Stale attempt answer')
+    await expect(content).toContainText(completedSteps)
+    await expect(content.filter({ hasText: 'Stale attempt answer' })).toHaveCount(0)
     await expect(pause).toHaveCount(0)
     expect(errors).toEqual([])
   })

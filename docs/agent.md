@@ -61,7 +61,7 @@ echo "只读检查当前目录" | aiscan agent
 aiscan agent -p "检查已授权本地靶场，保留证据" -i http://127.0.0.1:3000
 ```
 
-自动化中可用 `--output-format json` 获取最终结果，或用 `stream-json` 消费流式事件。`-o run.jsonl` 独立保存历史记录；完整区别见[会话与上下文](user/sessions.md#记录)。
+自动化中可用 `-o json` 获取最终结果，或用 `-o jsonl` 消费流式事件。`-o jsonl -f run.jsonl` 保存可恢复的历史记录；完整区别见[会话与上下文](user/sessions.md#记录)。
 
 ## 任务推进与控制
 

@@ -42,7 +42,8 @@ type options struct {
 	DataDir     string `long:"data-dir" description:"Data directory"`
 	WorkDir     string `long:"workdir" description:"Workspace exposed to file and bash tools"`
 	BashTimeout int    `long:"bash-timeout" description:"Default bash timeout in seconds" default:"600"`
-	Format      string `long:"output-format" description:"One-shot output: text, json, or stream-json" default:"text"`
+	Format      string `short:"o" long:"output-format" description:"Output format: text, json, jsonl, markdown, csv" default:"text"`
+	File        string `short:"f" long:"file" description:"Output destination (default: stdout)"`
 	JSON        bool   `long:"json" description:"Alias for --output-format=json"`
 	NodeName    string `long:"node-name" description:"Agent node name"`
 	Debug       bool   `long:"debug" description:"Enable debug logging"`
@@ -78,6 +79,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 	if parsed.Version {
 		fmt.Fprintf(stdout, "agent v%s\n", cfg.Version)
 		return nil
+	}
+	if err := output.Open(); err != nil {
+		return err
 	}
 	option.Context = &cfg.Context{Directory: parsed.WorkDir}
 	if _, err := cfg.ResolveRuntimeConfig(&option); err != nil {
@@ -116,8 +120,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		if err != nil {
 			return err
 		}
-	} else if option.OutputFormat != "text" {
+	} else if option.OutputFormat != "text" && !(option.OutputFormat == "jsonl" && option.OutputFile != "") {
 		return fmt.Errorf("--output-format=%s is only available for one-shot agent runs", option.OutputFormat)
+	}
+	if !oneShot && option.OutputFile != "" && option.OutputFormat != "jsonl" {
+		return fmt.Errorf("interactive output stays in the terminal; use -o jsonl -f <file> to record events")
 	}
 	runCtx := ctx
 	if option.Timeout > 0 {
@@ -136,6 +143,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (resultEr
 		return err
 	}
 
+	if option.OutputFormat == "jsonl" {
+		output.Observe(profile.runtime)
+	}
 	if !oneShot {
 		if _, err := profile.runtime.Skills().ApplySelected("", option.Skills); err != nil {
 			return err
@@ -165,10 +175,10 @@ func parseOptions(args []string, helpOutput io.Writer) (options, cfg.Option, err
 		if errors.As(err, &flagErr) && flagErr.Type == flags.ErrHelp {
 			parser.WriteHelp(helpOutput)
 		}
-		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, JSON: parsed.JSON}}, err
+		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON}}, err
 	}
 	if len(rest) != 0 {
-		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, JSON: parsed.JSON}}, fmt.Errorf("unexpected arguments: %s", strings.Join(rest, " "))
+		return parsed, cfg.Option{MiscOptions: cfg.MiscOptions{OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON}}, fmt.Errorf("unexpected arguments: %s", strings.Join(rest, " "))
 	}
 	option := cfg.Option{
 		LLMOptions: parsed.LLMOptions,
@@ -181,7 +191,7 @@ func parseOptions(args []string, helpOutput io.Writer) (options, cfg.Option, err
 		NodeOptions: cfg.NodeOptions{NodeName: parsed.NodeName},
 		MiscOptions: cfg.MiscOptions{
 			ConfigFile: parsed.ConfigFile, DataDir: parsed.DataDir,
-			OutputFormat: parsed.Format, JSON: parsed.JSON, Debug: parsed.Debug,
+			OutputFormat: parsed.Format, OutputFile: parsed.File, JSON: parsed.JSON, Debug: parsed.Debug,
 			Verbose: parsed.Verbose, Quiet: parsed.Quiet, NoColor: parsed.NoColor, Version: parsed.Version,
 		},
 	}

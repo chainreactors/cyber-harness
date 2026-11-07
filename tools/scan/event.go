@@ -63,7 +63,7 @@ func targetEvent(source string, target target) event {
 		var err error
 		e.Artifact, err = newArtifactResult(tool, kind, address, data)
 		if err != nil {
-			return errorEventOf(source, fmt.Sprintf("encode %s artifact: %v", tool, err))
+			return event{Kind: eventError, Source: source, Error: fmt.Sprintf("encode %s artifact: %v", tool, err)}
 		}
 	}
 	return e
@@ -91,14 +91,6 @@ func bindLoot(loot parsers.Loot, resultID, tool string) parsers.Loot {
 	loot.Data["result_id"] = resultID
 	loot.Data["artifact_tool"] = tool
 	return loot
-}
-
-func artifactLootEvent(source string, loot parsers.Loot, artifact artifactResult) event {
-	return event{Kind: eventLoot, Source: source, Loot: &loot, Artifact: &artifact}
-}
-
-func errorEventOf(source, message string) event {
-	return event{Kind: eventError, Source: source, Error: message}
 }
 
 func statsEvent(source string, stats sdktypes.Stats) event {
@@ -151,7 +143,7 @@ func (e event) label() string {
 }
 
 func emitError(emit func(event), source, format string, args ...any) {
-	emit(errorEventOf(source, fmt.Sprintf(format, args...)))
+	emit(event{Kind: eventError, Source: source, Error: fmt.Sprintf(format, args...)})
 }
 
 const (

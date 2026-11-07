@@ -48,7 +48,7 @@ func (s *Service) forwardJEV(ctx context.Context, request *jev.ProtocolMessage) 
 	}
 	defer func() {
 		if agent := s.agents.get(nodeID); agent != nil {
-			agent.state().dropTask(id)
+			agent.dropTask(id)
 		}
 	}()
 	select {

@@ -6,6 +6,7 @@ import (
 	"github.com/chainreactors/cyber/core/types"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	cfg "github.com/chainreactors/cyber/pkg/config"
+	webhost "github.com/chainreactors/cyber/pkg/web/host"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestWebLayeredExtensionSavePreservesOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	store := &webConfigStore{runtime: &cfg.Option{Context: environment}}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Runtime: &cfg.Option{Context: environment}}
 	var saved []byte
 	for i := 0; i < 2; i++ {
 		_, _, current, err := store.GetDistributeConfig(t.Context())
@@ -98,7 +99,7 @@ func TestWebLayeredExtensionSavePreservesOwnership(t *testing.T) {
 func TestWebConfigStoreDoesNotPersistRuntimeCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
 	option := &cfg.Option{LLMOptions: cfg.LLMOptions{Provider: "openai", APIKey: "flag-secret", Model: "flag-model"}, Extensions: cfg.Values{scannerext.CyberhubConfigKey: {"key": "hub-secret"}}}
-	store := &webConfigStore{explicit: path, runtime: option}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Explicit: path, Runtime: option}
 	_, loaded, current, err := store.GetDistributeConfig(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +132,7 @@ func TestWebConfigStoreDoesNotPersistRuntimeCredentials(t *testing.T) {
 func TestNewProfileDoesNotInheritSecretByPosition(t *testing.T) {
 	old := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "original", ApiKey: "original-secret"}}}
 	next := &types.LLMConfig{Providers: []*types.LLMProviderConfig{{Id: "new-profile", Provider: "openai", Model: "new-model"}}}
-	preserveLLMProfileSecrets(next, old)
+	webhost.PreserveLLMProfileSecrets(next, old)
 	if next.Providers[0].ApiKey != "" {
 		t.Fatal("new profile inherited another profile's credentials")
 	}
@@ -153,7 +154,7 @@ func TestWebLayeredSaveDoesNotCopyInheritedCredentials(t *testing.T) {
 	if _, err := cfg.ResolveRuntimeConfig(option); err != nil {
 		t.Fatal(err)
 	}
-	store := &webConfigStore{runtime: option}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Runtime: option}
 	path, _, current, err := store.GetDistributeConfig(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +218,7 @@ func TestWebConfigExtensionSavePreservesOmittedSectionsAndSecrets(t *testing.T) 
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	store := &webConfigStore{explicit: path}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Explicit: path}
 	clientExtension, err := cfg.ValuesToProto(cfg.Values{"ioa.client": {"url": "http://ioa.test", "space": ""}})
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +261,7 @@ func TestWebConfigScannerExtensionsPreserveSecrets(t *testing.T) {
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	store := &webConfigStore{explicit: path}
+	store := &webhost.FileConfigStore{Codec: configCodec(), Explicit: path}
 	fields, err := cfg.ValuesToProto(cfg.Values{
 		"cyberhub": {"url": "https://hub.example", "key": ""},
 		"recon":    {"fofa_key": "", "hunter_api_key": ""},

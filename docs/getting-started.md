@@ -75,10 +75,10 @@ OpenAI-compatible 服务使用 `provider: openai`；Anthropic-compatible 服务�
 ## 3. 完成一个本地任务
 
 ```sh
-aiscan agent -p "只读取当前目录，列出顶层文件并说明判断依据，不修改文件" -o first-run.jsonl
+aiscan agent -p "只读取当前目录，列出顶层文件并说明判断依据，不修改文件" -o jsonl -f first-run.jsonl
 ```
 
-你应看到模型输出和可能的工具调用，任务结束后命令退出；`first-run.jsonl` 保存 AOP 事件。模型选择哪些工具不是固定的，不能用某段回答是否逐字匹配判断安装成功。
+任务结束后命令退出；`first-run.jsonl` 保存模型输出、工具调用及运行生命周期的 AOP 事件，可用下一步的 `-F` 回看。模型选择哪些工具不是固定的，不能用某段回答是否逐字匹配判断安装成功。
 
 `-o` 创建新文件，重复运行时换一个文件名。查看记录：
 
@@ -89,7 +89,7 @@ aiscan -F first-run.jsonl
 从记录恢复上下文并开始新任务：
 
 ```sh
-aiscan agent --resume first-run.jsonl -p "根据刚才的结果总结目录用途" -o second-run.jsonl
+aiscan agent --resume first-run.jsonl -p "根据刚才的结果总结目录用途" -o jsonl -f second-run.jsonl
 ```
 
 恢复会话不恢复旧的子进程、网络连接或后台任务，也不会修改输入记录。详细边界见[会话与上下文](user/sessions.md#回看与恢复)。
@@ -107,7 +107,7 @@ aiscan agent
 对本地靶场直接扫描，不使用模型验证：
 
 ```sh
-aiscan scan -i http://127.0.0.1:3000 --verify=off -o lab-scan.jsonl
+aiscan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
 ```
 
 先确保该端口运行着你要测试的服务。扫描可能包含主动探测和认证检测；无发现不代表服务安全。`scan` 的规则流水线与 Agent 的自主决策不同，见 [扫描指南](scan.md)。

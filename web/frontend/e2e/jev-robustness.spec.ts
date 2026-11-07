@@ -44,7 +44,7 @@ for (const width of [390, 1440]) {
       runtime(4, { case: 'boundary', value: { reason: 'defer' } })])
     const card = page.getByTestId('agent-workflow')
     await expect(card).toHaveCount(1)
-    await card.locator('summary').focus()
+    await card.locator(':scope > summary').focus()
     await page.keyboard.press('Space')
     await page.keyboard.press('Space')
     await expect(card).toHaveAttribute('open', '')

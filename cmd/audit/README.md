@@ -75,7 +75,7 @@ Reuse harness configuration/model commands and `--provider`, `--base-url`,
 `--api-key`, `--model`, `--config`, `--data-dir`. No task starts the local REPL;
 `-p`, `--task-file`, or `-i` starts a one-shot run. `--resume` restores recorded
 history; without a new task it opens the REPL. `--timeout` and Ctrl-C cancel runs.
-Use `--output-format json` or `stream-json` for machine-readable session output.
+Use `-o json` for a task result or `-o jsonl` for the canonical event stream. Add `-f results.json` to write the selected format to a file; omit it for stdout.
 Startup failures (configuration, workspace, task or required tools) also produce
 a JSON error result or a typed stream error, before any session ID exists. Once
 the session starts, its renderer owns the final output so failures are not

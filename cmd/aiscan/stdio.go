@@ -9,19 +9,21 @@ import (
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	aop "github.com/chainreactors/cyber/aop"
 	"github.com/chainreactors/cyber/core/telemetry"
+	taskcli "github.com/chainreactors/cyber/pkg/cli/task"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/host"
 	"github.com/chainreactors/cyber/pkg/profile"
 )
 
 // RunStdio assembles a Profile around the transport-only host.
-func runStdio(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer) (runErr error) {
+func runStdio(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, logger telemetry.Logger, input io.Reader, output io.Writer, outputTask *taskcli.Output) (runErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p, rt, err := loadAgentProfile(ctx, newProfile, option, logger, &agentsession.Config{Loop: agent.StandardLoop{}})
 	if err != nil {
 		return err
 	}
+	outputTask.Observe(rt)
 	mux := aop.NewNamespaceMux(ctx)
 	if err := p.RegisterNamespaces(mux); err != nil {
 		_ = mux.Close(context.Background())

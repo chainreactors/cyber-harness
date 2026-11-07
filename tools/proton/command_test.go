@@ -535,3 +535,29 @@ func TestProtonIndependentResourcesOccurrencesAndExclusions(t *testing.T) {
 		t.Fatal("missing input was presented as a clean scan")
 	}
 }
+
+func TestProtonStdinRequiresContent(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		stdin     io.Reader
+		wantError bool
+	}{
+		{"absent", nil, true},
+		{"eof", strings.NewReader(""), true},
+		{"content", strings.NewReader("AKIAIOSFODNN7EXAMPLE"), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			command := protoncmd.NewCommand(dir, resources.Config, nil, "", nil)
+			var output bytes.Buffer
+			_, err := command.Run(t.Context(), &coretool.Execution{Args: []string{"-j"}, Dir: dir, Stdin: test.stdin, Stdout: &output, Stderr: io.Discard})
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "target required") {
+					t.Fatalf("empty stdin must not count as a scan target: %v", err)
+				}
+			} else if err != nil || !strings.Contains(output.String(), "AKIAIOSFODNN7EXAMPLE") {
+				t.Fatalf("stdin content was not scanned: output=%s error=%v", output.String(), err)
+			}
+		})
+	}
+}
