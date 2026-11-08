@@ -1,6 +1,8 @@
 package passive
 
 import (
+	"fmt"
+
 	"github.com/projectdiscovery/uncover/sources"
 	"github.com/projectdiscovery/uncover/sources/agent/binaryedge"
 	"github.com/projectdiscovery/uncover/sources/agent/censys"
@@ -18,19 +20,41 @@ import (
 	"github.com/projectdiscovery/uncover/sources/agent/zoomeye"
 )
 
-var stockAgents = map[string]sources.Agent{
-	"shodan":     &shodan.Agent{},
-	"shodan-idb": &shodanidb.Agent{},
-	"censys":     &censys.Agent{},
-	"quake":      &quake.Agent{},
-	"zoomeye":    &zoomeye.Agent{},
-	"netlas":     &netlas.Agent{},
-	"criminalip": &criminalip.Agent{},
-	"publicwww":  &publicwww.Agent{},
-	"hunterhow":  &hunterhow.Agent{},
-	"odin":       &odin.Agent{},
-	"binaryedge": &binaryedge.Agent{},
-	"onyphe":     &onyphe.Agent{},
-	"driftnet":   &driftnet.Agent{},
-	"greynoise":  &greynoise.Agent{},
+func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
+	switch src {
+	case "fofa":
+		return &richFofaAgent{}, nil
+	case "hunter":
+		return &richHunterAgent{}, nil
+	case "shodan":
+		return &shodan.Agent{}, nil
+	case "shodan-idb":
+		return &shodanidb.Agent{}, nil
+	case "censys":
+		return &censys.Agent{}, nil
+	case "quake":
+		return &quake.Agent{}, nil
+	case "zoomeye":
+		return &zoomeye.Agent{}, nil
+	case "netlas":
+		return &netlas.Agent{}, nil
+	case "criminalip":
+		return &criminalip.Agent{}, nil
+	case "publicwww":
+		return &publicwww.Agent{}, nil
+	case "hunterhow":
+		return &hunterhow.Agent{}, nil
+	case "odin":
+		return &odin.Agent{}, nil
+	case "binaryedge":
+		return &binaryedge.Agent{}, nil
+	case "onyphe":
+		return &onyphe.Agent{}, nil
+	case "driftnet":
+		return &driftnet.Agent{}, nil
+	case "greynoise":
+		return &greynoise.Agent{}, nil
+	default:
+		return nil, fmt.Errorf("uncover: unknown source %q", src)
+	}
 }

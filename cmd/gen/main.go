@@ -20,46 +20,46 @@ const (
 	protocGenESVersion      = "v2.13.0"
 )
 
-var aopProtos = []string{
-	"aop/value.proto",
-	"aop/content.proto",
-	"aop/event.proto",
-	"aop/chat.proto",
-	"aop/envelope.proto",
-	"aop/operation/protocol.proto",
-	"aop/protocol.proto",
-	"aop/file/protocol.proto",
-	"aop/exec/protocol.proto",
-	"aop/pty/protocol.proto",
-	"aop/tool/protocol.proto",
-	"aop/traffic/protocol.proto",
-}
-
-var typeProtos = []string{
-	"decision/claim.proto",
-	"types/agent.proto",
-	"types/artifact.proto",
-	"types/chat.proto",
-	"types/command.proto",
-	"types/config.proto",
-	"types/guardrail.proto",
-	"types/jev.proto",
-	"types/reload.proto",
-	"types/scan.proto",
-	"types/system.proto",
-}
-
-var rpcProtos = []string{
-	"rpc/aop.proto",
-	"rpc/agent.proto",
-	"rpc/artifact.proto",
-	"rpc/chat.proto",
-	"rpc/config.proto",
-	"rpc/scan.proto",
-	"rpc/system.proto",
-}
-
 func main() {
+	aopProtos := []string{
+		"aop/value.proto",
+		"aop/content.proto",
+		"aop/event.proto",
+		"aop/chat.proto",
+		"aop/envelope.proto",
+		"aop/operation/protocol.proto",
+		"aop/protocol.proto",
+		"aop/file/protocol.proto",
+		"aop/exec/protocol.proto",
+		"aop/pty/protocol.proto",
+		"aop/tool/protocol.proto",
+		"aop/traffic/protocol.proto",
+	}
+
+	typeProtos := []string{
+		"decision/claim.proto",
+		"types/agent.proto",
+		"types/artifact.proto",
+		"types/chat.proto",
+		"types/command.proto",
+		"types/config.proto",
+		"types/guardrail.proto",
+		"types/jev.proto",
+		"types/reload.proto",
+		"types/scan.proto",
+		"types/system.proto",
+	}
+
+	rpcProtos := []string{
+		"rpc/aop.proto",
+		"rpc/agent.proto",
+		"rpc/artifact.proto",
+		"rpc/chat.proto",
+		"rpc/config.proto",
+		"rpc/scan.proto",
+		"rpc/system.proto",
+	}
+
 	root, err := repositoryRoot()
 	if err != nil {
 		fatal("locate repository root", err)

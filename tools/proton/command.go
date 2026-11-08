@@ -147,7 +147,12 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	args = toolargs.ResolveRelativePaths(args, protonFileFlags, c.WorkDir)
 	var flags protonFlags
 	parser := goflags.NewParser(&flags, goflags.Default&^goflags.PrintErrors)
-	remaining, err := parser.ParseArgs(toolargs.NormalizeFlags(args, protonKnownFlags, toolargs.CommonAliases))
+	remaining, err := parser.ParseArgs(toolargs.NormalizeFlags(args, protonKnownFlags, map[string]string{
+		"-etags": "-exclude-tags",
+		"-eid":   "-exclude-id",
+		"-es":    "-exclude-severity",
+		"-tl":    "-template-list",
+	}))
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
 			fmt.Fprint(execution.Stdout, c.Usage()+"\n")

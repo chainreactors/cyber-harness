@@ -45,8 +45,7 @@ func TestCyberhubSectionPrecedence(t *testing.T) {
 }
 
 func TestCyberhubSectionDefaultsFollowBuildVariables(t *testing.T) {
-	defer func() { DefaultCyberhubURL = "" }()
-	DefaultCyberhubURL = "http://build"
+	t.Cleanup(SetDefaults(CyberhubOptions{URL: "http://build", Key: DefaultCyberhubKey, Mode: DefaultCyberhubMode, Proxy: DefaultScannerProxy}))
 	resolved := resolveSections(t, nil, nil, nil)
 	value, err := cfg.Get[*CyberhubOptions](resolved, CyberhubConfigKey)
 	if err != nil {

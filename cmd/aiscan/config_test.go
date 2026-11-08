@@ -54,16 +54,8 @@ func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 }
 
 func TestApplicationConfigUsesCompiledDefaults(t *testing.T) {
-	oldURL, oldKey, oldMode := scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubMode
-	oldTavily := searchext.DefaultTavilyKeys
-	t.Cleanup(func() {
-		scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubMode = oldURL, oldKey, oldMode
-		searchext.DefaultTavilyKeys = oldTavily
-	})
-	scannerext.DefaultCyberhubURL = "http://hub:8080"
-	scannerext.DefaultCyberhubKey = "HUBKEY"
-	scannerext.DefaultCyberhubMode = "override"
-	searchext.DefaultTavilyKeys = "BUILTIN_TAVILY"
+	t.Cleanup(scannerext.SetDefaults(scannerext.CyberhubOptions{URL: "http://hub:8080", Key: "HUBKEY", Mode: "override", Proxy: scannerext.DefaultScannerProxy}))
+	t.Cleanup(searchext.SetDefaultKeys("BUILTIN_TAVILY"))
 
 	option := &cfg.Option{}
 	cfg.ApplyDefaults(option)

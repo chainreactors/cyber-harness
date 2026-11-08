@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -117,7 +116,6 @@ func TestLiveAutomaticReflexAB(t *testing.T) {
 				client   *jevapi.Client
 				commands *coretool.CommandRegistry
 				calls    atomic.Int64
-				stale    atomic.Int64
 			}
 			runs := map[string]*installation{}
 			rows := map[string][]benchmarkRow{}
@@ -173,9 +171,6 @@ func TestLiveAutomaticReflexAB(t *testing.T) {
 				installed := &installation{ext: e, cfg: cfg, meter: meter, client: client, commands: commands}
 				toolhooks.CommandCompleted.On(cfg.Hooks, "benchmark", func(_ context.Context, ev toolhooks.CommandCompletion) (struct{}, error) {
 					installed.calls.Add(1)
-					if errors.Is(ev.Err, coretool.ErrStaleChoice) {
-						installed.stale.Add(1)
-					}
 					return struct{}{}, nil
 				})
 				runs[mode] = installed
@@ -187,7 +182,7 @@ func TestLiveAutomaticReflexAB(t *testing.T) {
 				r := runs[mode]
 				prompt, oracle := fixture.task(scenario, index)
 				beforeL, beforeJ := r.meter.snapshot(), r.client.Usage()
-				beforeCalls, beforeStale := r.calls.Load(), r.stale.Load()
+				beforeCalls := r.calls.Load()
 				beforeActions := executedJEVActions(t, r.ext)
 				cfg := r.cfg
 				cfg.SessionID = fmt.Sprintf("%s-%s-%d-%t", scenario, mode, index, warm)
@@ -199,7 +194,7 @@ func TestLiveAutomaticReflexAB(t *testing.T) {
 				settled := time.Since(started).Milliseconds()
 				after := r.meter.snapshot()
 				row := benchmarkRow{Index: index, Warm: warm, ForegroundMS: foreground, SettledMS: settled, L2: subtractUsage(after.usage, beforeL.usage), JEV: subtractUsage(r.client.Usage(), beforeJ), ForegroundCalls: after.foreground - beforeL.foreground, Correct: err == nil && result != nil && oracle(result.Output)}
-				row.ToolCalls, row.StaleCalls = r.calls.Load()-beforeCalls, r.stale.Load()-beforeStale
+				row.ToolCalls = r.calls.Load() - beforeCalls
 				row.Actions = executedJEVActions(t, r.ext) - beforeActions
 				fixture.mu.Lock()
 				row.WrongActions, row.RepeatedReads = fixture.wrong, fixture.repeatedReads
@@ -447,7 +442,6 @@ func subtractUsage(a, b *aop.TokenUsage) *aop.TokenUsage {
 
 type benchmarkRow struct {
 	ToolCalls       int64           `json:"tool_calls"`
-	StaleCalls      int64           `json:"stale_calls"`
 	WrongActions    int             `json:"wrong_actions"`
 	RepeatedReads   int             `json:"repeated_http_reads"`
 	Actions         int             `json:"reflex_actions"`

@@ -221,10 +221,9 @@ func summarizeMessageData(msg *aop.Message) (role string, contentLen int, reason
 // ---------------------------------------------------------------------------
 
 var (
-	agentMarkdownRenderer    *glamour.TermRenderer
-	agentMarkdownRendererErr error
-	agentMarkdownRendererW   int
-	agentMarkdownRendererMu  sync.Mutex
+	agentMarkdownRenderer   *glamour.TermRenderer
+	agentMarkdownRendererW  int
+	agentMarkdownRendererMu sync.Mutex
 )
 
 func renderAgentMarkdown(content string, enabled bool) string {
@@ -255,7 +254,7 @@ func getAgentMarkdownRenderer() (*glamour.TermRenderer, error) {
 	agentMarkdownRendererMu.Lock()
 	defer agentMarkdownRendererMu.Unlock()
 	if agentMarkdownRenderer != nil && w == agentMarkdownRendererW {
-		return agentMarkdownRenderer, agentMarkdownRendererErr
+		return agentMarkdownRenderer, nil
 	}
 	opts := []glamour.TermRendererOption{
 		glamour.WithAutoStyle(),
@@ -265,9 +264,10 @@ func getAgentMarkdownRenderer() (*glamour.TermRenderer, error) {
 	if w > 0 {
 		opts = append(opts, glamour.WithWordWrap(w))
 	}
-	agentMarkdownRenderer, agentMarkdownRendererErr = glamour.NewTermRenderer(opts...)
+	renderer, err := glamour.NewTermRenderer(opts...)
+	agentMarkdownRenderer = renderer
 	agentMarkdownRendererW = w
-	return agentMarkdownRenderer, agentMarkdownRendererErr
+	return renderer, err
 }
 
 // terminalWidth returns the stdout column count, or 0 when unknown (piped /

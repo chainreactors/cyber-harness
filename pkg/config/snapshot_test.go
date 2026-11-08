@@ -271,22 +271,20 @@ func TestPrivateAtomicWriteAndBackup(t *testing.T) {
 }
 
 func TestFileViewDoesNotInheritCompiledSecrets(t *testing.T) {
-	withDefaults(t, func() {
-		DefaultAPIKey = "compiled-secret"
-		c := isolatedContext(t)
-		putConfig(t, c.UserFile(), "llm:\n  model: file-model\n")
-		snapshot, err := LoadSnapshot(c, "", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		option, err := snapshot.FileOptions(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := LLMFromOption(option).Providers[0].ApiKey; got != "" {
-			t.Fatal("compiled secret entered file view")
-		}
-	})
+	t.Cleanup(SetProviderDefaults(LLMOptions{Provider: DefaultProvider, BaseURL: DefaultBaseURL, APIKey: "compiled-secret", Model: DefaultModel}))
+	c := isolatedContext(t)
+	putConfig(t, c.UserFile(), "llm:\n  model: file-model\n")
+	snapshot, err := LoadSnapshot(c, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	option, err := snapshot.FileOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := LLMFromOption(option).Providers[0].ApiKey; got != "" {
+		t.Fatal("compiled secret entered file view")
+	}
 }
 
 func TestProjectProfileOverridesUserShorthand(t *testing.T) {

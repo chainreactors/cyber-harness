@@ -19,8 +19,6 @@ const (
 	MaxPayloadBytes = 2_500_000
 )
 
-var JPEGQualities = []int{85, 70, 55, 40}
-
 type Optimized struct {
 	MimeType string
 	Data     []byte
@@ -95,8 +93,9 @@ func ResizeIfNeeded(img image.Image, w, h int) image.Image {
 }
 
 func pickSmallestEncoding(img image.Image) ([]byte, string, error) {
+	qualities := [...]int{85, 70, 55, 40}
 	pngData := EncodePNG(img)
-	jpegData := EncodeJPEG(img, JPEGQualities[0])
+	jpegData := EncodeJPEG(img, qualities[0])
 	best, mime := pngData, "image/png"
 	if len(jpegData) < len(best) {
 		best, mime = jpegData, "image/jpeg"
@@ -104,7 +103,7 @@ func pickSmallestEncoding(img image.Image) ([]byte, string, error) {
 	if len(best) <= MaxPayloadBytes {
 		return best, mime, nil
 	}
-	for _, quality := range JPEGQualities[1:] {
+	for _, quality := range qualities[1:] {
 		jpegData = EncodeJPEG(img, quality)
 		if len(jpegData) <= MaxPayloadBytes {
 			return jpegData, "image/jpeg", nil
@@ -117,7 +116,7 @@ func pickSmallestEncoding(img image.Image) ([]byte, string, error) {
 		h = max(1, h*3/4)
 		dst := image.NewRGBA(image.Rect(0, 0, w, h))
 		draw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
-		jpegData = EncodeJPEG(dst, JPEGQualities[0])
+		jpegData = EncodeJPEG(dst, qualities[0])
 		if len(jpegData) <= MaxPayloadBytes {
 			return jpegData, "image/jpeg", nil
 		}

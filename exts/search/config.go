@@ -8,7 +8,16 @@ import (
 const ConfigKey = "search"
 
 // DefaultTavilyKeys is the link-time default for the search section.
+// Startup overrides use SetDefaultKeys.
 var DefaultTavilyKeys = ""
+
+// SetDefaultKeys replaces the link-time search credentials and returns a
+// restore function. Call only during startup, before configuration is resolved.
+func SetDefaultKeys(keys string) func() {
+	old := DefaultTavilyKeys
+	DefaultTavilyKeys = keys
+	return func() { DefaultTavilyKeys = old }
+}
 
 // Options holds web search configuration. It carries no flags.
 type Options struct {

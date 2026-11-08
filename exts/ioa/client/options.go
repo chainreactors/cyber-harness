@@ -16,8 +16,17 @@ import (
 const ConfigKey = "ioa.client"
 
 // Link-time defaults belong to the extension, not the core option model.
+// Startup overrides use SetDefaults.
 var DefaultURL string
 var DefaultSpace = "default"
+
+// SetDefaults replaces the link-time endpoint and space and returns a restore
+// function. Call only during startup, before configuration is resolved.
+func SetDefaults(url, space string) func() {
+	oldURL, oldSpace := DefaultURL, DefaultSpace
+	DefaultURL, DefaultSpace = url, space
+	return func() { DefaultURL, DefaultSpace = oldURL, oldSpace }
+}
 
 type Options struct {
 	URL      string `long:"ioa-url" config:"url" json:"url" description:"IOA endpoint (defaults to <server-url>/ioa for Web agents)"`

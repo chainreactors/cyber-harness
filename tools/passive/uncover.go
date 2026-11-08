@@ -152,20 +152,6 @@ func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sour
 	return results, nil
 }
 
-func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
-	switch src {
-	case "fofa":
-		return &richFofaAgent{}, nil
-	case "hunter":
-		return &richHunterAgent{}, nil
-	default:
-		if agent, ok := stockAgents[src]; ok {
-			return agent, nil
-		}
-		return nil, fmt.Errorf("uncover: unknown source %q", src)
-	}
-}
-
 // --------------- rich FOFA agent ------------------------------------------------
 
 const (

@@ -180,23 +180,14 @@ func collectSessionMeta(events []*aop.Event) map[string]*sessionMeta {
 // glamour renderer
 // ---------------------------------------------------------------------------
 
-var (
-	eventRenderer     *glamour.TermRenderer
-	eventRendererErr  error
-	eventRendererOnce sync.Once
-)
-
-func getEventRenderer() (*glamour.TermRenderer, error) {
-	eventRendererOnce.Do(func() {
-		eventRenderer, eventRendererErr = glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithColorProfile(termenv.ANSI),
-			glamour.WithEmoji(),
-			glamour.WithWordWrap(120),
-		)
-	})
-	return eventRenderer, eventRendererErr
-}
+var getEventRenderer = sync.OnceValues(func() (*glamour.TermRenderer, error) {
+	return glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithColorProfile(termenv.ANSI),
+		glamour.WithEmoji(),
+		glamour.WithWordWrap(120),
+	)
+})
 
 func renderMD(md string) string {
 	r, err := getEventRenderer()

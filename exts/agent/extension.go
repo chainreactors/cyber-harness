@@ -152,9 +152,6 @@ func (l *Loop) close(ctx context.Context) error {
 	}
 }
 
-var _ extension.Extension = (*Extension)(nil)
-var _ agent.Loop = (*Loop)(nil)
-
 var (
 	_ extension.Extension = (*Extension)(nil)
 	_ agent.Loop          = (*Loop)(nil)
