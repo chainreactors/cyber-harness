@@ -13,8 +13,8 @@ type terminalSessionStore struct {
 	events []*aop.EventDelivery
 }
 
-func (s *terminalSessionStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, error) {
-	return s.events, nil
+func (s *terminalSessionStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, int64, error) {
+	return s.events, 0, nil
 }
 
 type finishedSessionRuntime struct {

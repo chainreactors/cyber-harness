@@ -39,7 +39,7 @@ type SessionStore interface {
 	UpdateSession(context.Context, *types.SessionRecord) error
 	DeleteSession(context.Context, string) error
 	LinkScanToSession(context.Context, string, string) error
-	ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, error)
+	ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, int64, error)
 }
 
 // SessionRuntime is the Agent/AOP execution boundary. Sessions owns request
@@ -415,7 +415,7 @@ func (s *Sessions) turnEnded(ctx context.Context, sessionID, turnID string) (boo
 	}); ok {
 		return indexed.HasTurnEnded(ctx, sessionID, turnID)
 	}
-	items, err := s.store.ListAOPEventsAfter(ctx, sessionID, 0, 0)
+	items, _, err := s.store.ListAOPEventsAfter(ctx, sessionID, 0, 0)
 	if err != nil {
 		return false, err
 	}
@@ -634,7 +634,7 @@ func (s *Sessions) ListEvents(ctx context.Context, request *aop.ListEventsReques
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
-	stored, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, int(request.Limit))
+	stored, _, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, int(request.Limit))
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -648,6 +648,8 @@ func (s *Sessions) ListEvents(ctx context.Context, request *aop.ListEventsReques
 	}
 	return response, nil
 }
+
+const watchReplayBatchSize = 256
 
 func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequest, send func(*aop.EventDelivery) error) error {
 	if s == nil || s.store == nil || s.runtime == nil {
@@ -665,24 +667,33 @@ func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequ
 	}
 	live, unsubscribe := s.runtime.SubscribeSessionEvents(request.SessionId)
 	defer unsubscribe()
-	replayed, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, 0)
-	if err != nil {
-		return fmt.Errorf("replay events: %w", err)
-	}
-	for _, item := range replayed {
-		if item == nil || item.Event == nil {
-			continue
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		cursor, err := parseAOPCursor(item.Cursor)
+		replayed, next, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, watchReplayBatchSize)
 		if err != nil {
-			return err
+			return fmt.Errorf("replay events: %w", err)
 		}
-		if err := send(item); err != nil {
-			return err
+		for _, item := range replayed {
+			if item == nil || item.Event == nil {
+				continue
+			}
+			cursor, err := parseAOPCursor(item.Cursor)
+			if err != nil {
+				return err
+			}
+			if err := send(item); err != nil {
+				return err
+			}
+			if cursor > after {
+				after = cursor
+			}
 		}
-		if cursor > after {
-			after = cursor
+		if next == 0 {
+			break
 		}
+		after = next
 	}
 	for {
 		select {
