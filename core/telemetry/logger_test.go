@@ -11,7 +11,7 @@ import (
 
 func TestActivateDebugUsesTelemetryLoggerAsGlobal(t *testing.T) {
 	oldGlobal := logs.Log
-	defer func() { logs.Log = oldGlobal }()
+	t.Cleanup(SetGlobalLogs(oldGlobal))
 
 	var buf bytes.Buffer
 	logger := NewLogger(LogConfig{Output: &buf})
@@ -28,8 +28,7 @@ func TestActivateDebugUsesTelemetryLoggerAsGlobal(t *testing.T) {
 }
 
 func TestSuppressGlobalNonErrorsKeepsOnlyErrors(t *testing.T) {
-	oldGlobal := logs.Log
-	defer func() { logs.Log = oldGlobal }()
+	t.Cleanup(SetGlobalLogs(logs.Log))
 
 	var buf bytes.Buffer
 	GlobalLogger(LogConfig{Output: &buf})
@@ -49,8 +48,7 @@ func TestSuppressGlobalNonErrorsKeepsOnlyErrors(t *testing.T) {
 }
 
 func TestGlobalSDKSettingsCannotSilenceApplicationLogger(t *testing.T) {
-	oldGlobal := logs.Log
-	defer func() { logs.Log = oldGlobal }()
+	t.Cleanup(SetGlobalLogs(logs.Log))
 	var buf bytes.Buffer
 	logger := GlobalLogger(LogConfig{Output: &buf})
 	logs.Log.SetQuiet(true)
@@ -77,6 +75,25 @@ func TestErrorOnlyLoggerSuppressesNonErrors(t *testing.T) {
 	}
 	if !strings.Contains(got, "● error") {
 		t.Fatalf("error log missing: %q", got)
+	}
+}
+
+func TestEnableLogsDebugFollowsCurrentGlobalSettings(t *testing.T) {
+	t.Cleanup(SetGlobalLogs(logs.Log))
+	for range 2 {
+		var buf bytes.Buffer
+		GlobalLogger(LogConfig{Quiet: true, Output: &buf})
+		logger := EnableLogsDebug()
+		logger.Debugf("enabled")
+		if logger != GlobalLogs() || buf.String() != "● enabled\n" {
+			t.Fatalf("current logger did not enable debug: %q", buf.String())
+		}
+		restore := SuppressGlobalNonErrors()
+		EnableLogsDebug().Debugf("enabled again")
+		restore()
+		if buf.String() != "● enabled\n● enabled again\n" {
+			t.Fatalf("debug remained suppressed: %q", buf.String())
+		}
 	}
 }
 

@@ -67,7 +67,7 @@ func TestOptimize_PicksSmallerFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(opt.Data), min(len(EncodePNG(img)), len(EncodeJPEG(img, JPEGQualities[0]))); got != want {
+	if got, want := len(opt.Data), min(len(EncodePNG(img)), len(EncodeJPEG(img, 85))); got != want {
 		t.Fatalf("encoded size = %d, want smallest encoding %d", got, want)
 	}
 }

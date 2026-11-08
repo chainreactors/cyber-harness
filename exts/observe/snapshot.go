@@ -12,8 +12,6 @@ import (
 
 const DefaultMaxEntries = 20000
 
-var DefaultIgnore = []string{".git", "node_modules", ".cairn", "__pycache__", ".venv"}
-
 type FileOptions struct {
 	Enabled    bool
 	Ignore     []string
@@ -21,7 +19,7 @@ type FileOptions struct {
 }
 
 func defaultFileOptions() FileOptions {
-	return FileOptions{Enabled: true, Ignore: append([]string(nil), DefaultIgnore...), MaxEntries: DefaultMaxEntries}
+	return FileOptions{Enabled: true, Ignore: []string{".git", "node_modules", ".cairn", "__pycache__", ".venv"}, MaxEntries: DefaultMaxEntries}
 }
 
 type snapshotEntry struct {
@@ -49,7 +47,7 @@ func TakeSnapshot(root string, options FileOptions) (Snapshot, error) {
 	}
 	ignore := options.Ignore
 	if len(ignore) == 0 {
-		ignore = DefaultIgnore
+		ignore = defaultFileOptions().Ignore
 	}
 	result := make(Snapshot)
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {

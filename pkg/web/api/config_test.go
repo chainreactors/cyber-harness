@@ -236,9 +236,7 @@ func TestConnectionFofaSuccessAndStoredKeyFallback(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := passiveconfig.FofaInfoEndpoint
-	passiveconfig.FofaInfoEndpoint = srv.URL
-	defer func() { passiveconfig.FofaInfoEndpoint = orig }()
+	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
@@ -267,9 +265,7 @@ func TestConnectionFofaError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": true, "errmsg": "[-700] account invalid"})
 	}))
 	defer srv.Close()
-	orig := passiveconfig.FofaInfoEndpoint
-	passiveconfig.FofaInfoEndpoint = srv.URL
-	defer func() { passiveconfig.FofaInfoEndpoint = orig }()
+	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		setConfigSection(c, "recon", map[string]any{"fofa_key": "bad"})
@@ -294,9 +290,7 @@ func TestConnectionHunterSuccess(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	orig := passiveconfig.HunterSearchEndpoint
-	passiveconfig.HunterSearchEndpoint = srv.URL
-	defer func() { passiveconfig.HunterSearchEndpoint = orig }()
+	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		setConfigSection(c, "recon", map[string]any{"hunter_api_key": "hk"})
@@ -311,9 +305,7 @@ func TestConnectionHunterError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 401, "message": "invalid api-key"})
 	}))
 	defer srv.Close()
-	orig := passiveconfig.HunterSearchEndpoint
-	passiveconfig.HunterSearchEndpoint = srv.URL
-	defer func() { passiveconfig.HunterSearchEndpoint = orig }()
+	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
 		setConfigSection(c, "recon", map[string]any{"hunter_api_key": "bad"})

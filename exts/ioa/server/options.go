@@ -8,7 +8,16 @@ import (
 
 const ConfigKey = "ioa.server"
 
+// DefaultURL is the link-time listen URL. Startup overrides use SetDefaultURL.
 var DefaultURL string
+
+// SetDefaultURL replaces the link-time listen URL and returns a restore
+// function. Call only during startup, before configuration is resolved.
+func SetDefaultURL(url string) func() {
+	old := DefaultURL
+	DefaultURL = url
+	return func() { DefaultURL = old }
+}
 
 type Options struct {
 	URL   string `long:"ioa-url" config:"url" json:"url" description:"IOA listen URL"`

@@ -106,9 +106,7 @@ func TestClientYAMLAndCLIOverride(t *testing.T) {
 }
 
 func TestExtensionBuildDefaultsYieldToExplicitEmptyValues(t *testing.T) {
-	url, space := DefaultURL, DefaultSpace
-	DefaultURL, DefaultSpace = "https://compiled.test", "compiled"
-	t.Cleanup(func() { DefaultURL, DefaultSpace = url, space })
+	t.Cleanup(SetDefaults("https://compiled.test", "compiled"))
 	option := &cfg.Option{AgentOptions: cfg.AgentOptions{ServerURL: "https://web.test"}}
 	value, err := ReadOptions(option)
 	if err != nil || value.URL != DefaultURL || value.Space != DefaultSpace {

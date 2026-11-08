@@ -199,25 +199,23 @@ llm:
   provider: config-provider
 `)
 
-	withDefaults(t, func() {
-		DefaultProvider = "build-provider"
+	t.Cleanup(SetProviderDefaults(LLMOptions{Provider: "build-provider", BaseURL: DefaultBaseURL, APIKey: DefaultAPIKey, Model: DefaultModel}))
 
-		option := Option{}
-		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
-			t.Fatal(err)
-		}
-		mergeOption(&option, &loaded)
+	option := Option{}
+	var loaded Option
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	mergeOption(&option, &loaded)
 
-		if option.Provider != "config-provider" {
-			t.Errorf("Provider: got %q, want %q (config fills empty)", option.Provider, "config-provider")
-		}
+	if option.Provider != "config-provider" {
+		t.Errorf("Provider: got %q, want %q (config fills empty)", option.Provider, "config-provider")
+	}
 
-		ApplyDefaults(&option)
-		if option.Provider != "config-provider" {
-			t.Errorf("Provider after ApplyDefaults: got %q, want %q (config > build)", option.Provider, "config-provider")
-		}
-	})
+	ApplyDefaults(&option)
+	if option.Provider != "config-provider" {
+		t.Errorf("Provider after ApplyDefaults: got %q, want %q (config > build)", option.Provider, "config-provider")
+	}
 }
 
 func TestPriorityBuildFillsRemaining(t *testing.T) {
@@ -227,25 +225,23 @@ llm:
   provider: ""
 `)
 
-	withDefaults(t, func() {
-		DefaultModel = "build-model"
+	t.Cleanup(SetProviderDefaults(LLMOptions{Provider: DefaultProvider, BaseURL: DefaultBaseURL, APIKey: DefaultAPIKey, Model: "build-model"}))
 
-		option := Option{}
-		var loaded Option
-		if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
-			t.Fatal(err)
-		}
-		mergeOption(&option, &loaded)
+	option := Option{}
+	var loaded Option
+	if err := LoadConfig(filepath.Join(dir, "cyber.yaml"), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	mergeOption(&option, &loaded)
 
-		if option.Model != "" {
-			t.Errorf("Model before ApplyDefaults: got %q, want empty", option.Model)
-		}
+	if option.Model != "" {
+		t.Errorf("Model before ApplyDefaults: got %q, want empty", option.Model)
+	}
 
-		ApplyDefaults(&option)
-		if option.Model != "build-model" {
-			t.Errorf("Model after ApplyDefaults: got %q, want %q (build fills remaining)", option.Model, "build-model")
-		}
-	})
+	ApplyDefaults(&option)
+	if option.Model != "build-model" {
+		t.Errorf("Model after ApplyDefaults: got %q, want %q (build fills remaining)", option.Model, "build-model")
+	}
 }
 
 func TestLoadAndApplyConfigDefaultFile(t *testing.T) {
@@ -255,9 +251,7 @@ llm:
   provider: found-provider
 `)
 
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	t.Chdir(dir)
 
 	option := Option{}
 	path, err := LoadAndApplyConfig(&option)
@@ -286,9 +280,7 @@ llm:
   provider: custom-provider
 `)
 
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	t.Chdir(dir)
 
 	option := Option{}
 	option.ConfigFile = customPath
@@ -362,7 +354,6 @@ func TestInitDefaultConfig(t *testing.T) {
 	if !strings.Contains(content, "# llm:") {
 		t.Fatal("missing minimal configuration example")
 	}
-
 }
 
 func TestFullPriorityChain(t *testing.T) {
@@ -374,33 +365,28 @@ llm:
   api_key: config-key
 `)
 
-	withDefaults(t, func() {
-		DefaultProvider = "build-provider"
-		DefaultModel = "build-model"
+	t.Cleanup(SetProviderDefaults(LLMOptions{Provider: "build-provider", BaseURL: DefaultBaseURL, APIKey: DefaultAPIKey, Model: "build-model"}))
 
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	t.Chdir(dir)
 
-		option := Option{}
-		option.Provider = "cli-provider"
+	option := Option{}
+	option.Provider = "cli-provider"
 
-		if _, err := LoadAndApplyConfig(&option); err != nil {
-			t.Fatal(err)
+	if _, err := LoadAndApplyConfig(&option); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDefaults(&option)
+
+	checks := []struct{ field, got, want, reason string }{
+		{"Provider", option.Provider, "cli-provider", "CLI > config > build"},
+		{"Model", option.Model, "config-model", "config > build (CLI empty)"},
+		{"APIKey", option.APIKey, "config-key", "config fills empty"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q (%s)", c.field, c.got, c.want, c.reason)
 		}
-		ApplyDefaults(&option)
-
-		checks := []struct{ field, got, want, reason string }{
-			{"Provider", option.Provider, "cli-provider", "CLI > config > build"},
-			{"Model", option.Model, "config-model", "config > build (CLI empty)"},
-			{"APIKey", option.APIKey, "config-key", "config fills empty"},
-		}
-		for _, c := range checks {
-			if c.got != c.want {
-				t.Errorf("%s: got %q, want %q (%s)", c.field, c.got, c.want, c.reason)
-			}
-		}
-	})
+	}
 }
 
 func TestResolveRuntimeConfigEnvOverridesConfig(t *testing.T) {
@@ -418,29 +404,25 @@ llm:
 	t.Setenv("CYBER_API_KEY", "env-key")
 	t.Setenv("CYBER_LLM_PROXY", "http://env-proxy:7890")
 
-	withDefaults(t, func() {
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	t.Chdir(dir)
 
-		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
-			t.Fatal(err)
-		}
+	option := Option{}
+	if _, err := ResolveRuntimeConfig(&option); err != nil {
+		t.Fatal(err)
+	}
 
-		checks := []struct{ field, got, want string }{
-			{"Provider", option.Provider, "openai"},
-			{"BaseURL", option.BaseURL, "https://env.example/v1"},
-			{"APIKey", option.APIKey, "env-key"},
-			{"Model", option.Model, "env-model"},
-			{"LLMProxy", option.LLMProxy, "http://env-proxy:7890"},
+	checks := []struct{ field, got, want string }{
+		{"Provider", option.Provider, "openai"},
+		{"BaseURL", option.BaseURL, "https://env.example/v1"},
+		{"APIKey", option.APIKey, "env-key"},
+		{"Model", option.Model, "env-model"},
+		{"LLMProxy", option.LLMProxy, "http://env-proxy:7890"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
 		}
-		for _, c := range checks {
-			if c.got != c.want {
-				t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
-			}
-		}
-	})
+	}
 }
 
 func TestResolveRuntimeConfigCLIWinsOverEnv(t *testing.T) {
@@ -453,22 +435,18 @@ llm:
 	t.Setenv("CYBER_BASE_URL", "https://env.example/v1")
 	t.Setenv("CYBER_API_KEY", "env-key")
 
-	withDefaults(t, func() {
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	t.Chdir(dir)
 
-		option := Option{}
-		option.Model = "cli-model"
-		option.BaseURL = "https://cli.example/v1"
-		option.APIKey = "cli-key"
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
-			t.Fatal(err)
-		}
-		if option.Model != "cli-model" || option.BaseURL != "https://cli.example/v1" || option.APIKey != "cli-key" {
-			t.Fatalf("CLI values were overridden: %#v", option.LLMOptions)
-		}
-	})
+	option := Option{}
+	option.Model = "cli-model"
+	option.BaseURL = "https://cli.example/v1"
+	option.APIKey = "cli-key"
+	if _, err := ResolveRuntimeConfig(&option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Model != "cli-model" || option.BaseURL != "https://cli.example/v1" || option.APIKey != "cli-key" {
+		t.Fatalf("CLI values were overridden: %#v", option.LLMOptions)
+	}
 }
 
 func TestResolveRuntimeConfigUsesOpenAIEnvironment(t *testing.T) {
@@ -476,24 +454,20 @@ func TestResolveRuntimeConfigUsesOpenAIEnvironment(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "gpt-env")
 	t.Setenv("OPENAI_API_KEY", "openai-key")
 
-	withDefaults(t, func() {
-		dir := t.TempDir()
-		writeTestConfig(t, dir, `
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
 llm:
   provider: ""
 `)
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	t.Chdir(dir)
 
-		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
-			t.Fatal(err)
-		}
-		if option.Provider != "openai" || option.BaseURL != "https://openai-proxy.example/v1" || option.Model != "gpt-env" || option.APIKey != "openai-key" {
-			t.Fatalf("OpenAI environment not applied: %#v", option.LLMOptions)
-		}
-	})
+	option := Option{}
+	if _, err := ResolveRuntimeConfig(&option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Provider != "openai" || option.BaseURL != "https://openai-proxy.example/v1" || option.Model != "gpt-env" || option.APIKey != "openai-key" {
+		t.Fatalf("OpenAI environment not applied: %#v", option.LLMOptions)
+	}
 }
 
 func TestApplyEnvironmentUsesSharedLLMConfiguration(t *testing.T) {
@@ -522,24 +496,20 @@ func TestResolveRuntimeConfigUsesAnthropicEnvironment(t *testing.T) {
 	t.Setenv("ANTHROPIC_MODEL", "claude-env")
 	t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
 
-	withDefaults(t, func() {
-		dir := t.TempDir()
-		writeTestConfig(t, dir, `
+	dir := t.TempDir()
+	writeTestConfig(t, dir, `
 llm:
   provider: ""
 `)
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	t.Chdir(dir)
 
-		option := Option{}
-		if _, err := ResolveRuntimeConfig(&option); err != nil {
-			t.Fatal(err)
-		}
-		if option.Provider != "anthropic" || option.BaseURL != "https://anthropic-proxy.example/v1" || option.Model != "claude-env" || option.APIKey != "anthropic-key" {
-			t.Fatalf("Anthropic environment not applied: %#v", option.LLMOptions)
-		}
-	})
+	option := Option{}
+	if _, err := ResolveRuntimeConfig(&option); err != nil {
+		t.Fatal(err)
+	}
+	if option.Provider != "anthropic" || option.BaseURL != "https://anthropic-proxy.example/v1" || option.Model != "claude-env" || option.APIKey != "anthropic-key" {
+		t.Fatalf("Anthropic environment not applied: %#v", option.LLMOptions)
+	}
 }
 
 func TestResolveRuntimeConfigRejectsUnsupportedProvider(t *testing.T) {
@@ -548,19 +518,13 @@ func TestResolveRuntimeConfigRejectsUnsupportedProvider(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "openai-compatible-key")
 
-	withDefaults(t, func() {
-		dir := t.TempDir()
-		origDir, _ := os.Getwd()
-		if err := os.Chdir(dir); err != nil {
-			t.Fatal(err)
-		}
-		defer os.Chdir(origDir)
+	dir := t.TempDir()
+	t.Chdir(dir)
 
-		option := Option{LLMOptions: LLMOptions{Provider: "bogus-vendor"}}
-		if _, err := ResolveRuntimeConfig(&option); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
-			t.Fatalf("ResolveRuntimeConfig() error = %v", err)
-		}
-	})
+	option := Option{LLMOptions: LLMOptions{Provider: "bogus-vendor"}}
+	if _, err := ResolveRuntimeConfig(&option); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Fatalf("ResolveRuntimeConfig() error = %v", err)
+	}
 }
 
 func TestApplyEnvironmentIgnoresVendorSpecificLLMVariables(t *testing.T) {
@@ -626,10 +590,8 @@ llm:
 `)
 	t.Setenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 
-	withDefaults(t, func() {
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	{
+		t.Chdir(dir)
 
 		option := Option{}
 		if _, err := ResolveRuntimeConfig(&option); err != nil {
@@ -638,15 +600,13 @@ llm:
 		if option.Model != "kimi-for-coding" {
 			t.Errorf("config model should win over fallback ANTHROPIC_MODEL: got %q, want %q", option.Model, "kimi-for-coding")
 		}
-	})
+	}
 
 	// With no model in the config, the fallback provider env still fills the gap.
-	withDefaults(t, func() {
+	{
 		emptyDir := t.TempDir()
 		writeTestConfig(t, emptyDir, "llm:\n  provider: anthropic\n  base_url: https://kiro.example/v1\n  api_key: config-key\n")
-		origDir, _ := os.Getwd()
-		os.Chdir(emptyDir)
-		defer os.Chdir(origDir)
+		t.Chdir(emptyDir)
 
 		option := Option{}
 		if _, err := ResolveRuntimeConfig(&option); err != nil {
@@ -655,7 +615,7 @@ llm:
 		if option.Model != "claude-opus-4-8" {
 			t.Errorf("fallback ANTHROPIC_MODEL should fill an empty model: got %q, want %q", option.Model, "claude-opus-4-8")
 		}
-	})
+	}
 }
 
 // Same inherited-env hazard as the model case, but for base_url and api_key: a
@@ -675,10 +635,8 @@ llm:
 	t.Setenv("ANTHROPIC_BASE_URL", "https://fallback.example/v1")
 	t.Setenv("ANTHROPIC_API_KEY", "fallback-key")
 
-	withDefaults(t, func() {
-		origDir, _ := os.Getwd()
-		os.Chdir(dir)
-		defer os.Chdir(origDir)
+	{
+		t.Chdir(dir)
 
 		option := Option{}
 		if _, err := ResolveRuntimeConfig(&option); err != nil {
@@ -690,16 +648,14 @@ llm:
 		if option.APIKey != "config-key" {
 			t.Errorf("config api_key should win over fallback ANTHROPIC_API_KEY: got %q, want %q", option.APIKey, "config-key")
 		}
-	})
+	}
 
 	// With no base_url / api_key in the config, the fallback provider env still
 	// fills the gap (unchanged fallback behavior).
-	withDefaults(t, func() {
+	{
 		emptyDir := t.TempDir()
 		writeTestConfig(t, emptyDir, "llm:\n  provider: anthropic\n  model: kimi-for-coding\n")
-		origDir, _ := os.Getwd()
-		os.Chdir(emptyDir)
-		defer os.Chdir(origDir)
+		t.Chdir(emptyDir)
 
 		option := Option{}
 		if _, err := ResolveRuntimeConfig(&option); err != nil {
@@ -711,7 +667,7 @@ llm:
 		if option.APIKey != "fallback-key" {
 			t.Errorf("fallback ANTHROPIC_API_KEY should fill an empty api_key: got %q, want %q", option.APIKey, "fallback-key")
 		}
-	})
+	}
 }
 
 func TestResolveRuntimeConfigUsesStagedProfileAndExplicitCLIOverrides(t *testing.T) {
@@ -756,22 +712,4 @@ llm:
 	if explicit.Provider != "openai" || explicit.Model != "cli-model" || explicit.APIKey != "cli-key" {
 		t.Fatalf("explicit CLI LLM values did not override staged config: %+v", explicit.LLMOptions)
 	}
-}
-
-func withDefaults(t *testing.T, fn func()) {
-	t.Helper()
-	saved := []*string{
-		&DefaultProvider, &DefaultBaseURL, &DefaultAPIKey, &DefaultModel,
-		&DefaultNodeID, &DefaultNodeName,
-	}
-	originals := make([]string, len(saved))
-	for i, p := range saved {
-		originals[i] = *p
-	}
-	t.Cleanup(func() {
-		for i, p := range saved {
-			*p = originals[i]
-		}
-	})
-	fn()
 }

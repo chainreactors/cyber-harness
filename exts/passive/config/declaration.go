@@ -20,9 +20,17 @@ import (
 const connectionTimeout = 20 * time.Second
 
 var (
-	FofaInfoEndpoint     = "https://fofa.info/api/v1/info/my"
-	HunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
+	fofaInfoEndpoint     = "https://fofa.info/api/v1/info/my"
+	hunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
 )
+
+// SetConnectionEndpoints replaces the credential probe endpoints and returns a
+// restore function. Configure endpoints before starting connection checks.
+func SetConnectionEndpoints(fofa, hunter string) func() {
+	oldFofa, oldHunter := fofaInfoEndpoint, hunterSearchEndpoint
+	fofaInfoEndpoint, hunterSearchEndpoint = fofa, hunter
+	return func() { fofaInfoEndpoint, hunterSearchEndpoint = oldFofa, oldHunter }
+}
 
 func Declare(resources *resource.Registry) error {
 	if _, err := resource.Add[cfg.Section](resources, ReconSection()); err != nil {
@@ -106,7 +114,7 @@ func getConnectionJSON(ctx context.Context, endpoint, proxy string) ([]byte, err
 }
 
 func testFofaConnection(ctx context.Context, key, proxy string) (string, error) {
-	body, err := getConnectionJSON(ctx, FofaInfoEndpoint+"?key="+url.QueryEscape(key), proxy)
+	body, err := getConnectionJSON(ctx, fofaInfoEndpoint+"?key="+url.QueryEscape(key), proxy)
 	if err != nil {
 		return "", err
 	}
@@ -149,7 +157,7 @@ func testHunterConnection(ctx context.Context, key, proxy string) (string, error
 	params.Set("is_web", "3")
 	params.Set("start_time", now.AddDate(0, 0, -1).Format("2006-01-02 15:04:05"))
 	params.Set("end_time", now.Format("2006-01-02 15:04:05"))
-	body, err := getConnectionJSON(ctx, HunterSearchEndpoint+"?"+params.Encode(), proxy)
+	body, err := getConnectionJSON(ctx, hunterSearchEndpoint+"?"+params.Encode(), proxy)
 	if err != nil {
 		return "", err
 	}

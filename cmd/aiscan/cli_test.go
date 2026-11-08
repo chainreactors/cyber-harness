@@ -837,125 +837,92 @@ func TestParseCLIIOAServeCommandUsesURL(t *testing.T) {
 }
 
 func TestResolveScannerModeForVerifyModes(t *testing.T) {
-	withDefaults(t, func() {
-		mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, "")
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != provider.StartupOptional {
-			t.Fatalf("mode = %#v", mode)
-		}
-		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1"}) {
-			t.Fatalf("args = %#v", args)
-		}
+	mode, args, err := resolveScannerMode([]string{"scan", "-i", "127.0.0.1"}, "")
+	if err != nil {
+		t.Fatalf("ResolveScannerMode() error = %v", err)
+	}
+	if mode.Provider != provider.StartupOptional {
+		t.Fatalf("mode = %#v", mode)
+	}
+	if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1"}) {
+		t.Fatalf("args = %#v", args)
+	}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, "")
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != provider.StartupOptional {
-			t.Fatalf("mode = %#v", mode)
-		}
-		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=off"}) {
-			t.Fatalf("args = %#v", args)
-		}
+	mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=off"}, "")
+	if err != nil {
+		t.Fatalf("ResolveScannerMode() error = %v", err)
+	}
+	if mode.Provider != provider.StartupOptional {
+		t.Fatalf("mode = %#v", mode)
+	}
+	if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=off"}) {
+		t.Fatalf("args = %#v", args)
+	}
 
-		if _, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, ""); err == nil {
-			t.Fatal("removed --deep flag was accepted")
-		}
+	if _, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--deep"}, ""); err == nil {
+		t.Fatal("removed --deep flag was accepted")
+	}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=on"}, "")
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != provider.StartupRequired || !mode.Agent {
-			t.Fatalf("mode = %#v", mode)
-		}
-		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=on"}) {
-			t.Fatalf("args = %#v", args)
-		}
+	mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--verify=on"}, "")
+	if err != nil {
+		t.Fatalf("ResolveScannerMode() error = %v", err)
+	}
+	if mode.Provider != provider.StartupRequired || !mode.Agent {
+		t.Fatalf("mode = %#v", mode)
+	}
+	if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--verify=on"}) {
+		t.Fatalf("args = %#v", args)
+	}
 
-		mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, "")
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != provider.StartupRequired || !mode.Agent {
-			t.Fatalf("sniper mode = %#v", mode)
-		}
+	mode, _, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--sniper"}, "")
+	if err != nil {
+		t.Fatalf("ResolveScannerMode() error = %v", err)
+	}
+	if mode.Provider != provider.StartupRequired || !mode.Agent {
+		t.Fatalf("sniper mode = %#v", mode)
+	}
 
-		mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, "")
-		if err != nil {
-			t.Fatalf("ResolveScannerMode() error = %v", err)
-		}
-		if mode.Provider != provider.StartupOptional || mode.Agent {
-			t.Fatalf("scan-local --ai should not enable AI features: %#v", mode)
-		}
-		if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--ai"}) {
-			t.Fatalf("args = %#v", args)
-		}
-	})
+	mode, args, err = resolveScannerMode([]string{"scan", "-i", "127.0.0.1", "--ai"}, "")
+	if err != nil {
+		t.Fatalf("ResolveScannerMode() error = %v", err)
+	}
+	if mode.Provider != provider.StartupOptional || mode.Agent {
+		t.Fatalf("scan-local --ai should not enable AI features: %#v", mode)
+	}
+	if !reflect.DeepEqual(args, []string{"scan", "-i", "127.0.0.1", "--ai"}) {
+		t.Fatalf("args = %#v", args)
+	}
 }
 
 func TestAppConfigUsesCompiledDefaults(t *testing.T) {
-	withDefaults(t, func() {
-		scannerext.DefaultCyberhubURL = "http://hub:8080"
-		scannerext.DefaultCyberhubKey = "HUBKEY"
-		scannerext.DefaultCyberhubMode = "override"
-		searchext.DefaultTavilyKeys = "BUILTIN_TAVILY"
-		cfg.DefaultNodeID = "node-1"
-		cfg.DefaultNodeName = "worker-1"
+	t.Cleanup(scannerext.SetDefaults(scannerext.CyberhubOptions{URL: "http://hub:8080", Key: "HUBKEY", Mode: "override", Proxy: scannerext.DefaultScannerProxy}))
+	t.Cleanup(searchext.SetDefaultKeys("BUILTIN_TAVILY"))
+	t.Cleanup(cfg.SetNodeDefaults("node-1", "worker-1"))
 
-		opt := &cfg.Option{}
-		cfg.ApplyDefaults(opt)
-		if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {
-			t.Fatal("compiled node defaults were not resolved")
-		}
-
-		resolved, err := defaultSections().ResolveValues(nil, nil, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		hub, err := cfg.Get[*scannerext.CyberhubOptions](resolved, scannerext.CyberhubConfigKey)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if hub.URL != "http://hub:8080" || hub.Key != "HUBKEY" || hub.Mode != "override" {
-			t.Fatalf("compiled cyberhub defaults were not resolved: %#v", hub)
-		}
-		search, err := cfg.Get[*searchext.Options](resolved, searchext.ConfigKey)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if search.TavilyKeys != "BUILTIN_TAVILY" {
-			t.Fatalf("compiled tavily default was not resolved: %#v", search)
-		}
-	})
-}
-
-func withDefaults(t *testing.T, fn func()) {
-	t.Helper()
-	saved := []struct {
-		p *string
-		v string
-	}{
-		{&cfg.DefaultProvider, cfg.DefaultProvider},
-		{&cfg.DefaultBaseURL, cfg.DefaultBaseURL},
-		{&cfg.DefaultAPIKey, cfg.DefaultAPIKey},
-		{&cfg.DefaultModel, cfg.DefaultModel},
-		{&scannerext.DefaultScannerProxy, scannerext.DefaultScannerProxy},
-		{&scannerext.DefaultCyberhubURL, scannerext.DefaultCyberhubURL},
-		{&scannerext.DefaultCyberhubKey, scannerext.DefaultCyberhubKey},
-		{&scannerext.DefaultCyberhubMode, scannerext.DefaultCyberhubMode},
-		{&searchext.DefaultTavilyKeys, searchext.DefaultTavilyKeys},
-		{&cfg.DefaultNodeID, cfg.DefaultNodeID},
-		{&cfg.DefaultNodeName, cfg.DefaultNodeName},
+	opt := &cfg.Option{}
+	cfg.ApplyDefaults(opt)
+	if opt.NodeID != cfg.DefaultNodeID || opt.NodeName != cfg.DefaultNodeName {
+		t.Fatal("compiled node defaults were not resolved")
 	}
-	t.Cleanup(func() {
-		for _, s := range saved {
-			*s.p = s.v
-		}
-	})
-	fn()
+
+	resolved, err := defaultSections().ResolveValues(nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, err := cfg.Get[*scannerext.CyberhubOptions](resolved, scannerext.CyberhubConfigKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hub.URL != "http://hub:8080" || hub.Key != "HUBKEY" || hub.Mode != "override" {
+		t.Fatalf("compiled cyberhub defaults were not resolved: %#v", hub)
+	}
+	search, err := cfg.Get[*searchext.Options](resolved, searchext.ConfigKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.TavilyKeys != "BUILTIN_TAVILY" {
+		t.Fatalf("compiled tavily default was not resolved: %#v", search)
+	}
 }
 
 func readClientOptions(t *testing.T, option *cfg.Option) ioaclient.Options {

@@ -80,27 +80,32 @@ func GlobalLogger(cfg LogConfig) Logger {
 	// Dependencies may mutate the global logger during initialization. Keep
 	// those settings separate so they cannot silence application diagnostics.
 	if adapter, ok := NewLogger(cfg).(*logsLogger); ok {
-		logs.Log = adapter.base
+		SetGlobalLogs(adapter.base)
 	}
 	return logger
 }
 
+// SetGlobalLogs replaces the logger used by dependencies and returns a restore
+// function. Configure it before starting dependency operations.
+func SetGlobalLogs(logger *logs.Logger) func() {
+	old := logs.Log
+	logs.Log = logger
+	return func() { logs.Log = old }
+}
+
 func GlobalLogs() *logs.Logger {
 	if logs.Log == nil {
-		logs.Log = logs.NewLogger(logs.WarnLevel)
-		logs.Log.SetOutput(os.Stderr)
+		logger := logs.NewLogger(logs.WarnLevel)
+		logger.SetOutput(os.Stderr)
+		SetGlobalLogs(logger)
 	}
 	return logs.Log
 }
 
-var enableDebugOnce sync.Once
-
 func EnableLogsDebug() *logs.Logger {
 	logger := GlobalLogs()
-	enableDebugOnce.Do(func() {
-		logger.SetLevel(logs.DebugLevel)
-		logger.SetQuiet(false)
-	})
+	logger.SetLevel(logs.DebugLevel)
+	logger.SetQuiet(false)
 	return logger
 }
 
@@ -133,12 +138,12 @@ func ActivateDebug(logger Logger) func() {
 	oldQuiet := target.Quiet
 	target.SetLevel(logs.DebugLevel)
 	target.SetQuiet(false)
-	logs.Log = target
+	SetGlobalLogs(target)
 
 	return func() {
 		target.SetLevel(oldLevel)
 		target.SetQuiet(oldQuiet)
-		logs.Log = oldGlobal
+		SetGlobalLogs(oldGlobal)
 	}
 }
 

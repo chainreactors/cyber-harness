@@ -29,11 +29,6 @@ type SQLiteStore struct {
 	modules []SchemaModule
 }
 
-var (
-	dbJSONMarshal   = protojson.MarshalOptions{UseProtoNames: true}
-	dbJSONUnmarshal = protojson.UnmarshalOptions{}
-)
-
 func NewSQLiteStore(dbPath string, modules ...SchemaModule) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
 	if err != nil {
@@ -88,7 +83,7 @@ func marshalProtoJSON(message protobuf.Message) (string, error) {
 	if message == nil {
 		return "", fmt.Errorf("protobuf message is required")
 	}
-	raw, err := dbJSONMarshal.Marshal(message)
+	raw, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(message)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +91,7 @@ func marshalProtoJSON(message protobuf.Message) (string, error) {
 }
 
 func unmarshalProtoJSON(raw string, message protobuf.Message, kind string) error {
-	if err := dbJSONUnmarshal.Unmarshal([]byte(raw), message); err != nil {
+	if err := protojson.Unmarshal([]byte(raw), message); err != nil {
 		return fmt.Errorf("decode %s protojson: %w", kind, err)
 	}
 	return nil

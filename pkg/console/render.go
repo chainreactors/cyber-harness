@@ -77,8 +77,7 @@ const spinnerSentinel = "\x00"
 // time stays transient instead of entering terminal history.
 const elapsedSentinel = "\x01"
 
-var defaultFrames = bspinner.Dot
-var readlineFooterInterval = 100 * time.Millisecond
+const readlineFooterInterval = 100 * time.Millisecond
 
 // LiveView manages transient status output. Both direct terminal rendering and
 // the readline composer animate on a timer; the composer redraw stays inside
@@ -170,11 +169,11 @@ func (v *LiveView) Start() {
 		return
 	}
 	v.running = true
-	v.frame = defaultFrames.Frames[0]
+	v.frame = bspinner.Dot.Frames[0]
 	v.renderLocked(v.frame)
 	v.stop = make(chan struct{})
 	v.done = make(chan struct{})
-	interval := defaultFrames.FPS
+	interval := bspinner.Dot.FPS
 	if v.bridge != nil {
 		// The composer interval is independent from other terminal renderers so
 		// it can be tuned without changing tool/output animation globally.
@@ -185,7 +184,7 @@ func (v *LiveView) Start() {
 
 func (v *LiveView) tick(interval time.Duration) {
 	defer close(v.done)
-	frames := defaultFrames.Frames
+	frames := bspinner.Dot.Frames
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	// Start already rendered frames[0]. Advance to the next frame on the first
@@ -350,5 +349,5 @@ func (v *LiveView) currentFrame() string {
 	if v.frame != "" {
 		return v.frame
 	}
-	return defaultFrames.Frames[0]
+	return bspinner.Dot.Frames[0]
 }

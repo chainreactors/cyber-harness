@@ -13,7 +13,6 @@ var (
 	ErrInvalidCommand   = errors.New("invalid command registration")
 	ErrDuplicateCommand = coreregistry.ErrDuplicate
 	ErrUnavailable      = coreregistry.ErrUnavailable
-	ErrStaleChoice      = errors.New("observed choice is stale")
 )
 
 // Command is an immutable native command declaration. Its dependencies are
