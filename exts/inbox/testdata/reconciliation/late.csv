@@ -1,0 +1,6 @@
+event_id,order_id,currency,kind,amount_minor,occurred_at,reference
+e19,A002,CNY,void,20000,2026-10-31T09:13:00Z,e03
+e20,A005,CNY,capture,5000,2026-10-31T08:13:00Z,
+e21,A007,USD,capture,300,2026-10-31T08:14:00Z,
+e19,A002,CNY,void,20000,2026-10-31T09:13:00Z,e03
+e09,A006,USD,capture,1200,2026-10-31T08:06:00Z,

@@ -42,21 +42,27 @@ aiscan> /compact 保留已验证结论、证据路径和未完成事项
 
 ## 完成摘要
 
+Web 每轮工作流的“执行复盘”保留各次模型调用的推理和实际工具步骤，可按执行顺序或 Token 用量排序。点击步骤定位原始卡片，查看参数、结果和验证记录；列表区分已返回、失败、进行中及未收到结果，显示已有耗时、缓存命中率和包含重试的请求次数。子 Agent 与后台步骤标明执行者。
+
+模型用量按已记录的逻辑调用统计，重试继续关联原来的消息，整轮汇总及编译父子汇总不重复累加。未报告的用量不补零；历史里没有模型请求边界时保持原有消息分组。工具返回和完成评估分别显示，模型提出的计划不会被当成已经执行的事实。
+
 标准会话在主任务完成后可以显示一条简短 recap：Web 放在该轮最终回答下方，交互终端显示 `✻ summary · elapsed`。摘要由当前 Provider 的模型生成，可能产生额外模型请求；生成过程不阻塞任务完成，失败或队列满时跳过，没有独立配置或命令。
 
 摘要使用本次任务的用户输入、回答及文本工具记录，不包含 reasoning、增量片段或媒体。它随事件历史保存供回看，不进入恢复后的模型对话，也不替代最终回答和工具证据。终端静态或 quiet 输出不显示；若新任务已经开始，迟到的终端摘要会被丢弃。
 
 ## 记录
 
-CLI 使用 `-o` 将运行事件保存到新建的 ProtoJSONL 文件：
+CLI 统一使用 `-o <格式>` 选择输出内容、`-f <文件>` 选择目标；省略 `-f` 输出到 stdout。保存可恢复的运行事件使用 JSONL：
 
 ```sh
-aiscan agent -p "读取当前目录并总结" -o first.jsonl
+aiscan agent -p "读取当前目录并总结" -o jsonl -f first.jsonl
 ```
 
 记录包含运行时发出的消息、工具调用、结果与生命周期等事件。需要文件、HTTP 等额外观察时，可使用 `--observe` 选择观测项；保存记录不会自动开启所有观测。重复运行应换一个输出路径，已有文件不会作为追加日志继续写入。
 
-`--output-format` 只控制 one-shot 的标准输出：`text` 用于阅读，`json` 返回一次任务的结果对象，`stream-json` 输出事件流。扫描器的 `-j` 则是各自的结果格式。这些输出与 `-o` 的历史文件用途不同，不能仅凭都是 JSON 就互换。
+`-o text` 用于阅读，`-o json` 返回任务结果对象，`-o jsonl` 输出可恢复的 canonical AOP 事件流，`-o markdown` 渲染记录，`-o csv` 导出原生产物及验证状态。这些格式也可用于 `-F` 回放；`stream-json` 和 `md` 分别是 `jsonl` 和 `markdown` 的格式别名。扫描器子命令之后的原生参数仍由扫描器解析，其结果 JSON 不能替代 AOP 历史。
+
+旧版把 `-o` 当作历史文件路径的命令需改为 `-o jsonl -f <路径>`；不再根据是否回放改变 `-o` 的含义，也不提供回放专用的格式参数。
 
 ## 回看与恢复
 
@@ -64,13 +70,13 @@ aiscan agent -p "读取当前目录并总结" -o first.jsonl
 
 ```sh
 aiscan -F first.jsonl
-aiscan -F first.jsonl --view-format markdown -f first.md
+aiscan -F first.jsonl -o markdown -f first.md
 ```
 
 恢复从事件历史中建立对话上下文，再执行新的输入：
 
 ```sh
-aiscan agent --resume first.jsonl -p "继续解释刚才的结果" -o second.jsonl
+aiscan agent --resume first.jsonl -p "继续解释刚才的结果" -o jsonl -f second.jsonl
 ```
 
 交互模式也可用 `/resume` 选择记录，或用 `/resume <路径>` 指定文件。恢复源保持只读；若要保存后续运行，需要另外指定输出。Web 的会话历史由 Web 数据库管理，不能直接把数据库文件作为 CLI 的 `--resume` 输入。

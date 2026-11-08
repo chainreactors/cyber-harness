@@ -55,6 +55,8 @@ Guardrail 是工具调用的检查边界。已启动子进程内部的操作和�
 
 `wait` 表示此次工具调用在前台等待的秒数。5 秒后尚未结束，工具返回后台 session ID，命令继续运行；`wait: 0` 或省略则等待完成。`timeout` 是命令的总运行期限，转入后台后仍生效；省略使用默认 600 秒，显式设为 0 表示不设置总期限。
 
+普通前台命令的 stdin 默认是 EOF，`read`、`cat` 等读取输入的命令不会空等到超时。需要后续输入时，显式设置 `wait > 0`，再用 `tmux send-keys` 发送内容；`tmux new-session` 的交互会话同样保留输入。`wait=0` 被 Inbox 中断而转后台时仍保持原来的 EOF。Go 调用方显式提供的 `BashExecOptions.Stdin` 优先使用其 reader。
+
 完成结果会送回 Agent 会话，运行期间也可通过 `tmux` 查看输出、发送交互输入或停止任务。这是 aiscan 自己的工作管理命令，不要求系统安装 tmux。
 
 ```text

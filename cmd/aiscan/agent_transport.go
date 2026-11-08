@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/chainreactors/cyber/core/telemetry"
@@ -20,9 +21,15 @@ func runAgentTransport(ctx context.Context, newProfile func(profile.Request) (pr
 	}
 	switch selected {
 	case cfg.AgentTransportWeb:
+		if option.OutputFormat != "text" || option.OutputFile != "" {
+			return fmt.Errorf("node transport uses the server event stream; -o/-f require a local task")
+		}
 		return node.RunWebSocketWithCapabilities(ctx, newProfile, option, logger, "scan")
 	case cfg.AgentTransportStdio:
-		return runStdio(ctx, newProfile, option, logger, input, output)
+		if option.OutputFormat != "text" && option.OutputFile == "" {
+			return fmt.Errorf("stdio transport reserves stdout for protocol messages; use -f for formatted events")
+		}
+		return runStdio(ctx, newProfile, option, logger, input, output, outputTask)
 	default:
 		return runAgentMode(ctx, newProfile, option, logger, setInterrupt, outputTask)
 	}

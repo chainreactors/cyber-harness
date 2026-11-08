@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -145,6 +146,44 @@ func TestNewBufferedMinCapacity(t *testing.T) {
 	}
 	if err := b.Push(NewUserMessage("b")); err != ErrInboxFull {
 		t.Fatalf("should fail at capacity 1: got %v, want ErrInboxFull", err)
+	}
+}
+
+func TestToMessagesKeepsExternalIDAcrossTranscriptRewrite(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message Message
+		wantID  string
+	}{
+		{
+			name: "wire ID",
+			message: func() Message {
+				m := NewMessage(OriginPeer, "user", "hello")
+				m.Message.Id = "wire-id"
+				return m
+			}(),
+			wantID: "wire-id",
+		},
+		{
+			name: "external ID after transcript rewrite",
+			message: func() Message {
+				m := NewMessage(OriginPeer, "user", "hello")
+				m.Message.Id = "transcript-id"
+				m.Meta = Metadata{MessageID: "wire-id"}
+				return m
+			}(),
+			wantID: "wire-id",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := tc.message.ToMessages()
+			if len(messages) != 1 {
+				t.Fatalf("messages = %d, want 1", len(messages))
+			}
+			if got := messageText(messages[0]); !strings.Contains(got, `message_id="`+tc.wantID+`"`) {
+				t.Fatalf("rendered message = %q, want external ID %q", got, tc.wantID)
+			}
+		})
 	}
 }
 

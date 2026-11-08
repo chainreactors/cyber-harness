@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -20,9 +21,11 @@ type Option struct {
 	Resolved       *Resolved `no-flag:"true" config:"-"`
 	Snapshot       *Snapshot `no-flag:"true" config:"-"`
 	Context        *Context  `no-flag:"true" config:"-"`
+	Command        RunMode   `no-flag:"true" config:"-"` // Selected by the host CLI, never by YAML.
 	LLMOptions     `group:"LLM Options" config:"llm"`
 	TrafficOptions `group:"Traffic Options" config:"traffic"`
 	AgentOptions   `group:"Agent Options" config:"agent"`
+	InboxOptions   `no-flag:"true" config:"inbox" local:"true"`
 	NodeOptions    `group:"Node Options" config:"node" local:"true"`
 	Extensions     Values    `no-flag:"true" config:"extensions"`
 	Sections       *Sections `no-flag:"true" config:"-"`
@@ -86,6 +89,23 @@ type AgentOptions struct {
 	CaptureProviderFrames bool     `long:"capture-provider-frames" config:"capture_provider_frames" description:"Emit exact provider request/response frames as sensitive AOP events"`
 }
 
+type InboxOptions struct {
+	StateDir  string `long:"state-dir" config:"state_dir" description:"Inbox state directory (default .cyber/active)"`
+	MaxActive int    `long:"max-active" config:"max_active" description:"Maximum concurrent inbox tasks" default:"4"`
+}
+
+// InboxStateDir resolves the host-owned durable state against its workdir.
+func InboxStateDir(opt *Option, workDir string) string {
+	dir := opt.StateDir
+	if dir == "" {
+		dir = filepath.Join(".cyber", "active")
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(workDir, dir)
+	}
+	return filepath.Clean(dir)
+}
+
 type AgentTransport string
 
 const (
@@ -130,10 +150,8 @@ type MiscOptions struct {
 	ConfigFile   string `short:"c" long:"config" description:"Load only this config file (default: project over ~/.cyber/cyber.yaml)"`
 	DataDir      string `long:"data-dir" config:"data_dir" description:"Data directory (default: existing local/portable .cyber, then ~/.cyber)"`
 	ViewFile     string `short:"F" long:"view" description:"View an AOP event JSONL file"`
-	ViewFormat   string `long:"view-format" description:"Render format for --view: terminal (default), markdown" default:"terminal"`
-	ViewOutput   string `short:"f" long:"file" description:"Rendered file destination used with --view"`
-	OutputFile   string `short:"o" long:"output" description:"Write the canonical AOP event stream to a new JSONL file"`
-	OutputFormat string `long:"output-format" description:"One-shot agent output format: text, json, stream-json" default:"text"`
+	OutputFile   string `short:"f" long:"file" description:"Output destination (default: stdout)"`
+	OutputFormat string `short:"o" long:"output-format" description:"Output format: text, json, jsonl, markdown, csv (stream-json aliases jsonl)" default:"text"`
 	JSON         bool   `long:"json" description:"Alias for one-shot agent --output-format=json"`
 	Observe      string `long:"observe" description:"Comma-separated observations: tools,commands,processes,files,http"`
 	Debug        bool   `long:"debug" config:"debug" description:"Enable debug logging"`
@@ -147,6 +165,7 @@ type RunMode string
 
 const (
 	RunModeAgent     RunMode = "agent"
+	RunModeInbox     RunMode = "inbox"
 	RunModeScanner   RunMode = "scanner"
 	RunModeNoCommand RunMode = ""
 )

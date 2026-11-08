@@ -2,6 +2,7 @@
 export const uiTestFiles = [
   'scan-ux.spec.ts',
   'recap-presentation.spec.ts', 'terminal-rendering.spec.ts', 'plugin-runtime.spec.ts',
+  'ioa-graph.spec.ts', 'ioa-web.spec.ts',
 ]
 export const jevTestFiles = [
   'jev-motion.spec.ts', 'workflow.spec.ts', 'jev-ui.spec.ts', 'jev-decision-ui.spec.ts',

@@ -6,9 +6,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	agentsession "github.com/chainreactors/cyber/agent/session"
-	"github.com/chainreactors/cyber/core/telemetry"
-	observeext "github.com/chainreactors/cyber/exts/observe"
-	cfg "github.com/chainreactors/cyber/pkg/config"
 )
 
 // Every capability a profile publishes is resolved by type at load, not by the
@@ -36,18 +33,10 @@ func TestEveryProfileShapeLoadsAndCloses(t *testing.T) {
 			},
 		},
 		{
-			name: "with event output",
-			build: func(t *testing.T) config {
-				config := minimalConfig(&agentsession.Config{})
-				config.Output = t.TempDir() + "/events.jsonl"
-				return config
-			},
-		},
-		{
 			name: "with observation",
 			build: func(*testing.T) config {
 				config := minimalConfig(&agentsession.Config{})
-				config.Observe = []observeext.Kind{observeext.Tools}
+				config.Option.Observe = " , tools , "
 				return config
 			},
 		},
@@ -97,6 +86,3 @@ func TestLoadedProfilePublishesItsApplicationAndRuntime(t *testing.T) {
 		t.Error("the session runtime is missing capabilities its extensions published")
 	}
 }
-
-var _ = cfg.Option{}
-var _ = telemetry.NopLogger

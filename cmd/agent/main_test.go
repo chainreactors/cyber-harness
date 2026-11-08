@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,24 +89,55 @@ func TestAgentOneShotRunsAgainstOpenAICompatibleGateway(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var stdout, stderr strings.Builder
-	err := run(context.Background(), []string{
-		"--provider", "openai", "--base-url", server.URL, "--api-key", "test", "--model", "fixture",
-		"--prompt", "hello", "--workdir", t.TempDir(), "--timeout", "10", "--quiet", "--no-color",
-	}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("agent run failed: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "fixture response") {
-		t.Fatalf("task bypassed the provided writer: %q", stdout.String())
-	}
-	select {
-	case model := <-called:
-		if model != "fixture" {
-			t.Fatalf("gateway model = %q, want fixture", model)
+	for _, format := range []string{"text", "json", "jsonl", "markdown", "csv"} {
+		for _, fileOutput := range []bool{false, true} {
+			name := format + "/stdout"
+			if fileOutput {
+				name = format + "/file"
+			}
+			t.Run(name, func(t *testing.T) {
+				var stdout, stderr strings.Builder
+				dir := t.TempDir()
+				args := []string{"--provider", "openai", "--base-url", server.URL, "--api-key", "test", "--model", "fixture",
+					"--prompt", "hello", "--workdir", dir, "--timeout", "10", "--quiet", "--no-color", "-o", format}
+				path := filepath.Join(dir, "result.out")
+				if fileOutput {
+					args = append(args, "-f", path)
+				}
+				err := run(context.Background(), args, &stdout, &stderr)
+				if err != nil {
+					t.Fatalf("agent run: %v\nstderr: %s", err, stderr.String())
+				}
+				body := stdout.String()
+				if fileOutput {
+					if body != "" {
+						t.Fatalf("file output leaked to stdout: %q", body)
+					}
+					data, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body = string(data)
+				}
+				if format == "csv" {
+					if !strings.HasPrefix(body, "target,tool,kind,") {
+						t.Fatalf("CSV output=%q", body)
+					}
+				} else if !strings.Contains(body, "fixture response") {
+					t.Fatalf("missing task response in %q", body)
+				}
+				if format == "json" && !json.Valid([]byte(body)) {
+					t.Fatalf("invalid JSON: %q", body)
+				}
+				if format == "jsonl" {
+					for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
+						if !json.Valid([]byte(line)) {
+							t.Fatalf("invalid JSONL: %q", line)
+						}
+					}
+				}
+			})
 		}
-	default:
-		t.Fatalf("agent did not call the configured gateway; stdout = %q", stdout.String())
 	}
 }
 

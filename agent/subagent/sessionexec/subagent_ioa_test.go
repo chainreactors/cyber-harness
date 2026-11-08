@@ -9,6 +9,7 @@ import (
 	"github.com/chainreactors/cyber/agent"
 	agenthooks "github.com/chainreactors/cyber/agent/hooks"
 	"github.com/chainreactors/cyber/aop"
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/extension"
 	"github.com/chainreactors/cyber/core/hooks"
 	"github.com/chainreactors/cyber/core/operation"
@@ -42,7 +43,8 @@ func TestSubagentWithMemoryIOA(t *testing.T) {
 				if err != nil || len(records) != 1 || records[0].Content["message"] != "task" {
 					return nil, fmt.Errorf("missing dispatch before execution: %v %v", records, err)
 				}
-				if records[0].Meta["subagent"].(map[string]any)["session_id"] != cfg.SessionID {
+				record, parseErr := harness.Parse(records[0].Meta)
+				if parseErr != nil || record == nil || record.Target.SessionID != cfg.SessionID {
 					return nil, fmt.Errorf("wrong child identity")
 				}
 				return &agent.Result{Output: "done", Stop: agenthooks.StopReasonCompleted}, nil

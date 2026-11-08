@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io"
 	"reflect"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestParseCLIReconCommandsAndFlags(t *testing.T) {
 		"passive",
 		`domain="example.com"`,
 		"-s", "fofa",
-	})
+	}, io.Discard)
 	if err != nil {
 		t.Fatalf("parseCLI() error = %v", err)
 	}

@@ -303,33 +303,6 @@ func TestLoadContextDoesNotOwnProfileLifetime(t *testing.T) {
 	}
 }
 
-func TestFromOptionOwnsEventOutputSelection(t *testing.T) {
-	resume := &cfg.Option{}
-	resume.Resume = "source.jsonl"
-	explicit := &cfg.Option{}
-	explicit.OutputFile = "explicit.jsonl"
-	tests := []struct {
-		name   string
-		option *cfg.Option
-		want   string
-	}{
-		{name: "one-shot", option: &cfg.Option{}},
-		{name: "resume", option: resume},
-		{name: "explicit", option: explicit, want: "explicit.jsonl"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			config, err := configFromOption(test.option, provider.StartupDisabled, nil, telemetry.NopLogger())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if config.Output != test.want {
-				t.Fatalf("output = %q, want %q", config.Output, test.want)
-			}
-		})
-	}
-}
-
 func TestProfileResolvesHostInputWithoutMutatingIt(t *testing.T) {
 	option := &cfg.Option{}
 	p, err := newAIScanProfile(profilepkg.Request{Option: option, ProviderMode: provider.StartupDisabled})

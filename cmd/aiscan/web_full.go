@@ -6,10 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/url"
-	"strings"
-	"sync"
 	"time"
 
 	provider "github.com/chainreactors/cyber/agent/provider"
@@ -56,7 +53,7 @@ func serveWeb(ctx context.Context, option, explicitOption *cfg.Option, opts webC
 		},
 		ConfigAPI:   configAPI(),
 		AccessKey:   accessKey,
-		ConfigStore: &webConfigStore{explicit: option.ConfigFile, runtime: option, overrides: explicitOption},
+		ConfigStore: &webhost.FileConfigStore{Explicit: option.ConfigFile, Runtime: option, Overrides: explicitOption, Codec: configCodec()},
 		BuildProfile: func(ctx context.Context, prepared *webservice.PreparedConfig) (profile.Profile, error) {
 			if prepared.Runtime == nil {
 				return nil, fmt.Errorf("config candidate has no resolved runtime options")
@@ -166,56 +163,11 @@ func initWebProfile(ctx context.Context, baseOption *cfg.Option, logger telemetr
 // Config file store for web UI settings page
 // ---------------------------------------------------------------------------
 
-type webConfigStore struct {
-	explicit  string
-	runtime   *cfg.Option
-	overrides *cfg.Option
-	once      sync.Once
-	store     *webhost.FileConfigStore
-}
-
-func (s *webConfigStore) shared() *webhost.FileConfigStore {
-	s.once.Do(func() {
-		s.store = &webhost.FileConfigStore{Explicit: s.explicit, Runtime: s.runtime, Overrides: s.overrides,
-			Codec: webhost.ConfigCodec{Sections: defaultSections(), ParseDocument: parseConfigDocument,
-				Document: func(value *types.DistributeConfig) map[string]any { return configDocument(value, nil) },
-				Validate: validateConfig, PreserveValues: preserveURLCredentials,
-			},
-		}
-	})
-	return s.store
-}
-func (s *webConfigStore) GetDistributeConfig(ctx context.Context) (string, bool, *types.DistributeConfig, error) {
-	return s.shared().GetDistributeConfig(ctx)
-}
-func (s *webConfigStore) PrepareDistributeConfig(ctx context.Context, value *types.DistributeConfig) (*webservice.PreparedConfig, error) {
-	return s.shared().PrepareDistributeConfig(ctx, value)
-}
-func (s *webConfigStore) CommitDistributeConfig(ctx context.Context, value *webservice.PreparedConfig) error {
-	return s.shared().CommitDistributeConfig(ctx, value)
-}
-func (s *webConfigStore) DiscardDistributeConfig(value *webservice.PreparedConfig) {
-	s.shared().DiscardDistributeConfig(value)
-}
-func preserveLLMProfileSecrets(next, current *types.LLMConfig) {
-	webhost.PreserveLLMProfileSecrets(next, current)
-}
-
-// ---------------------------------------------------------------------------
-// Listen-address helpers
-// ---------------------------------------------------------------------------
-
-// hubLocalURL derives the loopback URL a local agent child should dial from the
-// server listen address. A wildcard/empty host becomes 127.0.0.1; an
-// unparseable address yields "".
-func hubLocalURL(addr string) string {
-	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
-	if err != nil || port == "" {
-		return ""
+// configCodec binds the product's extension schema to the shared file store.
+func configCodec() webhost.ConfigCodec {
+	return webhost.ConfigCodec{
+		Sections: defaultSections(), ParseDocument: parseConfigDocument,
+		Document: func(value *types.DistributeConfig) map[string]any { return configDocument(value, nil) },
+		Validate: validateConfig, PreserveValues: preserveURLCredentials,
 	}
-	switch host {
-	case "", "0.0.0.0", "::", "[::]":
-		host = "127.0.0.1"
-	}
-	return "http://" + net.JoinHostPort(host, port)
 }

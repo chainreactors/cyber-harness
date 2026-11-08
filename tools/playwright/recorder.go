@@ -98,7 +98,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionClick,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "dblclick":
@@ -108,7 +108,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionDblClick,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "fill":
@@ -119,7 +119,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		value := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionTextInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value, "clear": "true"}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"value": value, "clear": "true"}),
 		}
 
 	case "type":
@@ -130,7 +130,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		value := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionTextInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"value": value}),
 		}
 
 	case "press":
@@ -140,7 +140,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		keys := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionKeyboard,
-			Args:   mergeMaps(selectorArgs(args[1]), map[string]string{"keys": keys}),
+			Args:   mergeMaps(headless.ParseSelector(args[1]), map[string]string{"keys": keys}),
 		}
 
 	case "select-option":
@@ -151,7 +151,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		value := strings.Join(args[2:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionSelectInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value, "selected": "true"}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"value": value, "selected": "true"}),
 		}
 
 	case "screenshot":
@@ -167,7 +167,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 				ra.Args["to"] = args[i]
 			} else if args[i] == "--selector" && i+1 < len(args) {
 				i++
-				ra.Args = mergeMaps(ra.Args, selectorArgs(args[i]))
+				ra.Args = mergeMaps(ra.Args, headless.ParseSelector(args[i]))
 			}
 		}
 
@@ -179,7 +179,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		value := strings.Join(args[2:], ",")
 		ra = RecordedAction{
 			Action: headless.ActionFilesInput,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"value": value}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"value": value}),
 		}
 
 	case "evaluate":
@@ -199,7 +199,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionHover,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "wait-for":
@@ -221,7 +221,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		default:
 			ra = RecordedAction{
 				Action: headless.ActionWaitVisible,
-				Args:   selectorArgs(target),
+				Args:   headless.ParseSelector(target),
 			}
 		}
 
@@ -266,7 +266,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionCheck,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "uncheck":
@@ -276,7 +276,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionUncheck,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "tap":
@@ -286,7 +286,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionClick,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 		}
 
 	case "dispatch-event":
@@ -297,7 +297,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		eventType := args[2]
 		ra = RecordedAction{
 			Action: headless.ActionDispatchEvent,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"event": eventType}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"event": eventType}),
 		}
 
 	case "dialog":
@@ -317,7 +317,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionExtract,
-			Args:   selectorArgs(sel),
+			Args:   headless.ParseSelector(sel),
 			Name:   sanitizeName(sel),
 		}
 
@@ -328,7 +328,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionExtract,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"target": "html"}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"target": "html"}),
 			Name:   sanitizeName(sel + "_html"),
 		}
 
@@ -340,7 +340,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		attr := args[2]
 		ra = RecordedAction{
 			Action: headless.ActionExtract,
-			Args: mergeMaps(selectorArgs(sel), map[string]string{
+			Args: mergeMaps(headless.ParseSelector(sel), map[string]string{
 				"target":    "attribute",
 				"attribute": attr,
 			}),
@@ -354,7 +354,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		sel := strings.Join(args[1:], " ")
 		ra = RecordedAction{
 			Action: headless.ActionExtract,
-			Args: mergeMaps(selectorArgs(sel), map[string]string{
+			Args: mergeMaps(headless.ParseSelector(sel), map[string]string{
 				"target": "value",
 			}),
 			Name: sanitizeName(sel + "_value"),
@@ -378,7 +378,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		if cmd == "blur" {
 			action = headless.ActionBlur
 		}
-		ra = RecordedAction{Action: action, Args: selectorArgs(sel)}
+		ra = RecordedAction{Action: action, Args: headless.ParseSelector(sel)}
 
 	case "wait-for-url", "wait-for-request", "wait-for-response":
 		if len(args) < 2 {
@@ -420,7 +420,7 @@ func recordCommandResult(sess *Session, cmd string, args []string, result string
 		}
 		ra = RecordedAction{
 			Action: headless.ActionAssert,
-			Args:   mergeMaps(selectorArgs(sel), map[string]string{"type": assertionType}),
+			Args:   mergeMaps(headless.ParseSelector(sel), map[string]string{"type": assertionType}),
 		}
 
 	case "localstorage-set", "sessionstorage-set":
@@ -622,11 +622,6 @@ func recordSave(sess *Session, path, id, name string) (string, error) {
 		return "", fmt.Errorf("write template: %w", err)
 	}
 	return fmt.Sprintf("Template saved: %s (%d actions)", path, sess.rec.len()), nil
-}
-
-// selectorArgs converts a CSS/XPath selector string to nuclei action args.
-func selectorArgs(sel string) map[string]string {
-	return headless.ParseSelector(sel)
 }
 
 // extractSelector extracts a selector from args starting at the given offset.

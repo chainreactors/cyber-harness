@@ -9,7 +9,7 @@
 对你有权测试的本地靶场执行：
 
 ```sh
-aiscan scan -i http://127.0.0.1:3000 --verify=off -o lab-scan.jsonl
+aiscan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
 ```
 
 URL 直接进入 Web 探测；IP、IP:port 和 CIDR 会按目标类型进入服务发现或相应探测。可以重复 `-i`，或用 `-l targets.txt` 从每行一个目标的文件读取。扫描会产生主动探测，也可能包含认证检测。
@@ -81,18 +81,23 @@ aiscan scan -i http://127.0.0.1:3000 --verify=off
 
 ## 输出格式
 
-终端默认随工作推进显示发现，结束时显示汇总。`--no-color` 关闭颜色；需要保存终端文本时使用 shell 重定向。
+终端默认随工作推进显示发现，结束时显示汇总。`--no-color` 关闭颜色；使用 `-o text -f scan.txt` 保存终端文本。
 
 `-j` 在扫描完成后输出 gogo 与 spray 的原生 JSON Lines，适合消费这两类结果的程序。它不是全部漏洞、弱口令和验证结果的统一导出格式，也不是可以直接恢复的会话历史。
 
-`-o` 保存实际发出的 AOP 事件和结构化产物到新文件。回放只读取记录，不重复探测：
+`-o csv` 可直接导出扫描产物，`-o jsonl` 保存实际发出的 AOP 事件和结构化产物，供后续回放与转换。回放只读取记录，不重复探测：
 
 ```sh
+aiscan scan -i http://127.0.0.1:3000 --verify=off -o csv -f lab-scan.csv
+aiscan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
 aiscan -F lab-scan.jsonl
-aiscan -F lab-scan.jsonl --view-format markdown -f lab-scan.md
+aiscan -F lab-scan.jsonl -o markdown -f lab-scan.md
+aiscan -F lab-scan.jsonl -o csv -f lab-scan.csv
 ```
 
-`-f` 是回放的渲染文件。当前 scan 参数解析器没有 `--report`，需要 Markdown 时使用上述回放渲染入口；得到的是事件记录的可读版本，不是额外一次模型审计报告。事件、原生产物与 Web 资产的关系见[事件与数据](architecture.md#事件与数据)。
+运行扫描、Agent 或使用 `-F` 回放时，均由 `-o` 选择格式、`-f` 指定文件；省略 `-f` 输出到标准输出。`stream-json` 是 `jsonl` 的别名，`md` 是 `markdown` 的别名。当前 scan 参数解析器没有 `--report`，需要 Markdown 时使用上述回放渲染入口；得到的是事件记录的可读版本，不是额外一次模型审计报告。事件、原生产物与 Web 资产的关系见[事件与数据](architecture.md#事件与数据)。
+
+CSV 每行对应一条已记录的扫描原生产物，包含目标、扫描器、结果类型、优先级和验证状态，以及 `data.*` 列中的原生字段；数组和对象保留为 JSON 单元格。同一 `result_id` 的最终 Loot 标记合并到对应产物，未验证记录的验证状态留空。只有终端文本或旧式 `-j` 输出的文件不能替代 AOP 事件文件；请在扫描时用 `-o jsonl -f lab-scan.jsonl` 保存记录。Web 资产表也支持直接导出 CSV。
 
 ## 与 Agent 配合
 

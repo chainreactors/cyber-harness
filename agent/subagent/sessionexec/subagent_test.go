@@ -92,7 +92,7 @@ func TestSubAgentCreateRequiresSpawningToolCallID(t *testing.T) {
 }
 
 func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
-	provider := &scriptedProvider{responses: []*provider.ChatCompletionResponse{
+	llm := &scriptedProvider{responses: []*provider.ChatCompletionResponse{
 		chatResponse(newTextMessage("assistant", "context result")),
 	}}
 
@@ -106,7 +106,7 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		mu.Unlock()
 	})
 	active := agent.NewAgent(agent.Config{Loop: agent.StandardLoop{},
-		Provider:  provider,
+		Provider:  llm,
 		Tools:     newTestTools(t),
 		Model:     "test-model",
 		SessionID: "active-session",
@@ -125,7 +125,7 @@ func TestSubAgentUsesExecutingAgentContext(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	completed := activeInbox.Drain()
-	if len(completed) != 1 || completed[0].Meta["subagent"] != "context-worker" {
+	if len(completed) != 1 || !strings.Contains(provider.MessageText(completed[0].Message), "context result") {
 		t.Fatalf("active inbox completion = %#v", completed)
 	}
 
@@ -193,8 +193,8 @@ func TestSubAgentAsyncOutlivesInvocationContext(t *testing.T) {
 	if len(completed) != 1 {
 		t.Fatalf("active inbox completion = %#v", completed)
 	}
-	if got := completed[0].Meta["status"]; got != "completed" {
-		t.Fatalf("subagent status = %v, want completed (%q)", got, provider.MessageText(completed[0].Message))
+	if got := provider.MessageText(completed[0].Message); !strings.Contains(got, `status="completed"`) {
+		t.Fatalf("subagent completion = %q, want completed status", got)
 	}
 }
 

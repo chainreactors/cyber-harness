@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/operation"
 	"github.com/chainreactors/cyber/core/telemetry"
 	coretool "github.com/chainreactors/cyber/core/tool"
@@ -318,20 +319,19 @@ type sessionSender struct {
 }
 
 func (c sessionSender) Send(ctx context.Context, space string, body protocols.SendMessage) (protocols.Message, error) {
-	meta := make(map[string]any, len(body.Meta)+2)
-	for k, v := range body.Meta {
-		meta[k] = v
-	}
-	delete(meta, "source_session_id")
-	delete(meta, "target_session_id")
-	if c.interrupt {
-		meta["interrupt"] = true
-	}
-	if c.source != "" {
-		meta["source_session_id"] = c.source
+	// The invocation owns provenance. CLI --meta may carry other applications'
+	// keys, but cannot forge lifecycle events or another session's identity.
+	meta := collaboration.Envelope{
+		Version: collaboration.Version, Event: collaboration.Message, ID: protocols.NewID(),
+		Source: collaboration.Address{SessionID: c.source},
+		Target: collaboration.Address{SessionID: c.target}, Interrupt: c.interrupt,
+	}.Meta()
+	for key, value := range body.Meta {
+		if !collaboration.IsField(key) {
+			meta[key] = value
+		}
 	}
 	if c.target != "" {
-		meta["target_session_id"] = c.target
 		if body.Refs == nil {
 			body.Refs = &protocols.Ref{}
 		} else {

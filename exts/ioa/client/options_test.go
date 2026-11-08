@@ -77,7 +77,7 @@ func TestAccessKeyURL(t *testing.T) {
 	}
 }
 
-func TestClientLegacyYAMLAndCLIOverride(t *testing.T) {
+func TestClientYAMLAndCLIOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("extensions:\n  ioa.client:\n    url: https://ioa.test\n    space: production\n    node_name: worker\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestClientLegacyYAMLAndCLIOverride(t *testing.T) {
 			want = explicit[ConfigKey]["space"].(string)
 		}
 		if value.Space != want || value.NodeName != "worker" || value.URL != "https://ioa.test" {
-			t.Fatalf("legacy options = %+v", value)
+			t.Fatalf("resolved options = %+v", value)
 		}
 	}
 }
@@ -122,7 +122,7 @@ func TestExtensionBuildDefaultsYieldToExplicitEmptyValues(t *testing.T) {
 }
 
 func TestEmptyEndpointSelectsMemoryExtension(t *testing.T) {
-	config, err := ConfigFromOption(nil)
+	config, err := ConfigFromOption(&cfg.Option{})
 	if err != nil || config == nil || config.URL != "" || config.Space != "default" || !config.RegisterCommands {
 		t.Fatalf("config: %+v %v", config, err)
 	}

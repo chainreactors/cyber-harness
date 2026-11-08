@@ -72,6 +72,24 @@ aiscan doctor --online
 
 `doctor` 默认检查配置和目录条件，不访问网络、不启动扫描；`--online` 才执行模型及宿主提供的已配置连接检查。未配置可选模型会跳过连接测试。检查失败退出码为 1；成功为 0。命令支持 `--json`，提示信息写 stderr。
 
+## Inbox 子命令与持久状态
+
+```yaml
+inbox:
+  state_dir: .cyber/active
+  max_active: 4         # 正在执行的根任务数；Inbox 等待释放名额，同一任务始终串行
+agent:
+  timeout: 0           # 共用执行设置，秒；inbox 默认 0，agent 默认 3600
+```
+
+通过 `aiscan inbox` 启动常驻 Router，`aiscan agent` 保留现有 prompt／REPL 行为；配置文件不能切换启动子命令。`inbox.state_dir` 与 `inbox.max_active` 对应子命令专属参数 `--state-dir`、`--max-active`，不出现在 `agent` 的参数中。`max_active: 0` 使用默认 4，负值报错。共用的 `agent` 执行设置和 `--timeout` 仍适用；`inbox` 默认不限时，不覆盖 YAML 或 CLI 显式 timeout，显式 `0` 表示不限时。
+
+`inbox` 目前只支持本地宿主，transport 使用 `local` 或没有 server URL 的 `auto`；不能与 `--server-url`、web 或 stdio transport 组合。恢复使用状态目录，不接受 `agent` 的 JSONL `--resume`。`inbox` 配置属于宿主本地配置，不作为远程 Agent 配置下发。
+
+状态目录相对宿主工作目录解析，默认 `.cyber/active`，包含 `active.sqlite`、WAL 文件和用于所有权锁的 `owner.sqlite`。目录只能由一个 inbox 宿主持有，退出或崩溃后释放锁；再次使用该目录恢复任务历史、未处理输入、结果 outbox 与来源游标。应把整个目录作为一个持久状态单元管理，不单独复制正在写入的数据库文件。
+
+`inbox` 的 IOA 身份由 hostname 与绝对状态目录派生；保持二者不变才能在同一 IOA 服务上恢复原地址。更换目录或主机名会使用另一绑定。任务共享宿主工作目录，历史隔离不提供文件隔离。操作说明见 [Inbox 常驻路由](agent.md#inbox-常驻路由)。
+
 ## 协作连接配置
 
 IOA 客户端与服务端使用独立的扩展配置。在包含这些扩展的发行版中，可合并到 `cyber.yaml`：

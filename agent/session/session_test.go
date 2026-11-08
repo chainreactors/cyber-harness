@@ -459,7 +459,7 @@ func TestStatusReportsLLMAndToolHealth(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]}`))
 	}))
 	defer srv.Close()
-	if _, _, err := rt.providers.Reload(context.Background(), providerapi.ProviderConfig{
+	if _, _, err := rt.config.Providers.Reload(context.Background(), providerapi.ProviderConfig{
 		Provider: "openai", Model: "gpt-test", BaseURL: srv.URL + "/v1", APIKey: "test",
 		ContextWindow: 128000, MaxTokens: 8192, Timeout: 45,
 	}, nil); err != nil {
@@ -678,8 +678,8 @@ func newBareRuntime(t *testing.T, values []coretool.Command, provider providerap
 	application := apptest.NewFixture(t, nil, nil)
 	application.Providers.Set(provider, providerapi.ProviderConfig{})
 	rt := &Runtime{
-		history: JSONLHistory{}, primarySessionID: "main-repl", providers: application.Providers, events: application.Stream, Logger: application.Logger, ctx: ctx, cancel: cancel,
-		commandRegistry: reg, tools: tools, shell: bash,
+		config:           Config{History: JSONLHistory{}, Providers: application.Providers, Events: application.Stream, CommandRegistry: reg, Tools: tools, Shell: bash},
+		primarySessionID: "main-repl", Logger: application.Logger, ctx: ctx, cancel: cancel,
 		sessions: make(map[string]*sessionState), runs: make(map[string]*Run),
 		agentConfig: agent.Config{Loop: agent.StandardLoop{}, Provider: provider, Tools: tools, Bus: application.Stream, Logger: telemetry.NopLogger(), PromptResolver: defaultPromptResolver(t)},
 		closeDone:   make(chan struct{}), loaded: true,
@@ -688,7 +688,7 @@ func newBareRuntime(t *testing.T, values []coretool.Command, provider providerap
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt.commands, rt.commandIndex = commandValues, commandIndex
+	rt.config.Commands, rt.commandIndex = commandValues, commandIndex
 	t.Cleanup(func() {
 		_ = terminalSet.Close(context.Background())
 	})

@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	aop "github.com/chainreactors/cyber/aop"
 	types "github.com/chainreactors/cyber/core/types"
+	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/charmbracelet/glamour"
 	"github.com/muesli/termenv"
 )
@@ -32,24 +34,41 @@ func RenderEventsMarkdown(w io.Writer, events []*aop.Event) error {
 }
 
 // RenderEventFile renders an AOP Event ProtoJSONL file.
-func RenderEventFile(path, format, outputPath string) error {
-	var writer io.Writer = os.Stdout
-	if outputPath != "" {
-		file, err := os.Create(outputPath)
-		if err != nil {
-			return fmt.Errorf("create output file: %w", err)
-		}
-		defer file.Close()
-		writer = file
+func RenderEventFile(path, format, outputPath string, stdout ...io.Writer) error {
+	format, err := cfg.NormalizeOutputFormat(format)
+	if err != nil {
+		return err
 	}
 	events, err := eventjsonl.ReadJSONL(path)
 	if err != nil {
 		return err
 	}
-	if strings.EqualFold(format, "markdown") || strings.EqualFold(format, "md") {
-		return RenderEventsMarkdown(writer, events)
+	if outputPath != "" {
+		input, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if output, err := os.Stat(outputPath); err == nil && os.SameFile(input, output) {
+			return fmt.Errorf("rendered output must differ from the input event file")
+		}
 	}
-	return RenderEvents(writer, events)
+	var rendered bytes.Buffer
+	renderer := NewEventWriter(&rendered, format)
+	for _, event := range events {
+		renderer.HandleEvent(event)
+	}
+	if err := renderer.Close(); err != nil {
+		return err
+	}
+	if outputPath != "" {
+		return os.WriteFile(outputPath, rendered.Bytes(), 0o644)
+	}
+	var writer io.Writer = os.Stdout
+	if len(stdout) > 0 && stdout[0] != nil {
+		writer = stdout[0]
+	}
+	_, err = rendered.WriteTo(writer)
+	return err
 }
 
 func BuildEventMarkdown(events []*aop.Event) string {

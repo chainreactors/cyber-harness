@@ -97,7 +97,7 @@ func TestWithdrawalWaitsForFinalRecordAndNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := parent.Cfg.Inbox.Drain()
-	if len(messages) != 1 || messages[0].Meta["status"] != "canceled" || parent.Cfg.Inbox.ActiveProducers() != 0 {
+	if len(messages) != 1 || !strings.Contains(messages[0].Message.Content[0].GetText().GetText(), `status="canceled"`) || parent.Cfg.Inbox.ActiveProducers() != 0 {
 		t.Fatalf("completion=%v producers=%d", messages, parent.Cfg.Inbox.ActiveProducers())
 	}
 }

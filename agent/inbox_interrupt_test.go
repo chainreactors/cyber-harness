@@ -11,8 +11,106 @@ import (
 	"github.com/chainreactors/cyber/agent/inbox"
 	"github.com/chainreactors/cyber/agent/provider"
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/hooks"
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
+
+func TestInboxWaitRejectsParallelWork(t *testing.T) {
+	llm := &scriptedProvider{responses: []*provider.ChatCompletionResponse{
+		chatResponse(ChatMessage{Role: "assistant", ToolCalls: []ToolCall{
+			{ID: "wait", Type: "function", Function: FunctionCall{Name: "inbox_wait", Arguments: `{}`}},
+			{ID: "work", Type: "function", Function: FunctionCall{Name: "work", Arguments: `{}`}},
+		}}),
+		chatResponse(NewTextMessage("assistant", "finished")),
+	}}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	ag := NewAgent(Config{Loop: StandardLoop{}, Provider: llm, MaxParallelTools: 1, Tools: newTestTools(t, &InboxWaitTool{}, &recordingTool{name: "work", output: "work done"})})
+	result, err := ag.Run(ctx, TextInput("parallel wait and work"))
+	if err != nil || result.Output != "finished" {
+		t.Fatalf("result=%v err=%v", result, err)
+	}
+	waitRejected, workDone := false, false
+	for _, m := range llm.requestsSnapshot()[1].Messages {
+		for _, part := range m.Content {
+			if result := part.GetToolResult(); result != nil {
+				waitRejected = waitRejected || result.Name == "inbox_wait" && result.IsError && strings.Contains(coretool.ResultText(result), "Call inbox_wait alone")
+				workDone = workDone || result.Name == "work" && coretool.ResultText(result) == "work done"
+			}
+		}
+	}
+	if !waitRejected || !workDone {
+		t.Fatalf("wait rejected=%v work=%v", waitRejected, workDone)
+	}
+}
+
+func TestInboxWaitTimeoutReacquiresWithRunContext(t *testing.T) {
+	ib := inbox.NewBuffered(1)
+	defer ib.Close()
+	reg := hooks.New()
+	resuming, release := make(chan struct{}), make(chan struct{})
+	agenthooks.InboxWait.On(reg, "test.resume", func(ctx context.Context, event agenthooks.InboxWaitEvent) (struct{}, error) {
+		if !event.Waiting {
+			if err := ctx.Err(); err != nil {
+				return struct{}{}, err
+			}
+			close(resuming)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return struct{}{}, ctx.Err()
+			}
+		}
+		return struct{}{}, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	ctx = ContextWithToolAgentConfig(inbox.ContextWithInbox(ctx, ib), Config{SessionID: "worker", Hooks: reg})
+	done := make(chan error, 1)
+	go func() { _, err := (&InboxWaitTool{}).Execute(ctx, `{"timeout":1}`); done <- err }()
+	select {
+	case <-resuming:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("resumed before capacity admission: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func TestInboxWaitPairsResumeAfterHandlerFailure(t *testing.T) {
+	ib := inbox.NewBuffered(1)
+	defer ib.Close()
+	reg := hooks.New()
+	suspended := false
+	agenthooks.InboxWait.On(reg, "test.capacity", func(_ context.Context, event agenthooks.InboxWaitEvent) (struct{}, error) {
+		suspended = event.Waiting
+		return struct{}{}, nil
+	})
+	failure := errors.New("later wait handler failed")
+	agenthooks.InboxWait.On(reg, "test.failure", func(_ context.Context, event agenthooks.InboxWaitEvent) (struct{}, error) {
+		if event.Waiting {
+			return struct{}{}, failure
+		}
+		return struct{}{}, nil
+	})
+	ctx := ContextWithToolAgentConfig(inbox.ContextWithInbox(t.Context(), ib), Config{SessionID: "worker", Hooks: reg})
+	_, err := (&InboxWaitTool{}).Execute(ctx, "{}")
+	if !errors.Is(err, failure) || suspended {
+		t.Fatalf("failed wait did not restore capacity: suspended=%v err=%v", suspended, err)
+	}
+}
 
 func TestInboxInterruptContinuesSameRun(t *testing.T) {
 	ib := inbox.NewBuffered(8)

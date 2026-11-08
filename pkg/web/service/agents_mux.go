@@ -37,7 +37,7 @@ func (p *AgentPool) registerAgentNamespaces(mux *aop.NamespaceMux, agent *remote
 		if value.GetLibrary() == nil && value.GetIdle() == nil {
 			return fmt.Errorf("unsupported JEV reply")
 		}
-		p.finishAgentTask(agent, envelope.ReplyTo, protobuf.CloneOf(value))
+		agent.finishTask(envelope.ReplyTo, protobuf.CloneOf(value))
 		return nil
 	}); err != nil {
 		return err
@@ -50,7 +50,7 @@ func (p *AgentPool) registerAgentNamespaces(mux *aop.NamespaceMux, agent *remote
 		if value.GetPendingResult() == nil && value.GetResolved() == nil {
 			return fmt.Errorf("unsupported guardrail reply")
 		}
-		p.finishAgentTask(agent, envelope.ReplyTo, protobuf.CloneOf(value))
+		agent.finishTask(envelope.ReplyTo, protobuf.CloneOf(value))
 		return nil
 	}); err != nil {
 		return err
@@ -151,7 +151,7 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 			agent.openSessions[accepted.Id] = struct{}{}
 			agent.mu.Unlock()
 		}
-		p.finishAgentTask(agent, correlationID, protobuf.CloneOf(response))
+		agent.finishTask(correlationID, protobuf.CloneOf(response))
 
 	case *aop.ProtocolMessage_CloseSessionResponse:
 		response := payload.CloseSessionResponse
@@ -160,22 +160,22 @@ func (p *AgentPool) handleAgentCoreMessage(agent *remoteAgent, envelope *aop.Env
 			delete(agent.openSessions, accepted.Id)
 			agent.mu.Unlock()
 		}
-		p.finishAgentTask(agent, correlationID, protobuf.CloneOf(response))
+		agent.finishTask(correlationID, protobuf.CloneOf(response))
 
 	case *aop.ProtocolMessage_RunTurnResponse:
 		if rejected := payload.RunTurnResponse.GetRejected(); rejected != nil {
-			p.finishAgentTask(agent, correlationID, protobuf.CloneOf(payload.RunTurnResponse))
+			agent.finishTask(correlationID, protobuf.CloneOf(payload.RunTurnResponse))
 		}
 
 	case *aop.ProtocolMessage_CancelTurnResponse:
-		p.finishAgentTask(agent, correlationID, protobuf.CloneOf(payload.CancelTurnResponse))
+		agent.finishTask(correlationID, protobuf.CloneOf(payload.CancelTurnResponse))
 
 	case *aop.ProtocolMessage_Event:
 		p.forwardAOPFrame(agent, correlationID, payload.Event)
 
 	case *aop.ProtocolMessage_ProtocolError:
 		if payload.ProtocolError != nil {
-			p.finishAgentTask(agent, correlationID, protobuf.CloneOf(payload.ProtocolError))
+			agent.finishTask(correlationID, protobuf.CloneOf(payload.ProtocolError))
 		}
 	}
 }
@@ -191,7 +191,7 @@ func (p *AgentPool) handleAgentCommandMessage(agent *remoteAgent, envelope *aop.
 		return
 	}
 	if result := value.GetResult(); result != nil {
-		p.finishAgentTask(agent, envelope.ReplyTo, protobuf.CloneOf(result))
+		agent.finishTask(envelope.ReplyTo, protobuf.CloneOf(result))
 	}
 }
 
@@ -200,7 +200,7 @@ func (p *AgentPool) handleAgentFileMessage(agent *remoteAgent, envelope *aop.Env
 		return
 	}
 	if result := value.GetResult(); result != nil {
-		p.finishAgentTask(agent, envelope.ReplyTo, protobuf.CloneOf(result))
+		agent.finishTask(envelope.ReplyTo, protobuf.CloneOf(result))
 	}
 }
 
@@ -226,13 +226,6 @@ func (p *AgentPool) handleAgentReloadMessage(agent *remoteAgent, value *types.Re
 	agent.mu.Unlock()
 }
 
-func (p *AgentPool) finishAgentTask(agent *remoteAgent, taskID string, result protobuf.Message) {
-	if agent == nil {
-		return
-	}
-	agent.finishTask(taskID, result)
-}
-
 func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, event *aop.Event) {
 	if event == nil || event.Payload == nil {
 		return
@@ -254,7 +247,7 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 				// task correlation cannot resolve them. Accept the event only
 				// when this exact agent has the Runtime session open; this keeps
 				// standalone scan telemetry from leaking into chat history.
-				if agent.state().sessionOpen(event.SessionId) {
+				if agent.sessionOpen(event.SessionId) {
 					sessionID = event.SessionId
 				} else {
 					sessionID = ""
@@ -294,9 +287,10 @@ func (p *AgentPool) forwardAOPFrame(agent *remoteAgent, correlationID string, ev
 	}
 	switch event.Payload.(type) {
 	case *aop.Event_TurnEnded:
-		agent.state().convergeOnTurnEnd(event.TurnId, event)
+		// Runtime already published the terminal error; release without a second terminal.
+		agent.finishTask(event.TurnId, nil)
 	case *aop.Event_ToolResult:
-		agent.state().convergeOnToolResult(correlationID, event)
+		agent.convergeOnToolResult(correlationID, event)
 	}
 }
 

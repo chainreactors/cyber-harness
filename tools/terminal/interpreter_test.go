@@ -108,6 +108,67 @@ func TestShellCommandComposition(t *testing.T) {
 	}
 }
 
+func TestForegroundStdinDefaultsToEOF(t *testing.T) {
+	for _, command := range []string{"read line", "memory_upper", "memory_upper | memory_upper"} {
+		t.Run(command, func(t *testing.T) {
+			bash, _, _ := newAdapterTestBash(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			result, err := bash.Execute(ctx, fmt.Sprintf(`{"command":%q}`, command))
+			if err != nil || ctx.Err() != nil || result == nil {
+				t.Fatalf("foreground stdin did not reach EOF: result=%v err=%v context=%v", result, err, ctx.Err())
+			}
+			if result.IsError != (command == "read line") {
+				t.Fatalf("unexpected EOF exit status: %v", result)
+			}
+		})
+	}
+}
+
+func TestForegroundPreservesExplicitStdin(t *testing.T) {
+	bash, _, _ := newAdapterTestBash(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	var output bytes.Buffer
+	execution, err := bash.RunForeground(ctx, "memory_upper", BashExecOptions{
+		Stdin: strings.NewReader("provided input"), Stdout: &output,
+	})
+	if err != nil || ctx.Err() != nil {
+		t.Fatalf("explicit stdin: err=%v context=%v", err, ctx.Err())
+	}
+	info, _ := execution.Session()
+	if info.ExitStatus() != 0 || output.String() != "PROVIDED INPUT" {
+		t.Fatalf("explicit stdin: status=%d output=%q", info.ExitStatus(), output.String())
+	}
+}
+
+func TestExplicitWaitPreservesTmuxInput(t *testing.T) {
+	bash, _, _ := newAdapterTestBash(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result, err := bash.Execute(ctx, `{"command":"read line; printf 'received:%s' \"$line\"","wait":1}`)
+	if err != nil || result == nil || result.IsError || !strings.Contains(coretool.ResultText(result), "moved to background") {
+		t.Fatalf("background read: result=%v err=%v", result, err)
+	}
+	sessions := bash.Manager().List()
+	if len(sessions) != 1 {
+		t.Fatalf("sessions=%v", sessions)
+	}
+	id := sessions[0].ID
+	tmux := NewTmuxCommand(bash)
+	if _, err := tmux.Run(ctx, &coretool.Execution{Args: []string{"send-keys", "-t", id, "hello", "Enter"}, Stdout: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-bash.Manager().Done(id):
+	case <-ctx.Done():
+		t.Fatal("background read did not receive tmux input")
+	}
+	if output := bash.Manager().PeekOrEmpty(id, 20); !strings.Contains(output, "received:hello") {
+		t.Fatalf("background output=%q", output)
+	}
+}
+
 func TestInterpreterPreservesNativeCommandValues(t *testing.T) {
 	want := []string{"", "two words", "|", ">", "&&", "$HOME", `a\nb`}
 	details := func() int { return 42 }

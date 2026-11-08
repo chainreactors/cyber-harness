@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	harness "github.com/chainreactors/cyber/core/collaboration"
 	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/chainreactors/cyber/core/types"
 
@@ -97,7 +98,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 			send := func(sender, id string) {
 				t.Helper()
 				select {
-				case feed <- protocols.Message{ID: id, Sender: sender, Content: map[string]any{"text": id}}:
+				case feed <- protocols.Message{ID: id, Sender: sender, Meta: harness.Envelope{Version: harness.Version, Event: harness.Message}.Meta(), Content: map[string]any{"text": id}}:
 				case <-ctx.Done():
 					t.Fatal("send timed out")
 				}
@@ -106,7 +107,7 @@ func TestRegistrationSpaceAndSubscriptionRecovery(t *testing.T) {
 				t.Helper()
 				select {
 				case message := <-received:
-					if message.Origin != inbox.OriginPeer || message.Meta["message_id"] != id {
+					if message.Origin != inbox.OriginPeer || message.Message.Id != id || message.Meta.MessageID != id {
 						t.Fatalf("unexpected peer message: %#v", message)
 					}
 				case <-ctx.Done():

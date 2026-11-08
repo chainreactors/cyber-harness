@@ -4,6 +4,7 @@ import type { ExtensionResolver } from '../runtime/conversation'
 import type { ToolCallEntry } from '../../cyber-ui/packages/viewer/src/types/timeline'
 import { eventTime, jevEvent, runtimeEvents, type JEVCompilation, type JEVSegment, type JEVCheck, type JEVRecord, type JEVStep } from './jev-view'
 import { decisionOptions, decisionText, parseJEVJSON, evaluationChoice, evaluationNumber } from './jev-decisions'
+import { normalizeTokenUsage } from '../../cyber-ui/packages/viewer/src/lib/token-usage'
 
 export type WorkflowState = 'pending' | 'completed' | 'failed' | 'interrupted'
 export type WorkflowNode = {
@@ -52,7 +53,23 @@ export function workflowNodeSummary(node: WorkflowNode): string {
   else if (payload?.case === 'generation') text = latest?.case === 'generation' ? latest.value.error : payload.value.error
   else if (payload?.case === 'libraryChange') text = payload.value.reason || payload.value.claim?.context || payload.value.reflex?.when || ''
   else if (node.item?.kind === 'assistant_response') text = node.item.thinking || node.item.response?.content || ''
+  else if (node.item?.kind === 'extension' && node.item.extensionType === 'eval') text = String(node.item.data.reason || '')
   return decisionText(text).replace(/\s+/g, ' ').trim().slice(0, 180)
+}
+
+// Use each recorded model counter once. Compiler summaries contain their child
+// rounds, and a reasoning/response pair may share the same assistant message.
+export function workflowNodeUsage(node: WorkflowNode, nodes: readonly WorkflowNode[]) {
+  if (node.item?.kind === 'assistant_response') return normalizeTokenUsage(node.item.response?.metadata?.usage)
+  const payload = [...(node.related || [])].reverse().find(record =>
+    record.value.payload.case === 'decisionResult' || record.value.payload.case === 'generation' && record.value.payload.value.state === 'finished')?.value.payload
+  if (payload?.case === 'decisionResult') return normalizeTokenUsage(payload.value.usage)
+  if (payload?.case !== 'generation' || payload.value.kind === 'reflex_validation') return null
+  const generation = payload.value
+  if (generation.kind === 'reflex_llm' && generation.requestId && nodes.some(other => other.sessionId === node.sessionId
+    && other.turnId === node.turnId && other.related?.some(record => record.value.payload.case === 'generation'
+      && record.value.payload.value.parentRequestId === generation.requestId && record.value.payload.value.usage))) return null
+  return normalizeTokenUsage(generation.usage)
 }
 
 // Every recorded step gets its own row on a shared downward time axis.
@@ -195,6 +212,9 @@ export function withWorkflows(items: ViewerTimelineItem[], source: readonly AOPE
         if (item.thinking?.trim()) add({ ...base, id: scope(sid, tid, item.id, 'thinking'), kind: 'reasoning', label: 'workflow.reasoning',
           state: item.streaming ? 'pending' : 'completed', item: { ...item, tools: [], steps: undefined,
             response: item.response?.content.trim() || item.response?.metadata?.recap ? undefined : item.response } })
+        else if (!item.response?.content.trim() && item.response?.metadata?.usage) add({ ...base,
+          id: scope(sid, tid, item.id, 'model'), kind: 'model', label: 'workflow.model', state: item.streaming ? 'pending' : 'completed',
+          item: { ...item, tools: [], steps: undefined } })
         for (const tool of item.tools) addTool(tool, base)
         if (item.response?.content.trim() || item.response?.metadata?.recap) {
           const timestamp = textEvents.length ? eventTime(textEvents[textEvents.length - 1]) : base.timestamp
@@ -227,10 +247,10 @@ export function withWorkflows(items: ViewerTimelineItem[], source: readonly AOPE
       const sid = event?.sessionId || session || nearby?.sessionId || 'conversation', tid = event?.turnId || turn || nearby?.turnId || ''
       const base = { actor: item.actorName || 'Agent', sessionId: sid, turnId: tid, timestamp: item.timestamp, lane: scope(sid, 'foreground') }
       if (item.kind === 'tool_call') { addTool(item.toolCall, base); continue }
-      const label = item.kind === 'extension' ? item.extensionType === 'guardrail' ? 'workflow.guardrail' : item.extensionType
+      const label = item.kind === 'extension' ? item.extensionType === 'guardrail' ? 'workflow.guardrail' : item.extensionType === 'eval' ? 'workflow.evaluation' : item.extensionType
         : item.kind === 'divider' ? 'workflow.error' : item.role === 'thinking' ? 'workflow.reasoning' : 'workflow.response'
       add({ ...base, id: scope(sid, tid, item.id), kind: item.kind === 'extension' ? item.extensionType : item.kind,
-        label, literal: item.kind === 'extension' && item.extensionType !== 'guardrail', state: item.kind === 'divider' ? 'failed'
+        label, literal: item.kind === 'extension' && !['guardrail', 'eval'].includes(item.extensionType), state: item.kind === 'divider' || item.kind === 'extension' && item.extensionType === 'eval' && item.data.pass === false ? 'failed'
           : item.kind === 'extension' && item.data.awaiting === true ? 'pending' : 'completed', item })
     }
   }

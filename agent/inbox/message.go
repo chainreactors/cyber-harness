@@ -6,6 +6,7 @@ import (
 	"time"
 
 	aop "github.com/chainreactors/cyber/aop"
+	"github.com/chainreactors/cyber/core/collaboration"
 )
 
 type Origin string
@@ -32,13 +33,47 @@ type Attachment struct {
 	Error   string
 }
 
+// Metadata is the fixed routing and provenance envelope for an inbox message.
+type Metadata struct {
+	Sender          string                  `json:"sender,omitempty"`
+	MessageID       string                  `json:"message_id,omitempty"`
+	SourceSessionID string                  `json:"source_session_id,omitempty"`
+	TargetSessionID string                  `json:"target_session_id,omitempty"`
+	Space           string                  `json:"space,omitempty"`
+	TaskID          string                  `json:"task_id,omitempty"`
+	Kind            string                  `json:"kind,omitempty"`
+	FeedbackID      string                  `json:"feedback_id,omitempty"`
+	FeedbackChain   []string                `json:"feedback_chain,omitempty"`
+	SourceTaskID    string                  `json:"source_task_id,omitempty"`
+	ExecutionID     string                  `json:"execution_id,omitempty"`
+	Status          string                  `json:"status,omitempty"`
+	ReplyNode       string                  `json:"reply_node,omitempty"`
+	ReplySession    string                  `json:"reply_session,omitempty"`
+	ReplyMessage    string                  `json:"reply_message,omitempty"`
+	Record          *collaboration.Envelope `json:"record,omitempty"`
+}
+
+func (m Metadata) Clone() Metadata {
+	m.FeedbackChain = append([]string(nil), m.FeedbackChain...)
+	if m.Record != nil {
+		record := *m.Record
+		record.Chain = append([]string(nil), record.Chain...)
+		if record.Agent != nil {
+			agent := *record.Agent
+			record.Agent = &agent
+		}
+		m.Record = &record
+	}
+	return m
+}
+
 type Message struct {
 	Message     *aop.Message
 	Origin      Origin
 	Priority    Priority
 	Interrupt   bool // Request the current consumer to yield after this message is admitted.
 	Attachments []Attachment
-	Meta        map[string]any
+	Meta        Metadata
 	CreatedAt   time.Time
 }
 
@@ -101,10 +136,14 @@ func (m Message) renderContent() string {
 		if !m.CreatedAt.IsZero() {
 			sb.WriteString(fmt.Sprintf(" time=%q", m.CreatedAt.Format(time.RFC3339)))
 		}
-		if sender, _ := m.Meta["sender"].(string); sender != "" {
-			sb.WriteString(fmt.Sprintf(" sender=%q", sender))
+		if m.Meta.Sender != "" {
+			sb.WriteString(fmt.Sprintf(" sender=%q", m.Meta.Sender))
 		}
-		if msgID, _ := m.Meta["message_id"].(string); msgID != "" {
+		msgID := m.Meta.MessageID
+		if msgID == "" && m.Message != nil {
+			msgID = m.Message.Id
+		}
+		if msgID != "" {
 			sb.WriteString(fmt.Sprintf(" message_id=%q", msgID))
 		}
 		sb.WriteString(">\n")

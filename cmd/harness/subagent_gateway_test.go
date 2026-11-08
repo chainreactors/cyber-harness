@@ -119,10 +119,15 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 	role := "probe"
 	if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
 		role = requestAgentRole(body)
-		if g.longTask {
+		if len(tools) == 1 {
+			if definition, ok := tools[0].(map[string]any); ok && field(definition, "function", "name") == "inbox_route" {
+				role = "router"
+			}
+		}
+		if g.longTask && role != "router" {
 			role = longTaskRole(body)
 		}
-		if g.gameTask {
+		if g.gameTask && role != "router" {
 			role = longRequestSession(body)
 			if role != "black" && role != "white" {
 				g.reject(w, fmt.Errorf("game only has black and white players, got %q", role))
@@ -140,7 +145,7 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 				continue
 			}
 			name, _ := field(item, "function", "name").(string)
-			if name == "bash" || (g.gameTask && name == "inbox_wait") || (name == "subagent" && role == "parent") ||
+			if (role == "router" && name == "inbox_route") || name == "bash" || (g.gameTask && name == "inbox_wait") || (name == "subagent" && role == "parent") ||
 				(g.longTask && (name == "read" || name == "ls" || name == "glob" || name == "write")) {
 				restricted = append(restricted, item)
 			}
@@ -246,7 +251,17 @@ func (g *subagentGateway) serve(ctx context.Context, w http.ResponseWriter, r *h
 		calls, err = completionToolCalls(response, stream, maxCalls)
 	}
 	if err == nil {
-		if g.gameTask {
+		if role == "router" {
+			for _, call := range calls {
+				var args struct {
+					SessionID string `json:"session_id"`
+				}
+				if call.Function.Name != "inbox_route" || json.Unmarshal([]byte(call.Function.Arguments), &args) != nil || strings.TrimSpace(args.SessionID) == "" {
+					err = fmt.Errorf("router may only forward messages to a nonempty session_id")
+					break
+				}
+			}
+		} else if g.gameTask {
 			// Game rules live in the task, not in a scripted tool sequence.
 			// The ordinary application executes the model's actual calls.
 		} else if g.longTask {

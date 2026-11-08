@@ -132,13 +132,13 @@ func RunIOANodes(ctx context.Context, client ioatools.Reader, option *ConsoleOpt
 
 func shortID(id string) string { return id[:min(len(id), 8)] }
 
-func (r *presentation) renderIOASpaces(ctx context.Context, client ioatools.Reader) error {
+func renderIOASpaces(ctx context.Context, client ioatools.Reader, view consoleapi.View) error {
 	spaces, err := client.ListSpaces(ctx)
 	if err != nil {
 		return err
 	}
 	if len(spaces) == 0 {
-		fmt.Fprintln(r.stderr, "no spaces found")
+		fmt.Fprintln(view.Err, "no spaces found")
 		return nil
 	}
 	rows := make([][]string, 0, len(spaces))
@@ -148,25 +148,25 @@ func (r *presentation) renderIOASpaces(ctx context.Context, client ioatools.Read
 			fmt.Sprintf("%d node", len(s.Nodes)), fmt.Sprintf("%d msg", s.MessageCount),
 		})
 	}
-	r.printBoxTable("spaces", rows)
+	view.Table("spaces", rows)
 	return nil
 }
 
-func (r *presentation) renderIOANodes(ctx context.Context, client ioatools.Reader, space string) error {
+func renderIOANodes(ctx context.Context, client ioatools.Reader, view consoleapi.View, space string) error {
 	if space != "" {
 		sp, err := client.ResolveSpace(ctx, space)
 		if err != nil {
 			return err
 		}
 		if len(sp.Nodes) == 0 {
-			fmt.Fprintf(r.stderr, "no nodes in space %q\n", sp.Name)
+			fmt.Fprintf(view.Err, "no nodes in space %q\n", sp.Name)
 			return nil
 		}
 		rows := make([][]string, 0, len(sp.Nodes))
 		for _, n := range sp.Nodes {
 			rows = append(rows, []string{shortID(n.ID), n.Name, n.Description})
 		}
-		r.printBoxTable("nodes", rows)
+		view.Table("nodes", rows)
 		return nil
 	}
 	nodes, err := client.ListNodes(ctx)
@@ -174,18 +174,18 @@ func (r *presentation) renderIOANodes(ctx context.Context, client ioatools.Reade
 		return err
 	}
 	if len(nodes) == 0 {
-		fmt.Fprintln(r.stderr, "no nodes found")
+		fmt.Fprintln(view.Err, "no nodes found")
 		return nil
 	}
 	rows := make([][]string, 0, len(nodes))
 	for _, n := range nodes {
 		rows = append(rows, []string{shortID(n.ID), n.Name})
 	}
-	r.printBoxTable("nodes", rows)
+	view.Table("nodes", rows)
 	return nil
 }
 
-func (r *presentation) renderIOAMessages(ctx context.Context, client ioatools.Reader, space string) error {
+func renderIOAMessages(ctx context.Context, client ioatools.Reader, view consoleapi.View, space string) error {
 	sp, err := client.ResolveSpace(ctx, space)
 	if err != nil {
 		return err
@@ -195,18 +195,16 @@ func (r *presentation) renderIOAMessages(ctx context.Context, client ioatools.Re
 		return err
 	}
 	if len(messages) == 0 {
-		fmt.Fprintf(r.stderr, "no start messages in space %q\n", sp.Name)
+		fmt.Fprintf(view.Err, "no start messages in space %q\n", sp.Name)
 		return nil
 	}
 	rows := make([][]string, 0, len(messages))
 	for _, m := range messages {
 		rows = append(rows, []string{shortID(m.ID), m.Sender, contentPreview(m.Content, 48)})
 	}
-	r.printBoxTable("messages", rows)
+	view.Table("messages", rows)
 	return nil
 }
-
-func (r *presentation) printBoxTable(title string, rows [][]string) { r.view.Table(title, rows) }
 
 func contentPreview(content map[string]any, maxLen int) string {
 	if text, ok := content["text"].(string); ok {
@@ -231,7 +229,3 @@ func writeJSONOutput(w io.Writer, v any) error {
 
 type ConsoleOptions struct{ JSON bool }
 type ConsoleArgs struct{ Space, MessageID string }
-type presentation struct {
-	view           consoleapi.View
-	stdout, stderr io.Writer
-}
