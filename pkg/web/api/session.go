@@ -39,7 +39,7 @@ type SessionStore interface {
 	UpdateSession(context.Context, *types.SessionRecord) error
 	DeleteSession(context.Context, string) error
 	LinkScanToSession(context.Context, string, string) error
-	ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, error)
+	ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, int64, error)
 }
 
 // SessionRuntime is the Agent/AOP execution boundary. Sessions owns request
@@ -415,7 +415,7 @@ func (s *Sessions) turnEnded(ctx context.Context, sessionID, turnID string) (boo
 	}); ok {
 		return indexed.HasTurnEnded(ctx, sessionID, turnID)
 	}
-	items, err := s.store.ListAOPEventsAfter(ctx, sessionID, 0, 0)
+	items, _, err := s.store.ListAOPEventsAfter(ctx, sessionID, 0, 0)
 	if err != nil {
 		return false, err
 	}
@@ -634,7 +634,7 @@ func (s *Sessions) ListEvents(ctx context.Context, request *aop.ListEventsReques
 	if err != nil {
 		return nil, NewError(CodeInvalidArgument, err)
 	}
-	stored, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, int(request.Limit))
+	stored, _, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, int(request.Limit))
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -671,39 +671,29 @@ func (s *Sessions) WatchEvents(ctx context.Context, request *aop.WatchEventsRequ
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		replayed, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, watchReplayBatchSize)
+		replayed, next, err := s.store.ListAOPEventsAfter(ctx, request.SessionId, after, watchReplayBatchSize)
 		if err != nil {
 			return fmt.Errorf("replay events: %w", err)
 		}
-		if len(replayed) == 0 {
-			break
-		}
-		prevAfter := after
 		for _, item := range replayed {
-			if item == nil {
-				continue
-			}
-			if item.Event == nil {
-				// Still move past it, so a page of empty rows can't stop the replay early.
-				if cursor, err := parseAOPCursor(item.Cursor); err == nil && cursor > after {
-					after = cursor
-				}
+			if item == nil || item.Event == nil {
 				continue
 			}
 			cursor, err := parseAOPCursor(item.Cursor)
 			if err != nil {
 				return err
 			}
-			if cursor > after {
-				after = cursor
-			}
 			if err := send(item); err != nil {
 				return err
 			}
+			if cursor > after {
+				after = cursor
+			}
 		}
-		if len(replayed) < watchReplayBatchSize || after == prevAfter {
+		if next == 0 {
 			break
 		}
+		after = next
 	}
 	for {
 		select {

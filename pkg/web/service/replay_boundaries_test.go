@@ -27,12 +27,9 @@ func TestReplayFromZeroAndPaginationPreserveEarlyEvents(t *testing.T) {
 			var after int64
 			seen := 0
 			for {
-				page, err := store.ListAOPEventsAfter(t.Context(), "long-history", after, limit)
+				page, next, err := store.ListAOPEventsAfter(t.Context(), "long-history", after, limit)
 				if err != nil {
 					t.Fatal(err)
-				}
-				if len(page) == 0 {
-					break
 				}
 				for _, item := range page {
 					seen++
@@ -45,13 +42,17 @@ func TestReplayFromZeroAndPaginationPreserveEarlyEvents(t *testing.T) {
 					}
 					after = cursor
 				}
+				if next == 0 {
+					break
+				}
+				after = next
 			}
 			if seen != count {
 				t.Fatalf("history lost events: replayed %d of %d", seen, count)
 			}
 		})
 	}
-	all, err := store.ListAOPEventsAfter(t.Context(), "long-history", 0, 0)
+	all, _, err := store.ListAOPEventsAfter(t.Context(), "long-history", 0, 0)
 	if err != nil || len(all) != count || all[0].Event.Id != "event-1" {
 		t.Fatalf("complete replay = %d events, %v", len(all), err)
 	}

@@ -504,7 +504,9 @@ func (s *SQLiteStore) ListAOPEventPage(ctx context.Context, sessionID string, be
 	return events, next, nil
 }
 
-func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, after int64, limit int) ([]*aop.EventDelivery, error) {
+// ListAOPEventsAfter returns events and a continuation cursor (zero to stop).
+// The cursor advances over stored rows even when their events are filtered.
+func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, after int64, limit int) ([]*aop.EventDelivery, int64, error) {
 	query := s.orm.NewSelect().Model((*aopEventModel)(nil)).Column("cursor", "event_proto").
 		Where("session_id = ? AND cursor > ?", sessionID, after).OrderExpr("cursor ASC")
 	if limit > 0 {
@@ -515,20 +517,24 @@ func (s *SQLiteStore) ListAOPEventsAfter(ctx context.Context, sessionID string, 
 	}
 	var models []aopEventModel
 	if err := query.Model(&models).Scan(ctx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	events := make([]*aop.EventDelivery, 0, len(models))
 	for _, model := range models {
 		event, err := eventFromProto(model.EventProto)
 		if err != nil {
-			return nil, fmt.Errorf("decode AOP event at cursor %d: %w", model.Cursor, err)
+			return nil, 0, fmt.Errorf("decode AOP event at cursor %d: %w", model.Cursor, err)
 		}
 		if event.GetSessionId() == "" || event.GetPayload() == nil {
 			continue
 		}
 		events = append(events, &aop.EventDelivery{Cursor: strconv.FormatInt(model.Cursor, 10), Event: event})
 	}
-	return events, nil
+	var next int64
+	if limit > 0 && len(models) == limit {
+		next = models[len(models)-1].Cursor
+	}
+	return events, next, nil
 }
 
 func eventFromProto(raw []byte) (*aop.Event, error) {

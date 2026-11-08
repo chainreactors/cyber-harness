@@ -83,8 +83,8 @@ func (s *sessionTestStore) DeleteSession(context.Context, string) error {
 
 func (*sessionTestStore) LinkScanToSession(context.Context, string, string) error { return nil }
 
-func (*sessionTestStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, error) {
-	return nil, nil
+func (*sessionTestStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, int64, error) {
+	return nil, 0, nil
 }
 
 type sessionTestRuntime struct {

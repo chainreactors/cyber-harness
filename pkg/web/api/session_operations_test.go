@@ -254,8 +254,8 @@ type turnReplayStore struct {
 	events []*aop.EventDelivery
 }
 
-func (s *turnReplayStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, error) {
-	return s.events, nil
+func (s *turnReplayStore) ListAOPEventsAfter(context.Context, string, int64, int) ([]*aop.EventDelivery, int64, error) {
+	return s.events, 0, nil
 }
 
 func TestLegacyStoreTerminalLookupMatchesOriginAndExecutionGeneration(t *testing.T) {

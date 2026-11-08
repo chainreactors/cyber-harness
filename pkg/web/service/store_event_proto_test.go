@@ -47,7 +47,7 @@ func TestStoredEventsRetainUnknownProtobufData(t *testing.T) {
 	if _, _, err := store.AppendAOPEvent(t.Context(), "session", event); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.ListAOPEventsAfter(t.Context(), "session", 0, 10)
+	page, _, err := store.ListAOPEventsAfter(t.Context(), "session", 0, 10)
 	if err != nil || len(page) != 1 || !proto.Equal(page[0].Event, event) {
 		t.Fatalf("unknown payload was changed: %v, %v", page, err)
 	}
