@@ -19,10 +19,11 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 	if !online {
 		return nil
 	}
-	value, err := DistributeFromOption(option)
+	value, err := cfg.SharedFromOption(option)
 	if err != nil {
 		return []configuration.Check{{Name: "connections", Message: "cannot resolve connection settings"}}
 	}
+	cfg.NormalizeLLMConfig(value.Llm)
 	var selected []string
 	if hub, err := scannerext.ReadCyberhub(option); err == nil && hub.URL != "" {
 		selected = append(selected, scannerext.CyberhubConfigKey)

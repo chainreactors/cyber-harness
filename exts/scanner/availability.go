@@ -27,7 +27,7 @@ func availability(commands []coretool.Command, engines *engine.Set) *Availabilit
 		if !registered[name] {
 			state.State = "unavailable"
 			state.Reason = "required scanner engine is unavailable"
-		} else if name != "curl" && name != "katana" {
+		} else if name != "curl" {
 			if engines == nil || engines.Resources == nil {
 				state.State = "degraded"
 				state.Reason = "scanner resources are unavailable"

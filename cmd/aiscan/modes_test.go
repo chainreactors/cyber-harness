@@ -151,6 +151,8 @@ func TestDirectScannerJSONOutputUsesCommandSpecificFlags(t *testing.T) {
 		{name: "gogo previous results input", args: []string{"gogo", "-j", "previous.json"}, want: false},
 		{name: "zombie stdout json", args: []string{"zombie", "-o", "json"}, want: true},
 		{name: "curl request", args: []string{"curl", "--json", "{}", "http://127.0.0.1"}, want: false},
+		{name: "literal JSON flag", args: []string{"scan", "--", "--json"}, want: false},
+		{name: "literal output format", args: []string{"gogo", "--", "-o", "jsonl"}, want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

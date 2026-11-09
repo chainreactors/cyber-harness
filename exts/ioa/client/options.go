@@ -55,11 +55,7 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 	if option.Resolved != nil {
 		decoded, err = cfg.Get[*Options](option.Resolved, ConfigKey)
 	} else {
-		registry := cfg.NewSections()
-		if _, err = registry.Add(Section()); err != nil {
-			return Options{}, err
-		}
-		raw, decodeErr := registry.Decode(ConfigKey, option.Extensions[ConfigKey])
+		raw, decodeErr := Section().Decode(option.Extensions[ConfigKey])
 		err = decodeErr
 		if err == nil {
 			decoded = raw.(*Options)

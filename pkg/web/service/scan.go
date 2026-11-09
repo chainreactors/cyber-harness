@@ -17,6 +17,7 @@ import (
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
 	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -69,7 +70,7 @@ func (s *Service) SubmitScan(ctx context.Context, target, mode string, options *
 		return nil, ErrScanUnavailable
 	}
 
-	now := nowProto()
+	now := timestamppb.Now()
 	scan := &scanpb.Scan{
 		Id:        generateID(),
 		Target:    target,
@@ -136,7 +137,7 @@ func (s *Service) CancelScan(id string) error {
 		return fmt.Errorf("%w: scan %s is %s", ErrScanNotCancelable, id, scanStatusToDB(scan.Status))
 	}
 	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
-	scan.UpdatedAt = nowProto()
+	scan.UpdatedAt = timestamppb.Now()
 	changed, err := s.store.TransitionScan(ctx, scan, scanpb.ScanStatus_SCAN_STATUS_RUNNING, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil {
 		return err
@@ -201,7 +202,7 @@ func (s *Service) runScan(runCtx context.Context, scanID string) {
 		return
 	}
 	scan.Status = scanpb.ScanStatus_SCAN_STATUS_RUNNING
-	scan.UpdatedAt = nowProto()
+	scan.UpdatedAt = timestamppb.Now()
 	changed, err := s.store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED)
 	if err != nil || !changed {
 		return
@@ -283,7 +284,7 @@ func (s *Service) finishScanContext(scan *scanpb.Scan, err error) {
 	}
 	next := proto.CloneOf(scan)
 	next.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
-	next.UpdatedAt = nowProto()
+	next.UpdatedAt = timestamppb.Now()
 	if changed, _ := s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING); changed {
 		s.broadcastScanStatus(scan.Id, next.Status)
 	}
@@ -293,7 +294,7 @@ func (s *Service) completeScan(ctx context.Context, scan *scanpb.Scan) (bool, er
 	next := proto.CloneOf(scan)
 	next.Status = scanpb.ScanStatus_SCAN_STATUS_COMPLETED
 	next.Error = ""
-	next.UpdatedAt = nowProto()
+	next.UpdatedAt = timestamppb.Now()
 	changed, err := s.store.TransitionScan(ctx, next, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err
@@ -308,7 +309,7 @@ func (s *Service) failScan(scan *scanpb.Scan, errMsg string) (bool, error) {
 	next := proto.CloneOf(scan)
 	next.Status = scanpb.ScanStatus_SCAN_STATUS_FAILED
 	next.Error = errMsg
-	next.UpdatedAt = nowProto()
+	next.UpdatedAt = timestamppb.Now()
 	changed, err := s.store.TransitionScan(context.Background(), next, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		return changed, err

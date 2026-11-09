@@ -178,17 +178,10 @@ func parseCLI(args []string, stdout io.Writer) (parsedCLI, error) {
 	}
 
 	var cli cliOptions
-	parser := newCLIParser(&cli, parserOptionsForArgs(args))
-	rest, err := parser.ParseArgs(args)
+	parser := newCLIParser(&cli, goflags.Default&^goflags.PrintErrors)
+	_, err := parser.ParseArgs(args)
 	if err != nil {
 		if flagsErr, ok := err.(*goflags.Error); ok && flagsErr.Type == goflags.ErrHelp {
-			if scannerName := firstCommandName(args, rootFlagValueArity); productScannerAvailable(scannerName) {
-				option := cfg.Option{MiscOptions: cli.MiscOptions}
-				finalizeOptions(&option, nil)
-				option.Timeout = 3600
-				scannerArgs := append([]string{scannerName}, argsAfterCommand(args, scannerName)...)
-				return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: scannerArgs}, nil
-			}
 			writeHelp(parser, stdout)
 			return parsedCLI{Mode: cfg.RunModeNoCommand, Help: true}, nil
 		}
@@ -223,17 +216,6 @@ func parseCLI(args []string, stdout io.Writer) (parsedCLI, error) {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
 
-	if mode == cfg.RunModeScanner {
-		scannerName := selectedScanner(parser)
-		option.Timeout = 3600
-		scannerRest, err := applyScannerCommandArgs("", rest, &option)
-		if err != nil {
-			return parsedCLI{Option: option, Mode: mode}, err
-		}
-		scannerArgs := append([]string{scannerName}, scannerRest...)
-		return parsedCLI{Option: option, Mode: mode, ScannerArgs: scannerArgs}, nil
-	}
-
 	if mode == runModeWeb {
 		return parsedCLI{Option: option, Mode: runModeWeb, WebOpts: cli.Web}, nil
 	}
@@ -242,15 +224,21 @@ func parseCLI(args []string, stdout io.Writer) (parsedCLI, error) {
 }
 
 func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout io.Writer) (parsedCLI, error) {
-	var manual cfg.Option
-	filteredRootArgs, err := applyScannerCommandArgs("", rootArgs, &manual)
+	var option cfg.Option
+	filteredRootArgs, err := applyScannerCommandArgs("", rootArgs, &option)
 	if err != nil {
-		return parsedCLI{Option: manual, Mode: cfg.RunModeScanner, ScannerArgs: []string{scannerName}}, err
+		return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: []string{scannerName}}, err
 	}
-	var cli cliOptions
-	parser := newCLIParser(&cli, goflags.Default&^goflags.PrintErrors)
+	cli := cliOptions{MiscOptions: option.MiscOptions}
+	options := goflags.Options(goflags.Default &^ goflags.PrintErrors)
 	if scannerName == "scan" {
-		parser = newCLIParser(&cli, (goflags.Default&^goflags.PrintErrors)|goflags.IgnoreUnknown)
+		options |= goflags.IgnoreUnknown
+	}
+	parser := newCLIParser(&cli, options)
+	if option.OutputFormat != "" {
+		// The adapter already consumed this flag; keep the parser's default
+		// from replacing the supplied format.
+		parser.Group.FindOptionByLongName("output-format").Default = []string{option.OutputFormat}
 	}
 	_, parseErr := parser.ParseArgs(filteredRootArgs)
 	if parseErr != nil {
@@ -261,16 +249,12 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout 
 		}
 	}
 
-	option := cfg.Option{MiscOptions: cli.MiscOptions}
+	option.MiscOptions = cli.MiscOptions
 	finalizeOptions(&option, nil)
-	mergeManualScannerOptions(&option, manual)
 	if parseErr != nil {
 		return parsedCLI{Option: option, Mode: cfg.RunModeScanner, ScannerArgs: []string{scannerName}}, parseErr
 	}
 	cfg.CaptureExplicitFlags(&option, parser)
-	for flag := range manual.Explicit {
-		option.MarkExplicit(flag)
-	}
 	if cli.Version {
 		return parsedCLI{Option: option, Mode: cfg.RunModeNoCommand}, nil
 	}
@@ -299,50 +283,6 @@ func parseScannerCLI(scannerName string, rootArgs, scannerRest []string, stdout 
 		Mode:        cfg.RunModeScanner,
 		ScannerArgs: append([]string{scannerName}, scannerArgs...),
 	}, nil
-}
-
-func mergeManualScannerOptions(option *cfg.Option, manual cfg.Option) {
-	option.OutputFile = cfg.ResolveString(manual.OutputFile, option.OutputFile)
-	option.OutputFormat = cfg.ResolveString(manual.OutputFormat, option.OutputFormat)
-	option.Observe = cfg.ResolveString(manual.Observe, option.Observe)
-	option.JSON = option.JSON || manual.JSON
-	option.ActiveProfile = cfg.ResolveString(manual.ActiveProfile, option.ActiveProfile)
-	option.Provider = cfg.ResolveString(manual.Provider, option.Provider)
-	option.BaseURL = cfg.ResolveString(manual.BaseURL, option.BaseURL)
-	option.APIKey = cfg.ResolveString(manual.APIKey, option.APIKey)
-	option.Model = cfg.ResolveString(manual.Model, option.Model)
-	if manual.MaxTokens != 0 {
-		option.MaxTokens = manual.MaxTokens
-	}
-	if manual.ContextWindow != 0 {
-		option.ContextWindow = manual.ContextWindow
-	}
-	option.LLMProxy = cfg.ResolveString(manual.LLMProxy, option.LLMProxy)
-	if manual.AI {
-		option.AI = true
-	}
-	for key, fields := range manual.Extensions {
-		if option.Extensions == nil {
-			option.Extensions = cfg.Values{}
-		}
-		target := option.Extensions[key]
-		if target == nil {
-			target = map[string]any{}
-			option.Extensions[key] = target
-		}
-		for name, value := range fields {
-			target[name] = value
-		}
-	}
-	if manual.NoColor {
-		option.NoColor = true
-	}
-	option.Prompt = cfg.ResolveString(manual.Prompt, option.Prompt)
-	option.TaskFile = cfg.ResolveString(manual.TaskFile, option.TaskFile)
-	option.Resume = cfg.ResolveString(manual.Resume, option.Resume)
-	if len(manual.Skills) > 0 {
-		option.Skills = append(option.Skills, manual.Skills...)
-	}
 }
 
 func buildOption(cli *cliOptions, parser *goflags.Parser) cfg.Option {
@@ -429,54 +369,25 @@ Examples:
 	return parser
 }
 
-func parserOptionsForArgs(args []string) goflags.Options {
-	options := goflags.Options(goflags.Default &^ goflags.PrintErrors)
-	if len(args) == 0 {
-		return options
-	}
-	if productScannerAvailable(firstCommandName(args, rootFlagValueArity)) {
-		options |= goflags.IgnoreUnknown
-	}
-	return options
-}
-
 func splitScannerCommand(args []string) (string, []string, []string, bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if productScannerAvailable(arg) {
-			return arg, append([]string(nil), args[:i]...), append([]string(nil), args[i+1:]...), true
-		}
-		if shouldSkipRootFlagValue(arg) && i+1 < len(args) {
-			i++
-		}
-	}
-	return "", nil, nil, false
-}
-
-func shouldSkipRootFlagValue(arg string) bool {
-	key, _, hasValue := strings.Cut(arg, "=")
-	if hasValue {
-		return false
-	}
-	return rootFlagValueArity[key] > 0
-}
-
-func firstCommandName(args []string, valueArity map[string]int) string {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
 		if arg == "--" {
-			return ""
+			break
 		}
 		if strings.HasPrefix(arg, "-") {
 			key, _, hasValue := strings.Cut(arg, "=")
 			if !hasValue {
-				i += valueArity[key]
+				i += rootFlagValueArity[key]
 			}
 			continue
 		}
-		return arg
+		if productScannerAvailable(arg) {
+			return arg, append([]string(nil), args[:i]...), append([]string(nil), args[i+1:]...), true
+		}
+		break
 	}
-	return ""
+	return "", nil, nil, false
 }
 
 type knownFlag struct {
@@ -574,19 +485,6 @@ var scannerKnownFlags = []knownFlag{
 	{names: []string{"--observe"}, arity: 1, apply: func(o *cfg.Option, v string) { o.Observe = v }},
 }
 
-var rootOnlyFlagValueArity = map[string]int{
-	"--input":         1,
-	"-i":              1,
-	"--view":          1,
-	"-F":              1,
-	"-o":              1,
-	"--output-format": 1,
-	"--observe":       1,
-	"--file":          1,
-	"-f":              1,
-	"--timeout":       1,
-}
-
 var rootFlagValueArity = buildRootFlagValueArity()
 
 func buildRootFlagValueArity() map[string]int {
@@ -598,19 +496,7 @@ func buildRootFlagValueArity() map[string]int {
 			m[name] = f.arity
 		}
 	}
-	for name, arity := range rootOnlyFlagValueArity {
-		m[name] = arity
-	}
 	return m
-}
-
-func argsAfterCommand(args []string, command string) []string {
-	for i, arg := range args {
-		if arg == command {
-			return append([]string(nil), args[i+1:]...)
-		}
-	}
-	return nil
 }
 
 func selectedMode(parser *goflags.Parser) cfg.RunMode {
@@ -633,21 +519,13 @@ func selectedMode(parser *goflags.Parser) cfg.RunMode {
 	return cfg.RunModeNoCommand
 }
 
-func selectedScanner(parser *goflags.Parser) string {
-	active := parser.Active
-	if active == nil {
-		return ""
-	}
-	if productScannerAvailable(active.Name) {
-		return active.Name
-	}
-	return ""
-}
-
 func applyScannerCommandArgs(scannerName string, args []string, option *cfg.Option) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			return append(out, args[i:]...), nil
+		}
 		key, value, hasValue := strings.Cut(arg, "=")
 		matched := false
 		for _, f := range scannerKnownFlags {

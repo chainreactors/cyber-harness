@@ -17,6 +17,7 @@ import (
 	webpkg "github.com/chainreactors/cyber/pkg/web"
 	scanpb "github.com/chainreactors/cyber/pkg/web/scan"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func waitScanStatus(t *testing.T, store *SQLiteStore, id string, want scanpb.ScanStatus) *scanpb.Scan {
@@ -235,7 +236,7 @@ func TestRemoteScanTimeoutCancelsAgentAndFailsScan(t *testing.T) {
 
 	scan := &scanpb.Scan{
 		Id: "timeout-scan", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
@@ -299,7 +300,7 @@ func TestRemoteScanExpiredBeforeDispatchFailsScan(t *testing.T) {
 
 	scan := &scanpb.Scan{
 		Id: "expired-scan", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_RUNNING, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
@@ -408,7 +409,7 @@ func TestCompleteScanCannotOverwriteCanceledScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	scan := &scanpb.Scan{Id: "scan-canceled", Target: "127.0.0.1", Mode: "quick", Status: scanpb.ScanStatus_SCAN_STATUS_CANCELED, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+	scan := &scanpb.Scan{Id: "scan-canceled", Target: "127.0.0.1", Mode: "quick", Status: scanpb.ScanStatus_SCAN_STATUS_CANCELED, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now()}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
@@ -442,8 +443,8 @@ func TestCancelCompletedScanReturnsConflictAndPreservesStatus(t *testing.T) {
 		Target:    "127.0.0.1",
 		Mode:      "quick",
 		Status:    scanpb.ScanStatus_SCAN_STATUS_COMPLETED,
-		CreatedAt: nowProto(),
-		UpdatedAt: nowProto(),
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)

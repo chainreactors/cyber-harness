@@ -391,7 +391,7 @@ func shouldCompactContext(contextTokens, contextWindow int, settings CompactionS
 
 func runAutoCompaction(ctx context.Context, cfg Config, em *aopEmitter, transcript *transcript, reason string, contextTokens int) (bool, error) {
 	reserve, keepRecent := effectiveCompactionLimits(cfg.ContextWindow, cfg.Compaction)
-	if len(transcript.messages) < 2 || findCutPoint(transcript.messages, keepRecent) <= 0 {
+	if len(transcript.messages) < 2 || findCompactionCut(transcript.messages, keepRecent).FirstKept <= 0 {
 		return false, nil
 	}
 	if canceled, hookReason := compactCanceled(ctx, cfg, reason, contextTokens); canceled {

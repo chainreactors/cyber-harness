@@ -36,11 +36,7 @@ func ReadScan(option *cfg.Option) (ScanOptions, error) {
 		}
 		return *decoded, nil
 	}
-	registry := cfg.NewSections()
-	if _, err := registry.Add(ScanSection()); err != nil {
-		return ScanOptions{}, err
-	}
-	raw, err := registry.Decode(ScanConfigKey, option.Extensions[ScanConfigKey])
+	raw, err := ScanSection().Decode(option.Extensions[ScanConfigKey])
 	if err != nil {
 		return ScanOptions{}, err
 	}

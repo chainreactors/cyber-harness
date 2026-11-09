@@ -16,7 +16,6 @@ import (
 	profile "github.com/chainreactors/cyber/pkg/profile"
 	web "github.com/chainreactors/cyber/pkg/web"
 	managementapi "github.com/chainreactors/cyber/pkg/web/api"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ScanServiceConfig enables the scan console. A nil Scans field disables it:
@@ -217,8 +216,6 @@ func generateID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
-
-func nowProto() *timestamppb.Timestamp { return timestamppb.New(time.Now()) }
 
 func (s *Service) Status() *types.SystemStatus {
 	providers := s.providers()

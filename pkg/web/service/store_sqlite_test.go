@@ -23,7 +23,7 @@ import (
 func createStoredSession(t *testing.T, store *SQLiteStore, id string) {
 	t.Helper()
 	if err := store.CreateSession(context.Background(), &types.SessionRecord{
-		Session: &aop.Session{Id: id, State: SessionStateOpen}, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Session: &aop.Session{Id: id, State: SessionStateOpen}, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatalf("CreateSession(%q): %v", id, err)
 	}
@@ -108,7 +108,7 @@ func TestSessionScanAssociationsAreReadOnlyExtensions(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 	createStoredSession(t, store, "session-1")
-	if err := store.Create(ctx, &scanpb.Scan{Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: nowProto(), UpdatedAt: nowProto()}); err != nil {
+	if err := store.Create(ctx, &scanpb.Scan{Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.LinkScanToSession(ctx, "session-1", "scan-1"); err != nil {
@@ -317,8 +317,8 @@ func TestSQLiteStorePersistsAnalysisOptions(t *testing.T) {
 		Mode:      "quick",
 		Options:   &scanpb.ScanOptions{Verify: proto.Bool(true)},
 		Status:    scanpb.ScanStatus_SCAN_STATUS_QUEUED,
-		CreatedAt: nowProto(),
-		UpdatedAt: nowProto(),
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -345,7 +345,7 @@ func TestSQLiteStoreUsesOnlyRelationalScanColumns(t *testing.T) {
 		Id: "scan-json", Target: "example.com", Mode: "full",
 		Options: &scanpb.ScanOptions{Verify: proto.Bool(true), Sniper: true},
 		Status:  scanpb.ScanStatus_SCAN_STATUS_RUNNING, Progress: "enumerating",
-		Error: "", CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Error: "", CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
@@ -446,14 +446,14 @@ func TestSQLiteStoreTransitionScanRequiresExpectedStatus(t *testing.T) {
 
 	scan := &scanpb.Scan{
 		Id: "scan-transition", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_QUEUED, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.Create(context.Background(), scan); err != nil {
 		t.Fatal(err)
 	}
 
 	scan.Status = scanpb.ScanStatus_SCAN_STATUS_CANCELED
-	scan.UpdatedAt = nowProto()
+	scan.UpdatedAt = timestamppb.Now()
 	changed, err := store.TransitionScan(context.Background(), scan, scanpb.ScanStatus_SCAN_STATUS_QUEUED, scanpb.ScanStatus_SCAN_STATUS_RUNNING)
 	if err != nil || !changed {
 		t.Fatalf("queued -> canceled = %v, %v; want true, nil", changed, err)
@@ -492,7 +492,7 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	now := time.Now()
 	session := &types.SessionRecord{
 		Session:   &aop.Session{Id: "session-cascade", State: SessionStateOpen},
-		CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}
 	if err := store.CreateSession(ctx, session); err != nil {
 		t.Fatal(err)
@@ -505,7 +505,7 @@ func TestSQLiteStoreEnablesForeignKeysAndCascadesSessionData(t *testing.T) {
 	}
 	if err := store.Create(ctx, &scanpb.Scan{
 		Id: "scan-cascade", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -551,12 +551,12 @@ func TestSessionFiltersApplyBeforePagination(t *testing.T) {
 	defer store.Close()
 	ctx := t.Context()
 	for i := 0; i < 125; i++ {
-		record := &types.SessionRecord{Session: &aop.Session{Id: fmt.Sprintf("s-%03d", i), NodeId: "offline", State: SessionStateOpen, Title: fmt.Sprintf("Task %03d", i)}, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+		record := &types.SessionRecord{Session: &aop.Session{Id: fmt.Sprintf("s-%03d", i), NodeId: "offline", State: SessionStateOpen, Title: fmt.Sprintf("Task %03d", i)}, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now()}
 		if err := store.CreateSession(ctx, record); err != nil {
 			t.Fatal(err)
 		}
 	}
-	scan := &scanpb.Scan{Id: "scan-target", Target: "https://target.test/path", Mode: "full", CreatedAt: nowProto(), UpdatedAt: nowProto()}
+	scan := &scanpb.Scan{Id: "scan-target", Target: "https://target.test/path", Mode: "full", CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now()}
 	if err := store.Create(ctx, scan); err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +597,7 @@ func TestArtifactArchiveRetainsLootInEitherArrivalOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		loot := &aop.Event{Id: "loot", EmittedAt: nowProto(), Payload: &aop.Event_Extension{Extension: payload}}
+		loot := &aop.Event{Id: "loot", EmittedAt: timestamppb.Now(), Payload: &aop.Event_Extension{Extension: payload}}
 		events := []*aop.Event{artifact, loot}
 		if lootFirst {
 			events = []*aop.Event{loot, artifact}

@@ -200,7 +200,7 @@ func (r *Registry) ValueArity() map[string]int {
 	visit = func(cmd *flags.Command) {
 		for _, option := range groupOptions(cmd.Group) {
 			kind := option.Field().Type
-			for kind.Kind() == reflect.Pointer {
+			for kind.Kind() == reflect.Pointer || kind.Kind() == reflect.Slice {
 				kind = kind.Elem()
 			}
 			arity := 1

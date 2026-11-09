@@ -64,11 +64,7 @@ func ReadRecon(option *cfg.Option) (ReconOptions, error) {
 		}
 		return value, nil
 	}
-	registry := cfg.NewSections()
-	if _, err := registry.Add(ReconSection()); err != nil {
-		return ReconOptions{}, err
-	}
-	raw, err := registry.Decode(ReconConfigKey, option.Extensions[ReconConfigKey])
+	raw, err := ReconSection().Decode(option.Extensions[ReconConfigKey])
 	if err != nil {
 		return ReconOptions{}, err
 	}

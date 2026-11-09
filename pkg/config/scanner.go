@@ -5,6 +5,9 @@ func IsScannerHelpRequest(args []string) bool {
 		return false
 	}
 	for _, arg := range args[1:] {
+		if arg == "--" {
+			break
+		}
 		if arg == "-h" || arg == "--help" {
 			return true
 		}

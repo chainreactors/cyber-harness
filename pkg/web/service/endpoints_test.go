@@ -24,6 +24,7 @@ import (
 	web "github.com/chainreactors/cyber/pkg/web"
 	"github.com/gorilla/websocket"
 	protobuf "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func newHandler(service web.Service, static http.Handler) *web.Handler {
@@ -193,7 +194,7 @@ func TestAOPServiceUsesSharedEnvelopeStreamOverConnectAndGRPC(t *testing.T) {
 	service := NewService(ServiceConfig{Store: store})
 	defer service.Close(context.Background())
 	if err := store.CreateSession(context.Background(), &types.SessionRecord{
-		Session: &aop.Session{Id: "session-1", State: SessionStateOpen}, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Session: &aop.Session{Id: "session-1", State: SessionStateOpen}, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +325,7 @@ func TestConnectBidiClientSessionLifecycle(t *testing.T) {
 
 	// A session bound to a node that is not connected: RunTurn must reject.
 	if err := store.CreateSession(ctx, &types.SessionRecord{
-		Session: &aop.Session{Id: "ghost-session", State: SessionStateOpen, NodeId: "node-ghost"}, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Session: &aop.Session{Id: "ghost-session", State: SessionStateOpen, NodeId: "node-ghost"}, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}

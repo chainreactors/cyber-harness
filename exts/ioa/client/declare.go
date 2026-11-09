@@ -45,9 +45,7 @@ func testConnection(ctx context.Context, in, stored *types.DistributeConfig) []*
 			if config == nil {
 				return Options{}
 			}
-			sections := cfg.NewSections()
-			_, _ = sections.Add(Section())
-			value, err := sections.Decode(ConfigKey, cfg.ValuesFromProto(config.Extensions)[ConfigKey])
+			value, err := Section().Decode(cfg.ValuesFromProto(config.Extensions)[ConfigKey])
 			if err != nil {
 				return Options{}
 			}
