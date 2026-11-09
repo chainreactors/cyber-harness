@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	provider "github.com/chainreactors/cyber/agent/provider"
@@ -45,9 +46,6 @@ func configuredScannerMode(option *cfg.Option, args []string) (scannerMode, []st
 			return scannerMode{}, nil, err
 		}
 		verify = scanOptions.Verify
-		if err := scan.ValidateVerify(verify); err != nil {
-			return scannerMode{}, nil, err
-		}
 	}
 	return resolveScannerMode(args, verify)
 }
@@ -59,12 +57,16 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 	if rest[0] != "scan" {
 		return scannerMode{}, rest, nil
 	}
-	verifyMode, explicit := scannerFlagValue(rest[1:], "--verify")
+	flags := rest[1:]
+	if end := slices.Index(flags, "--"); end >= 0 {
+		flags = flags[:end]
+	}
+	verifyMode, explicit := scannerFlagValue(flags, "--verify")
 	if !explicit {
 		verifyMode = defaultVerify
 	}
 	verifyMode = strings.ToLower(strings.TrimSpace(verifyMode))
-	if toolargs.HasFlag(rest[1:], "--deep") {
+	if toolargs.HasFlag(flags, "--deep") {
 		return scannerMode{}, nil, fmt.Errorf("--deep is no longer supported; use --mode full for full scanning")
 	}
 	if err := scan.ValidateVerify(verifyMode); err != nil {
@@ -74,7 +76,7 @@ func resolveScannerMode(rest []string, defaultVerify string) (scannerMode, []str
 		return scannerMode{}, nil, fmt.Errorf("--verify requires on or off")
 	}
 	mode := scannerMode{Provider: provider.StartupOptional}
-	if verifyMode == "on" || scannerBoolFlagEnabled(rest[1:], "--sniper") {
+	if verifyMode == "on" || scannerBoolFlagEnabled(flags, "--sniper") {
 		mode.Provider = provider.StartupRequired
 		mode.Agent = true
 	}
@@ -92,6 +94,9 @@ func shouldStreamScannerOutput(rest []string) bool {
 		return false
 	}
 	for _, arg := range rest[1:] {
+		if arg == "--" {
+			break
+		}
 		if arg == "--report" {
 			return false
 		}
@@ -125,6 +130,9 @@ func isDirectScannerJSONOutput(rest []string) bool {
 
 func scannerBoolFlagEnabled(args []string, names ...string) bool {
 	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
 		key, value, hasValue := strings.Cut(arg, "=")
 		for _, name := range names {
 			if key != name {
@@ -142,6 +150,9 @@ func scannerBoolFlagEnabled(args []string, names ...string) bool {
 
 func scannerFlagValue(args []string, names ...string) (string, bool) {
 	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
 		key, value, hasValue := strings.Cut(args[i], "=")
 		for _, name := range names {
 			if key != name {
@@ -163,6 +174,9 @@ func replaceOrAppendScannerFlag(args []string, flag, value string) []string {
 	out := append([]string(nil), args...)
 	for i := 1; i < len(out); i++ {
 		arg := out[i]
+		if arg == "--" {
+			return slices.Insert(out, i, flag+"="+value)
+		}
 		key, _, hasValue := strings.Cut(arg, "=")
 		if key != flag {
 			continue

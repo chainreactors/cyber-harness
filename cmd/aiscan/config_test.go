@@ -1,16 +1,109 @@
 package main
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/core/telemetry"
+	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 )
+
+func TestApplicationConfigMatchesRawAndResolvedSections(t *testing.T) {
+	lookup := func(string) (string, bool) { return "", false }
+	for _, test := range []struct {
+		name   string
+		fields cfg.Values
+	}{
+		{name: "defaults"},
+		{name: "explicit empty and zero", fields: cfg.Values{
+			scannerext.CyberhubConfigKey: {"url": "", "key": "", "mitm": false},
+			passiveconfig.ReconConfigKey: {"fofa_key": "", "limit": 0},
+			searchext.ConfigKey:          {"tavily_keys": ""},
+			scannerext.ScanConfigKey:     {"verify": "off"},
+			ioaclient.ConfigKey:          {"url": "", "space": ""},
+		}},
+		{name: "configured", fields: cfg.Values{
+			scannerext.CyberhubConfigKey: {"url": "https://hub.test", "key": "hub-key", "mode": "override", "mitm": true},
+			passiveconfig.ReconConfigKey: {"fofa_key": "fofa", "tavily_key": "recon-search", "limit": 42},
+			searchext.ConfigKey:          {"tavily_keys": "search-key"},
+			scannerext.ScanConfigKey:     {"verify": "on"},
+			ioaclient.ConfigKey:          {"url": "https://ioa.test", "space": "team", "node_name": "worker"},
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			option := &cfg.Option{
+				Extensions: cfg.CloneValues(test.fields), Context: &cfg.Context{LookupEnv: lookup},
+				NodeOptions: cfg.NodeOptions{NodeName: "fixture"},
+			}
+			logger := telemetry.NopLogger()
+			raw, err := configFromOption(option, provider.StartupDisabled, nil, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			option.Resolved, err = defaultSections().ResolveValues(test.fields, nil, lookup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			option.Extensions = option.Resolved.Values()
+			resolved, err := configFromOption(option, provider.StartupDisabled, nil, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The snapshot records how configuration was evaluated; compare the
+			// runtime settings that both read paths must produce.
+			raw.Base.Resolved = resolved.Base.Resolved
+			if !reflect.DeepEqual(raw.Base, resolved.Base) {
+				t.Fatalf("raw and resolved application settings differ:\nraw: %+v\nresolved: %+v", raw.Base, resolved.Base)
+			}
+			if raw.IOA.URL != resolved.IOA.URL || raw.IOA.Space != resolved.IOA.Space || raw.IOA.NodeName != resolved.IOA.NodeName {
+				t.Fatalf("raw and resolved IOA settings differ: raw=%+v resolved=%+v", raw.IOA, resolved.IOA)
+			}
+			if resolved.Base.MitmCapture != nil {
+				original := *resolved.Base.MitmCapture
+				*resolved.Base.MitmCapture = !original
+				hub, err := scannerext.ReadCyberhub(option)
+				if err != nil || hub.Mitm == nil || *hub.Mitm != original {
+					t.Fatalf("runtime mutation changed the resolved MITM setting: value=%+v err=%v", hub, err)
+				}
+			}
+			if resolved.Base.Recon.Limit != nil {
+				original := *resolved.Base.Recon.Limit
+				*resolved.Base.Recon.Limit = original + 1
+				recon, err := passiveconfig.ReadRecon(option)
+				if err != nil || recon.Limit == nil || *recon.Limit != original {
+					t.Fatalf("runtime mutation changed the resolved recon limit: value=%+v err=%v", recon, err)
+				}
+			}
+		})
+	}
+}
+
+func TestApplicationConfigRejectsInvalidSectionValues(t *testing.T) {
+	for _, test := range []struct {
+		section string
+		fields  map[string]any
+	}{
+		{scannerext.ScanConfigKey, map[string]any{"verify": "invalid"}},
+		{scannerext.CyberhubConfigKey, map[string]any{"unknown": "value"}},
+		{passiveconfig.ReconConfigKey, map[string]any{"limit": 1.5}},
+		{searchext.ConfigKey, map[string]any{"unknown": "value"}},
+		{ioaclient.ConfigKey, map[string]any{"url": "invalid"}},
+	} {
+		t.Run(test.section, func(t *testing.T) {
+			option := &cfg.Option{Extensions: cfg.Values{test.section: test.fields}}
+			if _, err := configFromOption(option, provider.StartupDisabled, nil, telemetry.NopLogger()); err == nil || !strings.Contains(err.Error(), test.section) {
+				t.Fatalf("invalid section %s was accepted: %v", test.section, err)
+			}
+		})
+	}
+}
 
 func TestApplicationConfigFromOptionCarriesWideSettings(t *testing.T) {
 	t.Setenv("SHODAN_API_KEY", "shodan-key")

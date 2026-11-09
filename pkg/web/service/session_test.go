@@ -26,7 +26,7 @@ func createTestSession(t *testing.T, svc *Service, nodeID, title string) *types.
 			agentName = info.Name()
 		}
 	}
-	now := nowProto()
+	now := timestamppb.Now()
 	session := &types.SessionRecord{
 		Session:   &aop.Session{Id: generateID(), State: SessionStateOpen, NodeId: nodeID, Title: title},
 		AgentName: agentName,
@@ -125,7 +125,7 @@ func TestOpenSessionLinksTypedScanExtension(t *testing.T) {
 	}
 	defer store.Close()
 	if err := store.Create(context.Background(), &scanpb.Scan{
-		Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Id: "scan-1", Target: "127.0.0.1", Mode: "quick", CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}

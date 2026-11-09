@@ -45,11 +45,7 @@ func ReadKeys(option *cfg.Option) (string, error) {
 		}
 		return decoded.TavilyKeys, nil
 	}
-	registry := cfg.NewSections()
-	if _, err := registry.Add(Section()); err != nil {
-		return "", err
-	}
-	raw, err := registry.Decode(ConfigKey, option.Extensions[ConfigKey])
+	raw, err := Section().Decode(option.Extensions[ConfigKey])
 	if err != nil {
 		return "", err
 	}

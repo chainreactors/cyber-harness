@@ -76,11 +76,7 @@ func ReadCyberhub(option *cfg.Option) (CyberhubOptions, error) {
 		}
 		return value, nil
 	}
-	registry := cfg.NewSections()
-	if _, err := registry.Add(CyberhubSection()); err != nil {
-		return CyberhubOptions{}, err
-	}
-	raw, err := registry.Decode(CyberhubConfigKey, option.Extensions[CyberhubConfigKey])
+	raw, err := CyberhubSection().Decode(option.Extensions[CyberhubConfigKey])
 	if err != nil {
 		return CyberhubOptions{}, err
 	}

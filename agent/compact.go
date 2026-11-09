@@ -244,11 +244,6 @@ func findCompactionCut(msgs []*aop.Message, keepTokens int) compactionCut {
 	return compactionCut{}
 }
 
-// findCutPoint is kept as the simple index helper used by trigger checks.
-func findCutPoint(msgs []*aop.Message, keepTokens int) int {
-	return findCompactionCut(msgs, keepTokens).FirstKept
-}
-
 func serializeMessages(msgs []*aop.Message) string {
 	var sb strings.Builder
 	for _, m := range msgs {

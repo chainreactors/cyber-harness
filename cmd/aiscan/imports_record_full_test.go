@@ -9,7 +9,9 @@ import (
 
 func TestRecordFullScannerSet(t *testing.T) {
 	want := []string{"curl", "gogo", "katana", "neutron", "passive", "proton", "scan", "spray", "zombie"}
-	if got := scannerNames(); !slices.Equal(got, want) {
+	got := productScannerNames()
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
 		t.Fatalf("record full scanners = %#v, want %#v", got, want)
 	}
 }

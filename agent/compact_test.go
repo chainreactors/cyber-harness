@@ -141,9 +141,9 @@ func TestFindCutPoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findCutPoint(tt.msgs, tt.keepTokens)
+			got := findCompactionCut(tt.msgs, tt.keepTokens).FirstKept
 			if got != tt.wantIdx {
-				t.Errorf("findCutPoint() = %d, want %d", got, tt.wantIdx)
+				t.Errorf("findCompactionCut().FirstKept = %d, want %d", got, tt.wantIdx)
 			}
 		})
 	}

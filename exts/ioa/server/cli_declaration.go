@@ -16,10 +16,7 @@ func RegisterCLI(reg *hostcli.Registry, run CLIExecute) error {
 			Token string `long:"token" description:"Server access key" default-mask:"***"`
 		}{}
 		action := hostcli.Action{Persistent: true, Run: func(ctx context.Context, env hostcli.Environment) error {
-			section := Section()
-			registry := cfg.NewSections()
-			_, _ = registry.Add(section)
-			v, err := registry.Decode(ConfigKey, env.Config.Extensions[ConfigKey])
+			v, err := Section().Decode(env.Config.Extensions[ConfigKey])
 			if err != nil {
 				return err
 			}

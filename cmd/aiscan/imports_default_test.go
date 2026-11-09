@@ -9,7 +9,8 @@ import (
 
 func TestDefaultScannerSet(t *testing.T) {
 	want := []string{"curl", "gogo", "neutron", "proton", "scan", "spray", "zombie"}
-	got := scannerNames()
+	got := productScannerNames()
+	slices.Sort(got)
 	if !slices.Equal(got, want) {
 		t.Fatalf("default scanners = %#v, want %#v", got, want)
 	}

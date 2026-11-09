@@ -1,8 +1,6 @@
 package scanner
 
 import (
-	"fmt"
-
 	"github.com/chainreactors/cyber/exts/proton"
 	"github.com/chainreactors/cyber/tools/curl"
 	"github.com/chainreactors/cyber/tools/gogo"
@@ -14,15 +12,6 @@ import (
 
 func Names() []string {
 	return []string{"curl", "gogo", "neutron", "proton", "spray", "zombie", "scan"}
-}
-
-func Available(name string) bool {
-	for _, available := range Names() {
-		if available == name {
-			return true
-		}
-	}
-	return false
 }
 
 func Usage(name string) (string, bool) {
@@ -44,16 +33,6 @@ func Usage(name string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func UsageLines() []string {
-	var result []string
-	for _, name := range Names() {
-		if description := Description(name); description != "" {
-			result = append(result, fmt.Sprintf("  %-15s%s", name, description))
-		}
-	}
-	return result
 }
 
 func Description(name string) string {

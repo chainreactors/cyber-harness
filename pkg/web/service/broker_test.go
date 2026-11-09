@@ -330,7 +330,7 @@ func TestScanCompletePersistsTypedAOPExtension(t *testing.T) {
 	createStoredSession(t, store, "session-scan")
 	if err := store.Create(context.Background(), &scanpb.Scan{
 		Id: "scan-123", Target: "127.0.0.1", Mode: "quick",
-		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: nowProto(), UpdatedAt: nowProto(),
+		Status: scanpb.ScanStatus_SCAN_STATUS_COMPLETED, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestWatchScanEventsImmediatelyReturnsTerminalSnapshot(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			scan := &scanpb.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: nowProto(), UpdatedAt: nowProto()}
+			scan := &scanpb.Scan{Id: "terminal-scan", Target: "127.0.0.1", Mode: "quick", Status: status, CreatedAt: timestamppb.Now(), UpdatedAt: timestamppb.Now()}
 			if err := store.Create(context.Background(), scan); err != nil {
 				t.Fatal(err)
 			}

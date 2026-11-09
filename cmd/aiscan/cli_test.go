@@ -216,12 +216,32 @@ func TestParseCLIDirectScannerAcceptsGlobalOutputBeforeCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
-	if parsed.Option.OutputFile != "events.jsonl" {
-		t.Fatalf("global output file = %q", parsed.Option.OutputFile)
+	if parsed.Option.OutputFormat != "jsonl" || parsed.Option.OutputFile != "events.jsonl" {
+		t.Fatalf("global output options = %+v", parsed.Option.MiscOptions)
 	}
 	wantArgs := []string{"gogo", "-i", "127.0.0.1", "-o", "jl"}
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIScannerRetainsRootConfigLocations(t *testing.T) {
+	for _, scanner := range []string{"scan", "gogo"} {
+		t.Run(scanner, func(t *testing.T) {
+			parsed, err := parseCLI([]string{
+				"--config", "custom.yaml", "--data-dir", "custom-data",
+				scanner, "-i", "127.0.0.1",
+			}, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parsed.Option.ConfigFile != "custom.yaml" || parsed.Option.DataDir != "custom-data" {
+				t.Fatalf("root config locations were lost: %+v", parsed.Option.MiscOptions)
+			}
+			if !parsed.Option.Explicit["config"] || !parsed.Option.Explicit["data-dir"] {
+				t.Fatalf("root config presence was lost: %v", parsed.Option.Explicit)
+			}
+		})
 	}
 }
 
@@ -441,7 +461,7 @@ func TestParseCLIAgentAcceptsLLMFlags(t *testing.T) {
 
 func TestAgentHelpRendersAgentOptionsWithoutRootCatalog(t *testing.T) {
 	var cli cliOptions
-	parser := newCLIParser(&cli, parserOptionsForArgs([]string{"agent", "-h"}))
+	parser := newCLIParser(&cli, goflags.Default&^goflags.PrintErrors)
 	_, err := parser.ParseArgs([]string{"agent", "-h"})
 	flagsErr, ok := err.(*goflags.Error)
 	if !ok || flagsErr.Type != goflags.ErrHelp {
@@ -605,6 +625,81 @@ func TestParseCLIRootPromptValueCanMatchScannerName(t *testing.T) {
 	wantArgs := []string{"scan", "-i", "127.0.0.1"}
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
+	}
+}
+
+func TestParseCLIKeepsScannerNamesInsideOtherCommands(t *testing.T) {
+	for _, args := range [][]string{
+		{"agent", "gogo"},
+		{"agent", "--", "scan"},
+		{"ioa", "spaces", "gogo"},
+		{"--", "scan", "-i", "127.0.0.1"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			parsed, _ := parseCLI(args, io.Discard)
+			if parsed.Mode == cfg.RunModeScanner || len(parsed.ScannerArgs) != 0 {
+				t.Fatalf("scanner name inside another command became a scanner invocation: mode=%q args=%v", parsed.Mode, parsed.ScannerArgs)
+			}
+		})
+	}
+}
+
+func TestParseCLIScannerAfterVerbosityFlags(t *testing.T) {
+	for _, test := range []struct {
+		flag, scanner string
+		verbosity     int
+	}{
+		{"-v", "gogo", 1},
+		{"--verbose", "scan", 1},
+		{"-vv", "gogo", 2},
+	} {
+		t.Run(test.flag, func(t *testing.T) {
+			parsed, err := parseCLI([]string{test.flag, test.scanner, "-i", "127.0.0.1"}, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if parsed.Mode != cfg.RunModeScanner || len(parsed.Option.Verbose) != test.verbosity {
+				t.Fatalf("verbosity flag consumed the scanner command: mode=%q verbose=%v", parsed.Mode, parsed.Option.Verbose)
+			}
+		})
+	}
+}
+
+func TestScannerArgumentsAfterTerminatorRemainLiteral(t *testing.T) {
+	for _, scanner := range []string{"scan", "gogo"} {
+		t.Run(scanner, func(t *testing.T) {
+			args := []string{scanner, "-i", "127.0.0.1", "--", "--model", "literal", "--file", "literal", "--debug"}
+			parsed, err := parseCLI(args, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(parsed.ScannerArgs, args) || parsed.Option.Model != "" || parsed.Option.OutputFile != "" || parsed.Option.Debug {
+				t.Fatalf("literal scanner arguments changed host settings: args=%q model=%q file=%q debug=%v", parsed.ScannerArgs, parsed.Option.Model, parsed.Option.OutputFile, parsed.Option.Debug)
+			}
+		})
+	}
+	for _, verify := range []string{"", "off", "on"} {
+		t.Run("verify="+verify, func(t *testing.T) {
+			args := []string{"scan", "-i", "127.0.0.1", "--", "--verify=invalid", "--sniper", "--deep", "--help", "--json", "--report"}
+			original := slices.Clone(args)
+			mode, resolved, err := resolveScannerMode(args, verify)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode.Agent != (verify == "on") {
+				t.Fatalf("literal flags changed scanner mode: %+v", mode)
+			}
+			want := slices.Clone(original)
+			if verify != "" {
+				want = slices.Insert(want, 3, "--verify="+verify)
+			}
+			if !slices.Equal(resolved, want) || !slices.Equal(args, original) {
+				t.Fatalf("scanner defaults crossed the terminator or changed the input: got=%q want=%q input=%q", resolved, want, args)
+			}
+			if cfg.IsScannerHelpRequest(resolved) || isDirectScannerJSONOutput(resolved) || !shouldStreamScannerOutput(resolved) {
+				t.Fatalf("literal flags changed help or output behavior: %q", resolved)
+			}
+		})
 	}
 }
 
