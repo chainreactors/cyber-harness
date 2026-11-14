@@ -27,7 +27,7 @@ $env:OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:24318'
 $env:OTEL_EXPORTER_OTLP_PROTOCOL = 'http/protobuf'
 $env:OTEL_SERVICE_NAME = 'cyber-harness'
 $env:CYBER_OTEL_PROJECT = 'cyber-harness'
-go run ./cmd/aiscan agent --prompt '用 Bash 执行 pwd，然后解释结果'
+go run ./cmd/cyber-scan agent --prompt '用 Bash 执行 pwd，然后解释结果'
 ```
 
 OTel 开启且未显式选择 `--observe` 时，自动启用现有 tools / commands / processes 观测。需要文件/HTTP 事实时使用 `--observe tools,commands,processes,files,http`；显式选择保持原样。OTLP 客户端使用 HTTP，gRPC 端口供其他客户端使用。

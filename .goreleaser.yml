@@ -1,6 +1,6 @@
 version: 2
 
-project_name: aiscan
+project_name: cyber-harness
 
 # This file is the build definition for the release workflow, which drives it
 # one target at a time:
@@ -8,7 +8,7 @@ project_name: aiscan
 #     GOOS=<goos> GOARCH=<goarch> goreleaser build --id <id> --single-target
 #
 # `goreleaser build` keeps ldflags, build tags and the CGO switch in one place
-# instead of spelling them out per profile in release-build.yml. Both editions
+# instead of spelling them out per profile in release-build.yml. All products
 # are pure Go and can be cross-compiled without a platform C toolchain.
 #
 # Packaging and publishing are deliberately absent. release-build.yml still
@@ -26,9 +26,9 @@ project_name: aiscan
 dist: .cache/goreleaser
 
 builds:
-  - id: aiscan
-    main: ./cmd/aiscan
-    binary: aiscan
+  - id: cyber-scan
+    main: ./cmd/cyber-scan
+    binary: cyber-scan
     env:
       - CGO_ENABLED=0
     goos:
@@ -46,9 +46,9 @@ builds:
     ldflags:
       - -s -w -X github.com/chainreactors/cyber/pkg/config.Version={{ .Version }}
 
-  - id: aiscan-full
-    main: ./cmd/aiscan
-    binary: aiscan-full
+  - id: cyber-harness
+    main: ./cmd/cyber-harness
+    binary: cyber-harness
     env:
       # CSTX runs in the browser through the TypeScript/WASM package; RE2 uses
       # the dependency's pure-Go backend.

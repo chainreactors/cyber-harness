@@ -9,12 +9,12 @@ async function screen(page: Page) {
 async function clearEditor(page: Page) {
   await page.getByRole('button', { name: /Main REPL/ }).click()
   await expect(page.getByRole('button', { name: /Main REPL/ })).toHaveAttribute('aria-current', 'true')
-  await expect(page.locator('.xterm-rows')).toContainText('aiscan')
+  await expect(page.locator('.xterm-rows')).toContainText('cyber-scan')
   const input = page.getByRole('textbox', { name: 'Terminal input' })
   await input.press('Control+e')
   await input.press('Control+u')
   await input.press('Control+l')
-  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['aiscan ❯'])
+  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['cyber-scan ❯'])
   return input
 }
 
@@ -69,13 +69,13 @@ test('remote system shell retains state across REPL switches and browser reconne
 test('short REPL input stays on the prompt row and retains the editing cursor', async ({ page }) => {
   const input = await clearEditor(page)
   await input.pressSequentially('!echo TTY_END')
-  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['aiscan ❯ !echo TTY_END'])
+  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['cyber-scan ❯ !echo TTY_END'])
   for (let i = 0; i < 3; i++) await input.press('ArrowLeft')
   await input.pressSequentially('KEPT_')
-  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['aiscan ❯ !echo TTY_KEPT_END'])
+  await expect.poll(async () => (await screen(page)).filter(line => line.trim())).toEqual(['cyber-scan ❯ !echo TTY_KEPT_END'])
   await input.press('Enter')
   await expect.poll(() => screen(page)).toContain('TTY_KEPT_END')
-  await expect.poll(() => screen(page)).toContain('aiscan ❯ !echo TTY_KEPT_END')
+  await expect.poll(() => screen(page)).toContain('cyber-scan ❯ !echo TTY_KEPT_END')
 })
 
 test('resizing a wrapped REPL draft preserves its text and cursor', async ({ page }) => {
@@ -83,22 +83,22 @@ test('resizing a wrapped REPL draft preserves its text and cursor', async ({ pag
   const word = `RESIZE_${'x'.repeat(60)}_END`
   await input.pressSequentially(`!echo ${word}`)
   const compact = async () => (await screen(page)).join('').replace(/\s/g, '')
-  await expect.poll(compact).toBe(`aiscan❯!echo${word}`)
+  await expect.poll(compact).toBe(`cyber-scan❯!echo${word}`)
   for (const width of [390, 820, 1280]) {
     await page.setViewportSize({ width, height: 844 })
     // Client reflow can already show the expected text before the remote
     // redraw arrives. Finish an editor round trip before resizing again.
     await input.pressSequentially('~')
-    await expect.poll(compact).toBe(`aiscan❯!echo${word}~`)
+    await expect.poll(compact).toBe(`cyber-scan❯!echo${word}~`)
     await input.press('Backspace')
-    await expect.poll(compact).toBe(`aiscan❯!echo${word}`)
+    await expect.poll(compact).toBe(`cyber-scan❯!echo${word}`)
   }
   for (let i = 0; i < 3; i++) await input.press('ArrowLeft')
   await input.pressSequentially('KEPT_')
   const edited = word.replace('_END', '_KEPT_END')
-  await expect.poll(compact).toBe(`aiscan❯!echo${edited}`)
+  await expect.poll(compact).toBe(`cyber-scan❯!echo${edited}`)
   await input.press('Enter')
-  await expect.poll(compact).toBe(`aiscan❯!echo${edited}${edited}aiscan❯`)
+  await expect.poll(compact).toBe(`cyber-scan❯!echo${edited}${edited}cyber-scan❯`)
 })
 
 test('async output preserves the next REPL draft while a task finishes', async ({ page }) => {
@@ -133,5 +133,5 @@ test('shell PTY supports command editing and Ctrl+C after resizing', async ({ pa
   await input.pressSequentially('exit')
   await input.press('Enter')
   await page.getByRole('button', { name: /Main REPL/ }).click()
-  await expect(page.locator('.xterm-rows')).toContainText('aiscan')
+  await expect(page.locator('.xterm-rows')).toContainText('cyber-scan')
 })

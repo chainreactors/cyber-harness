@@ -6,13 +6,13 @@ Web 提供会话、扫描结果与节点的统一操作界面。子 Agent 将一
 
 ## 通用 Web Hub
 
-`aiscan-full web` 提供内嵌工作台。作为远程执行 Hub 使用时增加 `--no-agent`，通过 AOP 接入扫描、审计或自定义 profile 的独立节点。下载 `aiscan-full` 后运行：
+`cyber-harness` 是包含 Web 的主程序，通过 AOP 接入扫描、RE、审计或自定义 profile 的同级节点。当前发布扫描和审计节点。下载主程序后运行：
 
 ```sh
-aiscan-full web --no-agent --token replace-me
+cyber-harness --token replace-me
 ```
 
-独立的 `cyber-web` Hub 可按 [源码构建说明](../../README_CN.md#构建源码发行版)构建，它只管理节点、会话、事件和共享配置，不加载产品执行 profile。
+源码构建使用 `make full`。Hub 管理节点、会话、事件和共享配置，工具在执行节点运行。
 
 访问 `http://127.0.0.1:8080` 并登录后，选择执行节点创建会话并提交任务。文件路径和工具能力来自该节点；scan、audit 和自定义 profile 可以同时连接。快速连接面板提供 scan 与 audit 下载和接入命令。
 
@@ -20,7 +20,7 @@ Web 宿主通过独立 IOA 服务端扩展挂载 `/ioa`，顶部 IOA 控制台�
 
 生成的安装命令只在执行节点所在机器上运行。Linux/macOS 命令使用临时目录下载并清理压缩包，Windows 命令使用 PowerShell 临时目录；节点进程退出后临时文件会被删除。已经安装过节点时，复制“仅上线”命令即可复用现有二进制。
 
-会话、事件、扫描与配置等管理数据默认保存到 `cyber-web.db`，可用 `--db` 指定路径。安全工具的原始产物在服务端归档，浏览器将它们解析成资产视图。因此聊天回答、执行记录和资产面板分别表达不同层面的结果。
+会话、事件、扫描与配置等管理数据默认保存到 `cyber-harness.db`，可用 `--db` 指定路径。安全工具的原始产物在服务端归档，浏览器将它们解析成资产视图。因此聊天回答、执行记录和资产面板分别表达不同层面的结果。
 
 ## 执行记录与资产
 
@@ -50,10 +50,10 @@ Agent 管理中的工具页与终端共用 Agent 选择。选择执行节点后�
 
 ```sh
 # Web 所在主机；替换 access key
-cyber-web --addr 0.0.0.0:8080 --token replace-me
+cyber-harness --addr 0.0.0.0:8080 --token replace-me
 
 # 扫描节点
-aiscan-full agent --server-url http://replace-me@192.0.2.10:8080 --node-name scan-1
+cyber-scan agent --server-url http://replace-me@192.0.2.10:8080 --node-name scan-1
 
 # 审计节点
 cyber-audit --workdir /path/to/repository --server-url http://replace-me@192.0.2.10:8080 --node-name audit-1
@@ -63,7 +63,7 @@ cyber-audit --workdir /path/to/repository --server-url http://replace-me@192.0.2
 
 扫描服务按节点公布的命令能力选择执行位置；没有扫描节点时立即返回 `FAILED_PRECONDITION`，不会在 Hub 执行扫描。如果节点在扫描排队或执行期间断开，扫描会标记为失败并说明原因。
 
-自定义宿主用 `node.RunWebSocket` 和自己的 `profile.Profile` 接入，无需在 Hub 注册产品名单。源码中的 `cmd/aiscan` 和 `make full` 保留旧版扫描 Web 适配器；发布矩阵使用 `cyber-web`、`aiscan-full`、`cyber-audit`。
+自定义宿主用 `node.RunWebSocket` 和自己的 `profile.Profile` 接入，无需在 Hub 注册产品名单。`make full` 从 `cmd/cyber-harness` 构建主程序；发布矩阵包含 `cyber-harness`、`cyber-scan` 和 `cyber-audit`。
 
 ## 子 Agent
 
@@ -95,13 +95,13 @@ IOA 通过 Space 组织多个 Agent 的消息。Agent 注册身份并加入 Spac
 先在一个终端启动服务：
 
 ```sh
-aiscan ioa serve
+cyber-scan ioa serve
 ```
 
 再在另一个已配置模型的终端启动交互 Agent：
 
 ```sh
-aiscan-full agent --ioa-url http://127.0.0.1:8765 --space lab
+cyber-scan agent --ioa-url http://127.0.0.1:8765 --space lab
 ```
 
 `--ioa-url` 增加协作连接，不改变本地任务模式。若同时传入 `-p`，仍执行一次性任务；持续协作需要持续存在的会话。凭据与客户端、服务端配置见[协作连接配置](../configuration.md#协作连接配置)。

@@ -24,38 +24,38 @@ Choose an entry point for your task:
 
 | Entry point | Use it for |
 | --- | --- |
-| `aiscan` / `aiscan-full` | Agent tasks, scanners, proxy routing and IOA; the full edition adds Web, browser automation, passive recon and crawling |
+| `cyber-scan` | Agent tasks, scanners, proxy routing, IOA, browser automation, passive recon and crawling |
 | [`cyber-audit`](cmd/audit/README.md) | Model-led source-code and binary audits, evidence collection and reports |
-| `cyber-web` (from source) | A profile-neutral Web Hub for sessions, events and artifacts from scan, audit or custom AOP nodes |
+| `cyber-harness` | A profile-neutral Web Hub for sessions, events and artifacts from scan, audit or custom AOP nodes |
 | `agent` | A minimal local Agent built from source, with files, terminal, Skills and local subagents |
 
 > Use only on explicitly authorized targets.
 
 ## Start here
 
-Download the archive matching your operating system and architecture from [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest). For CLI use, choose `aiscan` or `cyber-audit`, extract it and put the executable on PATH. Configure a model as described below before running an Agent task:
+Download the archive matching your operating system and architecture from [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest). For CLI use, choose `cyber-scan` or `cyber-audit`, extract it and put the executable on PATH. Configure a model as described below before running an Agent task:
 
 ```sh
 # With an LLM configured: run a local task and save its events
-aiscan agent -p "Read the current directory and explain its structure; do not modify files" -o jsonl -f first-run.jsonl
+cyber-scan agent -p "Read the current directory and explain its structure; do not modify files" -o jsonl -f first-run.jsonl
 
 # Audit a local repository
 cyber-audit --workdir /path/to/repository -p "Audit authentication and tenant isolation"
 
 # Run a deterministic scan against your own local lab, without AI verification
-aiscan scan -i http://127.0.0.1:3000 --verify=off
+cyber-scan scan -i http://127.0.0.1:3000 --verify=off
 ```
 
-For the Web workbench, download `aiscan-full` and start it:
+For the Web workbench, download `cyber-harness` and start it:
 
 ```sh
-aiscan-full web --token replace-me
+cyber-harness --token replace-me
 ```
 
 Open `http://127.0.0.1:8080` and sign in with the access key. Quick Connect generates a one-line command that downloads and starts a scan or audit node on the execution host. To connect a node you already installed, run one of these commands in another terminal:
 
 ```sh
-aiscan agent --server-url http://replace-me@127.0.0.1:8080
+cyber-scan agent --server-url http://replace-me@127.0.0.1:8080
 cyber-audit --workdir /path/to/repository --server-url http://replace-me@127.0.0.1:8080
 ```
 
@@ -63,7 +63,7 @@ See [Getting started (中文)](docs/getting-started.md) for installation, PowerS
 
 ## Configure a model
 
-Run `cyber-web init` or `aiscan init` to configure your model in `~/.cyber/cyber.yaml`. For project overrides, add `--project`. These are shared cyber-harness commands, also available in the minimal `agent` CLI. Existing files are preserved. [Configuration guide](docs/configuration.md).
+Run `cyber-harness init` or `cyber-scan init` to configure your model in `~/.cyber/cyber.yaml`. For project overrides, add `--project`. These are shared cyber-harness commands, also available in the minimal `agent` CLI. Existing files are preserved. [Configuration guide](docs/configuration.md).
 
 Example `cyber.yaml`:
 
@@ -109,11 +109,11 @@ Run these commands from the repository root. Outputs go to `bin/`; Windows binar
 
 | Command | Output | Capabilities | Frontend required |
 | --- | --- | --- | --- |
-| `make` / `make standard` | `bin/aiscan` | Agent, core scanners, proxy, Skills and IOA | No |
-| `make full` / `make web-build` | `bin/aiscan-full` | Standard capabilities plus Web, browser, passive recon and crawling | Yes |
+| `make` / `make standard` | `bin/cyber-scan` | Agent, core scanners, proxy, Skills and IOA | No |
+| `make full` / `make web-build` | `bin/cyber-harness` | Main Web Hub for peer execution nodes | Yes |
 | `make audit` | `bin/cyber-audit` | Source-code and binary audit; built from the independent `cmd/audit` module | No |
 | `make agent` | `bin/agent` | Local Agent, files, terminal, Skills and local subagents | No |
-| `make all` | `bin/aiscan` and `bin/aiscan-full` | Standard and full editions | Yes |
+| `make all` | `bin/cyber-scan`, `bin/agent` and `bin/cyber-harness` | Scan node, minimal Agent and main Hub | Yes |
 
 For targets that require the frontend, install Node.js/npm (CI uses Node.js 22), then install dependencies once before building:
 
@@ -123,7 +123,7 @@ make
 make full
 ```
 
-These targets use `CGO_ENABLED=0`. `make web-build` builds the full edition; `make web` also starts its Web service. Build tags are maintained in [editions.env](editions.env), and the build steps in [Makefile](Makefile). To build the separate `cyber-web` Hub from source, run `make frontend`, then `CGO_ENABLED=0 go build -tags "full sqlite" -o bin/cyber-web ./cmd/cyber-web`. Native recording uses `make record`, requires CGO and its SDK, and has separate [build instructions](docs/record.md).
+These targets use `CGO_ENABLED=0`. `make full` and `make web-build` build the main `cyber-harness` program with Web; `make web` also starts it. `cyber-scan`, RE and audit are peer execution products. The repository currently ships scan and audit nodes. Build tags are maintained in [editions.env](editions.env), and build steps in [Makefile](Makefile). Native recording extends the scan node through `make record`, requires CGO and its SDK, and has separate [build instructions](docs/record.md).
 
 ### Build the minimal local Agent
 

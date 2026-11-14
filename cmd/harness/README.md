@@ -1,6 +1,6 @@
 # Repository harness
 
-`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/aiscan` 的 `full`
+`cmd/harness/` 是仓库测试 harness。场景测试从当前工作区源码构建 `cmd/cyber-harness` 主程序和 `cmd/cyber-scan` 扫描节点
 版本，启动真实应用子进程，通过公开 HTTP / Connect JSON / stdio 接口操作，验证实际配置文件、
 进程重启与资源释放。场景测试不导入业务实现包，不注入 fake store、Provider 或 Host。
 
@@ -18,9 +18,9 @@ go test -count=1 -v -timeout 5m ./cmd/harness/...
 make harness
 ```
 
-需要 Go、已初始化的子模块及各场景所用的程序；默认 full 构建使用纯 Go，不需要录屏 SDK。前端场景另需 Node.js/npm、前端依赖和 Playwright Chromium。依赖缺失时直接失败，不跳过或替换实现。
-Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启动两个独立的
-`aiscan agent --transport stdio` 进程，扫描场景启动独立的 Web Agent 和本地 HTTP 目标。每个场景有独立的配置、数据库与
+需要 Go、已初始化的子模块及各场景所用的程序；默认 Hub 与扫描节点构建使用纯 Go，不需要录屏 SDK。前端场景另需 Node.js/npm、前端依赖和 Playwright Chromium。依赖缺失时直接失败，不跳过或替换实现。
+独立 Web 主程序启动后不包含本地执行节点，绑定 `127.0.0.1:0`；IOA 场景额外启动两个独立的
+`cyber-scan agent --transport stdio` 进程，扫描场景启动独立的 Web Agent 和本地 HTTP 目标。每个场景有独立的配置、数据库与
 数据目录。无 LLM 场景仅继承操作系统及动态库加载所需环境变量。真实 LLM 场景
 只额外注入明确配置的 `CYBER_API_KEY`、`CYBER_BASE_URL`、`CYBER_MODEL`、`CYBER_PROVIDER`，不读取个人默认模型设置。
 
@@ -47,7 +47,7 @@ Web 服务以 `--no-agent` 启动，绑定 `127.0.0.1:0`；IOA 场景额外启�
 不写入 YAML。日志按完整行脱敏，HTTP 响应也在记录和报错前脱敏。默认保存在 `.runlogs/harness/<run>/`；
 `CYBER_HARNESS_ARTIFACTS` 可指定保存父目录。临时应用二进制在运行结束后删除。
 
-当前 CLI 在二次退出确认后调用 `os.Exit(130)`；退出测试不能证明 App 的 defer 收尾执行。
+当前 CLI 在二次正常退出后调用 `os.Exit(130)`；退出测试不能证明 App 的 defer 收尾执行。
 Web 长期服务也不受 `--timeout` 控制。两点按实际用户行为记录，不把强制退出称为优雅关闭。
 
 无模型 IOA 场景通过公开命令协议操作真实存储与订阅，模型地址设为不可连接的本地端口；
@@ -177,7 +177,7 @@ go test -count=1 ./exts/jev
 
 Harness 不属于 GitHub CI 或 release gate，只在需要验证真实应用进程时手动运行。
 普通 CI 单元测试显式排除 `cmd/harness`，避免隐式启动应用进程或调用模型。
-race 检查覆盖测试驱动；应用子进程按 [editions.env](../../editions.env) 中的 `FULL_CAPS_TAGS` 和 `FULL_CGO` 构建，不继承测试驱动的 race 设置。当前 full 组合不加载 native CSTX 或录屏扩展。
+race 检查覆盖测试驱动；应用子进程按 [editions.env](../../editions.env) 中的 `STANDARD_CAPS_TAGS` / `STANDARD_CGO` 与 `FULL_CAPS_TAGS` / `FULL_CGO` 构建，不继承测试驱动的 race 设置。主程序与扫描节点均不加载 native CSTX 或录屏扩展。
 
 运行 live suite 前设置以下本地环境变量：
 

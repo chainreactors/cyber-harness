@@ -24,9 +24,6 @@ func Declare(resources *resource.Registry, command hostcli.Contribution) error {
 		func(registry *hostcli.Registry) error {
 			return registry.Group("agent", ConfigKey, FlagGroup())
 		},
-		func(registry *hostcli.Registry) error {
-			return registry.Group("web", ConfigKey, FlagGroup())
-		},
 	); err != nil {
 		return err
 	}

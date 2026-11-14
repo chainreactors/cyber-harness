@@ -23,7 +23,7 @@ owns tool definitions and default versions; [bundle.yaml](bundle.yaml)
 selects the three source-audit tools by name. Tool updates
 require no CRTM change. Both runtime requirements and bundle metadata are generated
 from that selection. All distributions use the `arsenal_embed` tag, with separate
-payload directories so audit never includes aiscan's bundle.
+payload directories so audit never includes cyber-scan's bundle.
 GitHub release builds enable this mode and test the packaged Linux and Windows
 executables in isolation, including Windows after UPX.
 

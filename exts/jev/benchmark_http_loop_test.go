@@ -87,7 +87,7 @@ func TestHTTPLoopFixtureRequiresObservedSequence(t *testing.T) {
 	for index := 0; index < 4; index++ {
 		t.Run(fmt.Sprint(index), func(t *testing.T) {
 			f := newLiveFixture(t)
-			_, oracle := f.task("aiscan-http-loop", index)
+			_, oracle := f.task("cyber-scan-http-loop", index)
 			urls, _, verdict := f.httpLoopEndpoints(index)
 			if oracle("Verdict: " + verdict) {
 				t.Fatal("accepted a verdict without executing the review")
@@ -118,7 +118,7 @@ func TestHTTPLoopFixtureRequiresObservedSequence(t *testing.T) {
 			if !oracle(text) || oracle(strings.ReplaceAll(text, "receipt-", "missing-")) || oracle(text+" WRONG") {
 				t.Fatal("oracle mishandled evidence, receipt or final verdict")
 			}
-			f.task("aiscan-http-loop", index)
+			f.task("cyber-scan-http-loop", index)
 			res, err := http.Get(urls[1])
 			if err != nil {
 				t.Fatal(err)

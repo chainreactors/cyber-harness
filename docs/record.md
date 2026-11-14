@@ -1,6 +1,6 @@
 # record — desktop and window capture
 
-`record` is an optional native tool for SDK and tool developers. It captures PNG screenshots and H.264/MP4 recordings from the desktop or a visible application window. Default full builds do not compile or register it.
+`record` is an optional native tool for SDK and tool developers. It captures PNG screenshots and H.264/MP4 recordings from the desktop or a visible application window. Default product builds do not compile or register it.
 
 | Platform | Support |
 | --- | --- |
@@ -44,7 +44,7 @@ Limitations:
 - macOS and Windows arm64 do not have a native recorder backend.
 - Capture requires an interactive graphical session; headless hosts and Windows session 0 are not supported.
 - The window must be visible and non-minimized. Capture size is fixed when recording starts; closing, minimizing, or shrinking the window can terminate the recording.
-- The native backend is not present in official full builds. Custom builds require CGO, the `record` build tag, and a supported C toolchain.
+- The native backend is not present in official builds. Custom builds require CGO, the `record` build tag, and a supported C toolchain.
 
 Record-enabled builds statically link a feature-minimal FFmpeg, x264, and the
 Linux XCB client code, so users do not install those runtimes separately. This
@@ -56,7 +56,7 @@ general-purpose FFmpeg build.
 
 ## Build tags and CGO
 
-The record build adds the `record` tag to the full feature set and requires
+The record build adds the `record` tag to the scan node and requires
 `CGO_ENABLED=1`. It composes `exts/record`, which owns the native runtime and
 registers the capture Tool. Build tags and the CGO setting come from
 [editions.env](../editions.env); use `make record` to apply the complete set.
@@ -85,7 +85,7 @@ Makefile, which wires its library prefix in:
 
 ```bash
 make record-native   # .cache/native/record/<os>_<arch>, for `record`
-make record          # fetches it, then builds bin/aiscan-record
+make record          # fetches it, then builds bin/cyber-scan-record
 ```
 
 `make record` depends on the fetch target, so it needs no manual pre-step.

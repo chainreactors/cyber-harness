@@ -121,9 +121,9 @@ Console 使用 Runtime 队列提交工作，正文和错误通过 AOP 事件展�
 
 ## 公共配置入口
 
-配置属于 cyber-harness，而非 aiscan 产品层。`pkg/config` 提供文件发现、分层合并、profile 选择、校验、最小模板及原子文件保存；`pkg/cli/configuration` 提供可接入宿主的 `init`、`config`、`doctor` 命令。
+配置属于 cyber-harness，而非 cyber-scan 产品层。`pkg/config` 提供文件发现、分层合并、profile 选择、校验、最小模板及原子文件保存；`pkg/cli/configuration` 提供可接入宿主的 `init`、`config`、`doctor` 命令。
 
-CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, configuration.Host{...})`，并通过 `RegisterHelp` 将命令加入帮助。Host 只提供名称、I/O、配置 Sections 和可选的检查回调；公共层不加载 agent、扫描器或 Web。`cmd/agent` 是最小接入示例，`cmd/aiscan` 额外贡献扫描和协作连接检查。
+CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, configuration.Host{...})`，并通过 `RegisterHelp` 将命令加入帮助。Host 只提供名称、I/O、配置 Sections 和可选的检查回调；公共层不加载 agent、扫描器或 Web。`cmd/agent` 是最小接入示例，`cmd/cyber-scan` 额外贡献扫描和协作连接检查。
 
 嵌入式宿主可直接调用 `config.ResolveRuntimeConfig`，通过 `Option.Context` 注入工作目录、用户目录、二进制路径和环境变量查询函数。`Context.Replacements` 只用于验证待保存的配置层，保留其他文件和运行时覆盖；不应把暂存文件当成新的 `-c`。构造和解析不会创建目录或启动资源。
 
@@ -131,7 +131,7 @@ CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, config
 
 ## 通用 Web 托管
 
-`pkg/web/host.Serve` 接收监听地址、静态文件、`webext.Config` 与可选 Extension，统一管理 HTTP 和 Web Extension 的生命周期。`cyber-web` 使用这套机制作为独立 Hub，不加载产品 profile。
+`pkg/web/host.Serve` 接收监听地址、静态文件、`webext.Config` 与可选 Extension，统一管理 HTTP 和 Web Extension 的生命周期。`cyber-harness` 使用这套机制作为独立 Hub，不加载产品 profile。
 
 执行节点通过 `node.RunWebSocket(ctx, constructor, option, logger)` 接入。constructor 接收 `profile.Request` 并返回产品自己的 `profile.Profile`；scan、audit 和自定义节点共用协议，无需在 Hub 注册产品名单。需要本地节点的宿主可提供 `host.Config.StartNode`；产品路由或应用 profile 通过 `Management` 和 `Extensions` 显式贡献。
 
@@ -139,11 +139,11 @@ CLI 宿主在普通运行时解析前调用 `configuration.Run(ctx, args, config
 
 ### 挂载 Web 能力
 
-Hub 通过 `GET /api/manifest` 发布服务器能力与可连接的节点 profile。`cyber-web` 安装 core Hub 和 IOA 浏览器能力；scan、audit 执行由连接的节点提供。Quick Connect 读取 manifest 中的 profile 描述，节点在 AOP 注册时报告自身能力，前端据此启用对应插件。
+Hub 通过 `GET /api/manifest` 发布服务器能力与可连接的节点 profile。`cyber-harness` 安装 core Hub 和 IOA 浏览器能力；scan、audit 执行由连接的节点提供。Quick Connect 读取 manifest 中的 profile 描述，节点在 AOP 注册时报告自身能力，前端据此启用对应插件。
 
 为 Web 增加具有存储或协议的功能时，在 `webext.Config.Capabilities` 中提供 [service.Capability](../../pkg/web/service/capability.go)：实现 manifest、schema modules、routes、namespace 注册和 Close。功能包持有自己的 protobuf、存储和处理器，Web Extension 负责调用安装与关闭接口。独立路由或现有 Extension 则通过 host 的 `Management`、`Extensions` 贡献；无需为每个功能另建 Hub。
 
-配置声明可以独立于执行能力注册。通用 Hub 使用 `SharedConfigCodec` 暴露公共配置，产品宿主提供自己的 codec 和扩展声明；Hub 不因此安装节点的执行工具。文件中未声明的 section 保留在磁盘，由对应产品节点加载。可运行装配见 [cyber-web 入口](../../cmd/cyber-web/main.go)。
+配置声明可以独立于执行能力注册。通用 Hub 使用 `SharedConfigCodec` 暴露公共配置，产品宿主提供自己的 codec 和扩展声明；Hub 不因此安装节点的执行工具。文件中未声明的 section 保留在磁盘，由对应产品节点加载。可运行装配见 [cyber-harness 入口](../../cmd/cyber-harness/main.go)。
 
 ### 连接与协议处理
 

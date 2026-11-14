@@ -35,15 +35,16 @@ func assertProfile(t *testing.T, response map[string]any, id string) {
 	assertField(t, response, "model-"+id, "config", "llm", "active", "model")
 }
 
-func assertSearchConfigured(t *testing.T, response map[string]any) {
+func assertProviderSecret(t *testing.T, response map[string]any) {
 	t.Helper()
-	flags, _ := field(response, "config", "extensions", "search", "configuredSecrets").([]any)
-	for _, flag := range flags {
-		if flag == "tavily_keys" {
+	providers, _ := field(response, "config", "llm", "providers").([]any)
+	for _, provider := range providers {
+		value, _ := provider.(map[string]any)
+		if value["id"] == "daily" && value["apiKeyConfigured"] == true {
 			return
 		}
 	}
-	t.Fatalf("search secret flag is missing: %v", response)
+	t.Fatalf("provider secret flag is missing: %v", response)
 }
 
 func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
@@ -64,7 +65,7 @@ func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
 
 	t.Log("save profiles in one client and observe them from another")
 	incoming := profileConfig("daily")
-	incoming["extensions"] = map[string]any{"search": map[string]any{"tavily_keys": "harness-only-placeholder"}}
+	incoming["llm"].(map[string]any)["providers"].([]any)[0].(map[string]any)["apiKey"] = "harness-only-placeholder"
 	response := editor.call(t, http.MethodPost, configRPC+"UpdateConfig", map[string]any{"config": incoming}, http.StatusOK)
 	assertProfile(t, response, "daily")
 	assertProfile(t, observer.config(t), "daily")
@@ -88,10 +89,10 @@ func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
 
 	t.Log("recover with a valid edit; blank secret fields retain the existing setting")
 	next := profileConfig("review")
-	next["extensions"] = map[string]any{"search": map[string]any{"tavily_keys": ""}}
+	next["llm"].(map[string]any)["providers"].([]any)[0].(map[string]any)["apiKey"] = ""
 	editor.call(t, http.MethodPost, configRPC+"UpdateConfig", map[string]any{"config": next}, http.StatusOK)
 	assertProfile(t, observer.config(t), "review")
-	assertSearchConfigured(t, observer.config(t))
+	assertProviderSecret(t, observer.config(t))
 	if !bytes.Contains(readFile(t, w.config), []byte("harness-only-placeholder")) {
 		t.Fatal("blank secret edit lost the stored setting")
 	}
@@ -105,7 +106,7 @@ func TestUserConfigurationAcrossCrashAndRestart(t *testing.T) {
 	p = w.start(t)
 	reopened := p.user(t, "reopened")
 	assertProfile(t, reopened.config(t), "review")
-	assertSearchConfigured(t, reopened.config(t))
+	assertProviderSecret(t, reopened.config(t))
 	reopened.call(t, http.MethodPost, configRPC+"ActivateProfile", map[string]any{"profileId": "offline"}, http.StatusOK)
 	assertProfile(t, reopened.config(t), "offline")
 
@@ -190,7 +191,7 @@ func TestUserConcurrentProfileChanges(t *testing.T) {
 	assertProfile(t, p.user(t, "after-restart").config(t), last)
 }
 
-func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
+func TestUserStartupRecoveryAndGracefulExit(t *testing.T) {
 	w := newWorkspace(t)
 	writeFile(t, w.config, []byte("llm: [unterminated\n"))
 	broken := w.launch(t, false)
@@ -211,33 +212,15 @@ func TestUserStartupRecoveryAndConfirmedExit(t *testing.T) {
 	u := p.user(t, "user")
 	assertField(t, u.config(t), true, "config", "loaded")
 	u.call(t, http.MethodPost, configRPC+"UpdateConfig", map[string]any{"config": profileConfig("daily")}, http.StatusOK)
-	t.Log("first exit signal asks for confirmation while the service remains usable")
-	p.interrupt(t)
-	confirmation := time.NewTimer(2 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer confirmation.Stop()
-	defer ticker.Stop()
-	for !bytes.Contains(readFile(t, p.logPath), []byte("Press Ctrl+C again to exit")) {
-		select {
-		case <-p.done:
-			t.Fatalf("application exited before confirmation: %v", p.waitErr)
-		case <-confirmation.C:
-			t.Fatal("application did not show its exit confirmation")
-		case <-ticker.C:
-		}
-	}
-	assertProfile(t, u.config(t), "daily")
-	t.Log("confirm exit, then verify resources and persisted configuration")
+	t.Log("interrupt the Hub and verify graceful shutdown and persisted configuration")
 	p.interrupt(t)
 	select {
 	case <-p.done:
-		// The current CLI deliberately exits with 130 after confirmation. This
-		// checks the public behavior, not graceful profile cleanup.
-		if p.cmd.ProcessState.ExitCode() != 130 {
-			t.Fatalf("confirmed exit: got %v, want code 130\n%s", p.waitErr, readFile(t, p.logPath))
+		if p.waitErr != nil {
+			t.Fatalf("Hub shutdown: %v\n%s", p.waitErr, readFile(t, p.logPath))
 		}
 	case <-time.After(15 * time.Second):
-		t.Fatalf("application did not exit after the user's signal\n%s", readFile(t, p.logPath))
+		t.Fatalf("Hub did not exit after interrupt\n%s", readFile(t, p.logPath))
 	}
 	listener, err := net.Listen("tcp", strings.TrimPrefix(p.url, "http://"))
 	if err != nil {

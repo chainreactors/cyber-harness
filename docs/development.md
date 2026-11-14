@@ -60,9 +60,9 @@ if err := h.Load(ctx); err != nil { return err }
 runtime, err := h.Runtime()
 ```
 
-aiscan 的完整安全工具组合由 [cmd/aiscan](../cmd/aiscan/profile.go) 内部构造，不再提供独立的公开发行版构造包。嵌入方可使用 [pkg/harness](../pkg/harness) 构造通用宿主，或从 `harness.BaseExtensions` 取得基础扩展后显式组合自己的能力；这不等价于完整 aiscan 发行版。产品入口先完成配置声明与解析，再构造运行时。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
+cyber-scan 的完整安全工具组合由 [cmd/cyber-scan](../cmd/cyber-scan/profile.go) 内部构造，不再提供独立的公开发行版构造包。嵌入方可使用 [pkg/harness](../pkg/harness) 构造通用宿主，或从 `harness.BaseExtensions` 取得基础扩展后显式组合自己的能力；这不等价于完整 cyber-scan 发行版。产品入口先完成配置声明与解析，再构造运行时。最小 Agent 宿主的完整实现可读 [cmd/agent](../cmd/agent)。
 
-各发行版的构建入口、产物和依赖见 [README 构建说明](../README_CN.md#构建源码发行版)，最小可运行代码见[自定义最小应用](../README_CN.md#自定义最小应用)。可选能力通过入口 imports 组装，独立 browser、passive、crawl 示例见[扩展开发](developer/extensions.md#按导入组合可选能力)。aiscan 的 `full` 选择完整发行版，构建标签由 [editions.env](../editions.env) 管理，实际步骤见 [Makefile](../Makefile)；原生录屏另见 [record](record.md)。
+各发行版的构建入口、产物和依赖见 [README 构建说明](../README_CN.md#构建源码发行版)，最小可运行代码见[自定义最小应用](../README_CN.md#自定义最小应用)。可选能力通过入口 imports 组装，独立 browser、passive、crawl 示例见[扩展开发](developer/extensions.md#按导入组合可选能力)。`make full` 构建包含 Web 的主程序 `cyber-harness`，构建标签由 [editions.env](../editions.env) 管理，实际步骤见 [Makefile](../Makefile)；原生录屏另见 [record](record.md)。
 
 自定义应用应明确分发哪些模型配置、知识文件和外部运行依赖。二进制中注册了浏览器或外部命令入口，并不意味着目标机器已经安装对应程序。固定源码版本后验证实际部署平台上的启动、一个完整任务和关闭；按 AGPL-3.0 的要求处理分发与源代码提供。
 

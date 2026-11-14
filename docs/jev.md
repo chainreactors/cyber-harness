@@ -103,10 +103,10 @@ const complete = jev({type: "noul", context: "当前真实结果已经完成用�
 [连续链路测试](../exts/jev/claim_pipeline_test.go)从空库启动普通 Agent，经原生 Executor 取得随机回执，归纳 typed Claim，向普通编译 Agent 提交错误参数并接收回放诊断，修复后通过原生契约、回放和独立语义评审发布 Reflex。随后重新加载持久库，以不同目标和相同目标运行三个新任务，检查当前参数、新回执、一次读取、无重新规划或编译，以及冻结库不变。choice、score、noul 都运行这条链路。测试也检查带引号参数的 Bash 解码，以及语义评审收到已解析的真实报告值。
 
 ```text
-go test ./agent/provider/jev ./exts/jev ./exts/guardrail ./pkg/web/service ./cmd/aiscan -count=1 -timeout 120s
-go test -tags 'emptytemplates forceposix full netgo noembed osusergo sqlite' ./agent/provider/jev ./exts/jev ./exts/guardrail ./pkg/web/service ./cmd/aiscan -count=1 -timeout 120s
+go test ./agent/provider/jev ./exts/jev ./exts/guardrail ./pkg/web/service ./cmd/cyber-scan -count=1 -timeout 120s
+go test -tags 'emptytemplates forceposix netgo noembed osusergo sqlite' ./agent/provider/jev ./exts/jev ./exts/guardrail ./pkg/web/service ./cmd/cyber-scan -count=1 -timeout 120s
 go test -race ./exts/jev -run 'TestClaim|TestOrdinaryReflex|TestReflex(Compiler|Frozen|.*Effect|.*Unknown|.*Steer)' -count=1 -timeout 120s
-go test -tags 'full sqlite' ./cmd/aiscan -run '^TestJEVProfileStreamingCompilationRuntimeAndProtocolEvents$' -count=1 -timeout 120s
+go test -tags 'sqlite' ./cmd/cyber-scan -run '^TestJEVProfileStreamingCompilationRuntimeAndProtocolEvents$' -count=1 -timeout 120s
 ```
 
 普通测试只替换模型推理，仍使用真实宿主和验证器。`TestLiveClaimToReflexPipeline` 提供两个明确区分的真实接口模式：设置 `JEV_PIPELINE_LIVE=1` 和 `TYPESAFE_API_KEY`，所有 JEV 判定调用真实接口，LLM 生成仍由固定测试响应提供；额外设置 `JEV_PIPELINE_LLM_LIVE=1`、`CYBER_API_KEY`、`CYBER_BASE_URL`、`CYBER_MODEL`、`CYBER_PROVIDER`，则 Claim 生成、编译、参数提取和最终整理也调用真实 LLM。
@@ -149,7 +149,7 @@ JEV_TAKEOVER_LIVE=1
 JEV_TAKEOVER_CASES=shadow,repeat,expense
 JEV_TAKEOVER_WARM=1
 JEV_TAKEOVER_REPORT_DIR=<新的报告目录>
-go test -tags "forceposix emptytemplates noembed osusergo netgo full sqlite" ./exts/jev -run '^TestLivePlaywrightTakeoverMatrix$' -parallel 3 -count=1 -v -timeout 90m
+go test -tags "forceposix emptytemplates noembed osusergo netgo sqlite" ./exts/jev -run '^TestLivePlaywrightTakeoverMatrix$' -parallel 3 -count=1 -v -timeout 90m
 ```
 
 也可以先 `go test -c` 构建测试程序，再将 `{llm,jev}` 凭据 JSON 从标准输入交给 [runner](../exts/jev/testdata/playwright_takeover_runner.mjs)，测试程序路径为其第一个参数。凭据只进入子进程环境，输出按完整行脱敏，不写凭据文件。重载验证额外设置 `JEV_TAKEOVER_RELOAD_DIR=<真实冷任务报告目录>`，普通 Loader 仍检查资格和当前原生契约。

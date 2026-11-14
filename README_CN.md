@@ -24,38 +24,38 @@ cyber-harness 是用于 cyber 场景的通用 Agent 运行框架。它把模型�
 
 | 入口 | 用途 |
 | --- | --- |
-| `aiscan` / `aiscan-full` | Agent、核心扫描器、代理和 IOA；full 增加 Web、浏览器、被动测绘和爬取 |
+| `cyber-scan` | Agent、扫描器、代理、IOA、浏览器、被动测绘和爬取 |
 | [`cyber-audit`](cmd/audit/README.md) | 模型驱动的源码与二进制审计、证据收集和报告 |
-| `cyber-web`（源码构建） | 通用 Web Hub，管理 scan、audit 或自定义 AOP 节点的会话、事件与产物 |
+| `cyber-harness` | 通用 Web Hub，管理 scan、audit 或自定义 AOP 节点的会话、事件与产物 |
 | `agent` | 从源码构建的最小本地 Agent，包含文件、终端、Skills 和本地子 Agent |
 
 > 请只在明确授权的目标上使用。
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest) 下载与你的系统和架构匹配的压缩包。使用 CLI 时选择 `aiscan` 或 `cyber-audit`，解压后将可执行文件加入 PATH。执行 Agent 任务前，先按下文完成模型配置：
+从 [GitHub Releases](https://github.com/chainreactors/cyber-harness/releases/latest) 下载与你的系统和架构匹配的压缩包。使用 CLI 时选择 `cyber-scan` 或 `cyber-audit`，解压后将可执行文件加入 PATH。执行 Agent 任务前，先按下文完成模型配置：
 
 ```sh
 # 已配置模型后：完成一次 Agent 任务，保存事件记录
-aiscan agent -p "只读查看当前目录并解释文件结构" -o jsonl -f first-run.jsonl
+cyber-scan agent -p "只读查看当前目录并解释文件结构" -o jsonl -f first-run.jsonl
 
 # 审计本地代码仓库
 cyber-audit --workdir /path/to/repository -p "审计认证逻辑与租户隔离"
 
 # 对自己的本地靶场执行规则扫描，关闭 AI 验证
-aiscan scan -i http://127.0.0.1:3000 --verify=off
+cyber-scan scan -i http://127.0.0.1:3000 --verify=off
 ```
 
-使用 Web 工作台时，下载 `aiscan-full` 并启动：
+使用 Web 工作台时，下载 `cyber-harness` 并启动：
 
 ```sh
-aiscan-full web --token replace-me
+cyber-harness --token replace-me
 ```
 
 访问 `http://127.0.0.1:8080`，使用 access key 登录。快速连接面板会生成一行命令，在执行节点所在机器上下载并启动扫描或审计节点。已有节点程序时，在另一个终端选择对应命令接入：
 
 ```sh
-aiscan agent --server-url http://replace-me@127.0.0.1:8080
+cyber-scan agent --server-url http://replace-me@127.0.0.1:8080
 cyber-audit --workdir /path/to/repository --server-url http://replace-me@127.0.0.1:8080
 ```
 
@@ -63,7 +63,7 @@ cyber-audit --workdir /path/to/repository --server-url http://replace-me@127.0.0
 
 ## 模型配置
 
-运行 `cyber-web init` 或 `aiscan init` 配置用户级模型（`~/.cyber/cyber.yaml`）；项目覆盖增加 `--project`。这些是 cyber-harness 公共命令，通用 `agent` CLI 同样支持；重复初始化保留已有文件。详见[配置与初始化](docs/configuration.md)。
+运行 `cyber-harness init` 或 `cyber-scan init` 配置用户级模型（`~/.cyber/cyber.yaml`）；项目覆盖增加 `--project`。这些是 cyber-harness 公共命令，通用 `agent` CLI 同样支持；重复初始化保留已有文件。详见[配置与初始化](docs/configuration.md)。
 
 `cyber.yaml` 示例：
 
@@ -109,11 +109,11 @@ git submodule update --init --recursive
 
 | 命令 | 产物 | 能力 | 是否需要前端 |
 | --- | --- | --- | --- |
-| `make` / `make standard` | `bin/aiscan` | Agent、核心扫描器、代理、Skills 和 IOA | 否 |
-| `make full` / `make web-build` | `bin/aiscan-full` | 标准能力，加 Web、浏览器、被动测绘和爬取 | 是 |
+| `make` / `make standard` | `bin/cyber-scan` | Agent、核心扫描器、代理、Skills 和 IOA | 否 |
+| `make full` / `make web-build` | `bin/cyber-harness` | 包含 Web 的主程序，管理同级执行节点 | 是 |
 | `make audit` | `bin/cyber-audit` | 源码与二进制审计，从独立的 `cmd/audit` 模块构建 | 否 |
 | `make agent` | `bin/agent` | 本地 Agent、文件、终端、Skills 和本地子 Agent | 否 |
-| `make all` | `bin/aiscan` 与 `bin/aiscan-full` | 标准与完整发行版 | 是 |
+| `make all` | `bin/cyber-scan`、`bin/agent` 与 `bin/cyber-harness` | 扫描节点、最小 Agent 与主程序 | 是 |
 
 需要前端的目标还需 Node.js/npm（CI 使用 Node.js 22）。首次构建前安装前端依赖：
 
@@ -123,7 +123,7 @@ make
 make full
 ```
 
-上述目标均使用 `CGO_ENABLED=0`。`make web-build` 构建完整发行版，`make web` 还会启动其 Web 服务。构建标签统一维护在 [editions.env](editions.env)，执行步骤见 [Makefile](Makefile)。独立的 `cyber-web` Hub 可从源码构建：先执行 `make frontend`，再运行 `CGO_ENABLED=0 go build -tags "full sqlite" -o bin/cyber-web ./cmd/cyber-web`。原生录屏使用 `make record`，需要 CGO 与录屏 SDK，详见[录屏构建](docs/record.md)。
+上述目标均使用 `CGO_ENABLED=0`。`make full` 与 `make web-build` 构建包含 Web 的主程序 `cyber-harness`，`make web` 还会启动它。`cyber-scan`、RE 和 audit 是同级执行产品，当前仓库已有扫描与审计节点。构建标签维护在 [editions.env](editions.env)，执行步骤见 [Makefile](Makefile)。原生录屏通过 `make record` 为扫描节点增加，需要 CGO 与录屏 SDK，详见[录屏构建](docs/record.md)。
 
 ### 构建最小本地 Agent
 

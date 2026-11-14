@@ -38,7 +38,7 @@ type Config struct {
 	Resources resources.Options
 	Crawler   scan.Crawler
 	// AgentName tags the scanner worker's AOP events; the composition root
-	// sets it (aiscan passes "cyber").
+	// sets it (cyber-scan passes "cyber").
 	AgentName string
 	Verify    string
 }

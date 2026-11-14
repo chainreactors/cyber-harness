@@ -1,13 +1,13 @@
 # 配置与初始化
 
-配置是 **cyber-harness 的通用功能**。下文使用 `aiscan` 举例；通用 `agent` CLI 支持相同的配置命令，嵌入式宿主可直接使用公共配置包。
+配置是 **cyber-harness 的通用功能**。下文使用 `cyber-scan` 举例；通用 `agent` CLI 支持相同的配置命令，嵌入式宿主可直接使用公共配置包。
 
 ## 首次配置
 
 ```sh
-aiscan init
-aiscan init --non-interactive --provider openai --model your-model
-aiscan init --project
+cyber-scan init
+cyber-scan init --non-interactive --provider openai --model your-model
+cyber-scan init --project
 ```
 
 `init` 默认写 `~/.cyber/cyber.yaml`。在交互终端中引导填写协议、端点、模型和 API key；密钥输入隐藏，留空可使用环境变量。非终端或 `--non-interactive` 不进入问答，只写显式参数，不读取或持久化环境变量凭据。初始化不会向模型服务发请求。
@@ -46,10 +46,10 @@ llm:
 ```
 
 ```sh
-aiscan config profiles
-aiscan agent --profile work --model another-model -p "列出当前目录"
-aiscan config use work
-aiscan config use work --project
+cyber-scan config profiles
+cyber-scan agent --profile work --model another-model -p "列出当前目录"
+cyber-scan config use work
+cyber-scan config use work --project
 ```
 
 选择 profile 后逐字段应用覆盖，`--model` 不会丢失端点、密钥、代理和限额。协议环境变量只补齐所选协议的缺失值；其他协议的凭据不会改变已选 profile。没有显式选择时使用第一项，错误 ID 和重复 ID 报错，不自动切换模型重试。
@@ -61,11 +61,11 @@ aiscan config use work --project
 ## 查看与检查
 
 ```sh
-aiscan config show --sources
-aiscan config show --sources --json
-aiscan config validate
-aiscan doctor
-aiscan doctor --online
+cyber-scan config show --sources
+cyber-scan config show --sources --json
+cyber-scan config validate
+cyber-scan doctor
+cyber-scan doctor --online
 ```
 
 `show` 展示有效配置，密钥及 URL 凭据始终脱敏；`--sources` 辅助定位文件、环境变量或 CLI 覆盖。`validate` 离线检查字段、类型及 profile 引用。未知的基础字段报错；当前发行版未注册的扩展保留原文并提示不可用，已注册扩展严格校验。
@@ -82,7 +82,7 @@ agent:
   timeout: 0           # 共用执行设置，秒；inbox 默认 0，agent 默认 3600
 ```
 
-通过 `aiscan inbox` 启动常驻 Router，`aiscan agent` 保留现有 prompt／REPL 行为；配置文件不能切换启动子命令。`inbox.state_dir` 与 `inbox.max_active` 对应子命令专属参数 `--state-dir`、`--max-active`，不出现在 `agent` 的参数中。`max_active: 0` 使用默认 4，负值报错。共用的 `agent` 执行设置和 `--timeout` 仍适用；`inbox` 默认不限时，不覆盖 YAML 或 CLI 显式 timeout，显式 `0` 表示不限时。
+通过 `cyber-scan inbox` 启动常驻 Router，`cyber-scan agent` 保留现有 prompt／REPL 行为；配置文件不能切换启动子命令。`inbox.state_dir` 与 `inbox.max_active` 对应子命令专属参数 `--state-dir`、`--max-active`，不出现在 `agent` 的参数中。`max_active: 0` 使用默认 4，负值报错。共用的 `agent` 执行设置和 `--timeout` 仍适用；`inbox` 默认不限时，不覆盖 YAML 或 CLI 显式 timeout，显式 `0` 表示不限时。
 
 `inbox` 目前只支持本地宿主，transport 使用 `local` 或没有 server URL 的 `auto`；不能与 `--server-url`、web 或 stdio transport 组合。恢复使用状态目录，不接受 `agent` 的 JSONL `--resume`。`inbox` 配置属于宿主本地配置，不作为远程 Agent 配置下发。
 
@@ -177,7 +177,7 @@ Web 保存模式可更新当前运行时，仅影响后续调用；首次启用�
 
 Web 设置沿用现有配置接口。保存目标为显式 `-c`、当前目录中已加载的配置，最后才是用户配置。页面展示可编辑的文件配置；运行时启动参数、环境变量可能覆盖这些值。
 
-**node 模式的 LLM 配置来自远端 server。** 使用 `aiscan agent --server-url ...`（自动或 `web` transport）时，node 先连接 server，收到下发配置后才初始化模型和执行启动任务。node 本地配置文件、模型 CLI 参数、LLM 环境变量及编译默认值不参与模型选择，也不会覆盖远端值；远端没有模型配置时不回退到本地模型。server 地址、节点身份和本地数据目录仍在 node 本地配置。
+**node 模式的 LLM 配置来自远端 server。** 使用 `cyber-scan agent --server-url ...`（自动或 `web` transport）时，node 先连接 server，收到下发配置后才初始化模型和执行启动任务。node 本地配置文件、模型 CLI 参数、LLM 环境变量及编译默认值不参与模型选择，也不会覆盖远端值；远端没有模型配置时不回退到本地模型。server 地址、节点身份和本地数据目录仍在 node 本地配置。
 
 node 上线、重连和 Web 配置保存后，server 自动下发实际生效的 LLM 配置，包括 server 配置文件、环境变量和启动参数解析后的 API key、模型与端点。node 无需单独配置相同的 key；运行时凭据只用于下发和连接检测，不回写配置文件。Web 顶部的 LLM 健康提示同样检测 server 实际生效的配置。
 

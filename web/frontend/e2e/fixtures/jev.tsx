@@ -58,7 +58,7 @@ function Fixture() {
     setEvents(current => append ? [...current, ...decoded] : decoded)
   }
   return <TooltipProvider><div className="flex h-screen flex-col bg-background text-foreground">
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5"><span className="text-sm font-semibold">aiscan</span>
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5"><span className="text-sm font-semibold">cyber-scan</span>
       <button aria-label="Reflex" onClick={() => setOpen(v => !v)} data-tool-drawer-trigger className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"><CircuitBoard className="h-4 w-4" /></button></header>
     <div className="min-h-0 flex-1"><ChatPanel resolveExtension={runtime.slots.resolve} extensionRevision={runtime.slots.revision.getSnapshot()} timeline={[]} aopEvents={events} guardrailReviews={[]} onResolveGuardrail={async () => {}} scanResults={new Map()}
       isThinking={false} isBusy={false} canPause={false} error="" hasActiveSession activeSessionID="session-1"

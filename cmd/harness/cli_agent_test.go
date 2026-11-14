@@ -164,8 +164,16 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 	requestsMu.Lock()
 	captured := append([]gatewayRequest(nil), requests...)
 	requestsMu.Unlock()
-	if len(captured) != 2*len(invocations) {
-		t.Fatalf("gateway requests = %d, want %d startup checks plus %d tasks", len(captured), len(invocations), len(invocations))
+	// Recap runs in the background and may make a non-streaming request before
+	// process exit. Count the foreground tasks at their actual wire boundary.
+	streaming := 0
+	for _, request := range captured {
+		if request.Stream {
+			streaming++
+		}
+	}
+	if streaming != len(invocations) {
+		t.Fatalf("streaming task requests = %d, want %d", streaming, len(invocations))
 	}
 	for i, request := range captured {
 		if request.Model != "fixture" {
@@ -175,7 +183,7 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 	tasks := make([]gatewayRequest, len(invocations))
 	for i, invocation := range invocations {
 		for _, request := range captured {
-			if strings.Contains(lastMessageText(request), invocation.prompt) {
+			if request.Stream && strings.Contains(lastMessageText(request), invocation.prompt) {
 				if len(tasks[i].Messages) != 0 {
 					t.Fatalf("multiple task requests contain %q", invocation.prompt)
 				}

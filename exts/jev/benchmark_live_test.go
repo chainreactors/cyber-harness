@@ -101,7 +101,7 @@ func TestLiveAutomaticReflexAB(t *testing.T) {
 		}
 	}
 	defer writeReport()
-	for _, scenario := range []string{"playwright", "aiscan-http", "playwright-general", "aiscan-http-loop"} {
+	for _, scenario := range []string{"playwright", "cyber-scan-http", "playwright-general", "cyber-scan-http-loop"} {
 		t.Run(scenario, func(t *testing.T) {
 			if strings.HasPrefix(scenario, "playwright") {
 				if _, ok := launcher.LookPath(); !ok {
@@ -575,7 +575,7 @@ func quantile(values []float64, q float64) float64 {
 }
 
 func TestAutomaticReflexBenchmarkRequiresKnownCostsAndTakeover(t *testing.T) {
-	for _, scenario := range []string{"playwright", "aiscan-http", "playwright-general", "aiscan-http-loop"} {
+	for _, scenario := range []string{"playwright", "cyber-scan-http", "playwright-general", "cyber-scan-http-loop"} {
 		for _, condition := range []string{"complete", "missing_cold_usage", "missing_reuse_usage", "no_takeover", "changed_prefix", "too_few_pairs"} {
 			t.Run(scenario+"/"+condition, func(t *testing.T) {
 				rows := map[string][]benchmarkRow{}
@@ -640,7 +640,7 @@ func (f *liveFixture) task(scenario string, index int) (string, func(string) boo
 	f.reads = map[string]bool{}
 	f.repeatedReads = 0
 	f.mu.Unlock()
-	if scenario == "aiscan-http-loop" {
+	if scenario == "cyber-scan-http-loop" {
 		return f.httpLoopTask(index)
 	}
 	if scenario == "playwright-general" {
@@ -684,7 +684,7 @@ func (f *liveFixture) task(scenario string, index int) (string, func(string) boo
 
 func TestHTTPFixtureChecksFinalVerdictNotExplanatoryMentions(t *testing.T) {
 	f := newLiveFixture(t)
-	_, oracle := f.task("aiscan-http", 4)
+	_, oracle := f.task("cyber-scan-http", 4)
 	var evidence []string
 	for n := 0; n < 4; n++ {
 		res, err := http.Get(fmt.Sprintf("%s/http/4/%d", f.server.URL, n))

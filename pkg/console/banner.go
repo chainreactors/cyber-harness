@@ -29,7 +29,7 @@ func (r *AgentConsole) renderBanner() {
 func (r *AgentConsole) bannerOutput() string {
 	colorEnabled := r.output != nil && r.output.color.Enabled
 	provider, model := r.providerModel()
-	modelText := "not configured - run `aiscan init`"
+	modelText := "not configured - run `cyber-scan init`"
 	modelStyle := ansiWarn
 	switch {
 	case provider != "" && model != "":
@@ -41,7 +41,7 @@ func (r *AgentConsole) bannerOutput() string {
 	}
 
 	width := r.bannerWidth()
-	header := ansiTitle("aiscan", colorEnabled) + " " + ansiDim("v"+cfg.Version, colorEnabled)
+	header := ansiTitle("cyber-scan", colorEnabled) + " " + ansiDim("v"+cfg.Version, colorEnabled)
 
 	var lines []string
 	lines = append(lines, header)
@@ -403,7 +403,7 @@ func renderBoxTable(rows [][]string, colorEnabled bool) string {
 func (r *AgentConsole) renderPanel(title, body string, colorEnabled bool) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		title = "aiscan"
+		title = "cyber-scan"
 	}
 	header := ansiTitle(title, colorEnabled)
 	return "\n" + renderFixedBox(header+"\n"+body, r.bannerWidth(), colorEnabled) + "\n\n"

@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
   expect((await page.request.post('/api/auth/login', { data: { token: process.env.ACCESS_KEY || 'test-token' } })).ok()).toBe(true)
   await page.goto('/')
   await openNodeTerminal(page, node)
-  await expect(page.locator('.xterm-rows')).toContainText('aiscan')
+  await expect(page.locator('.xterm-rows')).toContainText('cyber-scan')
   await page.getByRole('textbox', { name: 'Terminal input' }).press('Control+u')
   await page.getByRole('textbox', { name: 'Terminal input' }).press('Control+l')
 })
@@ -54,7 +54,7 @@ test('CLI recap follows the final answer and preserves a draft and its cursor wh
   expect(text.indexOf('✻ 已完成 cli-basic')).toBeGreaterThan(text.indexOf('Task cli-basic complete.'))
   expect(text.match(/✻ 已完成 cli-basic/g)).toHaveLength(1)
   expect(text).toMatch(/✻ 已完成 cli-basic 的本地检查并验证结果。 · \d+(?:\.\d+)?(?:ms|s)/)
-  expect(text.lastIndexOf('aiscan')).toBeGreaterThan(text.indexOf('✻ 已完成 cli-basic'))
+  expect(text.lastIndexOf('cyber-scan')).toBeGreaterThan(text.indexOf('✻ 已完成 cli-basic'))
 
   await command(page, 'RECAP-E2E late run a local check')
   try {

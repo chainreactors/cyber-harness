@@ -21,7 +21,11 @@ test('download links select the profile, platform and Hub release without creden
     for (const arch of ['amd64', 'arm64']) {
       for (const distribution of ['cyber-scan', 'cyber-audit', 'cyber-custom']) {
         const options = { ...defaults, os, arch, distribution }
-        assert.equal(nodeDownloadURL(options), `https://github.com/chainreactors/cyber-harness/releases/download/v1.2.3/${distribution}_${os}_${arch}.zip`)
+        const binary = distribution
+        assert.equal(nodeDownloadURL(options), `https://github.com/chainreactors/cyber-harness/releases/download/v1.2.3/${binary}_${os}_${arch}.zip`)
+        const executable = os === 'windows' ? `.\\${binary}.exe` : `./${binary}`
+        const command = distribution === 'cyber-scan' ? ' agent' : ''
+        assert.ok(nodeCommands(options).connect.startsWith(`${executable}${command} --server-url `))
       }
     }
   }
@@ -40,7 +44,8 @@ test('one-line bootstrap downloads, executes and cleans up on success and failur
   const archives = new Map()
   for (const distribution of ['cyber-scan', 'cyber-audit']) {
     const archive = join(root, `${distribution}.zip`)
-    const binary = distribution + (process.platform === 'win32' ? '.exe' : '')
+    const name = distribution
+    const binary = name + (process.platform === 'win32' ? '.exe' : '')
     await execute(fixture, ['--archive', archive, binary])
     archives.set(distribution, await readFile(archive))
   }

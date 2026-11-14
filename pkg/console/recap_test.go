@@ -122,7 +122,7 @@ func TestRecapPreservesReadlineDraftAndCursor(t *testing.T) {
 		o.HandleEvent(turnStartEvent(1))
 		o.HandleEvent(turnEndEvent(1, 0))
 		shell := bridge.shell
-		shell.Prompt.Primary(func() string { return "aiscan> " })
+		shell.Prompt.Primary(func() string { return "cyber-scan> " })
 		shell.Line().Set([]rune(draft)...)
 		shell.Cursor().Set(6)
 		shell.RefreshPrimaryWithoutAutocomplete()
@@ -133,7 +133,7 @@ func TestRecapPreservesReadlineDraftAndCursor(t *testing.T) {
 			t.Fatalf("draft/cursor changed: %q at %d", string(*shell.Line()), shell.Cursor().Pos())
 		}
 		text := output.StripANSI(raw.String())
-		if summary, prompt := strings.Index(text, "✻ 已完成本地检查。"), strings.LastIndex(text, "aiscan> "); summary < 0 || prompt <= summary {
+		if summary, prompt := strings.Index(text, "✻ 已完成本地检查。"), strings.LastIndex(text, "cyber-scan> "); summary < 0 || prompt <= summary {
 			t.Fatalf("recap did not appear above prompt: %q", text)
 		}
 	}

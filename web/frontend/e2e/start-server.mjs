@@ -11,7 +11,8 @@ const host = '127.0.0.1'
 const webPort = Number(process.env.CYBER_E2E_PORT || 38080)
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
 const workDir = await mkdtemp(join(tmpdir(), 'cyber-web-e2e-'))
-const binary = join(workDir, process.platform === 'win32' ? 'cyber-e2e.exe' : 'cyber-e2e')
+const binary = join(workDir, process.platform === 'win32' ? 'cyber-scan.exe' : 'cyber-scan')
+const webBinary = join(workDir, process.platform === 'win32' ? 'cyber-harness.exe' : 'cyber-harness')
 
 const externalLLM = {
   baseURL: process.env.CYBER_E2E_LLM_BASE_URL?.trim() || '',
@@ -135,29 +136,30 @@ const editionValue = (key) => {
   return value
 }
 
-const build = spawnSync('go', [
-  'build',
-  '-tags', editionValue('FULL_CAPS_TAGS'),
-  '-ldflags', '-X github.com/chainreactors/cyber/pkg/config.Version=1.0.0-rc1',
-  '-o', binary,
-  './cmd/aiscan',
-], {
-  cwd: root,
-  stdio: 'inherit',
-  env: { ...process.env, CGO_ENABLED: editionValue('FULL_CGO') },
-})
-if (build.status !== 0) {
-  mockLLM?.close()
-  await rm(workDir, { recursive: true, force: true })
-  process.exit(build.status ?? 1)
+for (const [product, output, entry] of [
+  ['STANDARD', binary, './cmd/cyber-scan'],
+  ['FULL', webBinary, './cmd/cyber-harness'],
+]) {
+  const build = spawnSync('go', [
+    'build', '-tags', editionValue(`${product}_CAPS_TAGS`),
+    '-ldflags', '-X github.com/chainreactors/cyber/pkg/config.Version=1.0.0-rc1',
+    '-o', output, entry,
+  ], {
+    cwd: root, stdio: 'inherit',
+    env: { ...process.env, CGO_ENABLED: editionValue(`${product}_CGO`) },
+  })
+  if (build.status !== 0) {
+    mockLLM?.close()
+    await rm(workDir, { recursive: true, force: true })
+    process.exit(build.status ?? 1)
+  }
 }
 
-const child = spawn(binary, [
+const child = spawn(webBinary, [
   '--config', configPath,
   '--data-dir', join(workDir, 'data'),
-  'web',
   '--addr', `${host}:${webPort}`,
-  '--db', join(workDir, 'cyber-web.db'),
+  '--db', join(workDir, 'cyber-harness.db'),
   '--token', 'test-token',
 ], {
   cwd: root,
@@ -165,7 +167,7 @@ const child = spawn(binary, [
 })
 
 let shuttingDown = false
-let agentChild = null
+const agentChildren = []
 
 async function launchRemoteAgent() {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -179,32 +181,37 @@ async function launchRemoteAgent() {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100))
   }
   if (shuttingDown) return
-  agentChild = spawn(binary, [
-    '--config', configPath,
-    '--data-dir', join(workDir, 'agent-data'),
-    'agent',
-    '--server-url', `http://test-token@${host}:${webPort}`,
-    '--node-name', 'e2e-node',
-  ], {
-    cwd: root,
-    stdio: 'inherit',
-  })
-  agentChild.once('error', (error) => {
-    console.error(error)
-    void shutdown(1)
-  })
-  agentChild.once('exit', (code, signal) => {
-    if (!shuttingDown) {
-      console.error(`Cyber E2E agent exited early (code=${code}, signal=${signal})`)
-      void shutdown(code ?? 1)
-    }
-  })
+  for (const nodeName of ['e2e-node', 'e2e-node-2']) {
+    const agentChild = spawn(binary, [
+      '--config', configPath,
+      '--data-dir', join(workDir, nodeName),
+      'agent',
+      '--server-url', `http://test-token@${host}:${webPort}`,
+      '--node-name', nodeName,
+    ], {
+      cwd: root,
+      stdio: 'inherit',
+    })
+    agentChild.once('error', (error) => {
+      console.error(error)
+      void shutdown(1)
+    })
+    agentChild.once('exit', (code, signal) => {
+      if (!shuttingDown) {
+        console.error(`Cyber E2E agent exited early (code=${code}, signal=${signal})`)
+        void shutdown(code ?? 1)
+      }
+    })
+    agentChildren.push(agentChild)
+  }
 }
 
 async function shutdown(code) {
   if (shuttingDown) return
   shuttingDown = true
-  if (agentChild?.exitCode === null) agentChild.kill()
+  for (const agentChild of agentChildren) {
+    if (agentChild.exitCode === null) agentChild.kill()
+  }
   if (child.exitCode === null) child.kill()
   if (mockLLM) await new Promise((resolveClose) => mockLLM.close(resolveClose))
   await rm(workDir, { recursive: true, force: true })

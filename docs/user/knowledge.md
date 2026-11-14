@@ -6,7 +6,7 @@ Skill 将一项工作的经验整理为模型可读取的说明。它可以规�
 
 ## 内置知识
 
-aiscan 默认使用 `cyber` 基础 Skill，工具说明和安全工作方法通过其中的引用逐步展开。知识库里存在一份文档，并不意味着它的全文会在每轮请求中发送给模型；模型可以根据任务按需读取。
+cyber-scan 默认使用 `cyber` 基础 Skill，工具说明和安全工作方法通过其中的引用逐步展开。知识库里存在一份文档，并不意味着它的全文会在每轮请求中发送给模型；模型可以根据任务按需读取。
 
 许多工具说明是 `cyber` 下的参考文档，不是独立 Skill。因此，工具名存在并不保证可以直接用 `-s <工具名>` 选择。IOA 等扩展还会贡献自己的知识，在未安装对应扩展时不加载。
 
@@ -32,7 +32,7 @@ description: 核对报告中的证据、验证范围和未解决事项。
 然后启动新的运行：
 
 ```sh
-aiscan agent -s review -p "检查当前目录中的报告"
+cyber-scan agent -s review -p "检查当前目录中的报告"
 ```
 
 `name` 用于选择 Skill，`description` 用于说明适用范围，也是加载校验项。正文写工作方法，需要较长材料时放进相邻文件并使用相对链接。Skill 中的命令必须由当前运行环境提供；文档不会自动安装依赖或赋予工具权限。
@@ -49,6 +49,6 @@ aiscan agent -s review -p "检查当前目录中的报告"
 
 OKF（Open Knowledge Format）把较大的知识集合组织为索引、概念文档、引用和历史。Skill 可以作为入口，再通过 OKF 索引逐层读取；知识条目的来源、验证状态与更新时间帮助使用者判断信息是否适用。
 
-aiscan 的 OKF 扩展还向 Agent 提供 Markdown 产出策略和校验命令。`okf validate <path>` 检查格式，`okf test <path>` 检查更严格的生产要求，均不执行文档中声明的计算程序。具体格式见[内置 OKF 说明](../../exts/okf/assets/okf.md)。
+cyber-scan 的 OKF 扩展还向 Agent 提供 Markdown 产出策略和校验命令。`okf validate <path>` 检查格式，`okf test <path>` 检查更严格的生产要求，均不执行文档中声明的计算程序。具体格式见[内置 OKF 说明](../../exts/okf/assets/okf.md)。
 
 开发者可通过 Bundle 或 Prompt contribution 接入知识与指令，见[扩展开发](../developer/extensions.md)。应用自己的系统提示词、Skill 正文和当前对话各有不同作用，架构层面的组合过程见[上下文](../architecture.md#上下文与知识)。

@@ -119,7 +119,7 @@ h, err := harness.New(harness.Config{
 
 `baseConfig` 和 `sessionConfig` 由发行版提供。按常规路径调用 `h.Load` / `h.Close`，加载失败也关闭。Load 验证整个配置、初始化连接、完成分页发现后，一次性贡献所有服务命令；失败时 Set 回滚已建立的连接。命令调用经过现有 command hooks，AI 的 bash 调用仍经过 tool hooks。
 
-扩展目前是可装配的 Go API，未加入 aiscan 的 CLI 配置声明。完整的基础接线与生命周期说明见[扩展开发](developer/extensions.md)。[examples/rmcp](../examples/rmcp/main.go)是 AOP 远程工具节点，与此处的标准 MCP 客户端不同。
+扩展目前是可装配的 Go API，未加入 cyber-scan 的 CLI 配置声明。完整的基础接线与生命周期说明见[扩展开发](developer/extensions.md)。[examples/rmcp](../examples/rmcp/main.go)是 AOP 远程工具节点，与此处的标准 MCP 客户端不同。
 
 ## 连接已有的逆向基础设施
 

@@ -6,14 +6,14 @@
 
 ## 连续对话
 
-启动 `aiscan agent` 后，普通输入会交给当前会话。模型每轮请求的上下文由指令、历史和工具结果组成，因此追问可以引用此前的结论。上下文中的描述不等于实时环境状态：如果文件或远程服务已经变化，Agent 需要重新读取或探测。
+启动 `cyber-scan agent` 后，普通输入会交给当前会话。模型每轮请求的上下文由指令、历史和工具结果组成，因此追问可以引用此前的结论。上下文中的描述不等于实时环境状态：如果文件或远程服务已经变化，Agent 需要重新读取或探测。
 
 运行期间的追加输入在后续执行边界处理，不会修改已经发出的模型请求。`/followup <内容>` 明确将输入排队到当前任务完成后发送；`/continue` 则让 Agent 基于现有上下文继续工作，不追加新的任务说明。`/stop` 停止当前运行，不能撤销此前工具已经完成的文件写入或网络操作。
 
 ```text
-aiscan> 读取当前目录中的报告，总结已经验证的结论
-aiscan> /followup 再列出证据不足的结论
-aiscan> /continue
+cyber-scan> 读取当前目录中的报告，总结已经验证的结论
+cyber-scan> /followup 再列出证据不足的结论
+cyber-scan> /continue
 ```
 
 后台命令与子 Agent 的完成结果也能回到会话。Agent 在等待这些结果时可能暂时没有新的模型输出；它仍然有尚未结束的工作。后台任务的查看与停止见[工具](tools.md#后台任务)。
@@ -31,7 +31,7 @@ aiscan> /continue
 模型的上下文窗口有限。长时间工作后，早期对话、工具输出和新输入会共同占用窗口。自动压缩将较早内容总结为摘要，保留近期消息，再继续请求模型；手动压缩允许指定保留重点：
 
 ```text
-aiscan> /compact 保留已验证结论、证据路径和未完成事项
+cyber-scan> /compact 保留已验证结论、证据路径和未完成事项
 ```
 
 摘要会损失细节。需要逐字引用的请求、响应、代码或命令输出，应保存为文件或原始产物。压缩不会让模型拥有无限记忆，也不会保证它在后续回答中还原所有原文。
@@ -55,7 +55,7 @@ Web 每轮工作流的“执行复盘”保留各次模型调用的推理和实�
 CLI 统一使用 `-o <格式>` 选择输出内容、`-f <文件>` 选择目标；省略 `-f` 输出到 stdout。保存可恢复的运行事件使用 JSONL：
 
 ```sh
-aiscan agent -p "读取当前目录并总结" -o jsonl -f first.jsonl
+cyber-scan agent -p "读取当前目录并总结" -o jsonl -f first.jsonl
 ```
 
 记录包含运行时发出的消息、工具调用、结果与生命周期等事件。需要文件、HTTP 等额外观察时，可使用 `--observe` 选择观测项；保存记录不会自动开启所有观测。重复运行应换一个输出路径，已有文件不会作为追加日志继续写入。
@@ -69,14 +69,14 @@ aiscan agent -p "读取当前目录并总结" -o jsonl -f first.jsonl
 回看读取事件并渲染，不运行模型或重复调用旧工具：
 
 ```sh
-aiscan -F first.jsonl
-aiscan -F first.jsonl -o markdown -f first.md
+cyber-scan -F first.jsonl
+cyber-scan -F first.jsonl -o markdown -f first.md
 ```
 
 恢复从事件历史中建立对话上下文，再执行新的输入：
 
 ```sh
-aiscan agent --resume first.jsonl -p "继续解释刚才的结果" -o jsonl -f second.jsonl
+cyber-scan agent --resume first.jsonl -p "继续解释刚才的结果" -o jsonl -f second.jsonl
 ```
 
 交互模式也可用 `/resume` 选择记录，或用 `/resume <路径>` 指定文件。恢复源保持只读；若要保存后续运行，需要另外指定输出。Web 的会话历史由 Web 数据库管理，不能直接把数据库文件作为 CLI 的 `--resume` 输入。

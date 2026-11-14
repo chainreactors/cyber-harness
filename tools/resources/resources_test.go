@@ -72,7 +72,7 @@ func TestInitBindsNeutronProxyBeforeTemplateCompilation(t *testing.T) {
 	t.Fatal("compiled neutron templates contain no HTTP request")
 }
 
-func TestInitUsesAiscanEmbeddedResources(t *testing.T) {
+func TestInitUsesCyberScanEmbeddedResources(t *testing.T) {
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
 	t.Cleanup(func() {
@@ -149,7 +149,7 @@ func TestEmbeddedFingersMatchNginx(t *testing.T) {
 	t.Fatalf("nginx fingerprint not matched: %v", frameworks.GetNames())
 }
 
-// TestPipelineDeliversAiscanBytes ensures that the bytes cyber stages in
+// TestPipelineDeliversCyberScanBytes ensures that the bytes cyber stages in
 // gogoConfigs / sprayConfigs / zombieConfigs really arrive at the downstream
 // SDK's pkg.LoadConfig — the actual call site each engine uses to read its
 // templates / dictionaries / rules.
@@ -166,7 +166,7 @@ func TestEmbeddedFingersMatchNginx(t *testing.T) {
 // and running this suite with -tags emptytemplates (which the SDK templates
 // switch to no-op stubs) is the strongest harness: the suite should still
 // pass because data must come from cyber.
-func TestPipelineDeliversAiscanBytes(t *testing.T) {
+func TestPipelineDeliversCyberScanBytes(t *testing.T) {
 	oldFingerPrePort := fingerresources.PrePort
 	oldFingerPortData := cloneBytes(fingerresources.PortData)
 	t.Cleanup(func() {
@@ -192,15 +192,15 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 		engine          string
 		install         func()
 		load            func(string) []byte
-		fromAiscan      func(string) []byte
+		fromCyberScan   func(string) []byte
 		required        []string
 		fallbackAllowed map[string]bool
 	}{
 		{
-			engine:     "gogo",
-			install:    func() { gogopkg.SetResourceProvider(set.GogoConfig) },
-			load:       gogopkg.LoadConfig,
-			fromAiscan: set.GogoConfig,
+			engine:        "gogo",
+			install:       func() { gogopkg.SetResourceProvider(set.GogoConfig) },
+			load:          gogopkg.LoadConfig,
+			fromCyberScan: set.GogoConfig,
 			// gogo /workspace/chainreactors/gogo/v2/pkg/load_common.go LoadConfig keys:
 			// fingerprinthub_web/service are by-design empty "[]" stubs — they
 			// only carry data when cyberhub remote merge is enabled, so we
@@ -209,18 +209,18 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 			fallbackAllowed: map[string]bool{"fingerprinthub_web": true, "fingerprinthub_service": true},
 		},
 		{
-			engine:     "spray",
-			install:    func() { spraypkg.SetResourceProvider(set.SprayConfig) },
-			load:       spraypkg.LoadConfig,
-			fromAiscan: set.SprayConfig,
+			engine:        "spray",
+			install:       func() { spraypkg.SetResourceProvider(set.SprayConfig) },
+			load:          spraypkg.LoadConfig,
+			fromCyberScan: set.SprayConfig,
 			// spray /workspace/chainreactors/spray/pkg/load.go LoadConfig keys:
 			required: []string{"port", "spray_rule", "spray_dict", "spray_common", "extract"},
 		},
 		{
-			engine:     "zombie",
-			install:    func() { zombiepkg.SetResourceProvider(set.ZombieConfig) },
-			load:       zombiepkg.LoadConfig,
-			fromAiscan: set.ZombieConfig,
+			engine:        "zombie",
+			install:       func() { zombiepkg.SetResourceProvider(set.ZombieConfig) },
+			load:          zombiepkg.LoadConfig,
+			fromCyberScan: set.ZombieConfig,
 			// zombie /workspace/chainreactors/zombie/pkg/loader.go LoadConfig keys:
 			required: []string{"zombie_common", "zombie_default", "zombie_rule", "zombie_template", "port", "http", "socket"},
 		},
@@ -231,7 +231,7 @@ func TestPipelineDeliversAiscanBytes(t *testing.T) {
 		t.Run(tc.engine, func(t *testing.T) {
 			tc.install()
 			for _, key := range tc.required {
-				want := tc.fromAiscan(key)
+				want := tc.fromCyberScan(key)
 				if len(want) == 0 {
 					t.Fatalf("%s: cyber returned no bytes for key %q", tc.engine, key)
 				}
@@ -312,7 +312,7 @@ func TestPipelineParsesIntoSDKStructures(t *testing.T) {
 
 	// gogo's pkg.Load is more involved (binds globals like FingerEngine etc),
 	// so we only check the LoadConfig contract for its required keys here —
-	// already covered by TestPipelineDeliversAiscanBytes above. We do however
+	// already covered by TestPipelineDeliversCyberScanBytes above. We do however
 	// sanity check a few key shapes:
 	t.Run("gogo_keyShapes", func(t *testing.T) {
 		gogopkg.SetResourceProvider(set.GogoConfig)
@@ -332,7 +332,7 @@ func TestPipelineParsesIntoSDKStructures(t *testing.T) {
 }
 
 // TestPipelineProviderActuallyDrivesLoadConfig pins the negative case for the
-// equality check in TestPipelineDeliversAiscanBytes. By default each SDK
+// equality check in TestPipelineDeliversCyberScanBytes. By default each SDK
 // embeds its own copy of (some of) the same upstream files cyber ships, so
 // "cyber bytes equal LoadConfig bytes" alone can't tell us whether the
 // provider is in the call path or whether we are silently riding on the SDK

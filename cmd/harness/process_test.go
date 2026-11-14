@@ -22,10 +22,11 @@ import (
 )
 
 var (
-	buildOnce      sync.Once
-	buildErr       error
-	executablePath string
-	artifactRoot   string
+	buildOnce         sync.Once
+	buildErr          error
+	executablePath    string
+	webExecutablePath string
+	artifactRoot      string
 )
 
 // The harness deliberately imports no application implementation packages.
@@ -71,11 +72,16 @@ func runHarness(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	executablePath = filepath.Join(artifactRoot, "aiscan")
+	executablePath = filepath.Join(artifactRoot, "cyber-scan")
 	if runtime.GOOS == "windows" {
 		executablePath += ".exe"
 	}
+	webExecutablePath = filepath.Join(artifactRoot, "cyber-harness")
+	if runtime.GOOS == "windows" {
+		webExecutablePath += ".exe"
+	}
 	defer os.Remove(executablePath)
+	defer os.Remove(webExecutablePath)
 	fmt.Fprintln(os.Stderr, "harness artifacts:", artifactRoot)
 	return m.Run()
 }
@@ -101,14 +107,14 @@ func repositoryRoot() (string, error) {
 // from; it is resolved from the repository root.
 const editionsFile = "editions.env"
 
-// fullBuildSettings returns the tags and environment a full-edition build needs.
+// productBuildSettings reads the shipped product tags and environment.
 // They are read from the manifest rather than inherited from the caller, so the
-// harness builds the shipped edition however it was started.
+// harness builds each shipped product however it was started.
 //
 // The capability tag set is deliberate: it drops the base policy tags that keep
 // the resource templates outside the binary, so the harness drives a binary that
 // stands alone in its artifact directory.
-func fullBuildSettings(root string) (string, []string, error) {
+func productBuildSettings(root, product string) (string, []string, error) {
 	raw, err := os.ReadFile(filepath.Join(root, editionsFile))
 	if err != nil {
 		return "", nil, err
@@ -123,13 +129,13 @@ func fullBuildSettings(root string) (string, []string, error) {
 			values[strings.TrimSpace(key)] = strings.TrimSpace(value)
 		}
 	}
-	tags := values["FULL_CAPS_TAGS"]
+	tags := values[product+"_CAPS_TAGS"]
 	if tags == "" {
-		return "", nil, fmt.Errorf("%s does not declare FULL_CAPS_TAGS", editionsFile)
+		return "", nil, fmt.Errorf("%s does not declare %s_CAPS_TAGS", editionsFile, product)
 	}
-	cgo := values["FULL_CGO"]
+	cgo := values[product+"_CGO"]
 	if cgo == "" {
-		return "", nil, fmt.Errorf("%s does not declare FULL_CGO", editionsFile)
+		return "", nil, fmt.Errorf("%s does not declare %s_CGO", editionsFile, product)
 	}
 
 	env := make([]string, 0, len(os.Environ())+1)
@@ -152,23 +158,28 @@ func buildExecutable(t *testing.T) string {
 			buildErr = err
 			return
 		}
-		tags, env, err := fullBuildSettings(root)
-		if err != nil {
-			buildErr = err
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "go", "build", "-tags", tags, "-o", executablePath, "./cmd/aiscan")
-		cmd.Dir = root
-		cmd.Env = env
-		data, err := cmd.CombinedOutput()
-		if writeErr := os.WriteFile(filepath.Join(artifactRoot, "build.log"), data, 0600); writeErr != nil {
-			buildErr = writeErr
-			return
-		}
-		if err != nil {
-			buildErr = fmt.Errorf("build current full application: %w\n%s", err, data)
+		for _, product := range []struct{ manifest, output, entry string }{
+			{"STANDARD", executablePath, "./cmd/cyber-scan"},
+			{"FULL", webExecutablePath, "./cmd/cyber-harness"},
+		} {
+			tags, env, err := productBuildSettings(root, product.manifest)
+			if err != nil {
+				buildErr = err
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			cmd := exec.CommandContext(ctx, "go", "build", "-tags", tags, "-o", product.output, product.entry)
+			cmd.Dir, cmd.Env = root, env
+			data, err := cmd.CombinedOutput()
+			cancel()
+			if writeErr := os.WriteFile(filepath.Join(artifactRoot, product.manifest+"-build.log"), data, 0600); writeErr != nil {
+				buildErr = writeErr
+				return
+			}
+			if err != nil {
+				buildErr = fmt.Errorf("build %s: %w\n%s", product.entry, err, data)
+				return
+			}
 		}
 	})
 	if buildErr != nil {
@@ -332,10 +343,10 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 		lifetime = 3 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
-	p.cmd = exec.CommandContext(ctx, executablePath,
+	p.cmd = exec.CommandContext(ctx, webExecutablePath,
 		"--config", w.config, "--data-dir", filepath.Join(w.dir, "data"), "--no-color",
-		"web", "--addr", "127.0.0.1:0",
-		"--db", w.db, "--token", "harness-local-access", "--no-agent")
+		"--addr", "127.0.0.1:0",
+		"--db", w.db, "--token", "harness-local-access")
 	p.cmd.Dir = w.dir
 	p.cmd.Env = testEnvironment(includeLLM)
 	p.cmd.Stdout, p.cmd.Stderr = output, output
@@ -360,7 +371,7 @@ func (w *workspace) launch(t *testing.T, includeLLM bool) *testProcess {
 	return p
 }
 
-var listening = regexp.MustCompile(`cyber-web listening on http://(127\.0\.0\.1:\d+)`)
+var listening = regexp.MustCompile(`cyber-harness listening on http://(127\.0\.0\.1:\d+)`)
 
 func (w *workspace) start(t *testing.T) *testProcess {
 	t.Helper()

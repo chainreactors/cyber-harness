@@ -4,7 +4,7 @@ title: okf
 description: Validate Open Knowledge Format 0.2 bundles and run stricter production checks.
 tags: [okf, markdown, validation]
 status: stable
-generated: { by: process:aiscan, at: 2026-09-18T00:00:00Z }
+generated: { by: process:cyber-scan, at: 2026-09-18T00:00:00Z }
 ---
 
 # OKF validation

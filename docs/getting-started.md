@@ -10,19 +10,20 @@
 
 | 发行方式 | 包含什么 | 适用场景 |
 | --- | --- | --- |
-| `aiscan` | Agent、核心扫描器、代理、Skills、IOA | CLI 使用和自动化 |
-| `aiscan-full` | 标准能力，加 Web、浏览器、被动测绘和深度爬取 | 浏览器工作台和完整工具集 |
+| `cyber-scan` | Agent、扫描器、代理、Skills、IOA、浏览器、测绘和爬取 | 扫描节点与 CLI 自动化 |
+| `cyber-harness` | 包含 Web 的主程序，管理同级执行节点 | 浏览器工作台 |
+| `cyber-audit` | 源码与二进制审计工具 | 审计节点 |
 | `make agent` | 通用本地 Agent，不装安全扫描与 Web 等扩展 | 学习框架、最小嵌入 |
 | `make record` | 带原生录屏能力的构建 | 需要桌面捕获的开发者，见 [record](record.md) |
 
-发布文件名形如 `aiscan_linux_amd64.zip`、`aiscan_darwin_arm64.zip`、`aiscan_windows_amd64.zip`，full 使用 `aiscan-full_` 前缀。实际可用平台以该 release 的附件为准。
+发布文件名形如 `cyber-scan_linux_amd64.zip`、`cyber-scan_darwin_arm64.zip`、`cyber-scan_windows_amd64.zip`，Web 主程序使用 `cyber-harness_` 前缀，审计节点使用 `cyber-audit_` 前缀。实际可用平台以该 release 的附件为准。
 
 ```sh
-aiscan --version
-aiscan -h
+cyber-scan --version
+cyber-scan -h
 ```
 
-Windows 下若没有加入 PATH，将下文的 `aiscan` 换为 `.\aiscan.exe`。命令中的模型名和端点必须替换为你的服务实际支持的值。
+Windows 下若没有加入 PATH，将下文的 `cyber-scan` 换为 `.\cyber-scan.exe`。命令中的模型名和端点必须替换为你的服务实际支持的值。
 
 源码构建需要 [go.mod](../go.mod) 指定的 Go 版本（当前为 1.26）和 Git。下面的 Makefile 命令使用 POSIX shell；Windows 可用相应的 MSYS2 环境。
 
@@ -33,23 +34,23 @@ make
 # 可选：make agent / make full
 ```
 
-`make` 默认构建标准发行版，无需前端。`make full` 与 `make web-build` 需要 Node.js/npm（CI 使用 Node.js 22）；先执行 `npm --prefix web/frontend ci` 安装依赖，再构建。`make agent` 与 `make audit` 无需前端。产物位于 `bin/`，Windows 下追加 `.exe`；这些目标使用 `CGO_ENABLED=0`，原生录屏构建才需要 CGO 工具链。完整构建入口和[自定义最小应用](../README_CN.md#自定义最小应用)见 [README](../README_CN.md#构建与嵌入)。构建标签由 [editions.env](../editions.env) 管理，资源内嵌策略见 [Makefile](../Makefile)。
+`make` 默认构建 cyber-scan 扫描节点，无需前端。`make full` 与 `make web-build` 需要 Node.js/npm（CI 使用 Node.js 22）；先执行 `npm --prefix web/frontend ci` 安装依赖，再构建。`make agent` 与 `make audit` 无需前端。产物位于 `bin/`，Windows 下追加 `.exe`；这些目标使用 `CGO_ENABLED=0`，原生录屏构建才需要 CGO 工具链。完整构建入口和[自定义最小应用](../README_CN.md#自定义最小应用)见 [README](../README_CN.md#构建与嵌入)。构建标签由 [editions.env](../editions.env) 管理，资源内嵌策略见 [Makefile](../Makefile)。
 
 ## 2. 配置模型
 
-配置机制由 cyber-harness 提供，aiscan 和通用 agent 共用。首次运行：
+配置机制由 cyber-harness 提供，cyber-scan 和通用 agent 共用。首次运行：
 
 ```sh
-aiscan init
+cyber-scan init
 ```
 
 终端中会引导设置协议、端点、模型和凭据，默认写入 `~/.cyber/cyber.yaml`。也可以无交互生成：
 
 ```sh
-aiscan init --non-interactive --provider openai --base-url https://api.deepseek.com/v1 --model deepseek-chat
+cyber-scan init --non-interactive --provider openai --base-url https://api.deepseek.com/v1 --model deepseek-chat
 ```
 
-已有文件不会被覆盖。项目需要不同设置时运行 `aiscan init --project`，当前目录配置优先于用户配置。也可手动编辑用户或项目的 `cyber.yaml`：
+已有文件不会被覆盖。项目需要不同设置时运行 `cyber-scan init --project`，当前目录配置优先于用户配置。也可手动编辑用户或项目的 `cyber.yaml`：
 
 ```yaml
 llm:
@@ -75,7 +76,7 @@ OpenAI-compatible 服务使用 `provider: openai`；Anthropic-compatible 服务�
 ## 3. 完成一个本地任务
 
 ```sh
-aiscan agent -p "只读取当前目录，列出顶层文件并说明判断依据，不修改文件" -o jsonl -f first-run.jsonl
+cyber-scan agent -p "只读取当前目录，列出顶层文件并说明判断依据，不修改文件" -o jsonl -f first-run.jsonl
 ```
 
 任务结束后命令退出；`first-run.jsonl` 保存模型输出、工具调用及运行生命周期的 AOP 事件，可用下一步的 `-F` 回看。模型选择哪些工具不是固定的，不能用某段回答是否逐字匹配判断安装成功。
@@ -83,13 +84,13 @@ aiscan agent -p "只读取当前目录，列出顶层文件并说明判断依据
 `-o` 创建新文件，重复运行时换一个文件名。查看记录：
 
 ```sh
-aiscan -F first-run.jsonl
+cyber-scan -F first-run.jsonl
 ```
 
 从记录恢复上下文并开始新任务：
 
 ```sh
-aiscan agent --resume first-run.jsonl -p "根据刚才的结果总结目录用途" -o jsonl -f second-run.jsonl
+cyber-scan agent --resume first-run.jsonl -p "根据刚才的结果总结目录用途" -o jsonl -f second-run.jsonl
 ```
 
 恢复会话不恢复旧的子进程、网络连接或后台任务，也不会修改输入记录。详细边界见[会话与上下文](user/sessions.md#回看与恢复)。
@@ -99,7 +100,7 @@ aiscan agent --resume first-run.jsonl -p "根据刚才的结果总结目录用�
 不传任务输入，进入交互模式：
 
 ```sh
-aiscan agent
+cyber-scan agent
 ```
 
 输入 `/help` 查看当前安装实际提供的命令，输入 `/status` 查看模型与工具状态。工具集合取决于发行版；[Agent 指南](agent.md)介绍继续、停止、压缩和目标评估。
@@ -107,7 +108,7 @@ aiscan agent
 对本地靶场直接扫描，不使用模型验证：
 
 ```sh
-aiscan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
+cyber-scan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
 ```
 
 先确保该端口运行着你要测试的服务。扫描可能包含主动探测和认证检测；无发现不代表服务安全。`scan` 的规则流水线与 Agent 的自主决策不同，见 [扫描指南](scan.md)。
@@ -115,10 +116,10 @@ aiscan scan -i http://127.0.0.1:3000 --verify=off -o jsonl -f lab-scan.jsonl
 使用完整发行版的浏览器工作台：
 
 ```sh
-aiscan-full web
+cyber-harness
 ```
 
-访问 `http://127.0.0.1:8080`，输入启动时打印的 access key；默认同时启动本地 Agent。Web 数据默认保存到 `cyber-web.db`，可用 `--db` 指定路径。远程节点见 [Web 与协作](user/web.md)。
+访问 `http://127.0.0.1:8080`，输入启动时打印的 access key；通过快速连接面板接入扫描或审计节点。Web 数据默认保存到 `cyber-harness.db`，可用 `--db` 指定路径。远程节点见 [Web 与协作](user/web.md)。
 
 ## 安装验证
 

@@ -87,8 +87,8 @@ npm run test:jev -- --grep 'real.*Reflex'
 Run from the repository root:
 
 ```sh
-go test -tags "full sqlite" ./agent/provider ./agent/session ./pkg/config ./pkg/node ./pkg/web/api ./pkg/web/service
-go test -race -tags "full sqlite" ./agent/provider ./agent/session ./exts/provider ./pkg/config ./pkg/node ./pkg/web/api ./pkg/web/service ./cmd/aiscan
+go test -tags "sqlite" ./agent/provider ./agent/session ./pkg/config ./pkg/node ./pkg/web/api ./pkg/web/service
+go test -race -tags "sqlite" ./agent/provider ./agent/session ./exts/provider ./pkg/config ./pkg/node ./pkg/web/api ./pkg/web/service ./cmd/cyber-scan
 ```
 
 The race check requires CGO and a C compiler; on Windows, select the compiler with `CC`. Repository process tests are documented in [cmd/harness](../../../cmd/harness/README.md).

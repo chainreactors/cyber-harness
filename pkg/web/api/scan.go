@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrScanUnavailable   = errors.New("no scan execution nodes connected; connect an external agent or start Web without --no-agent")
+	ErrScanUnavailable   = errors.New("no scan execution nodes connected; connect a cyber-scan agent with --server-url")
 	ErrScanNotFound      = errors.New("scan not found")
 	ErrScanNotCancelable = errors.New("scan cannot be canceled")
 	// ErrScanConsoleDisabled rejects scan work on a host built without the

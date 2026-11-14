@@ -91,7 +91,7 @@ func installedSkills(t *testing.T, collaboration bool) *skills.Store {
 			t.Fatal(diagnostics)
 		}
 		// The scanner bundle owns cyber://skills/cyber/ (report convention);
-		// the ioa bundle shares that namespace, mirroring the aiscan composition.
+		// the ioa bundle shares that namespace, mirroring the cyber-scan composition.
 		scannerBundle, scannerDiagnostics := scannerskills.Bundle()
 		if len(scannerDiagnostics) != 0 {
 			t.Fatal(scannerDiagnostics)

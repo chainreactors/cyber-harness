@@ -65,6 +65,6 @@ The durable active-state schema is now 2. Schema 1 is explicitly refused; select
 
 - core/collaboration: all event round trips and strict rejection.
 - exts/ioa/client: validation before admission, lifecycle records never execute, foreign metadata ignored, 300+ history replay with malformed record, cursor storage failure and backpressure.
-- exts/inbox and cmd/aiscan: actual Router/Session/tmux, durable outbox, ACK-loss deduplication, feedback cycle prevention, CLI process restart.
+- exts/inbox and cmd/cyber-scan: actual Router/Session/tmux, durable outbox, ACK-loss deduplication, feedback cycle prevention, CLI process restart.
 - Five real-model complex scenarios in exts/inbox/complex_live_test.go: versioned reconciliation, capacity-constrained DAG, urgent allocation correction, inventory replay/backpressure, release attestation after ACK loss.
 - Browser suites test application composition, restart identity, cross-node scoping, late arrival/retries, invalid/foreign metadata and full console reads from a real Hub when configured.

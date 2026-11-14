@@ -90,30 +90,30 @@ jobs:
 
       - name: Build the profile-neutral Web Hub
         run: |
-          CGO_ENABLED=0 go build -tags "$WEB_TAGS" -o /dev/null ./cmd/cyber-web
+          CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/cyber-harness
           # The standalone IOA server is a Hub messaging capability. Its
           # agent client and product execution capabilities remain on nodes.
-          if CGO_ENABLED=0 go list -deps -tags "$WEB_TAGS" ./cmd/cyber-web | grep -Eq '^github\.com/chainreactors/cyber/((exts|tools)/(scanner|search|proxy|browser|record|scan|audit)(/|$)|exts/ioa/client(/|$)|tools/ioa$)'; then
-            echo "::error::cyber-web reaches a product execution capability"
+          if CGO_ENABLED=0 go list -deps -tags "$FULL_TAGS" ./cmd/cyber-harness | grep -Eq '^github\.com/chainreactors/cyber/((exts|tools)/(scanner|search|proxy|browser|record|scan|audit)(/|$)|exts/ioa/client(/|$)|tools/ioa$)'; then
+            echo "::error::cyber-harness reaches a product execution capability"
             exit 1
           fi
-          CGO_ENABLED=0 go test -count=1 -tags "$WEB_TAGS" ./cmd/cyber-web ./pkg/web/host
+          CGO_ENABLED=0 go test -count=1 -tags "$FULL_TAGS" ./cmd/cyber-harness ./pkg/web/host
 
       # The retained native CSTX Extension is not part of any product edition;
       # browser builds use @cyber/cstx WASM.
-      - name: Ensure aiscan does not depend on libcstx
+      - name: Ensure cyber-scan does not depend on libcstx
         run: |
           if CGO_ENABLED=0 go list -deps \
-            -tags "$STANDARD_TAGS" ./cmd/aiscan \
+            -tags "$STANDARD_TAGS" ./cmd/cyber-scan \
             | grep -q '^github.com/chainreactors/libcstx/go$'; then
-            echo "::error::aiscan reaches the dormant native CSTX Extension"
+            echo "::error::cyber-scan reaches the dormant native CSTX Extension"
             exit 1
           fi
           for cgo in 0 1; do
             if CGO_ENABLED="$cgo" go list -deps \
-              -tags "$FULL_TAGS" ./cmd/aiscan \
+              -tags "$STANDARD_TAGS" ./cmd/cyber-scan \
               | grep -q '^github.com/chainreactors/libcstx/go$'; then
-              echo "::error::aiscan-full reaches the dormant native CSTX Extension with CGO_ENABLED=$cgo"
+              echo "::error::cyber-scan reaches the dormant native CSTX Extension with CGO_ENABLED=$cgo"
               exit 1
             fi
           done
@@ -123,7 +123,7 @@ jobs:
           tracked_native="$(git ls-files -- '*.a' '*.lib' '*.dll' '*.so' '*.dylib')"
           if [[ -n "$tracked_native" ]]; then
             printf '%s\n' "$tracked_native"
-            echo "::error::native libraries must come from pinned modules or Release SDKs, not the aiscan Git tree"
+            echo "::error::native libraries must come from pinned modules or Release SDKs, not the cyber-scan Git tree"
             exit 1
           fi
           libcstx_imports="$(git grep -l 'github.com/chainreactors/libcstx/go' -- '*.go' || true)"
@@ -136,10 +136,10 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure the full edition builds with and without cgo
+      - name: Ensure the scanner builds with and without cgo
         run: |
-          CGO_ENABLED=0 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
-          CGO_ENABLED=1 go build -tags "$FULL_TAGS" -o /dev/null ./cmd/aiscan
+          CGO_ENABLED=0 go build -tags "$STANDARD_TAGS" -o /dev/null ./cmd/cyber-scan
+          CGO_ENABLED=1 go build -tags "$STANDARD_TAGS" -o /dev/null ./cmd/cyber-scan
 
       - name: Run go vet
         run: go vet ./...
@@ -275,7 +275,7 @@ jobs:
         run: grep -Ev '^[[:space:]]*(#|$)' editions.env >> "$GITHUB_ENV"
 
       - name: Run Windows package tests
-        run: go test -count=1 ./agent/... ./cmd/aiscan/... ./pkg/web/...
+        run: go test -count=1 ./agent/... ./cmd/cyber-scan/... ./pkg/web/...
 
       - name: Set up Node.js for bootstrap tests
         uses: actions/setup-node@v7
@@ -286,13 +286,13 @@ jobs:
         working-directory: web/frontend
         run: npm run test:bootstrap
 
-      - name: Compile and test the full CLI without cgo on Windows
-        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
+      - name: Compile and test the scanner CLI without cgo on Windows
+        run: go test -count=1 -tags "$env:STANDARD_TAGS" ./cmd/cyber-scan
         env:
           CGO_ENABLED: "0"
 
-      - name: Compile and test the full CLI with cgo on Windows
-        run: go test -count=1 -tags "$env:FULL_TAGS" ./cmd/aiscan
+      - name: Compile and test the scanner CLI with cgo on Windows
+        run: go test -count=1 -tags "$env:STANDARD_TAGS" ./cmd/cyber-scan
         env:
           CGO_ENABLED: "1"
 
@@ -322,8 +322,8 @@ jobs:
 
       - name: Run remaining full-tag unit variants
         run: |
-          go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
-            ./cmd/aiscan ./agent/skills ./tools/passive ./tools/scan/engine
+          go test -tags "$STANDARD_CAPS_TAGS" -count=1 -timeout 5m \
+            ./cmd/cyber-scan ./agent/skills ./tools/passive ./tools/scan/engine
           go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
             -run '^TestCrawler(ProfilesAreExplicitlyComposed|FiltersAndDeduplicatesTargets)$' \
             ./tools/scan
@@ -334,7 +334,9 @@ jobs:
       - name: Run JEV compilation and profile regressions
         run: |
           go test -race -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
-            -run '^Test(ReflexV2|JEVProfile)' ./exts/jev ./cmd/aiscan
+            -run '^TestReflexV2' ./exts/jev
+          go test -race -tags "$STANDARD_CAPS_TAGS" -count=1 -timeout 5m \
+            -run '^TestJEVProfile' ./cmd/cyber-scan
 
       - name: Compile browser-backed full-tag suites
         run: |
@@ -345,8 +347,8 @@ jobs:
 
       - name: Run full server CSTX integration
         run: |
-          CGO_ENABLED=0 go test -tags "$FULL_CAPS_TAGS" -count=1 -timeout 5m \
-            ./cmd/aiscan ./pkg/web/api ./pkg/web/service
+          CGO_ENABLED=0 go test -tags "$STANDARD_CAPS_TAGS" -count=1 -timeout 5m \
+            ./cmd/cyber-scan ./pkg/web/api ./pkg/web/service
 
   headless-record-replay-e2e:
     runs-on: ubuntu-22.04

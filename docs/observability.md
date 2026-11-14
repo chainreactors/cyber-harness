@@ -145,7 +145,7 @@ SDK Shutdown 是一次性操作，扩展拥有其清理 goroutine。调用者超
 - AOP protobuf JSON 回放和失败/取消/未完成夹具：7 traces / 23 spans / 210 tokens，SigNoz 113 logs、15 类指标 / 99 序列；6 个 Turn outcome 为 success=3 / error=1 / canceled=1 / incomplete=1，Session 完成 5、未完成 1。覆盖重试、重复 completion、已完成父操作、同步/后台子 Agent、compact/eval、guardrail、JEV background compiler 和迟到 fact。
 - 两端逐项核对机制属性、cache/reasoning、missing、LLM kind、汇总不双计和来源关联；SigNoz 日志关联、histogram sum/count 与 trace 一致，活跃数最终归零。
 - focused Go tests、vet、OTel / observe / terminal race tests，以及 CLI 对应构建标签通过。回归覆盖终态错误归属、准确工具来源、Session 孤儿收尾、retry/discarded stream、部分/全部 missing usage、OTLP wire 字段/buckets、独立信号及采样关闭。
-- 本轮正式 `cmd/aiscan` 用正常 OTel 环境配置和真实 `gpt-6-sol` 执行 AOP 归档分析、Python 自检及工具失败修复，未注入 recording exporter：10 个模型调用、10 个工具调用（4 个失败）、114,242 tokens。SigNoz 158 logs / 29 spans，Phoenix 相同 29 spans；98 个非流式 canonical AOP facts、CLI usage、trace/metric tokens、operation 父子和失败状态逐项一致，任务成功且活跃归零。
+- 本轮正式 `cmd/cyber-scan` 用正常 OTel 环境配置和真实 `gpt-6-sol` 执行 AOP 归档分析、Python 自检及工具失败修复，未注入 recording exporter：10 个模型调用、10 个工具调用（4 个失败）、114,242 tokens。SigNoz 158 logs / 29 spans，Phoenix 相同 29 spans；98 个非流式 canonical AOP facts、CLI usage、trace/metric tokens、operation 父子和失败状态逐项一致，任务成功且活跃归零。
 - Agent 生成的 analyzer/report 另行核对：从历史销售/SLO/审计归档计算 input=132,272、output=6,025、total=138,297，22 请求、28 calls / 28 results、2 个失败工具。此为被分析的历史输入，不是本轮模型消耗。
 
 回放证明现有事件的转换；本轮真实模型验收覆盖普通主 Agent 和工具。复杂机制的真实模型执行仍需独立验收。运行方式见[示例](../examples/observability/README.md)。

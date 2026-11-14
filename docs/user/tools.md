@@ -2,19 +2,19 @@
 
 [使用者指南](../README.md#使用者指南) · 前一篇：[会话与上下文](sessions.md) · 下一篇：[Skills 与知识](knowledge.md)
 
-工具是 Agent 读取和改变环境的方式。模型看到工具名称、说明和参数结构，再请求执行；aiscan 返回实际结果，模型据此继续工作。可用集合取决于发行版及已安装扩展，运行时可用 `/status` 查看。
+工具是 Agent 读取和改变环境的方式。模型看到工具名称、说明和参数结构，再请求执行；cyber-scan 返回实际结果，模型据此继续工作。可用集合取决于发行版及已安装扩展，运行时可用 `/status` 查看。
 
 ## 文件与命令
 
 文件工具支持读取、查找和修改内容，`bash` 支持命令式工作。工作目录决定相对路径的起点，宿主权限决定进程实际可以访问的环境。会话本身不提供容器或文件系统隔离。
 
-`bash` 既可以执行宿主上的程序，也可以调用 aiscan 注册的命令。例如 `gogo`、`spray` 和 `scan` 可以直接调用内置扫描器，无需在 PATH 中另放一个同名程序；普通外部命令仍要求系统安装对应工具。
+`bash` 既可以执行宿主上的程序，也可以调用 cyber-scan 注册的命令。例如 `gogo`、`spray` 和 `scan` 可以直接调用内置扫描器，无需在 PATH 中另放一个同名程序；普通外部命令仍要求系统安装对应工具。
 
 交互模式的 `!` 前缀直接执行命令，适合查看帮助或手动完成明确的操作：
 
 ```text
-aiscan> !gogo -h
-aiscan> !tmux ls
+cyber-scan> !gogo -h
+cyber-scan> !tmux ls
 ```
 
 内置命令和外部命令可以通过执行适配层组成管道。不同命令有自己的参数作用域，例如 Agent 的 `-p` 表示 prompt，gogo 的 `-p` 表示端口。参数细节见[命令参考](../reference.md)。
@@ -57,21 +57,21 @@ Guardrail 是工具调用的检查边界。已启动子进程内部的操作和�
 
 普通前台命令的 stdin 默认是 EOF，`read`、`cat` 等读取输入的命令不会空等到超时。需要后续输入时，显式设置 `wait > 0`，再用 `tmux send-keys` 发送内容；`tmux new-session` 的交互会话同样保留输入。`wait=0` 被 Inbox 中断而转后台时仍保持原来的 EOF。Go 调用方显式提供的 `BashExecOptions.Stdin` 优先使用其 reader。
 
-完成结果会送回 Agent 会话，运行期间也可通过 `tmux` 查看输出、发送交互输入或停止任务。这是 aiscan 自己的工作管理命令，不要求系统安装 tmux。
+完成结果会送回 Agent 会话，运行期间也可通过 `tmux` 查看输出、发送交互输入或停止任务。这是 cyber-scan 自己的工作管理命令，不要求系统安装 tmux。
 
 ```text
-aiscan> !tmux ls
-aiscan> !tmux kill -t <session-id>
+cyber-scan> !tmux ls
+cyber-scan> !tmux kill -t <session-id>
 ```
 
 长输出可能只在模型上下文中保留部分内容。需要查看较早输出时使用工具返回的读取提示，完整管理语法见[终端命令说明](../../exts/skills/assets/runtime/tmux.md)。远程 API 的前台执行入口有独立契约，不能把 Agent 的后台等待参数等同于所有入口的行为。
 
 ## 网络与代理
 
-aiscan 的工具网络出口由本地代理 Hub 管理。`--proxy` 设置初始上游，Agent 可以通过 `proxy` 命令管理和切换节点；`mitm` 用于查看捕获的请求和响应。稳定的本地地址使工具可以复用路由配置。
+cyber-scan 的工具网络出口由本地代理 Hub 管理。`--proxy` 设置初始上游，Agent 可以通过 `proxy` 命令管理和切换节点；`mitm` 用于查看捕获的请求和响应。稳定的本地地址使工具可以复用路由配置。
 
 ```sh
-aiscan scan -i http://127.0.0.1:3000 --verify=off --proxy socks5://127.0.0.1:1080
+cyber-scan scan -i http://127.0.0.1:3000 --verify=off --proxy socks5://127.0.0.1:1080
 ```
 
 内置客户端接收代理配置，外部程序通过代理与 CA 环境变量接入。忽略这些变量的程序不一定经过 Hub；上游切换也不会把已经建立的 TCP 连接迁移到另一出口。
@@ -80,7 +80,7 @@ HTTPS 捕获依赖客户端信任 Hub CA。`--mitm=false` 关闭捕获，保留�
 
 ## 浏览器与外部工具
 
-full 版的浏览器支持页面导航、交互、截图和网络捕获。持久浏览器会话保留多步交互状态，适合需要登录或 JavaScript 渲染的页面；它的状态与 Agent 的对话历史不同，恢复聊天记录不会恢复旧浏览器实例。具体命令见[浏览器说明](../../exts/skills/assets/runtime/playwright.md)。
+cyber-scan 的浏览器支持页面导航、交互、截图和网络捕获。持久浏览器会话保留多步交互状态，适合需要登录或 JavaScript 渲染的页面；它的状态与 Agent 的对话历史不同，恢复聊天记录不会恢复旧浏览器实例。具体命令见[浏览器说明](../../exts/skills/assets/runtime/playwright.md)。
 
 Arsenal 管理外部安全工具，并将安装目录加入子进程 PATH。安装后的工具仍需要满足平台与运行依赖。原生桌面录屏是另外的可选构建，见 [record](../record.md)。
 

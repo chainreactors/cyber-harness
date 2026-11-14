@@ -40,9 +40,9 @@ $(error make lost its environment; run it from cmd.exe or PowerShell, e.g. cmd /
 endif
 endif
 
-STANDARD_BIN ?= $(BIN_DIR)/aiscan$(EXE)
-FULL_BIN ?= $(BIN_DIR)/aiscan-full$(EXE)
-RECORD_BIN ?= $(BIN_DIR)/aiscan-record$(EXE)
+STANDARD_BIN ?= $(BIN_DIR)/cyber-scan$(EXE)
+FULL_BIN ?= $(BIN_DIR)/cyber-harness$(EXE)
+RECORD_BIN ?= $(BIN_DIR)/cyber-scan-record$(EXE)
 AGENT_BIN ?= $(BIN_DIR)/agent$(EXE)
 AUDIT_BIN ?= $(BIN_DIR)/cyber-audit$(EXE)
 
@@ -69,14 +69,13 @@ endif
 
 # Tool payloads are independent of scanner template embedding.
 ARSENAL_EMBED ?= 0
-ARSENAL_CONFIG ?= cmd/aiscan/bundle.yaml
+ARSENAL_CONFIG ?= cmd/cyber-scan/bundle.yaml
 AUDIT_ARSENAL_CONFIG ?= cmd/audit/bundle.yaml
 ARSENAL_GOOS := $(shell $(GO) env GOOS)
 ARSENAL_GOARCH := $(shell $(GO) env GOARCH)
 ifeq ($(ARSENAL_EMBED),1)
 EMBED_PREREQ += embed-arsenal
 STANDARD_TAGS += arsenal_embed
-FULL_TAGS += arsenal_embed
 RECORD_TAGS += arsenal_embed
 AUDIT_PREREQ := embed-audit
 AUDIT_TAGS := arsenal_embed
@@ -114,13 +113,13 @@ RECORD_BUILD_ENV := CGO_LDFLAGS="-L$(RECORD_PREFIX)/lib $(RECORD_EXTRA_LDFLAGS)"
 .PHONY: help prepare frontend proto-gen standard agent full record record-native web-build web-run web all clean harness harness-llm check-architecture embed-resources ldflags
 
 help:
-	@echo "aiscan build targets:"
-	@echo "  make / make standard  Build the standard aiscan edition"
+	@echo "cyber-scan build targets:"
+	@echo "  make / make standard  Build the cyber-scan execution node"
 	@echo "  make agent            Build the minimal local agent binary"
 	@echo "  make audit ARSENAL_EMBED=1  Build audit with all required external tools"
-	@echo "  make full             Build frontend, then build the full edition"
+	@echo "  make full             Build frontend and the standalone cyber-harness Hub"
 	@echo "  make record           Build the record-enabled edition (supported platforms only)"
-	@echo "  make web              Build the full edition and start the Web UI"
+	@echo "  make web              Build cyber-harness and start the Web UI"
 	@echo "  make frontend         Build only web/frontend into web/static"
 	@echo "  make embed-arsenal    Download tools and generate target-specific embedding"
 	@echo "  make record-native    Install the recorder SDK"
@@ -129,7 +128,7 @@ help:
 	@echo "  make harness-llm      Run real LLM scenarios (requires explicit credentials)"
 	@echo "  make check-architecture  Run static repository and dependency guards"
 	@echo "  make ldflags          Print the -ldflags the build targets use"
-	@echo "  make all              Build the standard and full editions"
+	@echo "  make all              Build cyber-scan, agent and cyber-harness"
 	@echo ""
 	@echo "Variables:"
 	@echo "  EMBED=1               Generate and embed resources instead of loading them"
@@ -165,7 +164,7 @@ embed-resources:
 
 .PHONY: embed-arsenal arsenal-spec
 embed-arsenal arsenal-spec:
-	GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) $(GO) run github.com/chainreactors/crtm/cmd/crtm-bundle -config "$(ARSENAL_CONFIG)" -target "$(ARSENAL_GOOS)/$(ARSENAL_GOARCH)" -output cmd/aiscan -package main $(if $(filter arsenal-spec,$@),-metadata-only)
+	GOOS=$(shell $(GO) env GOHOSTOS) GOARCH=$(shell $(GO) env GOHOSTARCH) $(GO) run github.com/chainreactors/crtm/cmd/crtm-bundle -config "$(ARSENAL_CONFIG)" -target "$(ARSENAL_GOOS)/$(ARSENAL_GOARCH)" -output cmd/cyber-scan -package main $(if $(filter arsenal-spec,$@),-metadata-only)
 
 .PHONY: audit embed-audit audit-arsenal-spec
 embed-audit audit-arsenal-spec:
@@ -185,14 +184,14 @@ frontend:
 	$(NPM) --prefix "$(WEB_DIR)" run build
 
 standard: $(EMBED_PREREQ) prepare
-	CGO_ENABLED=$(STANDARD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/aiscan
+	CGO_ENABLED=$(STANDARD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(STANDARD_TAGS)" -o "$(STANDARD_BIN)" ./cmd/cyber-scan
 	@echo "Built standard edition: $(STANDARD_BIN)"
 
 agent: prepare
 	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o "$(AGENT_BIN)" ./cmd/agent
 	@echo "Built minimal agent: $(AGENT_BIN)"
 
-# Full and record-enabled binaries embed web/static, so frontend must finish first.
+# The Web Hub embeds web/static; execution nodes do not.
 record-native:
 ifeq ($(RECORD_PLATFORM),unsupported)
 	@echo "record native backend is not supported on this platform" >&2
@@ -201,9 +200,9 @@ else
 	"$(BASH)" ".github/native/sdk.sh" fetch record "$(RECORD_PLATFORM)" "$(RECORD_ARCH)"
 endif
 
-full: $(EMBED_PREREQ) frontend prepare
-	CGO_ENABLED=$(FULL_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/aiscan
-	@echo "Built full edition: $(FULL_BIN)"
+full: frontend prepare
+	CGO_ENABLED=$(FULL_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(FULL_TAGS)" -o "$(FULL_BIN)" ./cmd/cyber-harness
+	@echo "Built Web Hub: $(FULL_BIN)"
 
 ifeq ($(RECORD_PLATFORM),unsupported)
 record:
@@ -211,18 +210,18 @@ record:
 	@exit 1
 else
 # `record-native` installs the only SDK this edition needs.
-record: $(EMBED_PREREQ) frontend record-native prepare
-	$(RECORD_BUILD_ENV) CGO_ENABLED=$(RECORD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/aiscan
+record: $(EMBED_PREREQ) record-native prepare
+	$(RECORD_BUILD_ENV) CGO_ENABLED=$(RECORD_CGO) $(GO) build $(BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -tags "$(RECORD_TAGS)" -o "$(RECORD_BIN)" ./cmd/cyber-scan
 	@echo "Built record-enabled edition: $(RECORD_BIN)"
 endif
 
 web-build: full
 
 web-run:
-	"$(FULL_BIN)" web --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
+	"$(FULL_BIN)" --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
 
 web: full
-	"$(FULL_BIN)" web --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
+	"$(FULL_BIN)" --addr "$(WEB_ADDR)" $(if $(strip $(WEB_TOKEN)),--token "$(WEB_TOKEN)",)
 
 all: standard agent full
 

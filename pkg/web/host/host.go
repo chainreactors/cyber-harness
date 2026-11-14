@@ -60,7 +60,7 @@ func Serve(ctx context.Context, config Config) (resultErr error) {
 		return err
 	}
 	addr := listener.Addr().String()
-	logger.Infof("cyber-web listening on http://%s", addr)
+	logger.Infof("cyber-harness listening on http://%s", addr)
 	logger.Infof("  web access token: %s", config.Management.AccessKey)
 	nodeCtx, stopNode := context.WithCancel(ctx)
 	defer stopNode()

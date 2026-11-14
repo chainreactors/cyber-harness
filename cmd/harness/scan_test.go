@@ -17,7 +17,7 @@ const scanRPC = "/cyber.rpc.scan.ScanService/"
 
 func TestUserHubScanRequiresConnectedNode(t *testing.T) {
 	w := newWorkspace(t)
-	hub := w.start(t) // Real Web process with --no-agent, no model configured.
+	hub := w.start(t) // Real standalone Hub with no execution node or model configured.
 	u := hub.user(t, "scan-user")
 	var requests atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +38,7 @@ func TestUserHubScanRequiresConnectedNode(t *testing.T) {
 		assertField(t, response, id, "requestId")
 		assertField(t, response, "FAILED_PRECONDITION", "rejected", "code")
 		message, _ := field(response, "rejected", "message").(string)
-		if !strings.Contains(message, "--no-agent") {
+		if !strings.Contains(message, "--server-url") {
 			t.Fatalf("missing recovery instructions: %v", response)
 		}
 	}

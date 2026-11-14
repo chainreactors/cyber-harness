@@ -18,7 +18,7 @@ flowchart TD
     Events --> Consumers[展示 / 记录 / 传输]
 ```
 
-`harness.BaseExtensions` 返回有序的基础扩展；`harness.New` 在此之上构造工具宿主或会话 Agent。`cmd/agent` 选择最小本地能力，`cmd/aiscan` 加入扫描器、代理与协作，`cmd/audit` 以独立 Go 模块组合审计工具，`cmd/cyber-web` 提供独立 Hub。产品功能由入口的导入和装配代码决定。
+`harness.BaseExtensions` 返回有序的基础扩展；`harness.New` 在此之上构造工具宿主或会话 Agent。`cmd/agent` 选择最小本地能力，`cmd/cyber-scan` 加入扫描器、代理与协作，`cmd/audit` 以独立 Go 模块组合审计工具，`cmd/cyber-harness` 提供独立 Hub。产品功能由入口的导入和装配代码决定。
 
 ## 扩展装配与生命周期
 
@@ -37,7 +37,7 @@ flowchart TD
 
 CLI flag、配置 section 和连接检查先在声明阶段贡献，冻结并解析配置后才构造运行扩展。声明不会启动模型、进程或服务。工具安装通过所属 Extension 完成，宿主借用业务接口并持有 Set；扫描流水线的任务 DAG 不参与扩展加载排序。可运行组合与关闭示例见[扩展开发](developer/extensions.md)和[宿主集成](developer/hosting.md)。
 
-能力实现本身通过 imports 复用。`full` 仅选择 aiscan 的全量组合，browser、passive、Katana 扩展不要求该标签。原生 recorder、平台和资源内嵌标签保留各自的构建约束。独立组合示例见[扩展开发](developer/extensions.md#按导入组合可选能力)。
+能力实现本身通过 imports 复用。`make full` 构建包含 Web 的主程序 `cyber-harness`，扫描与审计在同级节点运行。browser、passive、Katana 由扫描入口直接组合，不依赖 `full` 标签。原生 recorder、平台和资源内嵌标签保留各自的构建约束。独立组合示例见[扩展开发](developer/extensions.md#按导入组合可选能力)。
 
 ## Agent 运行时
 
@@ -57,7 +57,7 @@ Session 持有对话、队列和身份，一次外部提交形成 Turn。Turn �
 
 ### Inbox 与后台生产者
 
-mailbox 是每个 Session 的基本机制。`aiscan agent` 由 prompt／REPL 驱动，IOA 可直接投递到存活 Session；独立的 `aiscan inbox` 子命令才安装 `exts/inbox` 常驻 Router。它跨 Run 保存路由上下文，只拥有 `inbox_route`，根据消息、存活 Session 与持久任务目录选择 `new_task`、`task_id` 或 `session_id`。业务执行由已有 subagent + Session 后端承担，Router 不获得 shell、文件或执行工具。媒体只向路由模型提供描述，不读取 URI。
+mailbox 是每个 Session 的基本机制。`cyber-scan agent` 由 prompt／REPL 驱动，IOA 可直接投递到存活 Session；独立的 `cyber-scan inbox` 子命令才安装 `exts/inbox` 常驻 Router。它跨 Run 保存路由上下文，只拥有 `inbox_route`，根据消息、存活 Session 与持久任务目录选择 `new_task`、`task_id` 或 `session_id`。业务执行由已有 subagent + Session 后端承担，Router 不获得 shell、文件或执行工具。媒体只向路由模型提供描述，不读取 URI。
 
 ```mermaid
 flowchart LR
@@ -232,8 +232,8 @@ Web 归档原始 Artifact、Loot 与 cursor，按事件 ID 去重，通过 opera
 | `pkg/` | 公共配置、宿主契约、Console、节点与 Web |
 | `cmd/` | 产品组合与运行入口 |
 
-`core` 不依赖 `agent`、`pkg` 或 `tools`。从 [BaseExtensions](../pkg/harness/base.go)与 [aiscan Profile](../cmd/aiscan/profile.go)阅读装配，沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进工具与事件。生命周期验证位于 [Extension](../core/extension)和 [Resource](../core/resource)，依赖边界由 `go test ./pkg/internal/architecture` 检查。
+`core` 不依赖 `agent`、`pkg` 或 `tools`。从 [BaseExtensions](../pkg/harness/base.go)与 [cyber-scan Profile](../cmd/cyber-scan/profile.go)阅读装配，沿 [Session](../agent/session/session.go)进入 [StandardLoop](../agent/loop.go)，再跟进工具与事件。生命周期验证位于 [Extension](../core/extension)和 [Resource](../core/resource)，依赖边界由 `go test ./pkg/internal/architecture` 检查。
 
-JEV 实现入口为[编译 Agent](../exts/jev/compiler_agent.go)、[资格验证](../exts/jev/qualification.go)和[运行时](../exts/jev/runtime_judgment.go)；[原生机制测试](../exts/jev/native_mechanism_test.go)验证回放与完成语义，[修复测试](../exts/jev/compiler_repair_test.go)验证诊断、压缩和候选保留，[Profile 测试](../cmd/aiscan/jev_profile_flow_test.go)验证产品接线。fixture 测试与真实模型实验的范围不同，不能互相代替。
+JEV 实现入口为[编译 Agent](../exts/jev/compiler_agent.go)、[资格验证](../exts/jev/qualification.go)和[运行时](../exts/jev/runtime_judgment.go)；[原生机制测试](../exts/jev/native_mechanism_test.go)验证回放与完成语义，[修复测试](../exts/jev/compiler_repair_test.go)验证诊断、压缩和候选保留，[Profile 测试](../cmd/cyber-scan/jev_profile_flow_test.go)验证产品接线。fixture 测试与真实模型实验的范围不同，不能互相代替。
 
 运行条件、入口、产物和判定边界见[仓库 harness](../cmd/harness/README.md)、[Web 前端](../web/frontend/e2e/README.md)和[审计测试](../cmd/audit/tests/README.md)。

@@ -42,7 +42,7 @@ go run ./examples/crawl
 
 passive 的配置声明位于 `exts/passive/config`，运行扩展位于 `exts/passive`。宿主可以声明并保存配置而不链接运行实现；`recon` section、环境变量和现有 CLI flag 名称保持兼容，是否显示 flag 由宿主决定。
 
-`cmd/aiscan` 用成对的 `discovery_full.go` / `discovery_standard.go` 选择产品 imports，保留 `full` 作为全量发行版组合。无需新增 browser、passive 或 crawl 标签。`record` 仍受原生 SDK、CGO 和平台约束，可以独立于 `full` 组合。
+`cmd/cyber-scan` 直接组合 browser、passive 和 Katana；`make full` 从独立入口 `cmd/cyber-harness` 构建 Web 主程序。无需新增 browser、passive 或 crawl 标签。`record` 仍受原生 SDK、CGO 和平台约束，可以独立于 `full` 组合。
 
 ## 子 Agent 贡献
 
@@ -113,12 +113,12 @@ Router 借用 `*sessionexec.Tool` 调用与模型 subagent 工具相同的 Prepa
 
 inbox 输入、路由、任务历史、执行 journal、反馈和 outbox 都在同一状态目录 SQLite 中保存。完成快照与输入消费原子提交；执行失败只确认已读取的输入，未读取的实时追问保留 pending 并另起 execution 续接，反馈链也只记录已确认输入的来源。显式取消仍终止该次已认领输入。重启将旧执行置为 interrupted，恢复任务历史并核对外部副作用；不恢复旧进程，也不承诺副作用 exactly-once。关闭先停准入和调度，再取消／排空 Session 与所属后台工作，最后释放订阅、数据库和目录锁。
 
-空 `StateDir` 仍可选择原内存 Router，安装在消息源与会话之前以建立 live Session 目录。它只转发到存活 Session，消息与最近 1024 条完成回执仅在内存保留，没有持久任务调度、恢复与游标接口。`aiscan agent` 不安装 Router；独立的 `aiscan inbox` 子命令选择持久实现，宿主以运行期 `Option.Command` 识别入口，该字段不能由 YAML 或远程配置选择。Inbox 专属配置位于 `inbox` section。
+空 `StateDir` 仍可选择原内存 Router，安装在消息源与会话之前以建立 live Session 目录。它只转发到存活 Session，消息与最近 1024 条完成回执仅在内存保留，没有持久任务调度、恢复与游标接口。`cyber-scan agent` 不安装 Router；独立的 `cyber-scan inbox` 子命令选择持久实现，宿主以运行期 `Option.Command` 识别入口，该字段不能由 YAML 或远程配置选择。Inbox 专属配置位于 `inbox` section。
 
 持久 Router 的集成测试使用脚本 Provider 驱动真实 Agent Loop、Session、内部 Manager、HTTP IOA server/SDK，覆盖重启续接、强杀恢复、历史隔离、并发与纠正、反馈循环、outbox 重发、后台进程清理和超过一页的 IOA 补读：
 
 ```powershell
-go test -race ./exts/inbox ./exts/ioa/client ./agent/subagent/sessionexec ./cmd/aiscan -count=1 -timeout 2m
+go test -race ./exts/inbox ./exts/ioa/client ./agent/subagent/sessionexec ./cmd/cyber-scan -count=1 -timeout 2m
 $env:CYBER_ACTIVE_SOAK_DURATION='65s'
 go test -race ./exts/inbox -run '^TestActiveIOAMonitorRestartAndContinuous$' -count=1 -v -timeout 2m
 ```
@@ -132,7 +132,7 @@ $env:CYBER_INBOX_CASES_OUTPUT = Join-Path (Get-Location) 'outputs/inbox-real-cas
 go test -race ./exts/inbox -run '^TestRepositoryCI' -shuffle=on -count=10 -timeout 180s -v
 ```
 
-`TestReleaseReviewFeedbackSafetyAcrossIOA` 由 builder worker 生成当前提交的 go.mod SHA-256，通过 HTTP/SSE 交给 reviewer worker 写实际审计文件；再重启接收宿主，补读离线回传的 cyclic feedback，并测试隐式新任务、过长链、历史 execution 地址及仅有 source_task_id 的回投。路由模型故意先选择错误目标，必须收到工具错误后改为 record；五个结果都不得新增执行，独立普通通知仍能处理。`cmd/aiscan` 的 `TestInboxCLIProcessWorkflow` 还从独立进程的真实 Profile 验证外部 IOA 请求、回包身份/反馈链、tmux 输入与宿主重启，避免只验证手工拼装的测试宿主。
+`TestReleaseReviewFeedbackSafetyAcrossIOA` 由 builder worker 生成当前提交的 go.mod SHA-256，通过 HTTP/SSE 交给 reviewer worker 写实际审计文件；再重启接收宿主，补读离线回传的 cyclic feedback，并测试隐式新任务、过长链、历史 execution 地址及仅有 source_task_id 的回投。路由模型故意先选择错误目标，必须收到工具错误后改为 record；五个结果都不得新增执行，独立普通通知仍能处理。`cmd/cyber-scan` 的 `TestInboxCLIProcessWorkflow` 还从独立进程的真实 Profile 验证外部 IOA 请求、回包身份/反馈链、tmux 输入与宿主重启，避免只验证手工拼装的测试宿主。
 
 离线复杂场景使用脚本 Provider 驱动真实 Agent Loop、HTTP IOA server/SDK 和 Session；执行 `go test -race ./exts/inbox ./exts/ioa/client`。`TestContinuousMonitorIOARouting` 覆盖忙碌接收者、独立任务、5 批监控事件、空闲后续跑、SSE 重连、中断纠正、结果交回协调者、IOA 回执和停止准入。设置 `CYBER_INBOX_MONITOR_INTERVAL=10s` 可把用例扩展为约 71 秒的持续验证，默认使用短间隔保持离线测试快速。
 

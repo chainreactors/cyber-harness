@@ -44,19 +44,20 @@ export function nodeCommands(options: NodeBootstrapOptions): { install: string; 
   url.password = ''
   const endpoint = url.toString().replace(/\/$/, '')
   const download = nodeDownloadURL(options)
+  const name = distribution
   const command = distribution === 'cyber-scan' ? ' agent' : ''
   const quote = os === 'windows' ? powershellQuote : shellQuote
   const args = `--server-url ${quote(endpoint)} --node-name ${quote(nodeName)}`
   if (os === 'windows') {
-    const binary = `${distribution}.exe`
+    const binary = `${name}.exe`
     // Run directly in PowerShell; nesting another interpreter would expand
     // its variables in the parent shell before the child can use them.
     const install = `& { $ErrorActionPreference='Stop'; $tmp=Join-Path ([IO.Path]::GetTempPath()) ('cyber-node-' + [guid]::NewGuid()); New-Item -ItemType Directory -Path $tmp | Out-Null; try { Invoke-WebRequest -UseBasicParsing ${quote(download)} -OutFile (Join-Path $tmp 'node.zip'); Expand-Archive -LiteralPath (Join-Path $tmp 'node.zip') -DestinationPath $tmp; & (Join-Path $tmp ${quote(binary)})${command} ${args}; if ($LASTEXITCODE -ne 0) { throw ('Node exited with code ' + $LASTEXITCODE) } } finally { if ((Split-Path -Parent $tmp) -eq ([IO.Path]::GetTempPath().TrimEnd([IO.Path]::DirectorySeparatorChar))) { Remove-Item -LiteralPath $tmp -Recurse -Force } } }`
     return { install, connect: `.\\${binary}${command} ${args}` }
   }
-  const binary = `"$tmp/${distribution}"`
+  const binary = `"$tmp/${name}"`
   // A subshell scopes the trap and temporary variable to this launch, so
   // cleanup runs when the node exits instead of waiting for the terminal.
-  const install = `(tmp="$(mktemp -d)" && trap 'rm -rf "$tmp"' EXIT && curl -fsSL ${quote(download)} -o "$tmp/node.zip" && unzip -qo "$tmp/node.zip" ${quote(distribution)} -d "$tmp" && chmod +x ${binary} && ${binary}${command} ${args})`
-  return { install, connect: `./${distribution}${command} ${args}` }
+  const install = `(tmp="$(mktemp -d)" && trap 'rm -rf "$tmp"' EXIT && curl -fsSL ${quote(download)} -o "$tmp/node.zip" && unzip -qo "$tmp/node.zip" ${quote(name)} -d "$tmp" && chmod +x ${binary} && ${binary}${command} ${args})`
+  return { install, connect: `./${name}${command} ${args}` }
 }

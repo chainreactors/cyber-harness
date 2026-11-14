@@ -11,7 +11,7 @@ import (
 )
 
 // cyberPromptContribution owns the cybersecurity identity and policy sections
-// of the aiscan distribution. On the main system prompt it replaces the
+// of the cyber-scan distribution. On the main system prompt it replaces the
 // neutral skeleton's identity and inserts its sections next to the neutral
 // ones; scanner worker targets have no skeleton, so all sections are added.
 func cyberPromptContribution() prompt.Contribution {

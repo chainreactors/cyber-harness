@@ -31,12 +31,7 @@ func Declare(resources *resource.Registry) error {
 // contributeFlags mounts the scanner flag groups on the commands that run
 // scanner-backed workloads.
 func contributeFlags(registry *hostcli.Registry) error {
-	for _, command := range []string{"agent", "web"} {
-		if err := registry.Group(command, CyberhubConfigKey, CyberhubFlagGroup()); err != nil {
-			return err
-		}
-	}
-	return nil
+	return registry.Group("agent", CyberhubConfigKey, CyberhubFlagGroup())
 }
 
 func testCyberhubConnection(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {

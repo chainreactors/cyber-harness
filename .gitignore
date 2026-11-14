@@ -22,7 +22,7 @@ dist/
 *.db-*
 *.sock.lock
 /cyber
-/aiscan
+/cyber-scan
 /spray
 out/
 scan_results.jsonl
@@ -36,17 +36,15 @@ community.yaml
 
 # Local runtime state / operator artifacts
 .cyber/
-.aiscan/
 /cyber-deploy.yaml
-/aiscan-deploy.yaml
 /*.log
 /.claude/
 /.codex/
 /.playwright-cli/
 /.cache/
 /.buildcheck/
-/cmd/aiscan/assets/
-/cmd/aiscan/bundle_generated_*.go
+/cmd/cyber-scan/assets/
+/cmd/cyber-scan/bundle_generated_*.go
 /cmd/audit/internal/toolchain/assets/
 /cmd/audit/internal/toolchain/bundle_generated_*.go
 # operator scan outputs dumped at repo root (screenshots, IP lists, app dumps, findings/reports)
@@ -70,7 +68,6 @@ web/static-stale/
 /scripts/
 /scan_report.md
 cyber.yaml
-aiscan.yaml
 .runlogs/harness/
 
 # Local JEV experiments and browser replay output
@@ -81,7 +78,11 @@ aiscan.yaml
 /exts/jev/.runlogs/
 
 # Generated build and validation artifacts
-/reports/evidence/
+/reports/
+/refer/
+/_video/
+/*.pptx
+/PPT*/
 /docs/evidence/
 /docs/validation/jev-browser-takeover-*.json
 /cmd/web/static/*

@@ -41,7 +41,7 @@ async function requireRegisteredAgents(request: APIRequestContext) {
     agents = response.agents ?? []
     return agents.length
   }, {
-    message: 'the E2E server must register its local mock-backed agent',
+    message: 'the E2E server must register its remote mock-backed scan node',
     timeout: 15_000,
   }).toBeGreaterThan(0)
   expect(agents[0].hello?.nodeId).toBeTruthy()
@@ -259,7 +259,7 @@ test.describe('ConnectRPC management plane', () => {
     expect(config.config?.loaded).toBe(true)
 
     const agents = await requireRegisteredAgents(request)
-    expect(agents.some((agent) => agent.hello?.nodeId === 'local')).toBeTruthy()
+    expect(agents.some((agent) => agent.hello?.nodeId === 'e2e-node')).toBeTruthy()
   })
 
   test('session, scan and artifact archive queries use ConnectRPC', async ({ request }) => {
@@ -274,7 +274,7 @@ test.describe('ConnectRPC management plane', () => {
 
     const agents = await connectRPC(request, '/cyber.rpc.agent.AgentService/ListAgents', {})
     expect(Array.isArray(agents.agents ?? [])).toBeTruthy()
-    expect(agents.agents?.some((agent: { hello?: { nodeId?: string } }) => agent.hello?.nodeId === 'local')).toBeTruthy()
+    expect(agents.agents?.some((agent: { hello?: { nodeId?: string } }) => agent.hello?.nodeId === 'e2e-node')).toBeTruthy()
   })
 
   test('retired REST management routes stay removed', async ({ request }) => {
@@ -382,7 +382,7 @@ test.describe('single AOP WebSocket browser plane', () => {
   test('spray help command renders compact output in the web transcript', async ({ page, request }) => {
     await requireRegisteredAgents(request)
     await openAuthenticatedApp(page)
-    await page.locator('aside [data-node-id="local"]').getByRole('button', { name: /New task on/ }).click()
+    await page.locator('aside [data-node-id="e2e-node"]').getByRole('button', { name: /New task on/ }).click()
     await expect.poll(() => new URL(page.url()).pathname).toMatch(/^\/sessions\//)
     const sessionID = new URL(page.url()).pathname.split('/').filter(Boolean).at(-1)!
     try {

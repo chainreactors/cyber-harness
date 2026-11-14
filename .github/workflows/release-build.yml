@@ -20,11 +20,11 @@ concurrency:
   cancel-in-progress: false
 
 # ---------------------------------------------------------------------------
-# One frontend bundle + standard/full CI build matrix -> verified bundle
+# One frontend bundle + scan/Web/audit CI build matrix -> verified bundle
 # ---------------------------------------------------------------------------
 
 jobs:
-  # ── Build the embedded frontend once for every full target ─────
+  # ── Build the embedded frontend once for every Web target ─────
   frontend:
     runs-on: ubuntu-22.04
     steps:
@@ -73,11 +73,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: aiscan
-            build: aiscan
+          - id: cyber-scan
+            build: cyber-scan
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
-          - id: aiscan-full
-            build: aiscan-full
+          - id: cyber-harness
+            build: cyber-harness
             targets: "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64"
           - id: cyber-audit
             build: cyber-audit
@@ -102,7 +102,7 @@ jobs:
           cache: true
 
       - name: Download embedded frontend
-        if: matrix.build == 'aiscan-full'
+        if: matrix.build == 'cyber-harness'
         uses: actions/download-artifact@v8
         with:
           name: embedded-frontend
@@ -158,7 +158,7 @@ jobs:
           done
 
           if [[ -x "${OUTDIR}/${BUILD}_linux_amd64" ]]; then
-            expected="aiscan"; [[ "$BUILD" == "cyber-audit" ]] && expected="cyber-audit"
+            expected="$BUILD"
             test "$("${OUTDIR}/${BUILD}_linux_amd64" --version)" = "$expected v${VERSION}"
           fi
 
@@ -249,8 +249,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist/release
-          sha256sum *.zip > aiscan_checksums.txt
-          cat aiscan_checksums.txt
+          sha256sum *.zip > cyber-harness_checksums.txt
+          cat cyber-harness_checksums.txt
 
       - name: Upload release bundle
         uses: actions/upload-artifact@v7
@@ -294,16 +294,16 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          (cd dist/release && sha256sum -c aiscan_checksums.txt)
+          (cd dist/release && sha256sum -c cyber-harness_checksums.txt)
           test "$(find dist/release -name '*.zip' | wc -l)" -eq 18
-          for binary in aiscan aiscan-full cyber-audit; do
+          for binary in cyber-scan cyber-harness cyber-audit; do
             destination="${RUNNER_TEMP}/${binary}"
             unzip -q "dist/release/${binary}_linux_${ARCH}.zip" -d "$destination"
             test -x "${destination}/${binary}"
-            expected="aiscan"; [[ "$binary" == "cyber-audit" ]] && expected="cyber-audit"
+            expected="$binary"
             test "$("${destination}/${binary}" --version)" = "$expected ${TAG}"
-            if [[ "$binary" == "aiscan-full" ]]; then
-              "${destination}/${binary}" web --help >/dev/null
+            if [[ "$binary" == "cyber-harness" ]]; then
+              "${destination}/${binary}" --help >/dev/null
             fi
           done
 
@@ -344,13 +344,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $cases = @(
-            @{ Archive = 'aiscan_windows_amd64.zip'; Binary = 'aiscan.exe'; Full = $false },
-            @{ Archive = 'aiscan-full_windows_amd64.zip'; Binary = 'aiscan-full.exe'; Full = $true },
-            @{ Archive = 'cyber-audit_windows_amd64.zip'; Binary = 'cyber-audit.exe'; Full = $false }
+            @{ Archive = 'cyber-scan_windows_amd64.zip'; Binary = 'cyber-scan.exe'; Web = $false },
+            @{ Archive = 'cyber-harness_windows_amd64.zip'; Binary = 'cyber-harness.exe'; Web = $true },
+            @{ Archive = 'cyber-audit_windows_amd64.zip'; Binary = 'cyber-audit.exe'; Web = $false }
           )
 
           foreach ($case in $cases) {
-            $expectedVersion = if ($case.Binary -eq "cyber-audit.exe") { "cyber-audit $env:TAG" } else { "aiscan $env:TAG" }
+            $expectedVersion = "$([IO.Path]::GetFileNameWithoutExtension($case.Binary)) $env:TAG"
             $destination = Join-Path $env:RUNNER_TEMP ([IO.Path]::GetFileNameWithoutExtension($case.Archive))
             Expand-Archive -LiteralPath (Join-Path 'dist/release' $case.Archive) -DestinationPath $destination
             $binary = Join-Path $destination $case.Binary
@@ -361,10 +361,10 @@ jobs:
             if ($version -ne $expectedVersion) {
               throw "$($case.Binary) reported '$version', expected '$expectedVersion'"
             }
-            if ($case.Full) {
-              & $binary web --help | Out-Null
+            if ($case.Web) {
+              & $binary --help | Out-Null
               if ($LASTEXITCODE -ne 0) {
-                throw "$($case.Binary) web --help exited with $LASTEXITCODE"
+                throw "$($case.Binary) --help exited with $LASTEXITCODE"
               }
             }
           }

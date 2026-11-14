@@ -6,11 +6,11 @@ Agent 接受任务，向模型提供当前上下文与工具，然后根据模�
 
 ## Inbox 常驻路由
 
-`aiscan agent` 由 prompt／REPL 驱动。长期处理消息流使用独立的 `inbox` 子命令：
+`cyber-scan agent` 由 prompt／REPL 驱动。长期处理消息流使用独立的 `inbox` 子命令：
 
 ```sh
-aiscan inbox --state-dir .cyber/active --max-active 4
-aiscan inbox --ioa-url http://127.0.0.1:8765 --space team -p "分析当前待处理告警"
+cyber-scan inbox --state-dir .cyber/active --max-active 4
+cyber-scan inbox --ioa-url http://127.0.0.1:8765 --space team -p "分析当前待处理告警"
 ```
 
 `inbox` 的初始 prompt 和后续每行输入都交给常驻 Router；Router 只做分发，由 subagent 执行任务。外部监控通过 IOA 或嵌入 API `Router.Submit` 接入。无消息时不请求模型，stdin EOF 只断开输入，仍继续监听；输入 `/exit` 或取消宿主会停止准入并排空资源。`inbox` 默认整体超时为 0，可用 `--timeout <秒>` 显式限制，目前只支持 local transport。
@@ -37,7 +37,7 @@ Worker 完成反馈必须回复原请求者，或交给已有协调任务继续�
 配置模型后，运行：
 
 ```sh
-aiscan agent
+cyber-scan agent
 ```
 
 先输入 `/status` 查看当前模型与工具，再输入任务。例如让它只读查看当前目录、说明各模块职责，然后追问某个文件。交互模式会保留已有对话，后续输入可以引用之前的结果。
@@ -49,16 +49,16 @@ aiscan agent
 把任务作为启动参数传入，Agent 完成后退出：
 
 ```sh
-aiscan agent -p "只读查看当前目录并解释主要模块"
-aiscan agent --task-file task.md
-aiscan agent -p task.md
+cyber-scan agent -p "只读查看当前目录并解释主要模块"
+cyber-scan agent --task-file task.md
+cyber-scan agent -p task.md
 ```
 
 `-p` 指向已有文件时读取文件内容。任务文本依次取 prompt、task-file、非空 stdin；只有 `-i` 目标时生成默认任务，目标也会附加到选中的任务文本中。输入不是把所有来源按任意顺序拼接。
 
 ```sh
-echo "只读检查当前目录" | aiscan agent
-aiscan agent -p "检查已授权本地靶场，保留证据" -i http://127.0.0.1:3000
+echo "只读检查当前目录" | cyber-scan agent
+cyber-scan agent -p "检查已授权本地靶场，保留证据" -i http://127.0.0.1:3000
 ```
 
 自动化中可用 `-o json` 获取最终结果，或用 `-o jsonl` 消费流式事件。`-o jsonl -f run.jsonl` 保存可恢复的历史记录；完整区别见[会话与上下文](user/sessions.md#记录)。
@@ -78,7 +78,7 @@ aiscan agent -p "检查已授权本地靶场，保留证据" -i http://127.0.0.1
 目标评估为任务增加一个反馈循环：Agent 完成一轮工作后，评估器根据验收标准检查轨迹与输出，需要继续时把反馈交回 Agent。
 
 ```sh
-aiscan agent -p "核对当前目录中的报告" -e "每个结论都有来源；明确列出未验证事项" --eval-rounds 3
+cyber-scan agent -p "核对当前目录中的报告" -e "每个结论都有来源；明确列出未验证事项" --eval-rounds 3
 ```
 
 验收标准应描述可检查的结果。交互模式用 `/eval <标准>` 设置，`/eval off` 关闭。评估请求独立于执行请求，默认仍使用当前 Provider 和模型，因此不能将它视为另一套独立事实来源。
@@ -90,7 +90,7 @@ aiscan agent -p "核对当前目录中的报告" -e "每个结论都有来源；
 直接 `scan` 按规则推进扫描流水线，Agent 则根据模型响应选择下一步。单扫描器的顶层 `--ai` 入口把命令、参数和意图组织成 Agent 任务：
 
 ```sh
-aiscan --ai -p "解释结果并注明证据" gogo -i 127.0.0.1 -p 80,443
+cyber-scan --ai -p "解释结果并注明证据" gogo -i 127.0.0.1 -p 80,443
 ```
 
 这里由 Agent 调用工具并分析，不能假定宿主先确定性执行一次扫描器再总结 stdout。`scan --verify` 属于扫描结果的后续验证，当前能力与限制见[扫描指南](scan.md)。
