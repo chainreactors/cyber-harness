@@ -2,6 +2,7 @@
 // RECAP_TEST_PROVIDER_URL=http://127.0.0.1:38181
 // BASE_URL=http://127.0.0.1:38080 npx playwright test e2e/recap-runtime.spec.ts
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { createNodeTask } from './task-ui'
 
 const providerURL = process.env.RECAP_TEST_PROVIDER_URL
 const token = process.env.ACCESS_KEY || 'test-token'
@@ -28,6 +29,7 @@ test.beforeEach(async ({ page }) => {
   })
   expect((await page.request.post('/api/auth/login', { data: { token } })).ok()).toBe(true)
   await page.goto('/?node=e2e-node')
+  await createNodeTask(page)
 })
 
 test.afterEach(async ({ page }, info) => {
@@ -84,14 +86,16 @@ test('real tools produce one small-model recap after completion, preserved by re
   await info.attach('recap-input', { body: JSON.stringify(call, null, 2), contentType: 'application/json' })
   await page.reload()
   await expect(page.getByTestId('task-recap')).toHaveText(recapText('basic'))
-  await expect(page.getByTestId('assistant-response')).toHaveCount(1)
+  const finalResponse = page.getByTestId('assistant-response').filter({ has: page.getByTestId('task-recap') })
+  await expect(finalResponse).toHaveCount(1)
+  await expect(finalResponse.getByTestId('assistant-response-content')).toHaveText('Task basic complete.')
   await page.setViewportSize({ width: 390, height: 844 })
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' })
   if (await collapse.isVisible()) await collapse.click()
-  const footer = page.getByTestId('assistant-response-footer')
+  const footer = finalResponse.getByTestId('assistant-response-footer')
   await expect(footer).toBeVisible()
   expect(await footer.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-  const answer = await page.getByTestId('assistant-response-content').boundingBox()
+  const answer = await finalResponse.getByTestId('assistant-response-content').boundingBox()
   const box = await footer.boundingBox()
   expect(box!.y).toBeGreaterThanOrEqual(answer!.y + answer!.height)
 })
@@ -110,9 +114,11 @@ test('a delayed recap never blocks the next task or enters its context and survi
     await request.post(providerURL + '/test/release?case=late')
   }
   await expect(page.getByTestId('task-recap')).toHaveText([recapText('late'), recapText('next')])
-  const cards = page.getByTestId('assistant-response')
+  const cards = page.getByTestId('assistant-response').filter({ has: page.getByTestId('task-recap') })
   await expect(cards).toHaveCount(2)
+  await expect(cards.first().getByTestId('assistant-response-content')).toHaveText('Task late complete.')
   await expect(cards.first().getByTestId('task-recap')).toHaveText(recapText('late'))
+  await expect(cards.last().getByTestId('assistant-response-content')).toHaveText('Task next complete.')
   await expect(cards.last().getByTestId('task-recap')).toHaveText(recapText('next'))
   await expect(page.getByRole('textbox', { name: 'Your goal' })).toHaveValue('Unsaved next task')
   const [next] = await calls(request, 'next')
@@ -155,17 +161,17 @@ test('switching to another node session keeps a pending recap in its original hi
   const original = page.url()
   try {
     await expect.poll(async () => (await calls(request, 'late')).length).toBe(1)
-    await page.locator('aside [data-node-id="local"]').getByRole('button', { name: 'New task on local' }).click()
+    await createNodeTask(page, 'e2e-node-2')
     await send(page, 'isolated')
     await expect(page.getByTestId('task-recap')).toHaveText(recapText('isolated'))
-    await expect(page.getByTestId('assistant-response-content')).not.toContainText('Task late complete.')
-    expect((await history(page)).some((event: any) => event.emitter === 'local' && event.turnEnded)).toBe(true)
+    await expect(page.getByTestId('assistant-response-content').filter({ hasText: 'Task late complete.' })).toHaveCount(0)
+    expect((await history(page)).some((event: any) => event.emitter === 'e2e-node-2' && event.turnEnded)).toBe(true)
   } finally {
     await request.post(providerURL + '/test/release?case=late')
   }
   await page.goto(original)
   await expect(page.getByTestId('task-recap')).toHaveText(recapText('late'))
-  await expect(page.getByTestId('assistant-response-content')).not.toContainText('Task isolated complete.')
+  await expect(page.getByTestId('assistant-response-content').filter({ hasText: 'Task isolated complete.' })).toHaveCount(0)
 })
 
 test('multiple evaluator rounds trigger one recap at the outer task boundary', async ({ page, request }) => {
@@ -185,7 +191,7 @@ test('multiple evaluator rounds trigger one recap at the outer task boundary', a
 
 test('canceling a task produces only its interrupted-work recap', async ({ page, request }) => {
   await send(page, 'cancel')
-  await expect(page.getByTestId('assistant-response-content')).toContainText('Waiting for the cancellation check.')
+  await expect(page.getByTestId('assistant-response-content').filter({ hasText: 'Waiting for the cancellation check.' })).toBeVisible()
   await page.getByRole('button', { name: 'Pause response' }).click()
   await expect(page.getByTestId('task-recap')).toHaveText('已读取本地技能，任务随后被取消。')
   const [call] = await calls(request, 'cancel')
@@ -200,7 +206,7 @@ test('recap failure stays silent and the following task still completes', async 
   await expect(page.getByRole('button', { name: 'Pause response' })).toHaveCount(0)
   await send(page, 'after-failure')
   await expect(page.getByTestId('task-recap')).toHaveText(recapText('after-failure'))
-  await expect(page.getByTestId('assistant-response').first().getByTestId('task-recap')).toHaveCount(0)
+  await expect(page.getByTestId('assistant-response').filter({ hasText: 'Task failure complete.' }).getByTestId('task-recap')).toHaveCount(0)
   expect(await calls(request, 'failure')).toHaveLength(1)
   expect(recaps(await history(page))).toHaveLength(1)
 })
@@ -220,6 +226,7 @@ test('deleting a session while its recap is pending does not recreate the sessio
     await request.post(providerURL + '/test/release?case=late')
   }
   await page.goto('/?node=e2e-node')
+  await createNodeTask(page)
   await send(page, 'after-delete')
   await expect(page.getByTestId('task-recap')).toHaveText(recapText('after-delete'))
   const missing = await request.post('/cyber.rpc.chat.SessionService/GetSession', {

@@ -3,6 +3,7 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { anyPack, anyUnpack } from '@bufbuild/protobuf/wkt'
 import { EnvelopeSchema } from '../cyber-ui/packages/aop/src/gen/aop/envelope_pb'
 import { ProtocolMessageSchema } from '../cyber-ui/packages/aop/src/gen/aop/protocol_pb'
+import { createNodeTask } from './task-ui'
 
 const providerURL = `http://127.0.0.1:${process.env.CYBER_BOUNDARY_PROVIDER_PORT || '38481'}`
 const unique = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -26,22 +27,9 @@ async function events(request: APIRequestContext, sessionID: string) {
   return (await rpc(request, 'ListEvents', { sessionId: sessionID, limit: 500 })).events || []
 }
 async function newSession(page: Page, node = 'e2e-node') {
-  const before = new URL(page.url()).pathname
-  const sidebar = page.getByRole('complementary')
-  await expect(sidebar).toBeVisible()
-  const nodes = sidebar.getByRole('button', { name: 'Nodes', exact: true })
-  if (await nodes.count()) {
-    await nodes.click()
-    await sidebar.getByRole('button', { name: new RegExp(`(?:^|\\s)${node}(?:\\s|$)`) }).click()
-    await sidebar.getByRole('button', { name: 'New task', exact: true }).click()
-  } else {
-    await sidebar.locator(`[data-node-id="${node}"]`).getByRole('button', { name: `New task on ${node}` }).click()
-  }
-  await expect.poll(() => new URL(page.url()).pathname).not.toBe(before)
-  await expect(page).toHaveURL(/\/sessions\/[^/?]+/)
+  await createNodeTask(page, node)
   const sessionID = new URL(page.url()).pathname.split('/').at(-1)!
   await expect(page.locator(`[data-session-id="${sessionID}"] textarea`)).toBeVisible()
-  await expect(composer(page)).toBeVisible()
   return sessionID
 }
 async function send(page: Page, id: string, mode = 'ok') {
@@ -349,7 +337,7 @@ async function saveModel(page: Page, model: string) {
   return dialog
 }
 
-for (const node of ['local', 'e2e-node']) {
+for (const node of ['e2e-node', 'e2e-node-2']) {
   test(`settings model changes preserve the active ${node} session and reject quota probes`, async ({ page, request }) => {
     test.setTimeout(60_000)
     await page.goto('/')
@@ -367,7 +355,10 @@ for (const node of ['local', 'e2e-node']) {
       const call = (await state(request)).calls.find((call: any) => call.id === next && call.stream)
       expect(call.model).toBe('boundary-model-b')
       expect(call.messages.some((message: any) => JSON.stringify(message.content).includes(active))).toBe(true)
-      const dialog = await saveModel(page, 'quota-model')
+      await page.getByRole('button', { name: 'Open settings', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+      await dialog.getByRole('combobox', { name: 'Model', exact: true }).fill('quota-model')
+      await dialog.getByRole('button', { name: 'Test connection', exact: true }).click()
       await expect(dialog.getByText(/insufficient quota/).first()).toBeVisible({ timeout: 15_000 })
       await dialog.getByRole('button', { name: 'Close', exact: true }).click()
       await send(page, recovered)

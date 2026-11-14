@@ -86,6 +86,7 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 	writeFile(t, skillPath, []byte("---\nname: local-review\ndescription: local CLI fixture\n---\nRequire marker "+skillMarker+" in this task.\n"))
 	historyPath := filepath.Join(w.dir, "first-run.jsonl")
 	continuedPath := filepath.Join(w.dir, "continued-run.jsonl")
+	continuedAgainPath := filepath.Join(w.dir, "continued-again.jsonl")
 
 	type invocation struct {
 		name   string
@@ -99,6 +100,7 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 		{name: "stream-json", format: "stream-json", prompt: "stream this turn"},
 		{name: "local-skill", format: "json", prompt: "apply the selected local skill", extra: []string{"--skill", skillPath}},
 		{name: "resume", format: "jsonl", prompt: "continue with prior context", extra: []string{"--resume", historyPath, "-f", continuedPath}},
+		{name: "resume-again", format: "jsonl", prompt: "continue a second time", extra: []string{"--resume", continuedPath, "-f", continuedAgainPath}},
 	}
 
 	for _, invocation := range invocations {
@@ -150,7 +152,7 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 		})
 	}
 
-	for _, path := range []string{historyPath, continuedPath} {
+	for _, path := range []string{historyPath, continuedPath, continuedAgainPath} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read event output %s: %v", path, err)
@@ -197,10 +199,15 @@ func TestUserAgentOneShotFormatsSkillAndResume(t *testing.T) {
 	if body := requestText(tasks[3]); !strings.Contains(body, skillMarker) {
 		t.Fatalf("local skill content did not reach the provider request:\n%s", body)
 	}
-	resumed := requestText(tasks[4])
-	for _, want := range []string{"persist this turn", "fixture-answer-", "continue with prior context"} {
-		if !strings.Contains(resumed, want) {
-			t.Fatalf("resumed request is missing %q:\n%s", want, resumed)
+	for _, task := range tasks[4:] {
+		resumed := requestText(task)
+		for _, want := range []string{"persist this turn", "fixture-answer-", "continue with prior context"} {
+			if !strings.Contains(resumed, want) {
+				t.Fatalf("resumed request is missing %q:\n%s", want, resumed)
+			}
+		}
+		if count := strings.Count(resumed, "persist this turn"); count != 1 {
+			t.Fatalf("resumed request repeats inherited history %d times:\n%s", count, resumed)
 		}
 	}
 }

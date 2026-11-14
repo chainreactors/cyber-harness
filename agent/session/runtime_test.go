@@ -533,19 +533,29 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	large := strings.Repeat("x", 4<<20)
+	large := strings.Repeat("x", 256<<10)
 	oldID := root.ID()
-	runtime.config.Events.Publish(&aop.Event{
-		SessionId: root.ID(), TurnId: "turn-1", Emitter: "cyber",
-		Payload: &aop.Event_Message{Message: &aop.Message{Id: "m-1", Role: "user", Content: []*aop.Content{aop.Text(large)}}},
-	})
+	run, err := root.Run(t.Context(), RunInput{Content: []*aop.Content{aop.Text(large)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	messages := root.MessagesSnapshot()
+	if err := runtime.CloseSession(t.Context(), oldID, SessionCloseCompleted); err != nil {
+		t.Fatal(err)
+	}
 	flushPersistenceOutput(t, output)
 	before, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := root.rotate(context.Background(), SessionCloseResumed, root.ID(), root.MessagesSnapshot()); err != nil {
+	continuation, err := runtime.OpenSession(t.Context(), SessionOptions{
+		ID: "continuation", ParentSessionID: oldID, Messages: messages,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	flushPersistenceOutput(t, output)
@@ -561,10 +571,7 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	childID := root.ID()
-	if childID == oldID {
-		t.Fatalf("rotation did not create a child session: %q", childID)
-	}
+	childID := continuation.ID()
 	for _, event := range events {
 		if event.SessionId == childID && (event.GetMessage() != nil || event.GetToolResult() != nil) {
 			t.Fatalf("inherited history was re-emitted in child stream: %s", aop.Kind(event))
@@ -575,8 +582,8 @@ func TestContinuationReferencesHistoryWithoutReemittingLargeMessages(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data.Messages) != 1 || data.Messages[0].Content[0].GetText().GetText() != large {
-		t.Fatalf("resumed inherited history = %d messages, want the original large message", len(data.Messages))
+	if len(data.Messages) != len(messages) || data.Messages[0].Content[0].GetText().GetText() != large {
+		t.Fatalf("resumed inherited history = %d messages, want %d including the original large message", len(data.Messages), len(messages))
 	}
 }
 
@@ -753,6 +760,13 @@ func TestInteractiveResumeReadsSelectedContextWithoutSwitchingOutput(t *testing.
 	}
 	if len(currentEvents) == 0 || currentEvents[len(currentEvents)-1].GetSessionEnded().GetReason() != string(SessionCloseCompleted) {
 		t.Fatalf("explicit output did not remain active after resume: %#v", currentEvents)
+	}
+	current, err := ReadHistory(currentPath)
+	if err != nil {
+		t.Fatalf("resume the new output without the selected source: %v", err)
+	}
+	if current.SessionID != newID || len(current.Messages) != 2 || persistenceMessagesText(current.Messages) != persistenceMessagesText(data.Messages) {
+		t.Fatalf("new output lost the selected context: %#v", current)
 	}
 }
 

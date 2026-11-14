@@ -24,7 +24,6 @@ type resumeStream struct {
 	parentToolCall string
 	model          string
 	messages       []*aop.Message
-	messageCounter int64
 	order          int
 	started        bool
 	closedReason   string
@@ -77,7 +76,6 @@ func ReadHistory(path string) (*History, error) {
 			}
 			// ScanJSONL owns a fresh event per record; recovery transfers it to History.
 			stream.messages = append(stream.messages, payload.Message)
-			stream.messageCounter = max(stream.messageCounter, messageIDSequence(payload.Message.Id))
 		case *aop.Event_ToolResult:
 			if payload.ToolResult != nil {
 				stream.messages = append(stream.messages, &aop.Message{
@@ -116,8 +114,8 @@ func ReadHistory(path string) (*History, error) {
 }
 
 // resumeStreamMessages reconstructs the in-memory transcript without creating
-// new events for inherited history. A compacted child explicitly declares a
-// snapshot and supersedes its parent; all other sessions inherit their parent
+// new events for inherited history. A snapshot child supersedes its parent;
+// all other sessions inherit their parent
 // transcript and only contribute their own turn messages.
 func resumeStreamMessages(selected *resumeStream, streams map[string]*resumeStream) ([]*aop.Message, int64, error) {
 	if selected == nil {
@@ -161,7 +159,6 @@ func resumeStreamMessages(selected *resumeStream, streams map[string]*resumeStre
 			messages = append(messages, message)
 			counter = max(counter, messageIDSequence(message.Id))
 		}
-		counter = max(counter, stream.messageCounter)
 	}
 	return messages, counter, nil
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -531,6 +530,11 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		if len(options.Messages) == 0 {
 			options.Messages = rt.resumeMessages
 		}
+		// The new recording cannot inherit events held only in the source file.
+		options.HistorySnapshot = true
+	}
+	if options.HistorySnapshot {
+		options.Messages = prepareContinuationMessages(options.Messages)
 	}
 	agentName := strings.TrimSpace(options.AgentName)
 	if agentName == "" {
@@ -656,7 +660,7 @@ func (rt *Runtime) OpenSession(ctx context.Context, options SessionOptions) (*Se
 		Model: agentCfg.Model, ParentSessionId: options.ParentSessionID, ParentToolCallId: options.ParentToolCallID,
 	}, historyMode, state.delegation)
 	if options.HistorySnapshot && len(options.Messages) > 0 {
-		emitContinuationMessages(state, prepareContinuationMessages(options.Messages))
+		emitContinuationMessages(state, options.Messages)
 	}
 	state.mu.Lock()
 	state.starting = false
@@ -1161,7 +1165,6 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	rt := oldState.runtime
 	logicalID := oldState.logicalID
 	agentName := oldState.agentName
-	prepared := prepareContinuationMessages(messages)
 	oldState.refreshProvider()
 	oldState.mu.Lock()
 	config := oldState.agent.ConfigSnapshot()
@@ -1173,7 +1176,7 @@ func (s *Session) rotate(ctx context.Context, reason SessionCloseReason, parentS
 	newID := rt.nextContinuationID(logicalID)
 	continuation, err := rt.OpenSession(ctx, SessionOptions{
 		ID: newID, LogicalID: logicalID, TaskID: oldState.taskID, ParentSessionID: parentSessionID,
-		AgentName: agentName, Messages: prepared, HistorySnapshot: reason == SessionCloseCompacted, Config: &config, providers: providers,
+		AgentName: agentName, Messages: messages, HistorySnapshot: reason == SessionCloseCompacted || reason == SessionCloseResumed, Config: &config, providers: providers,
 	})
 	if err != nil {
 		return nil, err
@@ -1207,7 +1210,7 @@ func prepareContinuationMessages(messages []*aop.Message) []*aop.Message {
 			continue
 		}
 		cloned := proto.CloneOf(message)
-		counter = max(counter, continuationMessageSequence(cloned.Id))
+		counter = max(counter, messageIDSequence(cloned.Id))
 		prepared = append(prepared, cloned)
 	}
 	for _, message := range prepared {
@@ -1217,14 +1220,6 @@ func prepareContinuationMessages(messages []*aop.Message) []*aop.Message {
 		}
 	}
 	return prepared
-}
-
-func continuationMessageSequence(id string) int64 {
-	if !strings.HasPrefix(id, "m-") {
-		return 0
-	}
-	value, _ := strconv.ParseInt(strings.TrimPrefix(id, "m-"), 10, 64)
-	return value
 }
 
 func emitContinuationMessages(state *sessionState, messages []*aop.Message) {

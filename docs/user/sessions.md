@@ -79,7 +79,7 @@ cyber-scan -F first.jsonl -o markdown -f first.md
 cyber-scan agent --resume first.jsonl -p "继续解释刚才的结果" -o jsonl -f second.jsonl
 ```
 
-交互模式也可用 `/resume` 选择记录，或用 `/resume <路径>` 指定文件。恢复源保持只读；若要保存后续运行，需要另外指定输出。Web 的会话历史由 Web 数据库管理，不能直接把数据库文件作为 CLI 的 `--resume` 输入。
+交互模式也可用 `/resume` 选择记录，或用 `/resume <路径>` 指定文件。恢复源保持只读；若要保存后续运行，需要另外指定输出。新的 JSONL 记录包含恢复上下文快照，可独立用于下一次 `--resume`，无需同时读取前一份文件。Web 的会话历史由 Web 数据库管理，不能直接把数据库文件作为 CLI 的 `--resume` 输入。
 
 恢复的对象是对话历史。旧的终端进程、浏览器实例、IOA 连接和周期任务不会因此重新出现。恢复后涉及环境状态的工作，应先确认现状，再决定是否重新执行。
 

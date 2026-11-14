@@ -13,16 +13,16 @@ npx playwright install chromium
 npm run build
 ```
 
-The main test command runs the default and JEV suites. Select a narrower suite with its configuration:
+The main test command runs the default, JEV, UI and runtime HMR suites. Select a narrower suite with its configuration:
 
 ```sh
 npm run test:e2e
 npx playwright test -c e2e/ui.config.ts
 npm run test:jev
-npx playwright test -c e2e/record.config.ts
+npm run test:bootstrap
 ```
 
-The record suite requires the native recording build described in [record](../../../docs/record.md). Test configuration files and their server helpers determine each suite's prerequisites and environment variables.
+Test configuration files and their server helpers determine each suite's prerequisites and environment variables. If your shell sets an HTTP proxy, include `127.0.0.1,localhost` in `NO_PROXY` and `no_proxy` so Playwright's local health checks reach the fixtures.
 
 ## Session and transport boundaries
 
@@ -30,7 +30,7 @@ The record suite requires the native recording build described in [record](../..
 npx playwright test -c e2e/boundary.config.ts
 ```
 
-The managed server uses isolated temporary configuration and databases, local and remote Go Agent paths, a controllable local Provider and Vite for browser-client tests. The Web UI project uses Go's embedded production frontend. Its network recovery tests use that frontend because Vite reloads the page after reconnecting. This suite needs no real Provider credential.
+The managed server uses isolated temporary configuration and databases, a Hub with two external Go Agent nodes, a controllable local Provider and Vite for browser-client tests. The Web UI project uses Go's embedded production frontend. Its network recovery tests use that frontend because Vite reloads the page after reconnecting. This suite needs no real Provider credential. Settings tests save model changes separately from explicit connection probes; the standalone Hub supports saving offline configuration.
 
 | Test file | Scope |
 | --- | --- |
@@ -51,6 +51,26 @@ The managed server uses isolated temporary configuration and databases, local an
 | `CYBER_BOUNDARY_GUI_URL` | Override the embedded frontend URL independently | Go server URL |
 
 When using `BASE_URL`, start the fixture yourself and provide the matching embedded UI URL where necessary. Screenshots, traces and the HTML report are written to `.runlogs/rc7-boundary/` at the repository root, as configured in `boundary.config.ts`.
+
+## Recap and terminal runtime
+
+The recap suites exercise real tools and terminal input through a deterministic local Provider. They skip in the default suite unless `RECAP_TEST_PROVIDER_URL` is set. Start the Provider in one terminal:
+
+```sh
+node e2e/recap-provider.mjs
+```
+
+In another terminal, run the managed Hub and two nodes against that Provider (POSIX shell syntax):
+
+```sh
+NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+CYBER_E2E_LLM_BASE_URL=http://127.0.0.1:38181/v1 \
+CYBER_E2E_LLM_API_KEY=recap-fixture-key CYBER_E2E_LLM_MODEL=gpt-4.1 \
+RECAP_TEST_PROVIDER_URL=http://127.0.0.1:38181 \
+npx playwright test e2e/recap-runtime.spec.ts e2e/recap-terminal.spec.ts
+```
+
+On PowerShell, set the same variables with `$env:NAME='value'` before running Playwright. Stop the local Provider when finished. These tests cover delayed and failed recaps, cancellation, node isolation, reconnects, deletion, bounded input and model fallback without external model credentials.
 
 ## Live Guardrail checks
 

@@ -42,6 +42,7 @@ export default defineConfig({
     },
   },
   server: {
+    watch: { ignored: ['**/playwright-report/**', '**/test-results/**'] },
     proxy: {
       // The backend serves three top-level families: the auth + AOP-websocket
       // JSON API, the IOA read API, and the ConnectRPC services. Missing any of

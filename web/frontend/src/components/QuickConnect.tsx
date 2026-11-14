@@ -5,7 +5,7 @@ import { Button, Input, Tooltip, TooltipContent, TooltipTrigger } from '@cyber/u
 import { cn } from '@cyber/theme'
 import { copyToClipboard } from '../../cyber-ui/packages/template/src/clipboard'
 import { getAgentConnectToken } from '../api'
-import { nodeCommands, nodeDownloadURL, type OS, type Arch, type DownloadSource, type Distribution } from '../lib/node-bootstrap'
+import { nodeCommands, nodeDownloadURL, type OS, type Arch, type DownloadSource } from '../lib/node-bootstrap'
 
 interface Platform {
   os: OS
@@ -18,7 +18,7 @@ const OS_OPTIONS: { value: OS; label: string }[] = [
   { value: 'windows', label: 'Windows' },
 ]
 
-const ARCH_OPTIONS: { value: Arch; label: string; osFilter?: OS[] }[] = [
+const ARCH_OPTIONS: { value: Arch; label: string }[] = [
   { value: 'amd64', label: 'x86_64' },
   { value: 'arm64', label: 'ARM64' },
 ]
@@ -44,21 +44,15 @@ function detectPlatform(): Platform {
   return { os, arch }
 }
 
-function archOptionsForOS(os: OS) {
-  return ARCH_OPTIONS.filter((a) => !a.osFilter || a.osFilter.includes(os))
-}
-
-type CopiedKey = string | null
-
 export default function QuickConnect({ serverURL, version, profiles }: Props) {
   const { t } = useTranslation('app')
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>(detectPlatform)
-  const [distribution, setDistribution] = useState<Distribution>('cyber-scan')
+  const [distribution, setDistribution] = useState('cyber-scan')
   const [defaultNodeName] = useState(() => `node-${Math.random().toString(36).slice(2, 10)}`)
   const [nodeName, setNodeName] = useState('')
   const [downloadSource, setDownloadSource] = useState<DownloadSource>('global')
-  const [copied, setCopied] = useState<CopiedKey>(null)
+  const [copied, setCopied] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
@@ -69,7 +63,7 @@ export default function QuickConnect({ serverURL, version, profiles }: Props) {
 
   useEffect(() => {
     if (availableProfiles.some((profile) => profile.id === distribution)) return
-    setDistribution(availableProfiles[0].id as Distribution)
+    setDistribution(availableProfiles[0].id)
     setCopied(null)
     setCopyError(false)
   }, [availableProfiles, distribution])
@@ -84,11 +78,7 @@ export default function QuickConnect({ serverURL, version, profiles }: Props) {
   }, [])
 
   const setOS = useCallback((os: OS) => {
-    setPlatform((prev) => {
-      const available = archOptionsForOS(os)
-      const arch = available.some((a) => a.value === prev.arch) ? prev.arch : 'amd64'
-      return { os, arch }
-    })
+    setPlatform((prev) => ({ ...prev, os }))
     setCopied(null)
     setCopyError(false)
   }, [])
@@ -150,7 +140,6 @@ export default function QuickConnect({ serverURL, version, profiles }: Props) {
   if (!serverURL) return null
 
   const { os, arch } = platform
-  const availableArches = archOptionsForOS(os)
   const downloadSources: { value: DownloadSource; label: string }[] = [
     { value: 'global', label: t('quickConnectGlobal') },
     { value: 'china', label: t('quickConnectChina') },
@@ -227,7 +216,7 @@ export default function QuickConnect({ serverURL, version, profiles }: Props) {
                 </button>
               ))}
               <span className="mx-0.5 self-center text-border">|</span>
-              {availableArches.map((a) => (
+              {ARCH_OPTIONS.map((a) => (
                 <button
                   key={a.value}
                   type="button"
@@ -250,7 +239,7 @@ export default function QuickConnect({ serverURL, version, profiles }: Props) {
             {availableProfiles.map((profile) => (
               <Button key={profile.id} type="button" size="xs" variant={distribution === profile.id ? 'default' : 'outline'}
                 aria-label={profile.id} aria-pressed={distribution === profile.id}
-                onClick={() => { setDistribution(profile.id as Distribution); setCopied(null); setCopyError(false) }}>
+                onClick={() => { setDistribution(profile.id); setCopied(null); setCopyError(false) }}>
                 {profile.title || profile.id}
               </Button>
             ))}
@@ -360,7 +349,7 @@ function CommandRow({ label, copyLabel, commands, copied, onCopy, className }: {
   label: string
   copyLabel: string
   commands: CmdEntry[]
-  copied: CopiedKey
+  copied: string | null
   onCopy: (key: string, text: string) => void
   className?: string
 }) {

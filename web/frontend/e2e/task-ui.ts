@@ -1,14 +1,14 @@
 import { expect, type Page } from '@playwright/test'
 
 export async function nodeActions(page: Page, nodeName = 'e2e-node') {
-  const node = page.locator('aside [data-node-id]').filter({ has: page.getByRole('button', { name: `New task on ${nodeName}` }) })
+  const node = page.locator('aside [data-node-id]').filter({ has: page.getByRole('button', { name: `New task on ${nodeName}`, exact: true }) })
   await expect(node).toBeVisible()
   return node
 }
 
 export async function createNodeTask(page: Page, nodeName = 'e2e-node') {
   const actions = await nodeActions(page, nodeName)
-  await actions.getByRole('button', { name: `New task on ${nodeName}` }).click()
+  await actions.getByRole('button', { name: `New task on ${nodeName}`, exact: true }).click()
   await expect(page).toHaveURL(/\/sessions\//)
   await expect(page.getByRole('textbox', { name: 'Your goal' })).toBeVisible()
   return actions
