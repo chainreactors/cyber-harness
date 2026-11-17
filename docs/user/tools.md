@@ -88,4 +88,12 @@ Arsenal 管理外部安全工具，并将安装目录加入子进程 PATH。安�
 
 `web_search` 获取网络搜索结果，`fetch` 读取 URL 内容。搜索优先使用支持该能力的 Provider，必要时使用已配置的 Tavily；没有可用后端时会失败。搜索结果提供线索，具体判断仍需读取和核实来源。
 
+所有搜索后端统一通过已有的 Function calling 工具 `web_search` 暴露，参数均为 `query` 和可选的 `num`。DeepSeek、OpenAI、Anthropic、Tavily 和 DuckDuckGo 的选择及失败后备由搜索扩展和工具内部处理，用户与模型无需切换工具名，也不会额外注册 `deepseek_search` 或 `deepseek_web_search`。
+
+搜索后端由 `exts/search` 扩展负责，包括独立的 HTTP 客户端、请求、响应解析和资源关闭；`agent/provider` 只提供已有模型配置，不再声明或执行搜索能力。DeepSeek 使用独立的 [Search API](https://api-docs.deepseek.com/zh-cn/guides/search)，返回标题、链接及每条结果的摘要。使用官方 `api.deepseek.com` 时，OpenAI 和 Anthropic 协议均会自动接入，复用当前 Profile 的 API key、代理和超时，不需要额外搜索配置，也不受聊天模型名称限制。自定义网关只有显式配置 `provider: deepseek` 才会使用这一接口，并要求网关提供对应的 `/v1/tools/search` 路由；仅使用 DeepSeek 模型名称不会启用。
+
+`web_search` 的 `query` 在 DeepSeek 上限为 128 个 Unicode 字符，支持 `site:`、`-site:`、引号、`lang:`、`after:` 和 `before:` 等搜索语法；`num` 仍为 1–10，默认 5。搜索无结果会正常返回；错误时沿用现有后备搜索流程，后续调用仍可重试。Search 按成功且非空的请求次数单独计费，详情见官方文档。
+
+设置环境变量 `DEEPSEEK_API_KEY` 后，可在仓库根目录运行 `go test ./exts/search -run '^TestLiveDeepSeekWebSearchTool$' -count=1 -v`，加载搜索扩展并通过注册的 `web_search` 工具依次验证官方 DeepSeek、OpenAI 和 Anthropic 配置。测试记录官方接口响应，核对来源与摘要，并在接口失败时取消请求、阻止后备搜索，避免把其它搜索源的成功误判为 DeepSeek 成功；未设置密钥时跳过，接口失败时停止后续请求。`HTTP 402 / Insufficient Balance` 表示账号余额不足，需充值后再验证。
+
 Cyberhub 面向已经加载的指纹和 POC 资源，支持按指纹、CVE 等查询关联。它与公共网络搜索的用途不同。资源配置及扫描器用法见[参考手册](../reference.md#cyberhub-资源)。

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -104,14 +103,6 @@ func hint404(err error, endpoint, altProtocol, altProvider string) error {
 	}
 	return fmt.Errorf("%w — POST %s not found (404); verify llm.base_url, or if this gateway speaks the %s protocol set llm.provider=%s",
 		err, endpoint, altProtocol, altProvider)
-}
-
-func doJSON(ctx context.Context, client *http.Client, timeout time.Duration, method, endpoint string, payload any, setHeaders func(*http.Request)) ([]byte, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-	return (&apiRequest{client: client, timeout: timeout}).do(ctx, method, endpoint, body, setHeaders)
 }
 
 // streamSSE opens an SSE connection and returns a channel of parsed events.
@@ -281,17 +272,4 @@ func wrapReadError(parentCtx context.Context, timedOut bool, timeout time.Durati
 		return fmt.Errorf("%s: %w", op, ErrCallTimeout)
 	}
 	return fmt.Errorf("%s: %w", op, err)
-}
-
-func clampInt(v, min, max, fallback int) int {
-	if v <= 0 {
-		return fallback
-	}
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
 }
