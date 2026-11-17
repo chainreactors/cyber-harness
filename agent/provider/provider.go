@@ -29,20 +29,6 @@ type StreamingProvider interface {
 	ChatCompletionStream(ctx context.Context, req *ChatCompletionRequest) (<-chan ChatCompletionStreamEvent, error)
 }
 
-type WebSearchProvider interface {
-	WebSearch(ctx context.Context, query string, maxResults int) (*WebSearchResponse, error)
-}
-
-type WebSearchResult struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
-
-type WebSearchResponse struct {
-	Results []WebSearchResult `json:"results,omitempty"`
-	Summary string            `json:"summary,omitempty"`
-}
-
 type ProviderConfig struct {
 	Provider      string `yaml:"provider" config:"provider"`
 	BaseURL       string `yaml:"base_url" config:"base_url"`

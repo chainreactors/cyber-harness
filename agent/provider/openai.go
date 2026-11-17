@@ -12,9 +12,8 @@ import (
 )
 
 type OpenAIProvider struct {
-	config            *ProviderConfig
-	client            *http.Client
-	webSearchDisabled bool
+	config *ProviderConfig
+	client *http.Client
 }
 
 func NewOpenAIProvider(cfg *ProviderConfig) (*OpenAIProvider, error) {
@@ -490,108 +489,6 @@ func parseOpenAIStreamChunk(data []byte) ([]ChatCompletionStreamEvent, error) {
 		event.ToolDeltas = append(event.ToolDeltas, callDelta)
 	}
 	return append(events, event), nil
-}
-
-// --- WebSearch via OpenAI Responses API ---
-
-func (p *OpenAIProvider) WebSearch(ctx context.Context, query string, maxResults int) (*WebSearchResponse, error) {
-	if p.webSearchDisabled {
-		return nil, fmt.Errorf("provider does not support server-side web search")
-	}
-	maxResults = clampInt(maxResults, 1, 10, 5)
-
-	base := strings.TrimSuffix(p.config.BaseURL, "/")
-	endpoint := base + "/responses"
-
-	data, err := doJSON(ctx, p.client, timeoutFromConfig(p.config.Timeout),
-		http.MethodPost, endpoint,
-		map[string]any{
-			"model": p.config.Model,
-			"input": "Search the web for: " + query,
-			"tools": []map[string]any{{"type": "web_search", "search_context_size": "medium"}},
-		},
-		p.setAuthHeaders,
-	)
-	if err != nil {
-		p.webSearchDisabled = true
-		return nil, err
-	}
-	resp, err := parseOpenAIWebSearchResponse(data, maxResults)
-	if err != nil {
-		p.webSearchDisabled = true
-		return nil, err
-	}
-	return resp, nil
-}
-
-func parseOpenAIWebSearchResponse(data []byte, maxResults int) (*WebSearchResponse, error) {
-	var probe struct {
-		Error *APIError `json:"error,omitempty"`
-	}
-	if json.Unmarshal(data, &probe) == nil && probe.Error != nil {
-		return nil, probe.Error
-	}
-
-	var raw struct {
-		Status string `json:"status"`
-		Output []struct {
-			Status  string `json:"status"`
-			Type    string `json:"type"`
-			Content []struct {
-				Type        string `json:"type"`
-				Text        string `json:"text"`
-				Annotations []struct {
-					Type  string `json:"type"`
-					Title string `json:"title"`
-					URL   string `json:"url"`
-				} `json:"annotations,omitempty"`
-			} `json:"content,omitempty"`
-		} `json:"output"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse web search response: %w", err)
-	}
-
-	searched := false
-	for _, block := range raw.Output {
-		if block.Type == "web_search_call" && block.Status == "completed" {
-			searched = true
-		}
-	}
-	if !searched || (raw.Status != "" && raw.Status != "completed") {
-		return nil, fmt.Errorf("web search was not completed: no completed web_search_call or incomplete response (status=%q)", raw.Status)
-	}
-	out := &WebSearchResponse{}
-	seen := make(map[string]struct{})
-	for _, block := range raw.Output {
-		if block.Type != "message" {
-			continue
-		}
-		for _, c := range block.Content {
-			if c.Type == "output_text" && strings.TrimSpace(c.Text) != "" {
-				out.Summary += c.Text + "\n"
-			}
-			for _, ann := range c.Annotations {
-				if ann.Type != "url_citation" || ann.URL == "" {
-					continue
-				}
-				if _, ok := seen[ann.URL]; ok || len(out.Results) >= maxResults {
-					continue
-				}
-				seen[ann.URL] = struct{}{}
-				title := ann.Title
-				if title == "" {
-					title = ann.URL
-				}
-				out.Results = append(out.Results, WebSearchResult{Title: title, URL: ann.URL})
-				if len(out.Results) >= maxResults {
-					break
-				}
-			}
-		}
-	}
-	out.Summary = strings.TrimSpace(out.Summary)
-	return out, nil
 }
 
 // CloseIdleConnections releases this provider's transport after callers drain.

@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/chainreactors/cyber/agent/provider"
 
@@ -18,6 +17,7 @@ import (
 type Extension struct {
 	config        Options
 	executionOnly bool
+	search        *modelSearch
 }
 
 func New(config Options) *Extension { return &Extension{config: config} }
@@ -52,7 +52,18 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		Run:             fetch.Run,
 	}
 
-	searchTool := searchtools.NewWebSearchTool(providerWebSearch(application), tavily)
+	var search func(context.Context, string, int) (string, error)
+	if application != nil {
+		model, config := application.Current()
+		if model != nil {
+			e.search, err = newModelSearch(config)
+			if err != nil {
+				return err
+			}
+			search = e.search.search
+		}
+	}
+	searchTool := searchtools.NewWebSearchTool(search, tavily)
 	entries := []coretool.Command{fetchCommand}
 	if err := scope.Init().Err(); err != nil {
 		return err
@@ -66,37 +77,9 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	return nil
 }
 
-// providerWebSearch adapts the configured model's own web search, when it has
-// one, to the search tool's signature. It lives here because it is search
-// behavior, not composition.
-func providerWebSearch(application *provider.State) func(context.Context, string, int) (string, error) {
-	if application == nil {
-		return nil
+func (e *Extension) Close(context.Context) error {
+	if e.search != nil {
+		e.search.client.CloseIdleConnections()
 	}
-	model, _ := application.Current()
-	searcher, ok := model.(provider.WebSearchProvider)
-	if !ok {
-		return nil
-	}
-	return func(ctx context.Context, query string, maxResults int) (string, error) {
-		response, err := searcher.WebSearch(ctx, query, maxResults)
-		if err != nil {
-			return "", err
-		}
-		var text strings.Builder
-		fmt.Fprintf(&text, "Web search results for: %s\n\n", query)
-		if len(response.Results) == 0 && response.Summary == "" {
-			text.WriteString("No results found.\n")
-			return text.String(), nil
-		}
-		for index, result := range response.Results {
-			fmt.Fprintf(&text, "[%d] %s\n    URL: %s\n\n", index+1, result.Title, result.URL)
-		}
-		if response.Summary != "" {
-			text.WriteString("Summary:\n")
-			text.WriteString(response.Summary)
-			text.WriteByte('\n')
-		}
-		return text.String(), nil
-	}
+	return nil
 }

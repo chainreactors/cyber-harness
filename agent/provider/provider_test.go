@@ -677,8 +677,6 @@ var (
 	} = (*AnthropicProvider)(nil)
 	_ StreamingProvider            = (*OpenAIProvider)(nil)
 	_ StreamingProvider            = (*AnthropicProvider)(nil)
-	_ WebSearchProvider            = (*OpenAIProvider)(nil)
-	_ WebSearchProvider            = (*AnthropicProvider)(nil)
 	_ interface{ DisableImages() } = (*OpenAIProvider)(nil)
 	_ interface{ DisableImages() } = (*AnthropicProvider)(nil)
 )

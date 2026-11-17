@@ -19,9 +19,8 @@ const (
 )
 
 type AnthropicProvider struct {
-	config            *ProviderConfig
-	client            *http.Client
-	webSearchDisabled bool
+	config *ProviderConfig
+	client *http.Client
 }
 
 func NewAnthropicProvider(cfg *ProviderConfig) (*AnthropicProvider, error) {
@@ -673,96 +672,6 @@ func (p *anthropicStreamParser) usageSnapshot() *aop.TokenUsage {
 		return nil
 	}
 	return convertAnthropicUsage(&p.usage)
-}
-
-// --- WebSearch via Anthropic server-side web_search tool ---
-
-func (p *AnthropicProvider) WebSearch(ctx context.Context, query string, maxResults int) (*WebSearchResponse, error) {
-	if p.webSearchDisabled {
-		return nil, fmt.Errorf("provider does not support server-side web search")
-	}
-	maxResults = clampInt(maxResults, 1, 10, 5)
-
-	data, err := doJSON(ctx, p.client, timeoutFromConfig(p.config.Timeout),
-		http.MethodPost, p.completionEndpoint(),
-		map[string]any{
-			"model":      p.config.Model,
-			"max_tokens": defaultAnthropicMaxToken,
-			"tools": []map[string]any{{
-				"type": "web_search_20250305", "name": "web_search", "max_uses": maxResults,
-			}},
-			"messages": []map[string]string{{"role": "user", "content": "Search the web for: " + query}},
-		},
-		func(req *http.Request) {
-			p.setAuthHeaders(req)
-			req.Header.Set("anthropic-beta", "web-search-2025-03-05")
-		},
-	)
-	if err != nil {
-		p.webSearchDisabled = true
-		return nil, err
-	}
-	resp, err := parseAnthropicWebSearchResponse(data)
-	if err != nil {
-		p.webSearchDisabled = true
-		return nil, err
-	}
-	return resp, nil
-}
-
-func parseAnthropicWebSearchResponse(data []byte) (*WebSearchResponse, error) {
-	var probe struct {
-		Type  string    `json:"type"`
-		Error *APIError `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(data, &probe); err == nil && probe.Type == "error" && probe.Error != nil {
-		return nil, probe.Error
-	}
-
-	var raw struct {
-		Content []struct {
-			Type    string          `json:"type"`
-			Text    string          `json:"text,omitempty"`
-			Content json.RawMessage `json:"content,omitempty"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse web search response: %w", err)
-	}
-
-	out := &WebSearchResponse{}
-	searched := false
-	for _, block := range raw.Content {
-		switch block.Type {
-		case "web_search_tool_result":
-			var results []struct {
-				Title string `json:"title"`
-				URL   string `json:"url"`
-			}
-			if len(block.Content) == 0 || block.Content[0] != '[' {
-				return nil, fmt.Errorf("web search failed: %s", block.Content)
-			}
-			if err := json.Unmarshal(block.Content, &results); err != nil {
-				return nil, fmt.Errorf("parse web search results: %w", err)
-			}
-			searched = true
-			for _, r := range results {
-				if r.URL == "" {
-					continue
-				}
-				out.Results = append(out.Results, WebSearchResult{Title: r.Title, URL: r.URL})
-			}
-		case "text":
-			if t := strings.TrimSpace(block.Text); t != "" {
-				out.Summary += t + "\n"
-			}
-		}
-	}
-	if !searched {
-		return nil, fmt.Errorf("web search was not executed: no web_search_tool_result")
-	}
-	out.Summary = strings.TrimSpace(out.Summary)
-	return out, nil
 }
 
 // CloseIdleConnections releases this provider's transport after callers drain.
