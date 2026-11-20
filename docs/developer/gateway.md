@@ -1,6 +1,13 @@
-# 自动配置
+# 进程内 API 中转
 
-`exts/gateway` 将外部服务配置绑定到现有能力。Agent 继续调用 `passive`、`proxy`，无需了解 gateway；它不贡献 Tool、Command、Skill 或提示词。
+`exts/gateway` 在进程内为已有工具选择外部 API、绑定地址和凭据。配置应用时直接更新候选 Profile 的客户端，执行时由原客户端请求选定的上游。Agent 继续调用 `passive`、`proxy`；gateway 不贡献 Tool、Command、Skill 或提示词。
+
+```text
+配置中心 / 配置文件 → gateway 在内存中选择并绑定上游
+Agent → 原有工具 → 已绑定的客户端 → 外部 API
+```
+
+gateway 不监听 HTTP 端口，不注册 Hub HTTP 路由，也不通过 localhost 回环转发。`base_url` 是外部上游地址，可以是官方 API 或已有的远程网关；进程内接管直接复用现有客户端。Clash 同样将订阅配置直接交给现有 proxy 所有者。注册、配置管理和资源句柄服务于这些绑定，不建立独立的网关服务。
 
 配置直接使用顶层块，服务字段直接放在实例下：
 

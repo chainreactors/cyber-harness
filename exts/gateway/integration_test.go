@@ -27,11 +27,12 @@ import (
 	"github.com/chainreactors/cyber/tools/passive"
 )
 
-func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
+func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 	var expectedKey atomic.Value
 	expectedKey.Store("first-secret")
 	var requests atomic.Int32
 	var probes atomic.Int32
+	// Only the upstream is HTTP. Gateway binds its clients in this process.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/subscription" {
 			fmt.Fprint(w, "socks5://127.0.0.1:1001#office\n")

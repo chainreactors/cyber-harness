@@ -1,4 +1,5 @@
-// Package gateway configures existing services without adding agent tools.
+// Package gateway binds upstream APIs to existing clients in process.
+// It starts no HTTP server and adds no agent tools.
 package gateway
 
 import (
@@ -55,7 +56,7 @@ func Section(kinds ...cfg.Section) (cfg.Section, error) {
 					}
 					continue
 				}
-				if _, _, _, err := decode(schemas, name, fields); err != nil {
+				if _, _, err := decode(schemas, name, fields); err != nil {
 					return err
 				}
 			}
@@ -129,13 +130,13 @@ func kindName(name string, fields map[string]any) (string, error) {
 	return name, nil
 }
 
-func decode(schemas *cfg.Sections, name string, fields map[string]any) (string, bool, any, error) {
+func decode(schemas *cfg.Sections, name string, fields map[string]any) (string, any, error) {
 	kind, err := kindName(name, fields)
 	if err != nil {
-		return "", false, nil, err
+		return "", nil, err
 	}
 	if !schemas.Has(kind) {
-		return "", false, nil, fmt.Errorf("gateway.%s: unknown kind %q", name, kind)
+		return "", nil, fmt.Errorf("gateway.%s: unknown kind %q", name, kind)
 	}
 	fields = maps.Clone(fields)
 	delete(fields, "kind")
@@ -144,18 +145,18 @@ func decode(schemas *cfg.Sections, name string, fields map[string]any) (string, 
 		var valid bool
 		enabled, valid = raw.(bool)
 		if !valid {
-			return "", false, nil, fmt.Errorf("gateway.%s.enabled must be a boolean", name)
+			return "", nil, fmt.Errorf("gateway.%s.enabled must be a boolean", name)
 		}
 	}
 	delete(fields, "enabled")
 	if !enabled {
-		return kind, false, nil, nil
+		return kind, nil, nil
 	}
 	value, err := schemas.Decode(kind, fields)
 	if err != nil {
-		return "", false, nil, fmt.Errorf("gateway.%s: %w", name, err)
+		return "", nil, fmt.Errorf("gateway.%s: %w", name, err)
 	}
-	return kind, true, value, nil
+	return kind, value, nil
 }
 
 func Read(option *cfg.Option) (cfg.Values, error) {

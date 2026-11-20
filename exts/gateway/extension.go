@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/chainreactors/cyber/core/extension"
@@ -13,6 +14,7 @@ import (
 
 // Kind binds a configuration schema to an existing service owner. Use selects
 // a named instance; an omitted selection requires at most one matching service.
+// The owner calls its upstream API directly; the binding has no HTTP listener.
 // Load receives nil for an explicitly disabled service, and is not called for
 // an absent service. Its returned handle owns only work started by this binding.
 type Kind struct {
@@ -46,7 +48,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	decoded := map[string]any{}
 	byKind := map[string][]string{}
 	for name, fields := range e.values {
-		kind, _, value, err := decode(schemas, name, fields)
+		kind, value, err := decode(schemas, name, fields)
 		if err != nil {
 			return err
 		}
@@ -58,11 +60,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		names := byKind[kind.Config.Key]
 		sort.Strings(names)
 		if kind.Use != "" {
-			found := false
-			for _, name := range names {
-				found = found || name == kind.Use
-			}
-			if !found {
+			if !slices.Contains(names, kind.Use) {
 				return fmt.Errorf("gateway: %s service %q is not configured", kind.Config.Key, kind.Use)
 			}
 			selected[i] = kind.Use
