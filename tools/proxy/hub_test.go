@@ -25,13 +25,13 @@ import (
 // it plus an HTTP client that routes through it and trusts its CA. Keep-alives
 // are disabled so every request forces a fresh upstream dial — otherwise a
 // pooled connection to the same host masks egress-chain changes.
-func newTestHub(t *testing.T, capture bool) (*ProxyHub, *State, *http.Client) {
+func newTestHub(t *testing.T, capture bool) (*Hub, *State, *http.Client) {
 	t.Helper()
 	state := NewState("")
 	store := NewFlowStore(10000)
 	caRoot := t.TempDir()
-	resource := NewProxyHub(state, store, caRoot, capture, nil)
-	hub := resource.ProxyHub
+	resource := newHub(state, store, caRoot, capture, nil)
+	hub := resource.Hub
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatalf("hub start: %v", err)
 	}
@@ -63,7 +63,7 @@ func newTestHub(t *testing.T, capture bool) (*ProxyHub, *State, *http.Client) {
 }
 
 // runMitm executes a mitm verb and returns its stdout.
-func runMitm(t *testing.T, store *FlowStore, hub *ProxyHub, args ...string) string {
+func runMitm(t *testing.T, store *FlowStore, hub *Hub, args ...string) string {
 	t.Helper()
 	cmd := NewMitmCommand(store, hub)
 	var out bytes.Buffer
@@ -211,16 +211,16 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 
 	store := hub.store
 	waitForFlows(t, store, 3)
-	if got := len(store.Query(QueryOpts{Status: "404"})); got != 1 {
+	if got := len(store.Query(Filter{Status: "404"})); got != 1 {
 		t.Errorf("status 404 filter = %d, want 1", got)
 	}
-	if got := len(store.Query(QueryOpts{Status: "5xx"})); got != 1 {
+	if got := len(store.Query(Filter{Status: "5xx"})); got != 1 {
 		t.Errorf("status 5xx filter = %d, want 1", got)
 	}
-	if got := len(store.Query(QueryOpts{CType: "json"})); got != 1 {
+	if got := len(store.Query(Filter{CType: "json"})); got != 1 {
 		t.Errorf("content-type json filter = %d, want 1", got)
 	}
-	if got := len(store.Query(QueryOpts{Last: 2})); got != 2 {
+	if got := len(store.Query(Filter{Last: 2})); got != 2 {
 		t.Errorf("last 2 = %d, want 2", got)
 	}
 
@@ -228,7 +228,7 @@ func TestCaptureFiltersAndVerbs(t *testing.T) {
 	if out := runMitm(t, store, hub, "flows"); !strings.Contains(out, "flows") {
 		t.Errorf("flows output = %q", out)
 	}
-	first := store.Query(QueryOpts{Last: 1})
+	first := store.Query(Filter{Last: 1})
 	if len(first) == 1 {
 		out := runMitm(t, store, hub, "flow", first[0].Id)
 		if !strings.Contains(out, "Request Headers") {

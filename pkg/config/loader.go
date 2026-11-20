@@ -55,6 +55,9 @@ func decodeConfig(c *gkcfg.Config, v interface{}) error {
 		return err
 	}
 	if option, ok := v.(*Option); ok {
+		if err := validateMapping(c.Data(), reflect.TypeFor[Option](), "", option.Sections); err != nil {
+			return err
+		}
 		if option.Sections != nil {
 			var err error
 			option.Extensions, err = option.Sections.Normalize(c.Data())
@@ -82,7 +85,7 @@ func LoadAndApplyConfig(option *Option) (string, error) {
 	}
 	option.Snapshot = snapshot
 	loaded := Option{Sections: option.Sections}
-	if err := LoadConfigDocument(snapshot.RuntimeDocument(option.Sections), &loaded); err != nil {
+	if err := LoadConfigDocument(CloneDocument(snapshot.Document), &loaded); err != nil {
 		return snapshot.Target, fmt.Errorf("load config %s: %w", snapshot.Target, err)
 	}
 	mergeOption(option, &loaded)

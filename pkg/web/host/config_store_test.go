@@ -11,9 +11,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestHubConfigPreservesProductSettingsAndRuntimeSecrets(t *testing.T) {
+func TestHubConfigPreservesRuntimeSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyber.yaml")
-	original := "llm:\n  active_profile: main\n  providers:\n    - id: main\n      provider: openai\n      model: old\n      api_key: stored-secret\nextensions:\n  custom.profile:\n    workspace: /srv/project\n    api_key: product-secret\n"
+	original := "llm:\n  active_profile: main\n  providers:\n    - id: main\n      provider: openai\n      model: old\n      api_key: stored-secret\n"
 	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestHubConfigPreservesProductSettingsAndRuntimeSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"custom.profile:", "/srv/project", "product-secret", "stored-secret", "model: new"} {
+	for _, want := range []string{"stored-secret", "model: new"} {
 		if !strings.Contains(string(after), want) {
 			t.Fatalf("saved config missing %q: %s", want, after)
 		}

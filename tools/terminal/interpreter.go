@@ -15,7 +15,7 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-func (t *BashTool) interpreterAttachment(script *syntax.File, execution *coretool.Execution, options BashExecOptions) proc.Attachment {
+func (t *BashTool) interpreterAttachment(script *syntax.File, execution *coretool.Execution, options Options) proc.Attachment {
 	return proc.AttachFunc(func(ctx context.Context) (*proc.Attached, error) {
 		input, inputWriter := io.Pipe()
 		output, outputWriter := io.Pipe()

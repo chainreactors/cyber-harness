@@ -20,17 +20,17 @@ import (
 const ConfigKey = "guardrail"
 
 type Config struct {
-	Provider      string    `config:"provider" json:"provider" description:"none (default) or jev"`
-	JEV           JEVConfig `config:"jev" json:"jev"`
-	Mode          Mode      `config:"mode" json:"mode" description:"auto asks the policy provider to assess consequences (default); safe asks a human; screening always applies"`
-	ReviewTimeout string    `config:"review_timeout" json:"review_timeout" description:"Maximum wait for tool approval (default 5m)"`
+	Rules
+	Provider      string `config:"provider" json:"provider" description:"none (default) or jev"`
+	Mode          Mode   `config:"mode" json:"mode" description:"auto asks the policy provider to assess consequences (default); safe asks a human; screening always applies"`
+	ReviewTimeout string `config:"review_timeout" json:"review_timeout" description:"Maximum wait for tool approval (default 5m)"`
 }
 
 func (c Config) timeout() (time.Duration, error) {
 	if c.Provider != "" && c.Provider != "none" && c.Provider != "jev" {
 		return 0, fmt.Errorf("guardrail provider must be none or jev")
 	}
-	if err := c.JEV.validate(); err != nil {
+	if err := c.validate(); err != nil {
 		return 0, err
 	}
 	if c.Mode != "" && c.Mode != ModeSafe && c.Mode != ModeAuto {
@@ -47,7 +47,7 @@ func (c Config) timeout() (time.Duration, error) {
 }
 
 func Declare(resources *resource.Registry) error {
-	_, err := resource.Add[cfg.Section](resources, cfg.Section{Key: ConfigKey, New: func() any { return &Config{Mode: ModeAuto, ReviewTimeout: "5m"} }, Validate: func(v any) error { _, err := v.(*Config).timeout(); return err }})
+	_, err := resource.Add[cfg.Section](resources, cfg.Section{Key: ConfigKey, New: func() any { return &Config{Rules: (Rules{}).defaults(), Mode: ModeAuto, ReviewTimeout: "5m"} }, Validate: func(v any) error { _, err := v.(*Config).timeout(); return err }})
 	return err
 }
 
@@ -78,7 +78,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		if err != nil {
 			return err
 		}
-		policy := newJEVPolicy(e.config.JEV, client)
+		policy := newPolicy(e.config.Rules, client)
 		check, confirm = policy.check, policy.confirm
 	}
 	e.runtime = newRuntime(scope.Lifetime(), stream, timeout, e.config.Mode, check, confirm)

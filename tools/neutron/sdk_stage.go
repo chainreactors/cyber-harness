@@ -16,7 +16,7 @@ import (
 	"github.com/chainreactors/sdk/pkg/association"
 )
 
-type neutronExecuteOptions struct {
+type options struct {
 	Target              string
 	Templates           []*templates.Template
 	RestrictToTemplates bool
@@ -34,7 +34,7 @@ type neutronExecuteOptions struct {
 	Debug               bool
 }
 
-func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index *association.Index, opts neutronExecuteOptions) (_ <-chan *sdkneutron.ExecuteResult, err error) {
+func neutronExecuteStream(ctx context.Context, engine *sdkneutron.Engine, index *association.Index, opts options) (_ <-chan *sdkneutron.ExecuteResult, err error) {
 	if engine == nil {
 		return nil, errors.New("neutron engine is not available")
 	}
@@ -166,7 +166,7 @@ func neutronExecuteTemplatesConcurrent(ctx context.Context, engine *sdkneutron.E
 	return out
 }
 
-func selectNeutronTemplates(engine *sdkneutron.Engine, index *association.Index, opts neutronExecuteOptions) ([]*templates.Template, bool) {
+func selectNeutronTemplates(engine *sdkneutron.Engine, index *association.Index, opts options) ([]*templates.Template, bool) {
 	hasFingerFilter := len(opts.Fingers) > 0
 	hasTagFilter := len(opts.Tags) > 0
 	hasExcludeTagFilter := len(opts.ExcludeTags) > 0

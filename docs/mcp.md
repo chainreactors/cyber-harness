@@ -47,19 +47,17 @@ ida decompile --addr 0x401000 2> error.txt || printf '查看 error.txt\n'
 
 ## 配置和独立试用
 
-扩展配置使用 `mcpServers`，每个服务选择 `command` 或 `url`。别名使用字母、数字、`-`、`_`，不能与 bash 内建命令、关键字或已注册的 harness 命令冲突。stdio 的 command 是已安装的可执行文件，args 是参数数组，直接启动子进程；env 覆盖指定环境变量，cwd 设置子进程工作目录。
+扩展直接接收服务名到 `mcp.Config` 的映射，配置文件也直接以服务名为键。`mcp.Parse` 严格校验这一种格式。每个服务选择 `command` 或 `url`。别名使用字母、数字、`-`、`_`，不能与 bash 内建命令、关键字或已注册的 harness 命令冲突。stdio 的 command 是已安装的可执行文件，args 是参数数组，直接启动子进程；env 覆盖指定环境变量，cwd 设置子进程工作目录。
 
 现代 `ida-pro-mcp` headless supervisor 示例：
 
 ```json
 {
-  "mcpServers": {
-    "ida": {
-      "command": "idalib-mcp",
-      "args": ["--stdio", "--max-workers", "1"],
-      "startupTimeoutSeconds": 30,
-      "timeoutSeconds": 300
-    }
+  "ida": {
+    "command": "idalib-mcp",
+    "args": ["--stdio", "--max-workers", "1"],
+    "startupTimeoutSeconds": 30,
+    "timeoutSeconds": 300
   }
 }
 ```
@@ -79,12 +77,10 @@ Streamable HTTP 服务配置：
 
 ```json
 {
-  "mcpServers": {
-    "ida": {
-      "url": "http://127.0.0.1:8745/mcp",
-      "headers": {"Authorization": "Bearer YOUR_TOKEN"},
-      "tools": ["idb_list", "decompile"]
-    }
+  "ida": {
+    "url": "http://127.0.0.1:8745/mcp",
+    "headers": {"Authorization": "Bearer YOUR_TOKEN"},
+    "tools": ["idb_list", "decompile"]
   }
 }
 ```
@@ -105,10 +101,8 @@ import (
     mcptools "github.com/chainreactors/cyber/tools/mcp"
 )
 
-mcpConfig := mcpext.Config{
-    MCPServers: map[string]mcptools.ServerConfig{
-        "ida": {Command: "idalib-mcp", Args: []string{"--stdio", "--max-workers", "1"}},
-    },
+mcpConfig := map[string]mcptools.Config{
+    "ida": {Command: "idalib-mcp", Args: []string{"--stdio", "--max-workers", "1"}},
 }
 h, err := harness.New(harness.Config{
     Base: baseConfig,
@@ -129,11 +123,9 @@ IDA、Python、许可证与已有 `ida-pro-mcp` 服务需要按[上游说明](ht
 
 ```json
 {
-  "mcpServers": {
-    "ida": {
-      "command": "python",
-      "args": ["/absolute/path/to/ida_pro_mcp/server.py", "--ida-rpc", "http://127.0.0.1:13337"]
-    }
+  "ida": {
+    "command": "python",
+    "args": ["/absolute/path/to/ida_pro_mcp/server.py", "--ida-rpc", "http://127.0.0.1:13337"]
   }
 }
 ```

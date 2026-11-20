@@ -24,7 +24,7 @@ func TestForegroundCancelDoesNotRunRemainingCommands(t *testing.T) {
 			}
 			done := make(chan error, 1)
 			go func() {
-				_, err := bash.RunForeground(ctx, blockingCommand(), BashExecOptions{Timeout: budget, TimeoutSet: true})
+				_, err := bash.RunForeground(ctx, blockingCommand(), Options{Timeout: budget, TimeoutSet: true})
 				done <- err
 			}()
 			deadline := time.Now().Add(5 * time.Second)

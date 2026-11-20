@@ -2,6 +2,8 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
@@ -12,9 +14,9 @@ import (
 	"time"
 )
 
-// ServerConfig selects exactly one transport. Engines and MCP servers are
+// Config selects exactly one transport. Engines and MCP servers are
 // installed separately; Command is an executable, never a shell expression.
-type ServerConfig struct {
+type Config struct {
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
@@ -27,7 +29,32 @@ type ServerConfig struct {
 	TimeoutSeconds        int64    `json:"timeoutSeconds,omitempty"`
 }
 
-func (c ServerConfig) Clone() ServerConfig {
+// Parse reads a named server map with strict per-server configuration.
+func Parse(data []byte) (map[string]Config, error) {
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("MCP config must be an object")
+	}
+	result := make(map[string]Config, len(entries))
+	for name, raw := range entries {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		var config Config
+		if err := decoder.Decode(&config); err != nil {
+			return nil, fmt.Errorf("MCP server %s: %w", name, err)
+		}
+		if err := config.Validate(name); err != nil {
+			return nil, err
+		}
+		result[name] = config
+	}
+	return result, nil
+}
+
+func (c Config) Clone() Config {
 	c.Args = slices.Clone(c.Args)
 	c.Env = maps.Clone(c.Env)
 	c.Headers = maps.Clone(c.Headers)
@@ -35,10 +62,10 @@ func (c ServerConfig) Clone() ServerConfig {
 	return c
 }
 
-var compatibleName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var namePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-func (c ServerConfig) Validate(name string) error {
-	if !compatibleName.MatchString(name) {
+func (c Config) Validate(name string) error {
+	if !namePattern.MatchString(name) {
 		return fmt.Errorf("MCP server alias must use letters, digits, '-' or '_'")
 	}
 	if (c.Command == "") == (c.URL == "") {

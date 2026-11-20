@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-type SprayCheckOptions struct {
+type SprayOptions struct {
 	URLs          []string
 	Host          string
 	Dictionaries  []string
@@ -35,7 +35,7 @@ type SprayCheckOptions struct {
 	OnStats       func(sdktypes.Stats)
 }
 
-func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOptions) (<-chan *parsers.SprayResult, error) {
+func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayOptions) (<-chan *parsers.SprayResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("spray engine is not available")
 	}
@@ -74,7 +74,7 @@ func SprayCheckStream(ctx context.Context, eng *spray.Engine, opts SprayCheckOpt
 	}, func() { cancel(); release() }), nil
 }
 
-func sprayInvocationContext(parent context.Context, opts SprayCheckOptions) (context.Context, context.CancelFunc) {
+func sprayInvocationContext(parent context.Context, opts SprayOptions) (context.Context, context.CancelFunc) {
 	if opts.MaxDuration > 0 {
 		return context.WithTimeout(parent, opts.MaxDuration)
 	}
@@ -84,7 +84,7 @@ func sprayInvocationContext(parent context.Context, opts SprayCheckOptions) (con
 	return context.WithCancel(parent)
 }
 
-func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
+func defaultSprayInvocationTimeout(opts SprayOptions) time.Duration {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 5
@@ -106,7 +106,7 @@ func defaultSprayInvocationTimeout(opts SprayCheckOptions) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func buildSprayOption(opts SprayCheckOptions) *spray.Option {
+func buildSprayOption(opts SprayOptions) *spray.Option {
 	sprayOpt := spray.NewDefaultOption()
 	coreOpt := sprayOpt.Option
 	// The scan command owns presentation; embedded engines must not print

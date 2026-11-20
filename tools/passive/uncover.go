@@ -16,23 +16,19 @@ import (
 	"github.com/projectdiscovery/uncover/sources"
 )
 
-// UncoverEngine wraps uncover's session and agent infrastructure. It uses
+// Uncover wraps uncover's session and agent infrastructure. It uses
 // custom agents for fofa/hunter to preserve fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
-type UncoverEngine struct {
+type Uncover struct {
 	keys    sources.Keys
 	proxy   string
 	limit   int
-	logger  telemetry.Logger
 	fofaURL string
 }
 
-// NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
+// NewUncover builds an engine from fully resolved Config. It does
 // not read process environment variables; pkg/config owns that boundary.
-func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine {
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
+func NewUncover(opts Config) *Uncover {
 	p := &sources.Provider{}
 
 	if opts.FofaKey != "" {
@@ -56,11 +52,10 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 		limit = 100
 	}
 
-	return &UncoverEngine{
+	return &Uncover{
 		keys:    keys,
-		proxy:   opts.IngressProxy,
+		proxy:   opts.Proxy,
 		limit:   limit,
-		logger:  logger,
 		fofaURL: opts.FofaURL,
 	}
 }
@@ -98,7 +93,7 @@ func applyCredentials(p *sources.Provider, values map[string]string) {
 }
 
 // Sources returns the list of sources that have valid credentials.
-func (e *UncoverEngine) Sources() []string {
+func (e *Uncover) Sources() []string {
 	type check struct {
 		name string
 		ok   bool
@@ -129,8 +124,8 @@ func (e *UncoverEngine) Sources() []string {
 	return out
 }
 
-// QueryRaw executes a single-source query and returns collected results.
-func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sources.Result, error) {
+// Query executes a single-source query and returns collected results.
+func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Result, error) {
 	agent, err := e.agentFor(src)
 	if err != nil {
 		return nil, err
@@ -228,7 +223,7 @@ func (a *fofaAgent) Query(ctx context.Context, session *sources.Session, query *
 				return
 			}
 			for _, row := range body.Results {
-				raw := RawFofa{pad(row, 0), pad(row, 1), pad(row, 2), pad(row, 3), pad(row, 4), pad(row, 5)}
+				raw := Fofa{pad(row, 0), pad(row, 1), pad(row, 2), pad(row, 3), pad(row, 4), pad(row, 5)}
 				rawBytes, _ := json.Marshal(raw)
 				port, _ := strconv.Atoi(raw.Port)
 				r := sources.Result{Source: a.Name(), IP: raw.IP, Port: port, Host: raw.Host, Raw: rawBytes}
@@ -252,8 +247,8 @@ type fofaResponse struct {
 	Size    int        `json:"size"`
 }
 
-// RawFofa is the per-result payload stored in Result.Raw.
-type RawFofa struct {
+// Fofa is the per-result payload stored in Result.Raw.
+type Fofa struct {
 	IP     string `json:"ip"`
 	Port   string `json:"port"`
 	Host   string `json:"host"`
@@ -320,7 +315,7 @@ func (a *hunterAgent) Query(ctx context.Context, session *sources.Session, query
 				return
 			}
 			for _, item := range body.Data.Arr {
-				raw := RawHunter{
+				raw := Hunter{
 					IP:      item.IP,
 					Port:    strconv.Itoa(item.Port),
 					URL:     item.URL,
@@ -372,8 +367,8 @@ type hunterComponent struct {
 	Version string `json:"version"`
 }
 
-// RawHunter is the per-result payload stored in Result.Raw.
-type RawHunter struct {
+// Hunter is the per-result payload stored in Result.Raw.
+type Hunter struct {
 	IP      string `json:"ip"`
 	Port    string `json:"port"`
 	URL     string `json:"url"`

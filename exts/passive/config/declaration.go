@@ -33,29 +33,48 @@ func SetConnectionEndpoints(fofa, hunter string) func() {
 }
 
 func Declare(resources *resource.Registry) error {
-	if _, err := resource.Add[cfg.Section](resources, ReconSection()); err != nil {
+	if _, err := resource.Add[cfg.Section](resources, Section()); err != nil {
 		return err
 	}
-	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: ReconConfigKey, Test: testReconConnections})
+	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: ConfigKey, Test: testReconConnections}, cfg.Connection{Section: "gateway.fofa", Test: testFofaConnections})
 	return err
 }
 
 func testReconConnections(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
-	inRecon, storedRecon := connectionSection(in, ReconConfigKey), connectionSection(stored, ReconConfigKey)
+	inRecon, storedRecon := connectionSection(in, ConfigKey), connectionSection(stored, ConfigKey)
 	proxy := fallbackString(connectionString(inRecon, "proxy"), connectionString(storedRecon, "proxy"))
 	var checks []*types.ConnectionCheck
-	if fofaKey := fallbackString(connectionString(inRecon, "fofa_key"), connectionString(storedRecon, "fofa_key")); strings.TrimSpace(fofaKey) != "" {
-		checks = append(checks, connectionCheck("fofa", func() (string, error) {
-			return testFofaConnection(ctx, fofaKey, proxy)
-		}))
-	}
 	if hunterKey := fallbackString(connectionString(inRecon, "hunter_api_key"), connectionString(storedRecon, "hunter_api_key")); strings.TrimSpace(hunterKey) != "" {
 		checks = append(checks, connectionCheck("hunter", func() (string, error) {
 			return testHunterConnection(ctx, hunterKey, proxy)
 		}))
 	}
 	if len(checks) == 0 {
-		checks = append(checks, &types.ConnectionCheck{Name: "recon", Error: "no FOFA or Hunter credentials configured"})
+		checks = append(checks, &types.ConnectionCheck{Name: "recon", Error: "no Hunter credentials configured"})
+	}
+	return checks
+}
+
+func testFofaConnections(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	candidates := connectionSection(in, "gateway")
+	cached := connectionSection(stored, "gateway")
+	if candidates == nil {
+		candidates = cached
+	}
+	var checks []*types.ConnectionCheck
+	for name, raw := range candidates {
+		fields, _ := raw.(map[string]any)
+		kind := connectionString(fields, "kind")
+		if kind == "" {
+			kind = name
+		}
+		if kind != "fofa" || fields["enabled"] == false {
+			continue
+		}
+		previous, _ := cached[name].(map[string]any)
+		key := fallbackString(connectionString(fields, "key"), connectionString(previous, "key"))
+		proxy := fallbackString(connectionString(fields, "proxy"), connectionString(previous, "proxy"))
+		checks = append(checks, connectionCheck(name, func() (string, error) { return testFofaConnection(ctx, key, proxy) }))
 	}
 	return checks
 }

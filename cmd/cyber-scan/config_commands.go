@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
-
+	"github.com/chainreactors/cyber/exts/gateway"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
+	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
@@ -28,9 +28,12 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 	if hub, err := scannerext.ReadCyberhub(option); err == nil && hub.URL != "" {
 		selected = append(selected, scannerext.CyberhubConfigKey)
 	}
-	recon, reconErr := passiveconfig.ReadRecon(option)
-	if reconErr == nil && (recon.FofaKey != "" || recon.HunterAPIKey != "") {
-		selected = append(selected, passiveconfig.ReconConfigKey)
+	recon, reconErr := passiveconfig.Read(option)
+	if reconErr == nil && recon.HunterAPIKey != "" {
+		selected = append(selected, passiveconfig.ConfigKey)
+	}
+	if services, err := gateway.Read(option); err == nil && len(services) > 0 {
+		selected = append(selected, "gateway.fofa")
 	}
 	searchKeys, searchErr := searchext.ReadKeys(option)
 	if (reconErr == nil && recon.TavilyKey != "") || (searchErr == nil && searchKeys != "") {

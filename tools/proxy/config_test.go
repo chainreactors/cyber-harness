@@ -15,7 +15,7 @@ func TestHubConstructionIsInert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := resource.ProxyHub
+	hub := resource.Hub
 	if hub.ProxyURL() != "" {
 		t.Fatal("proxy listener started during construction")
 	}

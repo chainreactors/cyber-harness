@@ -27,14 +27,6 @@ func (r *Resolved) Values() Values {
 	return CloneValues(r.values)
 }
 
-// Source reports the winning precedence layer of a canonical configuration path.
-func (r *Resolved) Source(path string) string {
-	if r == nil {
-		return ""
-	}
-	return r.sources[path]
-}
-
 // Get borrows a read-only resolved section. Feature Read functions return value
 // copies and copy their mutable fields when ownership is required.
 func Get[T any](r *Resolved, key string) (T, error) {
@@ -90,7 +82,7 @@ func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, 
 					}
 				}
 			}
-			walk(fields, "extensions."+key)
+			walk(fields, key)
 		}
 		mark(fallbacks, "protocol environment")
 		mark(file[key], "file")

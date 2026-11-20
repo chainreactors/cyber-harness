@@ -94,15 +94,3 @@ func finalizeOptions(option *cfg.Option, action *hostcli.Action) {
 		}
 	}
 }
-
-// Legacy node identity is projected once at the configuration boundary.
-func applyIdentity(option *cfg.Option) error {
-	value, err := ioaclient.ReadOptions(option)
-	if err != nil {
-		return err
-	}
-	if option.NodeName == "" {
-		option.NodeName = value.NodeName
-	}
-	return nil
-}

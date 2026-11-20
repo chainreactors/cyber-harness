@@ -44,10 +44,7 @@ func TestFlatConfigAndSecretEdits(t *testing.T) {
 	if strings.Contains(fmt.Sprint(view), "secret") || len(configured["gateway"]) != 2 {
 		t.Fatalf("unsafe view: %v metadata=%v", view, configured)
 	}
-	flat := sections.Flat(map[string]any{"extensions": map[string]any{"gateway": stored["gateway"]}})
-	if _, exists := flat["extensions"]; exists {
-		t.Fatal("flat output retained extensions envelope")
-	}
+	flat := map[string]any{"gateway": stored["gateway"]}
 	if strings.Contains(fmt.Sprint(cfg.Redact(flat, sections)), "secret") {
 		t.Fatal("flat inspection exposed credentials")
 	}
@@ -67,13 +64,10 @@ func TestFlatConfigAndSecretEdits(t *testing.T) {
 	if _, exists := changed["gateway"]["office"].(map[string]any)["url"]; exists {
 		t.Fatal("credential crossed service kinds")
 	}
-	legacy := &cfg.Option{Sections: sections}
-	if err := cfg.LoadConfigBytes([]byte("extensions:\n  gateway:\n    fofa:\n      key: fofa-secret\n"), legacy); err != nil {
-		t.Fatal(err)
+	if err := cfg.LoadConfigBytes([]byte("extensions:\n  gateway:\n    fofa:\n      key: fofa-secret\n"), &cfg.Option{Sections: sections}); err == nil {
+		t.Fatal("obsolete extensions envelope was accepted")
 	}
-	if legacy.Extensions["gateway"]["fofa"].(map[string]any)["key"] != "fofa-secret" {
-		t.Fatal("nested compatibility path lost data")
-	}
+
 }
 
 func TestBindingSelectionAndRollbackWithoutAgent(t *testing.T) {

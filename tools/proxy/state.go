@@ -31,7 +31,7 @@ type State struct {
 	singleDial    proxyclient.Dial // pre-built dial for a single persistent proxy URL
 
 	// chain is the composed egress dial for the current selection, republished
-	// on every state change. ProxyHub's upstream reads it on each connection so
+	// on every state change. Hub's upstream reads it on each connection so
 	// switching nodes takes effect live without touching in-flight children.
 	chain atomic.Pointer[proxyclient.Dial]
 }

@@ -30,7 +30,7 @@ func (e *Extension) Gateway(use string) gateway.Kind {
 			if e.resource == nil {
 				return nil, fmt.Errorf("proxy must be loaded before its subscription")
 			}
-			subscription, err := proxytool.NewSubscription(scope.Init(), scope.Lifetime(), e.resource.ProxyHub.State(), *value.(*proxytool.SubscriptionConfig))
+			subscription, err := proxytool.NewSubscription(scope.Init(), scope.Lifetime(), e.resource.Hub.State(), *value.(*proxytool.SubscriptionConfig))
 			if err != nil {
 				return nil, err
 			}

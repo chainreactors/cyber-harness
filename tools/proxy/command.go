@@ -17,7 +17,7 @@ type CommandExecutor func(ctx context.Context, tokens []string, execution *coret
 
 type Command struct {
 	state       *State
-	hub         *ProxyHub
+	hub         *Hub
 	execCommand CommandExecutor
 }
 
@@ -25,7 +25,7 @@ func New(state *State) *Command {
 	return &Command{state: state}
 }
 
-func (c *Command) SetHub(hub *ProxyHub)                  { c.hub = hub }
+func (c *Command) SetHub(hub *Hub)                       { c.hub = hub }
 func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
 func (c *Command) Name() string                          { return "proxy" }
 

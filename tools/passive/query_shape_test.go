@@ -38,14 +38,14 @@ type functionalPassiveEngine struct {
 
 func (e *functionalPassiveEngine) Sources() []string { return []string{"fofa"} }
 
-func (e *functionalPassiveEngine) QueryRaw(ctx context.Context, source, query string) ([]sources.Result, error) {
+func (e *functionalPassiveEngine) Query(ctx context.Context, source, query string) ([]sources.Result, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
 	e.queries = append(e.queries, source+":"+query)
-	raw, _ := json.Marshal(passive.RawFofa{
+	raw, _ := json.Marshal(passive.Fofa{
 		IP: "192.0.2.10", Port: "443", Host: "https://example.test",
 		Domain: "example.test", Title: "Regression Asset", ICP: "TEST-ICP",
 	})

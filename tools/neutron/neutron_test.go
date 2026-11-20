@@ -61,7 +61,7 @@ func TestSelectNeutronTemplatesFiltersByCommonMetadata(t *testing.T) {
 	index := association.NewIndex()
 	index.Build(nil, engine.Get())
 
-	selected, filtered := selectNeutronTemplates(engine, index, neutronExecuteOptions{
+	selected, filtered := selectNeutronTemplates(engine, index, options{
 		Fingers:           []string{"nginx"},
 		Tags:              []string{"cve"},
 		Severities:        []string{"critical", "high"},

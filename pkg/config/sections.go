@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"math"
 	"os"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
 	"github.com/go-viper/mapstructure/v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Values is configuration data, never a registry of running services.
@@ -22,9 +22,7 @@ type Values map[string]map[string]any
 
 // Section is an inert configuration declaration.
 type Section struct {
-	Key string
-	// Aliases are additional root names; Key is always accepted at the root.
-	Aliases  []string
+	Key      string
 	New      func() any
 	Validate func(any) error
 	Secrets  []string
@@ -38,7 +36,6 @@ type Section struct {
 type Sections struct {
 	mu           sync.Mutex
 	declarations map[string]Section
-	aliases      map[string]string
 	connections  map[string]func(context.Context, *types.DistributeConfig, *types.DistributeConfig) []*types.ConnectionCheck
 	sealed       bool
 }
@@ -46,7 +43,6 @@ type Sections struct {
 func NewSections() *Sections {
 	return &Sections{
 		declarations: map[string]Section{},
-		aliases:      map[string]string{},
 		connections:  map[string]func(context.Context, *types.DistributeConfig, *types.DistributeConfig) []*types.ConnectionCheck{},
 	}
 }
@@ -59,41 +55,28 @@ func (r *Sections) Add(sections ...Section) (resource.Handle, error) {
 		return nil, fmt.Errorf("configuration declarations are sealed")
 	}
 	names := map[string]bool{}
+	base := reflect.TypeFor[Option]()
+	for i := range base.NumField() {
+		if key := base.Field(i).Tag.Get("config"); key != "" && key != "-" {
+			names[key] = true
+		}
+	}
 	for key := range r.declarations {
 		names[key] = true
-	}
-	for alias := range r.aliases {
-		names[alias] = true
 	}
 	for _, section := range sections {
 		if strings.TrimSpace(section.Key) == "" || section.New == nil {
 			return nil, fmt.Errorf("configuration section requires key and factory")
 		}
-		local := map[string]bool{}
-		for index, name := range append([]string{section.Key}, section.Aliases...) {
-			// A root YAML alias and extensions key are different locations.
-			if index > 0 && name == section.Key && !local[name] {
-				local[name] = true
-				continue
-			}
-			if strings.TrimSpace(name) == "" {
-				return nil, fmt.Errorf("empty configuration name")
-			}
-			if names[name] {
-				return nil, fmt.Errorf("duplicate configuration name %q", name)
-			}
-			names[name] = true
+		if names[section.Key] {
+			return nil, fmt.Errorf("duplicate configuration name %q", section.Key)
 		}
+		names[section.Key] = true
 	}
 	registered := make([]Section, 0, len(sections))
 	for _, section := range sections {
-		section.Aliases = append([]string{section.Key}, section.Aliases...)
-		section.Aliases = slices.Compact(section.Aliases)
 		section.Secrets = append([]string(nil), section.Secrets...)
 		r.declarations[section.Key] = section
-		for _, alias := range section.Aliases {
-			r.aliases[alias] = section.Key
-		}
 		registered = append(registered, section)
 	}
 	closed := false
@@ -109,9 +92,6 @@ func (r *Sections) Add(sections ...Section) (resource.Handle, error) {
 		}
 		for _, section := range registered {
 			delete(r.declarations, section.Key)
-			for _, alias := range section.Aliases {
-				delete(r.aliases, alias)
-			}
 		}
 		return nil
 	}), nil
@@ -158,47 +138,17 @@ func mergeFields(dst, src map[string]any) {
 	}
 }
 func (r *Sections) Normalize(document map[string]any) (Values, error) {
-	out := Values{}
-	if raw := document["extensions"]; raw != nil {
-		switch values := raw.(type) {
-		case Values:
-			out = CloneValues(values)
-		case map[string]any:
-			for key, raw := range values {
-				fields, ok := raw.(map[string]any)
-				if raw != nil && !ok {
-					return nil, fmt.Errorf("extensions.%s must be an object", key)
-				}
-				out[key] = CloneDocument(fields)
-			}
-		default:
-			return nil, fmt.Errorf("extensions must be an object")
-		}
+	if err := validateMapping(document, reflect.TypeFor[Option](), "", r); err != nil {
+		return nil, err
 	}
-	for alias, key := range r.aliases {
-		if raw, ok := document[alias]; ok {
+	out := Values{}
+	for key := range r.declarations {
+		if raw, exists := document[key]; exists {
 			fields, ok := raw.(map[string]any)
 			if raw != nil && !ok {
-				return nil, fmt.Errorf("configuration %s must be an object", alias)
+				return nil, fmt.Errorf("configuration %s must be an object", key)
 			}
-			fields = CloneDocument(fields)
-			if existing, ok := out[key]; ok {
-				if fields == nil {
-					fields = map[string]any{}
-				}
-				for name, value := range fields {
-					if current, present := existing[name]; present && !reflect.DeepEqual(current, value) {
-						return nil, fmt.Errorf("conflicting configuration %s.%s and extensions.%s.%s", alias, name, key, name)
-					}
-				}
-				mergeFields(fields, existing)
-			}
-			out[key] = fields
-		}
-	}
-	for key := range out {
-		if _, ok := r.declarations[key]; !ok {
-			return nil, fmt.Errorf("unregistered extension configuration %q", key)
+			out[key] = CloneDocument(fields)
 		}
 	}
 	return out, nil
@@ -240,7 +190,7 @@ func (r *Sections) Decode(key string, fields map[string]any) (any, error) {
 func (s Section) Decode(fields map[string]any) (any, error) {
 	value := s.New()
 	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		TagName: "json", Result: value, ErrorUnused: true,
+		TagName: "json", Result: value, ErrorUnused: true, Squash: true,
 		DecodeHook: func(from, to reflect.Type, value any) (any, error) {
 			kind := to.Kind()
 			if kind < reflect.Int || kind > reflect.Uint64 {
@@ -297,6 +247,7 @@ func (s Section) Decode(fields map[string]any) (any, error) {
 	}
 	return value, nil
 }
+
 func (r *Sections) Keys() []string {
 	keys := make([]string, 0, len(r.declarations))
 	for key := range r.declarations {
@@ -306,20 +257,11 @@ func (r *Sections) Keys() []string {
 	return keys
 }
 
-// Aliases lists the root YAML keys this registry consumes on Normalize.
-func (r *Sections) Aliases() []string {
-	aliases := make([]string, 0, len(r.aliases))
-	for alias := range r.aliases {
-		aliases = append(aliases, alias)
-	}
-	sort.Strings(aliases)
-	return aliases
-}
 func (r *Sections) Defaults() Values {
 	out := Values{}
 	for _, key := range r.Keys() {
 		fields := map[string]any{}
-		decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "json", Result: &fields})
+		decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{TagName: "json", Result: &fields, Squash: true})
 		if err != nil {
 			panic(err)
 		}

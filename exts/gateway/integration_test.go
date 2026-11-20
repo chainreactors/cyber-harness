@@ -103,7 +103,7 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			t.Fatal(err)
 		}
 		proxy := proxyext.New(proxyext.Config{WorkDir: directory})
-		query := passiveext.New(passive.ReconOptions{FofaKey: "legacy-secret", IngressProxy: "http://127.0.0.1:1"})
+		query := passiveext.New(passive.Config{FofaKey: "owner-secret", Proxy: "http://127.0.0.1:1"})
 		base, err := harness.BaseExtensions(harness.BaseConfig{Directory: directory, Egress: proxy, Provider: provider.StartupConfig{Mode: provider.StartupDisabled}})
 		if err != nil {
 			t.Fatal(err)
@@ -123,15 +123,16 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 		if err := set.Load(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if key == "" {
+		switch key {
+		case "":
 			catalog = commands.Names()
-		} else if key == "disabled" {
+		case "disabled":
 			var output bytes.Buffer
 			_, err := commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "fofa", "fail"}, Stdout: &output, Stderr: &output})
 			if err == nil || !strings.Contains(err.Error(), "unknown source") {
-				t.Fatalf("disabled binding fell back to legacy credentials: %v", err)
+				t.Fatalf("disabled binding fell back to owner credentials: %v", err)
 			}
-		} else {
+		default:
 			if !reflect.DeepEqual(catalog, commands.Names()) {
 				t.Fatalf("gateway changed command catalog: %v -> %v", catalog, commands.Names())
 			}

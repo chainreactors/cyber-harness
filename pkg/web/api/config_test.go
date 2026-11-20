@@ -12,6 +12,7 @@ import (
 
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/exts/gateway"
 	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
@@ -63,6 +64,9 @@ func newConfig(backend ConfigBackend) *Config {
 	if err := passiveconfig.Declare(resources); err != nil {
 		panic(err)
 	}
+	if err := gateway.Declare(resources, passiveconfig.FofaSection()); err != nil {
+		panic(err)
+	}
 	if err := searchext.Declare(resources); err != nil {
 		panic(err)
 	}
@@ -94,7 +98,8 @@ func setConfigSection(config *types.DistributeConfig, name string, values map[st
 func TestScannerSettingsViewUsesRedactedExtensions(t *testing.T) {
 	stored := configWith(func(config *types.DistributeConfig) {
 		setConfigSection(config, "cyberhub", map[string]any{"url": "https://hub.example", "key": "hub-secret", "mitm": false})
-		setConfigSection(config, "recon", map[string]any{"fofa_key": "fofa-secret", "hunter_api_key": "hunter-secret"})
+		setConfigSection(config, "recon", map[string]any{"hunter_api_key": "hunter-secret"})
+		setConfigSection(config, "gateway", map[string]any{"fofa": map[string]any{"key": "fofa-secret"}})
 		setConfigSection(config, "scan", map[string]any{"verify": "high"})
 	})
 	view, err := newConfig(&fakeConfigStore{cfg: stored}).View(context.Background())
@@ -106,7 +111,7 @@ func TestScannerSettingsViewUsesRedactedExtensions(t *testing.T) {
 	if hub.GetValues().AsMap()["key"] != nil || !slices.Contains(hub.GetConfiguredSecrets(), "key") || hub.GetValues().AsMap()["mitm"] != false {
 		t.Fatalf("cyberhub view leaked secret or lost settings: %v", hub)
 	}
-	if recon.GetValues().AsMap()["fofa_key"] != nil || !slices.Contains(recon.GetConfiguredSecrets(), "fofa_key") || !slices.Contains(recon.GetConfiguredSecrets(), "hunter_api_key") {
+	if !slices.Contains(recon.GetConfiguredSecrets(), "hunter_api_key") {
 		t.Fatalf("recon view leaked secrets: %v", recon)
 	}
 	if view.GetExtensions()["scan"].GetValues().AsMap()["verify"] != "high" {
@@ -241,10 +246,10 @@ func TestConnectionFofaSuccessAndStoredKeyFallback(t *testing.T) {
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
 	store.cfg = configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "recon", map[string]any{"fofa_key": "stored-fofa"})
+		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "stored-fofa"}})
 	})
 
-	resp, err := testConn(context.Background(), store, "recon", configWith(nil))
+	resp, err := testConn(context.Background(), store, "gateway.fofa", configWith(nil))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -267,8 +272,8 @@ func TestConnectionFofaError(t *testing.T) {
 	defer srv.Close()
 	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
-	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "recon", map[string]any{"fofa_key": "bad"})
+	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "gateway.fofa", configWith(func(c *types.DistributeConfig) {
+		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "bad"}})
 	}))
 	c, ok := findCheck(resp, "fofa")
 	if !ok || c.Ok {

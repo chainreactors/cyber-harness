@@ -3,7 +3,7 @@ package engine
 import "testing"
 
 func TestBuildGogoRunnerOptionAppliesVersionAndExploit(t *testing.T) {
-	opt := buildGogoRunnerOption(GogoScanOptions{
+	opt := buildGogoRunnerOption(GogoOptions{
 		Timeout:      7,
 		VersionLevel: 1,
 		Exploit:      "auto",

@@ -95,7 +95,7 @@ func TestExecuteToolRequestRejectsMismatchedCorrelation(t *testing.T) {
 
 type recordingBash struct {
 	command string
-	options terminaltool.BashExecOptions
+	options terminaltool.Options
 }
 
 func (*recordingBash) Name() string        { return "bash" }
@@ -110,14 +110,14 @@ func (b *recordingBash) Execute(ctx context.Context, arguments string) (*aop.Too
 	if err != nil {
 		return nil, err
 	}
-	options := terminaltool.BashExecOptions{OnOutput: operation.InvocationFromContext(ctx).Progress}
+	options := terminaltool.Options{OnOutput: operation.InvocationFromContext(ctx).Progress}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
 	}
 	return b.RunForegroundTool(ctx, args.Command, options)
 }
-func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options terminaltool.BashExecOptions) (*aop.ToolResult, error) {
+func (b *recordingBash) RunForegroundTool(_ context.Context, command string, options terminaltool.Options) (*aop.ToolResult, error) {
 	b.command = command
 	b.options = options
 	options.OnOutput([]byte("streamed\n"))
@@ -195,7 +195,7 @@ func (*panicForegroundBash) Execute(context.Context, string) (*aop.ToolResult, e
 	panic("foreground boom")
 }
 
-func (*panicForegroundBash) RunForegroundTool(context.Context, string, terminaltool.BashExecOptions) (*aop.ToolResult, error) {
+func (*panicForegroundBash) RunForegroundTool(context.Context, string, terminaltool.Options) (*aop.ToolResult, error) {
 	panic("foreground boom")
 }
 

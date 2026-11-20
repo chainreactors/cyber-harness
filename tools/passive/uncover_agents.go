@@ -20,7 +20,7 @@ import (
 	"github.com/projectdiscovery/uncover/sources/agent/zoomeye"
 )
 
-func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
+func (e *Uncover) agentFor(src string) (sources.Agent, error) {
 	switch src {
 	case "fofa":
 		return &fofaAgent{endpoint: e.fofaURL}, nil

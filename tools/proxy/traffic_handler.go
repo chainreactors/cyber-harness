@@ -16,12 +16,12 @@ import (
 // and answers Query with a State snapshot or recorded flows. Live completed
 // flows are published only by the observe extension as typed AOP events.
 type trafficHandler struct {
-	hub *ProxyHub
+	hub *Hub
 }
 
 // TrafficNamespace declares the proxy control surface for the profile's typed
 // namespace catalog.
-func TrafficNamespace(hub *ProxyHub) (aop.Binding, error) {
+func TrafficNamespace(hub *Hub) (aop.Binding, error) {
 	if hub == nil || hub.store == nil || hub.state == nil {
 		return aop.Binding{}, fmt.Errorf("traffic namespace requires a proxy hub")
 	}
@@ -64,7 +64,7 @@ func (h *trafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope,
 
 func (h *trafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send aop.SendFunc) error {
 	if q.GetFlows() {
-		for _, f := range h.hub.store.Query(queryOptsFromFilter(q.GetFilter())) {
+		for _, f := range h.hub.store.Query(flowFilter(q.GetFilter())) {
 			flow := f
 			if err := h.sendFlow(env.Id, send, flow); err != nil {
 				return err
@@ -153,11 +153,11 @@ func applyRouting(ctx context.Context, state *State, rc *traffic.RoutingConfig) 
 	}
 }
 
-func queryOptsFromFilter(f *traffic.FlowFilter) QueryOpts {
+func flowFilter(f *traffic.FlowFilter) Filter {
 	if f == nil {
-		return QueryOpts{}
+		return Filter{}
 	}
-	return QueryOpts{
+	return Filter{
 		Host:   f.GetHost(),
 		Status: f.GetStatus(),
 		CType:  f.GetType(),

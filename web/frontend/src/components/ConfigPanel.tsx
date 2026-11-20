@@ -774,17 +774,14 @@ function IOATab({ form, setForm, cs }: TabProps) {
 function GuardrailTab({ form, setForm, onConfigureJEV }: TabProps & { onConfigureJEV: () => void }) {
   const { t } = useTranslation('config')
   const jev = form.extensions.jev ?? {}
-  const policy = (form.extensions.guardrail?.jev ?? {}) as JsonObject
+  const policy = form.extensions.guardrail ?? {}
   const update = (key: string, value: string | boolean) => setForm(f => ({
     ...f, extensions: { ...f.extensions, jev: { ...f.extensions.jev, [key]: value } },
   }))
   const value = (key: string, fallback = '') => typeof jev[key] === 'string' ? jev[key] as string : fallback
   const policyValue = (key: string, fallback: string) => typeof policy[key] === 'string' ? policy[key] as string : fallback
   const updatePolicy = (key: string, value: string) => setForm(f => ({
-    ...f, extensions: { ...f.extensions, guardrail: {
-      ...f.extensions.guardrail,
-      jev: { ...(f.extensions.guardrail?.jev as JsonObject | undefined), [key]: value },
-    } },
+    ...f, extensions: { ...f.extensions, guardrail: { ...f.extensions.guardrail, [key]: value } },
   }))
   return (
     <div className="grid gap-3 sm:grid-cols-2">

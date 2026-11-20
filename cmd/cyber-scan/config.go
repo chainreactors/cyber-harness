@@ -25,7 +25,7 @@ type appConfig struct {
 	DataDir           string
 	Provider          provider.StartupConfig
 	Scanner           scannerext.Config
-	Recon             passiveconfig.ReconOptions
+	Recon             passiveconfig.Recon
 	ReconCredentials  map[string]string
 	Gateway           cfg.Values
 	ProxyService      string
@@ -47,7 +47,7 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	if err != nil {
 		return config{}, err
 	}
-	recon, err := passiveconfig.ReadRecon(option)
+	recon, err := passiveconfig.Read(option)
 	if err != nil {
 		return config{}, err
 	}
@@ -66,39 +66,6 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	services, err := gateway.Read(option)
 	if err != nil {
 		return config{}, err
-	}
-	// Legacy flags/env keep their existing precedence. Conflicting file keys
-	// require an explicit choice rather than silently selecting an account.
-	for name, fields := range services {
-		if recon.Service != "" && name != recon.Service {
-			continue
-		}
-		kind, _ := fields["kind"].(string)
-		if kind == "" {
-			kind = name
-		}
-		if kind != "fofa" || fields["enabled"] == false {
-			continue
-		}
-		legacyValues := map[string]any{"key": recon.FofaKey, "proxy": recon.Proxy}
-		if recon.Limit != nil {
-			legacyValues["limit"] = *recon.Limit
-		}
-		for field, value := range legacyValues {
-			legacyField := field
-			if field == "key" {
-				legacyField = "fofa_key"
-			}
-			legacy := option.Resolved.Source("extensions.recon." + legacyField)
-			current := option.Resolved.Source("extensions.gateway." + name + "." + field)
-			if legacy == "cli" && current != "cli" || legacy == "environment" && current != "cli" && current != "environment" {
-				fields[field] = value
-			} else if field == "key" && recon.FofaKey != "" {
-				if key, _ := fields[field].(string); key != "" && key != recon.FofaKey && legacy == current {
-					return config{}, fmt.Errorf("conflicting FOFA keys in recon and gateway.%s", name)
-				}
-			}
-		}
 	}
 	proxyService := ""
 	if hub.Proxy != "" && !strings.Contains(hub.Proxy, "://") {

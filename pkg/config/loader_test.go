@@ -64,15 +64,8 @@ llm:
   base_url: https://api.deepseek.com/v1
   max_tokens: 32768
   context_window: 1000000
-cyberhub:
-  url: http://hub:9000
-  key: testkey
-  mode: override
 agent:
   server_url: http://web:8080
-ioa:
-  url: http://ioa:8765
-  space: case-1
 `)
 
 	var opt Option
@@ -118,8 +111,6 @@ func TestLoadConfigEmptyFieldsAreZero(t *testing.T) {
 llm:
   provider: ""
   model: ""
-cyberhub:
-  url: ""
 `)
 
 	var opt Option
@@ -141,8 +132,6 @@ llm:
   provider: config-provider
   model: config-model
   api_key: config-key
-cyberhub:
-  url: http://config-hub:9000
 `)
 
 	option := Option{}

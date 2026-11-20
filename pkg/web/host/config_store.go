@@ -111,7 +111,7 @@ func (s *FileConfigStore) stored() (*cfg.Snapshot, bool, *types.DistributeConfig
 	if err != nil {
 		return nil, false, nil, err
 	}
-	value, err := s.Codec.ParseDocument(snapshot.RuntimeDocument(s.Codec.Sections))
+	value, err := s.Codec.ParseDocument(cfg.CloneDocument(snapshot.Document))
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -228,7 +228,7 @@ func (s *FileConfigStore) PrepareDistributeConfig(ctx context.Context, incoming 
 	if err != nil {
 		return nil, err
 	}
-	merged, err := s.Codec.ParseDocument(candidate.RuntimeDocument(s.Codec.Sections))
+	merged, err := s.Codec.ParseDocument(cfg.CloneDocument(candidate.Document))
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +249,7 @@ func (s *FileConfigStore) PrepareDistributeConfig(ctx context.Context, incoming 
 	if err := cfg.ResolveRuntimeSnapshot(&runtimeOption, candidate); err != nil {
 		return nil, err
 	}
-	next, err := yaml.Marshal(sections.Flat(patched))
+	next, err := yaml.Marshal(patched)
 	if err != nil {
 		return nil, err
 	}

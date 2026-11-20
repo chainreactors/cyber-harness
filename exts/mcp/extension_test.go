@@ -84,7 +84,7 @@ type testHost struct {
 	dir      string
 }
 
-func assembly(t *testing.T, config Config) *testHost {
+func assembly(t *testing.T, config map[string]mcptools.Config) *testHost {
 	t.Helper()
 	h := &testHost{commands: coretool.NewCommandRegistry(), tools: coretool.NewToolRegistry(), hooks: hooks.New(), dir: t.TempDir()}
 	set, err := extension.New(
@@ -110,13 +110,13 @@ func assembly(t *testing.T, config Config) *testHost {
 	return h
 }
 
-func helperConfig(t *testing.T, directory string) mcptools.ServerConfig {
+func helperConfig(t *testing.T, directory string) mcptools.Config {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mcptools.ServerConfig{Command: executable, Args: []string{"-test.run=^TestMCPHelper$"}, Cwd: directory,
+	return mcptools.Config{Command: executable, Args: []string{"-test.run=^TestMCPHelper$"}, Cwd: directory,
 		Env: map[string]string{"CYBER_MCP_HELPER": "1", "CYBER_MCP_VALUE": "chosen-value"}}
 }
 
@@ -128,7 +128,7 @@ func (h *testHost) command(ctx context.Context, name string, args ...string) (st
 
 func TestStdioBashWorkflowAndLifetime(t *testing.T) {
 	directory := t.TempDir()
-	h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{"ida": helperConfig(t, directory)}})
+	h := assembly(t, map[string]mcptools.Config{"ida": helperConfig(t, directory)})
 	init, cancel := context.WithCancel(context.Background())
 	if err := h.set.Load(init); err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestStdioUnloadCancelsInFlightCall(t *testing.T) {
 	marker := filepath.Join(directory, "started")
 	config := helperConfig(t, directory)
 	config.Env["CYBER_MCP_MARKER"] = marker
-	h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{"ida": config}})
+	h := assembly(t, map[string]mcptools.Config{"ida": config})
 	if err := h.set.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -195,14 +195,14 @@ func TestHTTPBashCompositionAndAdmission(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(server.NewStreamableHTTPServer(testServer(&calls)))
 	defer upstream.Close()
-	h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{"http": {URL: upstream.URL + "/mcp"}}})
+	h := assembly(t, map[string]mcptools.Config{"http": {URL: upstream.URL + "/mcp"}})
 	if err := h.set.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// Native CLI participates in variable expansion, pipelines and redirects.
 	script := `message='two words'; http echo --message "$message" | { read -r result; printf '%s\n' "$result"; } > result.json`
 	var output bytes.Buffer
-	execution, err := h.bash.RunForeground(context.Background(), script, terminaltool.BashExecOptions{Stdout: &output})
+	execution, err := h.bash.RunForeground(context.Background(), script, terminaltool.Options{Stdout: &output})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,12 +220,12 @@ func TestHTTPBashCompositionAndAdmission(t *testing.T) {
 		t.Fatalf("arbitrary tool name and nested arguments: %s %v", text, err)
 	}
 	// Tool failures retain stdout and fail the shell command.
-	result, err := h.bash.RunForegroundTool(context.Background(), "http fail > failure.json", terminaltool.BashExecOptions{})
+	result, err := h.bash.RunForegroundTool(context.Background(), "http fail > failure.json", terminaltool.Options{})
 	failure, readErr := os.ReadFile(filepath.Join(h.dir, "failure.json"))
 	if err != nil || !result.IsError || readErr != nil || !strings.Contains(string(failure), `"isError":true`) {
 		t.Fatalf("failure lost stdout or exit status: %v %v %s %v", result, err, failure, readErr)
 	}
-	result, err = h.bash.RunForegroundTool(context.Background(), "http fail > failure.json 2> diagnostics.txt || printf recovered", terminaltool.BashExecOptions{})
+	result, err = h.bash.RunForegroundTool(context.Background(), "http fail > failure.json 2> diagnostics.txt || printf recovered", terminaltool.Options{})
 	if err != nil || result.IsError || !strings.Contains(coretool.ResultText(result), "recovered") {
 		t.Fatalf("shell recovery failed: %v %v", result, err)
 	}
@@ -245,7 +245,7 @@ func TestHTTPBashCompositionAndAdmission(t *testing.T) {
 func TestStdioInitializationTimeoutRollsBackOwnedProcess(t *testing.T) {
 	config := helperConfig(t, t.TempDir())
 	config.Env["CYBER_MCP_STALL"] = "1"
-	h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{"stall": config}})
+	h := assembly(t, map[string]mcptools.Config{"stall": config})
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	if err := h.set.Load(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -271,9 +271,9 @@ func TestHTTPRollbackAndAllowlist(t *testing.T) {
 	defer upstream.Close()
 	t.Run("rollback", func(t *testing.T) {
 		before := deletes.Load()
-		h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{
+		h := assembly(t, map[string]mcptools.Config{
 			"a": {URL: upstream.URL + "/mcp"}, "z": {URL: upstream.URL + "/mcp", Tools: []string{"absent"}},
-		}})
+		})
 		if err := h.set.Load(context.Background()); err == nil {
 			t.Fatal("missing allowlisted tool did not fail load")
 		}
@@ -289,7 +289,7 @@ func TestHTTPRollbackAndAllowlist(t *testing.T) {
 		{"allowlist", []string{"echo"}, 1}, {"empty", []string{}, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{"filtered": {URL: upstream.URL + "/mcp", Tools: test.tools}}})
+			h := assembly(t, map[string]mcptools.Config{"filtered": {URL: upstream.URL + "/mcp", Tools: test.tools}})
 			if err := h.set.Load(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -314,9 +314,9 @@ func TestAliasRejectsBashNamespaceConflictsBeforeConnecting(t *testing.T) {
 	defer upstream.Close()
 	for _, name := range []string{"echo", "test", "printf", "if", "for", "declare"} {
 		t.Run(name, func(t *testing.T) {
-			h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{
+			h := assembly(t, map[string]mcptools.Config{
 				"a": {URL: upstream.URL}, name: {URL: upstream.URL},
-			}})
+			})
 			if err := h.set.Load(context.Background()); err == nil || !strings.Contains(err.Error(), "conflicts with a bash") {
 				t.Fatalf("unreachable alias accepted: %v", err)
 			}

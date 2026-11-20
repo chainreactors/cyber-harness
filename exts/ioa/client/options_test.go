@@ -33,6 +33,28 @@ func TestClientOptionsAreExplicitAndIndependent(t *testing.T) {
 	}
 }
 
+func TestNodeNameUsesNodeConfiguration(t *testing.T) {
+	sections := cfg.NewSections()
+	if _, err := sections.Add(Section()); err != nil {
+		t.Fatal(err)
+	}
+	option := &cfg.Option{Sections: sections}
+	if err := cfg.LoadConfigBytes([]byte("node:\n  name: worker\nioa.client:\n  url: https://ioa.test\n"), option); err != nil {
+		t.Fatal(err)
+	}
+	config, err := ConfigFromOption(option)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.NodeName != "worker" {
+		t.Fatalf("node.name was not applied: %q", config.NodeName)
+	}
+	option.Extensions[ConfigKey]["node_name"] = "obsolete"
+	if _, err := ConfigFromOption(option); err == nil {
+		t.Fatal("removed ioa.client.node_name accepted")
+	}
+}
+
 // The runtime client must be able to authenticate with the configured key, and
 // the SDK reads an access key only from URL userinfo. Handing the same string
 // over as a bearer token makes the server answer 401 "invalid token", so assert
@@ -79,7 +101,7 @@ func TestAccessKeyURL(t *testing.T) {
 
 func TestClientYAMLAndCLIOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("extensions:\n  ioa.client:\n    url: https://ioa.test\n    space: production\n    node_name: worker\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("ioa.client:\n  url: https://ioa.test\n  space: production\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r := cfg.NewSections()
@@ -99,7 +121,7 @@ func TestClientYAMLAndCLIOverride(t *testing.T) {
 		if explicit != nil {
 			want = explicit[ConfigKey]["space"].(string)
 		}
-		if value.Space != want || value.NodeName != "worker" || value.URL != "https://ioa.test" {
+		if value.Space != want || value.URL != "https://ioa.test" {
 			t.Fatalf("resolved options = %+v", value)
 		}
 	}

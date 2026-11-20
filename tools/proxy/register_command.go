@@ -16,7 +16,7 @@ import (
 // NewCommands constructs the native proxy command group without publishing it.
 // Profiles that apply an authorization policy can wrap the returned command
 // before the group becomes visible.
-func NewCommands(execute CommandExecutor, hub *ProxyHub, fallbackProxy string) []coretool.Command {
+func NewCommands(execute CommandExecutor, hub *Hub, fallbackProxy string) []coretool.Command {
 	state, store := (*State)(nil), (*FlowStore)(nil)
 	if hub != nil {
 		state, store = hub.state, hub.store

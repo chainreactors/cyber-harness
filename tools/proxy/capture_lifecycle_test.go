@@ -17,9 +17,9 @@ func TestResponseEOFKeepsCaptureOpenUntilEngineCompletion(t *testing.T) {
 	if err := store.SetBodyDir(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	resource := NewProxyHub(NewState(""), store, "", true, nil)
+	resource := newHub(NewState(""), store, "", true, nil)
 	defer resource.Close(context.Background())
-	hub := resource.ProxyHub
+	hub := resource.Hub
 	addon := &captureAddon{hub: hub}
 	flow := &mitmproxy.Flow{StartTime: time.Now()}
 	state := newCaptureState(hub, flow)
@@ -39,7 +39,7 @@ func TestResponseEOFKeepsCaptureOpenUntilEngineCompletion(t *testing.T) {
 	flow.Error = errors.New("downstream write failed")
 	addon.FlowFinished(flow)
 	addon.FlowFinished(flow)
-	flows := store.Query(QueryOpts{})
+	flows := store.Query(Filter{})
 	if len(flows) != 1 || flows[0].Complete || !strings.Contains(flows[0].Error, flow.Error.Error()) {
 		t.Fatalf("completed flows = %+v", flows)
 	}

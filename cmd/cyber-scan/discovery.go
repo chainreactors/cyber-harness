@@ -9,10 +9,9 @@ import (
 )
 
 func discoveryExtensions(config appConfig) ([]extension.Extension, *passiveext.Extension) {
-	feature := passiveext.New(passive.ReconOptions{
-		FofaKey:      config.Recon.FofaKey,
+	feature := passiveext.New(passive.Config{
 		HunterAPIKey: config.Recon.HunterAPIKey,
-		IngressProxy: config.Recon.Proxy,
+		Proxy:        config.Recon.Proxy,
 		Limit:        intValue(config.Recon.Limit),
 		Credentials:  config.ReconCredentials,
 	})

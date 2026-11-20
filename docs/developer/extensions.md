@@ -40,7 +40,7 @@ go run ./examples/crawl
 
 `exts/scanner.Config.Crawler` 接受 `scan.Crawler`；组合根传入 `katana.Crawl` 后，quick 扫描增加普通爬取，full 扫描增加浏览器爬取。未注入 crawler 时，scan 只运行自身能力。scan 保留目标过滤、去重和流水线事件，Katana 适配器负责网络与浏览器生命周期。
 
-passive 的配置声明位于 `exts/passive/config`，运行扩展位于 `exts/passive`。宿主可以声明并保存配置而不链接运行实现；`recon` section、环境变量和现有 CLI flag 名称保持兼容，是否显示 flag 由宿主决定。
+passive 的配置声明位于 `exts/passive/config`，运行扩展位于 `exts/passive`。宿主可以声明并保存配置而不链接运行实现；FOFA 由 `gateway` 配置，通用查询设置放在 `recon`，是否显示对应 flag 由宿主决定。
 
 `cmd/cyber-scan` 直接组合 browser、passive 和 Katana；`make full` 从独立入口 `cmd/cyber-harness` 构建 Web 主程序。无需新增 browser、passive 或 crawl 标签。`record` 仍受原生 SDK、CGO 和平台约束，可以独立于 `full` 组合。
 

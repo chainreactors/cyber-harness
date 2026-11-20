@@ -20,7 +20,7 @@ func (e *Extension) Gateway(use string) gateway.Kind {
 			config := value.(*passiveconfig.Fofa)
 			e.options.FofaKey, e.options.FofaURL = config.Key, config.URL
 			if config.Proxy != nil {
-				e.options.IngressProxy = *config.Proxy
+				e.options.Proxy = *config.Proxy
 			}
 			if config.Limit != nil {
 				e.options.Limit = *config.Limit

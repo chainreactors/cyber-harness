@@ -41,24 +41,17 @@ func TestAllSectionsUseFlatNamesWithoutRevalidation(t *testing.T) {
 	}
 }
 
-func TestFlatPreservesMixedFieldsAndUnknownExtensions(t *testing.T) {
+func TestOnlyFlatConfigurationAccepted(t *testing.T) {
 	sections := fixtureSections(t)
-	for _, envelope := range []any{
-		map[string]any{"fixture": map[string]any{"count": 0}, "unlinked": map[string]any{"key": "keep"}},
-		Values{"fixture": {"count": 0}, "unlinked": {"key": "keep"}},
+	for _, input := range []string{
+		"extensions:\n  fixture:\n    count: 1\n",
+		"old_fixture:\n  count: 1\n",
+		"extensions: null\n",
+		"unknown:\n  count: 1\n",
 	} {
-		document := map[string]any{"fixture": map[string]any{"name": "keep-root"}, "extensions": envelope}
-		flat := sections.Flat(document)
-		root := flat["fixture"].(map[string]any)
-		if root["name"] != "keep-root" || root["count"] != 0 {
-			t.Fatalf("flattening discarded fields: %v", flat)
-		}
-		unknown := flat["extensions"].(map[string]any)
-		if len(unknown) != 1 || unknown["unlinked"].(map[string]any)["key"] != "keep" {
-			t.Fatalf("unlinked configuration was rewritten: %v", flat)
-		}
-		if len(document["fixture"].(map[string]any)) != 1 {
-			t.Fatal("output projection mutated its input")
+		option := &Option{Sections: sections}
+		if err := LoadConfigBytes([]byte(input), option); err == nil {
+			t.Fatalf("obsolete or unknown configuration accepted: %s", input)
 		}
 	}
 }

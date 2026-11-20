@@ -1,27 +1,30 @@
 package passive
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
-func TestNewUncoverEngineFofaKeyOnly(t *testing.T) {
+func TestUncoverFofaKeyOnly(t *testing.T) {
 	t.Setenv("FOFA_KEY", "")
 
-	eng := NewUncoverEngine(ReconOptions{FofaKey: "modern-api-key"}, nil)
+	eng := NewUncover(Config{FofaKey: "modern-api-key"})
 	if eng.keys.FofaKey != "modern-api-key" {
 		t.Fatalf("key-only creds did not backfill FofaKey: got %q", eng.keys.FofaKey)
 	}
-	if !sourceAvailable(eng, "fofa") {
+	if !slices.Contains(eng.Sources(), "fofa") {
 		t.Fatalf("fofa not available for key-only creds: %v", eng.Sources())
 	}
 }
 
-func TestNewUncoverEngineDoesNotRereadCredentialEnvironment(t *testing.T) {
+func TestUncoverUsesResolvedCredentials(t *testing.T) {
 	t.Setenv("FOFA_KEY", "env-key")
 	t.Setenv("HUNTER_API_KEY", "env-hunter")
 
-	eng := NewUncoverEngine(ReconOptions{
+	eng := NewUncover(Config{
 		FofaKey:      "cli-key",
 		HunterAPIKey: "cli-hunter",
-	}, nil)
+	})
 	if eng.keys.FofaKey != "cli-key" {
 		t.Fatalf("FOFA environment bypassed resolved config: %#v", eng.keys)
 	}
@@ -30,20 +33,11 @@ func TestNewUncoverEngineDoesNotRereadCredentialEnvironment(t *testing.T) {
 	}
 }
 
-func TestNewUncoverEngineUsesInjectedCredentials(t *testing.T) {
-	eng := NewUncoverEngine(ReconOptions{Credentials: map[string]string{
+func TestUncoverUsesInjectedCredentials(t *testing.T) {
+	eng := NewUncover(Config{Credentials: map[string]string{
 		"SHODAN_API_KEY": "shodan-key",
-	}}, nil)
-	if eng.keys.Shodan != "shodan-key" || !sourceAvailable(eng, "shodan") {
+	}})
+	if eng.keys.Shodan != "shodan-key" || !slices.Contains(eng.Sources(), "shodan") {
 		t.Fatalf("injected provider key not applied: %#v", eng.keys)
 	}
-}
-
-func sourceAvailable(e *UncoverEngine, name string) bool {
-	for _, s := range e.Sources() {
-		if s == name {
-			return true
-		}
-	}
-	return false
 }

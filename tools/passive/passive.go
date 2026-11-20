@@ -22,20 +22,20 @@ const queryTimeout = 600 * time.Second
 
 // Command dispatches passive recon to uncover by -s <source>.
 type Command struct {
-	engine  QueryEngine
+	engine  Engine
 	logger  telemetry.Logger
 	sources map[string]bool
 }
 
-// QueryEngine is the passive command's minimal dependency, allowing callers
+// Engine is the passive command's minimal dependency, allowing callers
 // to supply deterministic or alternate recon backends.
-type QueryEngine interface {
+type Engine interface {
 	Sources() []string
-	QueryRaw(context.Context, string, string) ([]sources.Result, error)
+	Query(context.Context, string, string) ([]sources.Result, error)
 }
 
 // New creates a passive command. Engine may be nil (not configured).
-func New(eng QueryEngine) *Command {
+func New(eng Engine) *Command {
 	c := &Command{
 		engine:  eng,
 		logger:  telemetry.NopLogger(),
@@ -50,14 +50,10 @@ func New(eng QueryEngine) *Command {
 }
 
 func (c *Command) WithLogger(l telemetry.Logger) *Command {
-	c.InitLogger(l)
-	return c
-}
-
-func (c *Command) InitLogger(l telemetry.Logger) {
 	if l != nil {
 		c.logger = l
 	}
+	return c
 }
 
 func (c *Command) Name() string { return "passive" }
@@ -111,7 +107,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 
 func (c *Command) runQuery(ctx context.Context, src string, args []string) (string, error) {
 	if c.engine == nil {
-		return "", fmt.Errorf("passive: no recon credentials configured. Set via flags (--fofa-key, --hunter-api-key), env (FOFA_KEY, HUNTER_API_KEY), or config file (recon.fofa_key, recon.hunter_api_key). Do not retry until credentials are provided")
+		return "", fmt.Errorf("passive: no recon engine configured")
 	}
 	query, err := parseQueryArgs(args)
 	if err != nil {
@@ -125,7 +121,7 @@ func (c *Command) runQuery(ctx context.Context, src string, args []string) (stri
 		ctx, cancel = context.WithTimeout(ctx, queryTimeout)
 		defer cancel()
 	}
-	results, queryErr := c.engine.QueryRaw(ctx, src, query)
+	results, queryErr := c.engine.Query(ctx, src, query)
 	if queryErr != nil {
 		queryErr = fmt.Errorf("passive: %w", queryErr)
 		if len(results) == 0 {
@@ -133,7 +129,7 @@ func (c *Command) runQuery(ctx context.Context, src string, args []string) (stri
 		}
 	}
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(uncoverPython(src, results)); err != nil {
+	if err := json.NewEncoder(&buf).Encode(rows(src, results)); err != nil {
 		return buf.String(), fmt.Errorf("passive: encode: %w", err)
 	}
 	c.logger.Debugf("passive source=%s results=%d", src, len(results))
@@ -186,7 +182,7 @@ func parseQueryArgs(args []string) (query string, err error) {
 
 // --------------- Python-compatible JSON shapes --------------------------------
 
-type pyFofa struct {
+type fofaRow struct {
 	IP     string `json:"ip"`
 	Port   string `json:"port"`
 	URL    string `json:"url"`
@@ -195,7 +191,7 @@ type pyFofa struct {
 	ICP    string `json:"icp"`
 }
 
-type pyGeneric struct {
+type asset struct {
 	IP     string `json:"ip"`
 	Port   string `json:"port"`
 	URL    string `json:"url"`
@@ -203,31 +199,31 @@ type pyGeneric struct {
 	Source string `json:"source"`
 }
 
-func uncoverPython(src string, results []sources.Result) any {
+func rows(src string, results []sources.Result) any {
 	switch src {
 	case "fofa":
-		out := make([]pyFofa, 0, len(results))
+		out := make([]fofaRow, 0, len(results))
 		for _, r := range results {
-			var raw RawFofa
+			var raw Fofa
 			_ = json.Unmarshal(r.Raw, &raw)
-			out = append(out, pyFofa{
+			out = append(out, fofaRow{
 				IP: raw.IP, Port: raw.Port, URL: raw.Host,
 				Domain: raw.Domain, Title: raw.Title, ICP: raw.ICP,
 			})
 		}
 		return out
 	case "hunter":
-		out := make([]RawHunter, 0, len(results))
+		out := make([]Hunter, 0, len(results))
 		for _, r := range results {
-			var raw RawHunter
+			var raw Hunter
 			_ = json.Unmarshal(r.Raw, &raw)
 			out = append(out, raw)
 		}
 		return out
 	default:
-		out := make([]pyGeneric, 0, len(results))
+		out := make([]asset, 0, len(results))
 		for _, r := range results {
-			out = append(out, pyGeneric{
+			out = append(out, asset{
 				IP:     r.IP,
 				Port:   strconv.Itoa(r.Port),
 				URL:    r.Url,

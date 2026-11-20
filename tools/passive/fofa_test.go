@@ -16,13 +16,13 @@ import (
 func TestFofaCommandCancellationIsNotEmptySuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
-	engine := passive.NewUncoverEngine(passive.ReconOptions{FofaKey: "local-secret", FofaURL: server.URL}, nil)
+	engine := passive.NewUncover(passive.Config{FofaKey: "local-secret", FofaURL: server.URL})
 	command := passive.New(engine)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	var output bytes.Buffer
 	_, err := command.Run(ctx, &coretool.Execution{Args: []string{"-s", "fofa", "anything"}, Stdout: &output, Stderr: &output})
 	if !errors.Is(err, context.DeadlineExceeded) || output.Len() != 0 {
-		t.Fatalf("cancelled query returned empty success: output=%s err=%v", output.String(), err)
+		t.Fatalf("canceled query returned empty success: output=%s err=%v", output.String(), err)
 	}
 }

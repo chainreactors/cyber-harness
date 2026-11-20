@@ -29,14 +29,14 @@ import (
 
 type MitmCommand struct {
 	store       *FlowStore
-	hub         *ProxyHub
+	hub         *Hub
 	execCommand CommandExecutor
 }
 
 // NewMitmCommand wires the mitm verbs to the long-lived hub's shared FlowStore
 // so `mitm flows/analyze/flow` query traffic captured from every tool, not just
 // a per-invocation proxy.
-func NewMitmCommand(store *FlowStore, hub *ProxyHub) *MitmCommand {
+func NewMitmCommand(store *FlowStore, hub *Hub) *MitmCommand {
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
@@ -127,7 +127,7 @@ func (c *MitmCommand) execWithCapture(ctx context.Context, args []string, execut
 }
 
 func (c *MitmCommand) queryFlows(args []string) (string, error) {
-	var f QueryOpts
+	var f Filter
 	p := goflags.NewParser(&f, goflags.Default&^goflags.PrintErrors&^goflags.HelpFlag)
 	if _, err := p.ParseArgs(args); err != nil {
 		return "", err
@@ -159,7 +159,7 @@ func (c *MitmCommand) analyze(args []string) (string, error) {
 	if _, err := p.ParseArgs(args); err != nil {
 		return "", err
 	}
-	return formatFlowAnalysis(c.store.Query(QueryOpts{Host: f.Host, Last: f.Last})), nil
+	return formatFlowAnalysis(c.store.Query(Filter{Host: f.Host, Last: f.Last})), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ const defaultMaxBodyBytes = cfg.DefaultBodyRetentionBytes
 
 type captureAddon struct {
 	mitmproxy.BaseAddon
-	hub     *ProxyHub
+	hub     *Hub
 	pending sync.Map // map[proxy flow id]*captureState
 }
 
@@ -256,7 +256,7 @@ func (a *captureAddon) state(f *mitmproxy.Flow) *captureState {
 }
 
 type captureState struct {
-	hub        *ProxyHub
+	hub        *Hub
 	mu         sync.Mutex
 	finished   bool
 	flow       Flow
@@ -265,7 +265,7 @@ type captureState struct {
 	captureErr error
 }
 
-func newCaptureState(hub *ProxyHub, f *mitmproxy.Flow) *captureState {
+func newCaptureState(hub *Hub, f *mitmproxy.Flow) *captureState {
 	correlation := hub.resolveCorrelation(correlationTokenOf(f))
 	flow := Flow{
 		Flow: &traffic.Flow{Timestamp: timestamppb.New(f.StartTime)}, Operation: correlation.operation, Invocation: correlation.invocation,
@@ -431,7 +431,7 @@ type Flow struct {
 	release     func()
 }
 
-type QueryOpts struct {
+type Filter struct {
 	Host   string `long:"host" description:"Filter by host substring"`
 	Status string `long:"status" description:"Filter by status code (2xx, 404, 5xx)"`
 	CType  string `long:"type" description:"Filter by Content-Type substring"`

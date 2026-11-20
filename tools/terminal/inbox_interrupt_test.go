@@ -118,7 +118,7 @@ func TestInboxInterruptRealShellKeepsTmuxSession(t *testing.T) {
 	defer ib.Close()
 	ctx, cancel := context.WithCancel(inbox.ContextWithInbox(t.Context(), ib))
 	defer cancel()
-	execution, err := bash.Start(ctx, command, BashExecOptions{})
+	execution, err := bash.Start(ctx, command, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,8 +20,8 @@ func TestPerCallEgressDoesNotSwapGlobalRoute(t *testing.T) {
 		_, _ = io.WriteString(w, "ok")
 	}))
 	defer target.Close()
-	hub := NewProxyHub(NewState(""), nil, t.TempDir(), false, nil).ProxyHub
-	resource := &Resource{ProxyHub: hub}
+	hub := newHub(NewState(""), nil, t.TempDir(), false, nil).Hub
+	resource := &Resource{Hub: hub}
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +79,12 @@ func TestPerCallHTTPSRouteUsesConnectToken(t *testing.T) {
 		_, _ = io.WriteString(w, "ok")
 	}))
 	defer target.Close()
-	resource := NewProxyHub(NewState(""), nil, t.TempDir(), false, nil)
+	resource := newHub(NewState(""), nil, t.TempDir(), false, nil)
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer resource.Close(context.Background())
-	hub := resource.ProxyHub
+	hub := resource.Hub
 	count := 0
 	route, _, release := hub.egress(t.Context(), proxyclient.Dial(func(ctx context.Context, network, address string) (net.Conn, error) {
 		count++

@@ -17,7 +17,7 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 
 | Source       | Provider    | Credential                                            |
 | ------------ | ----------- | ----------------------------------------------------- |
-| `fofa`       | FOFA        | `recon.fofa_key` or env `FOFA_KEY`                     |
+| `fofa`       | FOFA        | configured by host                                   |
 | `hunter`     | Hunter      | `recon.hunter_api_key` or env `HUNTER_API_KEY`         |
 | `shodan`     | Shodan      | env `SHODAN_API_KEY`                                   |
 | `shodan-idb` | Shodan IDB  | none                                                   |
@@ -34,7 +34,7 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 | `greynoise`  | GreyNoise   | env `GREYNOISE_API_KEY`                                |
 
 Sources without credentials are silently skipped at init.
-Additional sources can be configured via `~/.uncover-config/provider-config.yaml`.
+Credentials are supplied by the host before tools are loaded.
 
 ## When to Use
 

@@ -30,7 +30,7 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	feature := passiveext.New(passive.ReconOptions{})
+	feature := passiveext.New(passive.Config{})
 	entries = append(entries, feature)
 	var commands coretool.CommandExecutor
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {

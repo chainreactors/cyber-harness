@@ -67,7 +67,7 @@ func TestDiscoveredCLIMapsSchemaFlagsWithoutChangingValues(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":%s}`, request.ID, result)
 	}))
 	defer upstream.Close()
-	c := openHTTP(t, ServerConfig{URL: upstream.URL})
+	c := openHTTP(t, Config{URL: upstream.URL})
 	catalog, err := c.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)

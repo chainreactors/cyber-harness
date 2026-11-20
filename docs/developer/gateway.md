@@ -19,7 +19,7 @@ cyberhub:
 
 省略 `kind` 时使用实例名称，所以默认的 `fofa` 不必再写 `kind: fofa`。`enabled` 默认 true；false 表示关闭该绑定。相同类型有多个实例时必须明确选择：FOFA 使用 `recon.service`，Clash 使用 `cyberhub.proxy` 引用实例名。`cyberhub.proxy` 也继续接受原有代理 URL。选择仅属于宿主配置，不增加工具参数。
 
-FOFA 接受 `key`、可选的完整搜索接口 `url`、出站 `proxy` 和 `limit`。旧 `recon.fofa_key`、`FOFA_KEY`、CLI flag 仍可独立使用；CLI 和环境覆盖保持原有优先级，同一层的冲突凭证会报错。
+FOFA 的凭据统一配置在 `gateway` 的服务下，接受 `key`、可选的完整搜索接口 `url`、出站 `proxy` 和 `limit`。
 
 Clash 默认 `refresh: 30m`、`strategy: adaptive`，也支持 `type`、`name`、`country` 过滤和独立的下载 `proxy`。`refresh: 0s` 仅拉取一次，空 `strategy` 仅加载节点。拉取成功后原子发布，失败保留旧快照；手动选定的节点不会被定时刷新切回自动模式。选定节点被移除或改变时保留旧快照并记录错误。已有 `proxy subscribe/auto` 和 traffic 协议也调用同一订阅实现。
 
@@ -45,4 +45,8 @@ cyber-scan 在 proxy 加载后、passive 加载前安装 gateway。FOFA 绑定�
 
 ## 其他配置
 
-所有已注册的扩展 section 都自动支持以自身名称作为顶层块，不必重复声明同名 alias。旧 `extensions.<section>` 和其他明确的 alias 仍能读取，混用时冲突会报错。配置展示和保存采用顶层块；未链接的扩展保留原 envelope，避免破坏其他宿主的数据。传输协议和运行快照保持现有结构。
+所有已注册的扩展 section 都以自身名称作为顶层块。配置解析、展示、保存只使用这一种格式，未知配置和字段直接报错，不做格式转换或别名映射。文件文档与传输消息是独立 schema：文件直接使用配置块，传输消息使用现有 typed 字段。
+
+嵌入的配置字段直接展开，不增加结构体名称层。Guardrail 的规则直接写在 `guardrail.level`、`guardrail.on_error`、`guardrail.criteria`；MCP 直接使用服务名映射。模型 profiles、HTTP headers、规则 criteria 等有独立含义的集合保留自己的分组。
+
+Go 名称沿用包的上下文：`passive.Config`、`passive.Engine`、`passive.Uncover`、`proxy.Hub`、`proxy.Filter`、`mcp.Config`、`terminal.Options`。配置与每次执行选项、协议响应与命令输出、运行资源与借用接口仍保留不同类型；简化命名不合并这些合同。

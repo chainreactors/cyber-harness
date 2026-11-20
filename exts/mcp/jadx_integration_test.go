@@ -44,9 +44,9 @@ func TestJADXRealBashWorkflow(t *testing.T) {
 	if java == "" {
 		java = "java"
 	}
-	h := assembly(t, Config{MCPServers: map[string]mcptools.ServerConfig{
+	h := assembly(t, map[string]mcptools.Config{
 		"jadx": {Command: java, Args: []string{"-Xmx512m", "-jar", jar}, TimeoutSeconds: 90},
-	}})
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := h.set.Load(ctx); err != nil {

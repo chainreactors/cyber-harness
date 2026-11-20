@@ -2,9 +2,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,10 +16,11 @@ import (
 	"github.com/chainreactors/cyber/core/hooks"
 	coretool "github.com/chainreactors/cyber/core/tool"
 	mcpext "github.com/chainreactors/cyber/exts/mcp"
+	mcptools "github.com/chainreactors/cyber/tools/mcp"
 )
 
 func main() {
-	configPath := flag.String("config", "", "MCP JSON config file (mcpServers)")
+	configPath := flag.String("config", "", "MCP JSON server map")
 	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -39,17 +38,9 @@ func run(ctx context.Context, configPath string, argv []string, output, diagnost
 	if err != nil {
 		return err
 	}
-	var config mcpext.Config
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
+	config, err := mcptools.Parse(data)
+	if err != nil {
 		return err
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("MCP config must contain one JSON object")
-	}
-	if config.MCPServers == nil {
-		return fmt.Errorf("MCP config requires mcpServers")
 	}
 	r := coretool.NewCommandRegistry()
 	set, err := extension.New(extension.Provided[*hooks.Registry](hooks.New()), r, mcpext.New(config))
