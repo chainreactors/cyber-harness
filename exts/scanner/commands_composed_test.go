@@ -14,7 +14,7 @@ import (
 )
 
 func TestComposedScannerCommandsAreInstalled(t *testing.T) {
-	reg := installScanner(t, t.TempDir(), Config{Crawler: katana.Crawl}, katanaext.New(), passiveext.New(passive.ReconOptions{FofaKey: "deadbeef"})).commands
+	reg := installScanner(t, t.TempDir(), Config{Crawler: katana.Crawl}, katanaext.New(), passiveext.New(passive.Config{FofaKey: "deadbeef"})).commands
 	for _, name := range []string{"katana", "passive"} {
 		if !reg.Has(name) {
 			t.Fatalf("missing %s", name)
@@ -24,7 +24,7 @@ func TestComposedScannerCommandsAreInstalled(t *testing.T) {
 
 func TestComposedScannerFunctionalRegression(t *testing.T) {
 	httpServer := newScannerHTTPFixture(t)
-	installed := installScanner(t, t.TempDir(), Config{Crawler: katana.Crawl}, katanaext.New(), passiveext.New(passive.ReconOptions{FofaKey: "deadbeef"}))
+	installed := installScanner(t, t.TempDir(), Config{Crawler: katana.Crawl}, katanaext.New(), passiveext.New(passive.Config{FofaKey: "deadbeef"}))
 	registry := installed.commands
 	recorder := newFunctionalRecorder(installed.events)
 

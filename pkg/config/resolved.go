@@ -82,7 +82,7 @@ func (r *Sections) ResolveValues(file, cli Values, lookup func(string) (string, 
 					}
 				}
 			}
-			walk(fields, "extensions."+key)
+			walk(fields, key)
 		}
 		mark(fallbacks, "protocol environment")
 		mark(file[key], "file")

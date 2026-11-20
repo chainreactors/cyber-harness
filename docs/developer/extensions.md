@@ -40,7 +40,7 @@ go run ./examples/crawl
 
 `exts/scanner.Config.Crawler` 接受 `scan.Crawler`；组合根传入 `katana.Crawl` 后，quick 扫描增加普通爬取，full 扫描增加浏览器爬取。未注入 crawler 时，scan 只运行自身能力。scan 保留目标过滤、去重和流水线事件，Katana 适配器负责网络与浏览器生命周期。
 
-passive 的配置声明位于 `exts/passive/config`，运行扩展位于 `exts/passive`。宿主可以声明并保存配置而不链接运行实现；`recon` section、环境变量和现有 CLI flag 名称保持兼容，是否显示 flag 由宿主决定。
+passive 的配置声明位于 `exts/passive/config`，运行扩展位于 `exts/passive`。宿主可以声明并保存配置而不链接运行实现；FOFA 由 `gateway` 配置，通用查询设置放在 `recon`，是否显示对应 flag 由宿主决定。
 
 `cmd/cyber-scan` 直接组合 browser、passive 和 Katana；`make full` 从独立入口 `cmd/cyber-harness` 构建 Web 主程序。无需新增 browser、passive 或 crawl 标签。`record` 仍受原生 SDK、CGO 和平台约束，可以独立于 `full` 组合。
 
@@ -165,6 +165,8 @@ Prompt 在一次 Run 开始时解析。运行中改变贡献不会追溯修改�
 ## 配置与生命周期
 
 只有构造配置的简单应用可以直接使用 Go 值。要把功能加入统一 CLI 和配置文件时，功能包提供 `Declare`，向宿主预先定义的 CLI、配置与连接测试贡献点提交声明。宿主解析后把确定的值传入构造函数；`Declare` 不负责启动服务。
+
+已注册的配置 section 自动接受同名顶层 YAML 块，保存时也使用顶层形式。外部 API、代理订阅的自动化配置见 [gateway](gateway.md)；它为现有能力配置运行依赖，不增加 Agent 工具入口。
 
 基础配置的字段归属统一定义在 `config.Option`：`local:"true"` 表示本地设置，适用于身份、传输、数据目录和输出；没有配置键的进程参数也留在本地。文件加载与远端替换共用合并、环境覆盖和校验逻辑，远端替换不再逐项复制本地字段。扩展配置仍以各自的 `Section` 声明为准，通过 `Resolved` 提供已校验的值。文件层状态仅用于发现、编辑与诊断，不参与远端配置替换，也不承载运行服务。
 

@@ -35,7 +35,7 @@ func productScannerUsageLines() []string {
 }
 func resourceAddReconFlags(resources *resource.Registry) error {
 	_, err := resource.Add[hostcli.Contribution](resources, func(registry *hostcli.Registry) error {
-		return registry.Group("agent", passiveconfig.ReconConfigKey, passiveconfig.ReconFlagGroup())
+		return registry.Group("agent", passiveconfig.ConfigKey, passiveconfig.Flags())
 	})
 	return err
 }

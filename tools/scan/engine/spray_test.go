@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSprayOptionAppliesDebugAndRuntimeOptions(t *testing.T) {
-	opt := buildSprayOption(SprayCheckOptions{
+	opt := buildSprayOption(SprayOptions{
 		Host:         "vhost.example",
 		Dictionaries: []string{"paths.txt"},
 		Rules:        []string{"rules.txt"},
@@ -39,7 +39,7 @@ func TestBuildSprayOptionAppliesDebugAndRuntimeOptions(t *testing.T) {
 }
 
 func TestBuildSprayOptionLeavesPresentationToScan(t *testing.T) {
-	opt := buildSprayOption(SprayCheckOptions{})
+	opt := buildSprayOption(SprayOptions{})
 	if !opt.Quiet {
 		t.Fatal("embedded engine must not print directly to process stdout")
 	}
@@ -49,7 +49,7 @@ func TestBuildSprayOptionLeavesPresentationToScan(t *testing.T) {
 }
 
 func TestDefaultSprayInvocationTimeoutBoundsCrawl(t *testing.T) {
-	got := defaultSprayInvocationTimeout(SprayCheckOptions{Timeout: 5, Crawl: true, CrawlDepth: 2})
+	got := defaultSprayInvocationTimeout(SprayOptions{Timeout: 5, Crawl: true, CrawlDepth: 2})
 	if got != 80*time.Second {
 		t.Fatalf("crawl invocation timeout = %s, want 80s", got)
 	}

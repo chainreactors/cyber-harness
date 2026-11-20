@@ -142,38 +142,13 @@ func LoadSnapshot(context *Context, explicit string, sections *Sections) (*Snaps
 			return nil, err
 		}
 	}
-	s.finishFileSnapshot(sections)
+	s.fileSources = maps.Clone(s.Sources)
 	return s, nil
 }
 
 func (s *Snapshot) applyLayer(layer *Layer, doc map[string]any, sections *Sections) error {
 	if err := validateMapping(doc, reflect.TypeOf(Option{}), "", sections); err != nil {
 		return fmt.Errorf("config file %s: %w", layer.Path, err)
-	}
-	if sections != nil {
-		canonical := CloneDocument(doc)
-		unknown := map[string]any{}
-		if exts, ok := canonical["extensions"].(map[string]any); ok {
-			for key, value := range exts {
-				if !sections.Has(key) {
-					unknown[key] = value
-					delete(exts, key)
-				}
-			}
-		}
-		normalized, e := sections.Normalize(canonical)
-		if e != nil {
-			return fmt.Errorf("config file %s: %w", layer.Path, e)
-		}
-		for key, value := range normalized {
-			unknown[key] = map[string]any(value)
-		}
-		for _, alias := range sections.Aliases() {
-			delete(doc, alias)
-		}
-		if len(unknown) > 0 {
-			doc["extensions"] = unknown
-		}
 	}
 	layer.Document = CloneDocument(doc)
 	if s.Context.UserLLMOnly && layer.Scope == "project" {
@@ -192,17 +167,6 @@ func (s *Snapshot) applyLayer(layer *Layer, doc map[string]any, sections *Sectio
 	}
 	mergeDocumentLayer(s.Document, doc, "", layer.Path, s.Sources)
 	return nil
-}
-
-func (s *Snapshot) finishFileSnapshot(sections *Sections) {
-	if exts, ok := s.Document["extensions"].(map[string]any); ok {
-		for key := range exts {
-			if sections == nil || !sections.Has(key) {
-				s.Diagnostics = append(s.Diagnostics, "extension unavailable in this host: "+key)
-			}
-		}
-	}
-	s.fileSources = maps.Clone(s.Sources)
 }
 
 // WithTargetDocument recomposes the existing file layers for an editor's
@@ -228,7 +192,7 @@ func (s *Snapshot) WithTargetDocument(document map[string]any, sections *Section
 			return nil, err
 		}
 	}
-	candidate.finishFileSnapshot(sections)
+	candidate.fileSources = maps.Clone(candidate.Sources)
 	return candidate, nil
 }
 
@@ -338,7 +302,7 @@ func validateMapping(doc map[string]any, t reflect.Type, prefix string, sections
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		key := f.Tag.Get("config")
-		if key != "" && key != "-" {
+		if key != "" && key != "-" && key != "extensions" {
 			fields[key] = f.Type
 		}
 	}
@@ -347,20 +311,11 @@ func validateMapping(doc map[string]any, t reflect.Type, prefix string, sections
 		if prefix != "" {
 			path = prefix + "." + k
 		}
-		if prefix == "" && k == "extensions" {
+		if prefix == "" && sections.Has(k) {
 			if _, ok := v.(map[string]any); !ok && v != nil {
 				return fmt.Errorf("%s: expected mapping", path)
 			}
 			continue
-		}
-		if prefix == "" && sections != nil {
-			alias := false
-			for _, a := range sections.Aliases() {
-				alias = alias || a == k
-			}
-			if alias {
-				continue
-			}
 		}
 		ft, ok := fields[k]
 		if !ok {
@@ -414,27 +369,14 @@ func validateMapping(doc map[string]any, t reflect.Type, prefix string, sections
 					continue
 				}
 			}
-			if _, ok := v.(int); !ok {
-				if _, ok := v.(int64); !ok {
-					return fmt.Errorf("%s: expected integer", path)
-				}
+			switch reflect.TypeOf(v).Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			default:
+				return fmt.Errorf("%s: expected integer (got %T)", path, v)
 			}
 		}
 	}
 	return nil
-}
-
-// RuntimeDocument omits extensions not linked by this host, preserving them on disk.
-func (s *Snapshot) RuntimeDocument(sections *Sections) map[string]any {
-	doc := CloneDocument(s.Document)
-	if exts, ok := doc["extensions"].(map[string]any); ok {
-		for key := range exts {
-			if !sections.Has(key) {
-				delete(exts, key)
-			}
-		}
-	}
-	return doc
 }
 
 // FileOptions resolves profiles from file layers only, without environment or
@@ -449,7 +391,7 @@ func (s *Snapshot) FileOptions(sections *Sections) (*Option, error) {
 		file.Sources = map[string]string{}
 	}
 	option := &Option{Sections: sections, Explicit: map[string]bool{}, Snapshot: &file}
-	if err := LoadConfigDocument(s.RuntimeDocument(sections), option); err != nil {
+	if err := LoadConfigDocument(CloneDocument(s.Document), option); err != nil {
 		return nil, err
 	}
 	if err := seedProviderProfile(option, &Option{Explicit: map[string]bool{}}); err != nil {

@@ -231,7 +231,7 @@ func TestTmuxListSessionsHidesBuiltins(t *testing.T) {
 	bash.SetCommandRegistry(registry)
 
 	var out bytes.Buffer
-	if _, err := bash.RunForeground(context.Background(), "tmux ls", BashExecOptions{
+	if _, err := bash.RunForeground(context.Background(), "tmux ls", Options{
 		OnOutput: func(data []byte) { _, _ = out.Write(data) },
 	}); err != nil {
 		t.Fatalf("tmux ls: %v", err)

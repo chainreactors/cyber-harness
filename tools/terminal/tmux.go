@@ -18,7 +18,7 @@ import (
 type tmuxCommand struct {
 	bash    *BashTool
 	manager *procbus.Manager
-	start   func(context.Context, string, BashExecOptions) (*coretool.Execution, error)
+	start   func(context.Context, string, Options) (*coretool.Execution, error)
 }
 
 const tmuxUsage = `tmux - PTY session manager
@@ -191,7 +191,7 @@ func sessionCommandLine(parts []string) (string, error) {
 // a foreground session stays bound to the call, so canceling the call also
 // cancels the command.
 func (t *tmuxCommand) createSession(ctx context.Context, cmdLine, name string, timeout time.Duration, detached bool, parent *coretool.Execution) (*coretool.Execution, error) {
-	options := BashExecOptions{Name: name, Timeout: timeout, TimeoutSet: true, interactive: true}
+	options := Options{Name: name, Timeout: timeout, TimeoutSet: true, interactive: true}
 	if parent != nil {
 		options.route = parent.Route
 	}

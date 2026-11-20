@@ -38,7 +38,7 @@ func testCyberhubConnection(ctx context.Context, in, stored *types.DistributeCon
 	inHub, storedHub := connectionSection(in, CyberhubConfigKey), connectionSection(stored, CyberhubConfigKey)
 	hubURL := fallbackString(connectionString(inHub, "url"), connectionString(storedHub, "url"))
 	key := fallbackString(connectionString(inHub, "key"), connectionString(storedHub, "key"))
-	return []*types.ConnectionCheck{connectionCheck("cyberhub", func() (string, error) {
+	return []*types.ConnectionCheck{cfg.Check("cyberhub", func() (string, error) {
 		if strings.TrimSpace(hubURL) == "" {
 			return "", fmt.Errorf("cyberhub url is empty")
 		}
@@ -65,19 +65,6 @@ func connectionSection(config *types.DistributeConfig, key string) map[string]an
 func connectionString(section map[string]any, key string) string {
 	value, _ := section[key].(string)
 	return value
-}
-
-func connectionCheck(name string, run func() (string, error)) *types.ConnectionCheck {
-	started := time.Now()
-	detail, err := run()
-	result := &types.ConnectionCheck{Name: name, LatencyMs: time.Since(started).Milliseconds()}
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	result.Ok = true
-	result.Detail = detail
-	return result
 }
 
 func fallbackString(in, stored string) string {

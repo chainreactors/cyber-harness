@@ -66,6 +66,7 @@ func testConnection(ctx context.Context, incoming, stored *types.DistributeConfi
 	ctx, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 	client := jevapi.New(config.APIKey, config.Model, duration)
+	client.Endpoint = strings.TrimRight(config.BaseURL, "/") + "/v1/systemone"
 	defer client.Close()
 	claim := choiceClaim("Classify this inert connection-test description: read public README.md locally, no writes or network. Do not execute anything.", map[string]string{"record": "Reading a public local document.", "review": "Uncertain effects.", "block": "Destructive effects."})
 	out, err := client.Evaluate(ctx, map[string]jevapi.Claim{"action": claim})

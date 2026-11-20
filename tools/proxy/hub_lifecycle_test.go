@@ -23,7 +23,7 @@ func TestHubShutdownReportsStorageFailureOnce(t *testing.T) {
 			if err := store.SetBodyDir(t.TempDir()); err != nil {
 				t.Fatal(err)
 			}
-			hub := NewProxyHub(NewState(""), store, t.TempDir(), false, nil)
+			hub := newHub(NewState(""), store, t.TempDir(), false, nil)
 			closeResource := hub.Close
 			if throughInfra {
 				infra := hub
@@ -70,7 +70,7 @@ func TestHubShutdownTimeoutRetainsDrainAndFinalError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hub := NewProxyHub(NewState(""), store, dir, false, nil)
+		hub := newHub(NewState(""), store, dir, false, nil)
 		defer func() { unblock(); _ = hub.Close(context.Background()) }()
 		file := store.indexFile
 		store.Add(Flow{})

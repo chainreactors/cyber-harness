@@ -5,7 +5,7 @@ import (
 	coretool "github.com/chainreactors/cyber/core/tool"
 )
 
-func NewCommand(backend QueryEngine, logger telemetry.Logger) coretool.Command {
+func NewCommand(backend Engine, logger telemetry.Logger) coretool.Command {
 	impl := New(backend).WithLogger(logger)
 	return coretool.Command{
 		Name: impl.Name(), Usage: impl.Usage(),

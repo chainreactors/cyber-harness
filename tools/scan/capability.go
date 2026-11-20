@@ -73,7 +73,7 @@ func (c *Command) buildCapabilities(flags flags, profile profile) []pipeline.Cap
 		})
 	}
 
-	addSpray := func(name string, sopts engine.SprayCheckOptions, sources ...string) {
+	addSpray := func(name string, sopts engine.SprayOptions, sources ...string) {
 		if !profile.Enabled(name) || c.engines.Spray == nil {
 			return
 		}
@@ -88,7 +88,7 @@ func (c *Command) buildCapabilities(flags flags, profile profile) []pipeline.Cap
 		})
 	}
 
-	addSpray(capSprayCheck, engine.SprayCheckOptions{Finger: true}, "", capGogoPortscan, capSprayCrawl)
+	addSpray(capSprayCheck, engine.SprayOptions{Finger: true}, "", capGogoPortscan, capSprayCrawl)
 
 	if profile.Enabled(capCoreWeb) {
 		capabilities = append(capabilities, pipeline.Capability[event]{
@@ -104,7 +104,7 @@ func (c *Command) buildCapabilities(flags flags, profile profile) []pipeline.Cap
 		})
 	}
 
-	addSpray(capSprayPlugins, engine.SprayCheckOptions{
+	addSpray(capSprayPlugins, engine.SprayOptions{
 		CommonPlugin: true,
 		BakPlugin:    true,
 		ActivePlugin: true,
@@ -118,12 +118,12 @@ func (c *Command) buildCapabilities(flags flags, profile profile) []pipeline.Cap
 			Routes: routes(acceptsTarget(targetWeb), "", capGogoPortscan),
 			Worker: capWorkers(otherCapacity, flags.SprayThreads),
 			Run: func(ctx context.Context, e event, emit func(event)) {
-				c.probeWeb(ctx, flags, e.Target, capSprayCrawl, engine.SprayCheckOptions{Crawl: true, CrawlDepth: profile.CrawlDepth}, emit)
+				c.probeWeb(ctx, flags, e.Target, capSprayCrawl, engine.SprayOptions{Crawl: true, CrawlDepth: profile.CrawlDepth}, emit)
 			},
 		})
 	}
 
-	addSpray(capSprayBrute, engine.SprayCheckOptions{DefaultDict: true}, "", capGogoPortscan)
+	addSpray(capSprayBrute, engine.SprayOptions{DefaultDict: true}, "", capGogoPortscan)
 
 	if profile.Enabled(capZombieWeakpass) && c.engines.Zombie != nil {
 		weakpassBuilt = true

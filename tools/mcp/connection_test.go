@@ -69,7 +69,7 @@ func TestHTTPDiscoveryAndInvocationPreserveWireValues(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":%s}`, request.ID, result)
 	}))
 	defer upstream.Close()
-	c := openHTTP(t, ServerConfig{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer test-secret"}, Tools: []string{"decompile"}})
+	c := openHTTP(t, Config{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer test-secret"}, Tools: []string{"decompile"}})
 	catalog, err := c.Discover(context.Background())
 	if err != nil || len(catalog.tools) != 1 {
 		t.Fatalf("discover: %v, %v", catalog, err)
@@ -123,7 +123,7 @@ func TestHTTPDiscoveryAndInvocationPreserveWireValues(t *testing.T) {
 	}
 }
 
-func openHTTP(t *testing.T, config ServerConfig) *Connection {
+func openHTTP(t *testing.T, config Config) *Connection {
 	t.Helper()
 	c, err := New("ida", config)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestCancellationAndErrorDiagnostics(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	c := openHTTP(t, ServerConfig{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer secret-value"}})
+	c := openHTTP(t, Config{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer secret-value"}})
 	_, err := c.request(context.Background(), "fail", nil)
 	var rpc *RPCError
 	if !errors.As(err, &rpc) || rpc.Details.Code != -32001 || !strings.Contains(err.Error(), "unknown database") || strings.Contains(err.Error(), "secret-value") {
@@ -218,12 +218,12 @@ func TestCloseDeadlineRetainsCleanupForRetry(t *testing.T) {
 }
 
 func TestConfigurationAndAllowlistOmission(t *testing.T) {
-	for _, config := range []ServerConfig{{}, {Command: "python", URL: "http://localhost"}, {URL: "file:///tmp/socket"}, {URL: "http://user:pass@localhost"}, {URL: "http://localhost", Cwd: "x"}, {Command: "python", TimeoutSeconds: -1}} {
+	for _, config := range []Config{{}, {Command: "python", URL: "http://localhost"}, {URL: "file:///tmp/socket"}, {URL: "http://user:pass@localhost"}, {URL: "http://localhost", Cwd: "x"}, {Command: "python", TimeoutSeconds: -1}} {
 		if config.Validate("ida") == nil {
 			t.Fatalf("accepted invalid config: %#v", config)
 		}
 	}
-	config := ServerConfig{Command: "python", Tools: []string{}, Env: map[string]string{"KEY": "value"}}
+	config := Config{Command: "python", Tools: []string{}, Env: map[string]string{"KEY": "value"}}
 	copy := config.Clone()
 	copy.Env["KEY"] = "different"
 	if copy.Tools == nil || config.Env["KEY"] != "value" {
@@ -233,7 +233,7 @@ func TestConfigurationAndAllowlistOmission(t *testing.T) {
 	if err != nil || !strings.Contains(string(encoded), `"tools":[]`) {
 		t.Fatalf("serialization lost empty allowlist: %s, %v", encoded, err)
 	}
-	if err := (ServerConfig{Command: "python", Tools: []string{strings.Repeat("a", 100), "tool.with.dots", "schema"}}).Validate("ida"); err != nil {
+	if err := (Config{Command: "python", Tools: []string{strings.Repeat("a", 100), "tool.with.dots", "schema"}}).Validate("ida"); err != nil {
 		t.Fatalf("upstream names should not be restricted by function naming: %v", err)
 	}
 }
@@ -272,7 +272,7 @@ func TestMalformedCatalogAndResponseFailures(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":%s}`, req.ID, result)
 			}))
 			defer upstream.Close()
-			c := openHTTP(t, ServerConfig{URL: upstream.URL})
+			c := openHTTP(t, Config{URL: upstream.URL})
 			if _, err := c.Discover(context.Background()); err == nil {
 				t.Fatal("malformed catalog accepted")
 			}
@@ -295,7 +295,7 @@ func TestHTTPDoesNotFollowRedirectOrReplay(t *testing.T) {
 		http.Redirect(w, r, destination.URL, http.StatusTemporaryRedirect)
 	}))
 	defer upstream.Close()
-	c, err := New("ida", ServerConfig{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer private"}})
+	c, err := New("ida", Config{URL: upstream.URL, Headers: map[string]string{"Authorization": "Bearer private"}})
 	if err != nil {
 		t.Fatal(err)
 	}

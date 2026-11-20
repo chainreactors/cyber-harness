@@ -236,6 +236,7 @@ func TestSprayResultScopeRejectsExternalURLs(t *testing.T) {
 	})
 	if got == nil {
 		t.Fatal("same asset result was dropped")
+		return
 	}
 	if got.RedirectURL != "" {
 		t.Fatalf("external redirect was not cleared: %#v", got.RedirectURL)
@@ -629,12 +630,12 @@ func TestPOCCapabilitySkipsFingerWithoutMappedTemplates(t *testing.T) {
 }
 
 func TestSelectNeutronTemplatesRequiresFingerUnlessBroad(t *testing.T) {
-	selected, filtered := engine.SelectNeutronTemplates(nil, nil, engine.NeutronExecuteOptions{})
+	selected, filtered := engine.SelectNeutronTemplates(nil, nil, engine.NeutronOptions{})
 	if len(selected) != 0 || !filtered {
 		t.Fatalf("default selection = %#v filtered=%v, want empty filtered selection", selected, filtered)
 	}
 
-	selected, filtered = engine.SelectNeutronTemplates(nil, nil, engine.NeutronExecuteOptions{Broad: true})
+	selected, filtered = engine.SelectNeutronTemplates(nil, nil, engine.NeutronOptions{Broad: true})
 	if len(selected) != 0 || filtered {
 		t.Fatalf("broad selection = %#v filtered=%v, want unfiltered selection", selected, filtered)
 	}
@@ -730,6 +731,7 @@ func TestFocusFingerprintIsDerivedAsHighPriority(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("no fingerprint loot found")
+		return
 	}
 	focus, _ := got.Data["focus"].(bool)
 	if !focus || got.Priority != priorityHigh {
@@ -1668,10 +1670,10 @@ func TestWebProbeUsesConfiguredDictionaryAndCrawl(t *testing.T) {
 	for _, test := range []struct {
 		name, path   string
 		dictionaries []string
-		options      engine.SprayCheckOptions
+		options      engine.SprayOptions
 	}{
 		{name: "dictionary", path: "/private", dictionaries: []string{dictionary}},
-		{name: "crawl", path: "/linked", options: engine.SprayCheckOptions{Crawl: true, CrawlDepth: 1}},
+		{name: "crawl", path: "/linked", options: engine.SprayOptions{Crawl: true, CrawlDepth: 1}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mu.Lock()

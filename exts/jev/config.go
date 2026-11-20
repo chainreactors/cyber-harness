@@ -13,6 +13,7 @@ import (
 const ConfigKey = "jev"
 
 type Config struct {
+	BaseURL            string `config:"base_url" json:"base_url"`
 	APIKey             string `config:"api_key" json:"api_key" description:"TypeSafe API key (or TYPESAFE_API_KEY)"`
 	Model              string `config:"model" json:"model"`
 	Timeout            string `config:"timeout" json:"timeout" description:"Total request budget including retries"`
@@ -24,6 +25,9 @@ type Config struct {
 }
 
 func defaults(c Config) Config {
+	if c.BaseURL == "" {
+		c.BaseURL = "https://api.typesafe.ai"
+	}
 	if c.Learning == "" {
 		c.Learning = "auto"
 	}
@@ -47,6 +51,9 @@ func defaults(c Config) Config {
 
 func (c Config) validate() error {
 	c = defaults(c)
+	if err := cfg.ValidateBaseURL(c.BaseURL); err != nil {
+		return err
+	}
 	if c.Learning != "auto" && c.Learning != "frozen" {
 		return fmt.Errorf("jev learning must be auto or frozen")
 	}
@@ -64,7 +71,8 @@ func (c Config) validate() error {
 
 var configSection = cfg.Section{
 	Key: ConfigKey, New: func() any { c := defaults(Config{}); return &c }, Secrets: []string{"api_key"},
-	Validate: func(v any) error { return v.(*Config).validate() },
+	Normalize: func(value any) error { config := value.(*Config); *config = defaults(*config); return nil },
+	Validate:  func(v any) error { return v.(*Config).validate() },
 	Environment: func(s cfg.Sources) (map[string]any, map[string]any, error) {
 		if value, ok := s.LookupEnv("TYPESAFE_API_KEY"); ok && strings.TrimSpace(value) != "" {
 			return nil, map[string]any{"api_key": value}, nil

@@ -15,7 +15,7 @@ import (
 
 var ErrNoNeutronTemplates = errors.New("no neutron templates selected")
 
-type NeutronExecuteOptions struct {
+type NeutronOptions struct {
 	Target       string
 	Fingers      []string
 	MaxPerFinger int
@@ -23,7 +23,7 @@ type NeutronExecuteOptions struct {
 	Debug        bool
 }
 
-func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *association.Index, opts NeutronExecuteOptions) (<-chan *neutron.ExecuteResult, error) {
+func NeutronExecuteStream(ctx context.Context, eng *neutron.Engine, index *association.Index, opts NeutronOptions) (<-chan *neutron.ExecuteResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("neutron engine is not available")
 	}
@@ -80,7 +80,7 @@ func FingerAllowedIDs(index *association.Index, fingers []string, maxPerFinger i
 	return allowed
 }
 
-func SelectNeutronTemplates(eng *neutron.Engine, index *association.Index, opts NeutronExecuteOptions) ([]*templates.Template, bool) {
+func SelectNeutronTemplates(eng *neutron.Engine, index *association.Index, opts NeutronOptions) ([]*templates.Template, bool) {
 	if len(opts.Fingers) == 0 {
 		if opts.Broad {
 			return nil, false

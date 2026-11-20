@@ -263,7 +263,7 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 	streaming := shouldStreamScannerOutput(scannerArgs)
 	var outputErr error
 	var captured strings.Builder
-	execution, err := bash.RunForeground(ctx, coretool.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), terminaltool.BashExecOptions{
+	execution, err := bash.RunForeground(ctx, coretool.JoinCommandLine(scannerArgs[0], scannerArgs[1:]), terminaltool.Options{
 		OnOutput: func(data []byte) {
 			if streaming {
 				if outputErr == nil {

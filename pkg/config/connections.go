@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/chainreactors/cyber/core/resource"
 	types "github.com/chainreactors/cyber/core/types"
@@ -15,6 +16,19 @@ import (
 type Connection struct {
 	Section string
 	Test    func(context.Context, *types.DistributeConfig, *types.DistributeConfig) []*types.ConnectionCheck
+}
+
+// Check runs one connectivity probe and records its duration and outcome.
+func Check(name string, run func() (string, error)) *types.ConnectionCheck {
+	started := time.Now()
+	detail, err := run()
+	result := &types.ConnectionCheck{Name: name, LatencyMs: time.Since(started).Milliseconds()}
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Ok, result.Detail = true, detail
+	return result
 }
 
 // ConnectionPoint exposes Connection through the same resource mechanism used

@@ -18,7 +18,7 @@ type ScanOptions struct {
 // ScanSection declares the scan configuration section. It carries no flags.
 func ScanSection() cfg.Section {
 	return cfg.Section{
-		Key: ScanConfigKey, Aliases: []string{ScanConfigKey},
+		Key:      ScanConfigKey,
 		New:      func() any { return &ScanOptions{} },
 		Validate: func(value any) error { return scan.ValidateVerify(value.(*ScanOptions).Verify) },
 	}

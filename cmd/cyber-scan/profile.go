@@ -143,6 +143,7 @@ func buildCyberScanProfile(config config) (*cyberScanProfile, error) {
 		}
 		duration, _ := time.ParseDuration(jevConfig.Timeout)
 		client := jevapi.New(jevConfig.APIKey, jevConfig.Model, duration)
+		client.Endpoint = strings.TrimRight(jevConfig.BaseURL, "/") + "/v1/systemone"
 		values = append(values, extension.Func{LoadFunc: func(scope *extension.Scope) error { return extension.Provide[*jevapi.Client](scope, client) }, CloseFunc: func(context.Context) error { client.Close(); return nil }})
 	}
 	values = append(values, graph...)

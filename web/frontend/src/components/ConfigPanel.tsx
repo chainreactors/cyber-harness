@@ -30,10 +30,10 @@ interface LLMProfileForm {
 interface ConfigFormState {
   llm: { active_profile: string; providers: LLMProfileForm[] }
   cyberhub: { url: string; key: string; mode: string; proxy: string; mitm?: boolean }
-  recon: { fofa_key: string; hunter_api_key: string; proxy: string; limit?: number }
+  recon: { hunter_api_key: string; proxy: string; limit?: number }
   scan: { verify: string }
   search: { tavily_keys: string }
-  ioa: { url: string; token: string; node_name: string; space: string }
+  ioa: { url: string; token: string; space: string }
   agent: NonNullable<DistributeConfig['agent']>
   traffic: DistributeConfig['traffic']
   extensions: DistributeConfig['extensions']
@@ -53,7 +53,7 @@ function formToDistributeConfig(form: ConfigFormState, original?: ConfigFormStat
   if (scanEnabled) editSection('scan', form.scan, original?.scan)
   editSection('search', form.search, original?.search)
   editSection('ioa.client', form.ioa, original?.ioa, {
-    url: form.ioa.url, token: form.ioa.token, node_name: form.ioa.node_name, space: form.ioa.space,
+    url: form.ioa.url, token: form.ioa.token, space: form.ioa.space,
   })
   return create(DistributeConfigSchema, {
     llm: {
@@ -120,10 +120,10 @@ function emptyForm(name: string): ConfigFormState {
   return {
     llm: { active_profile: profile.id, providers: [profile] },
     cyberhub: { url: '', key: '', mode: '', proxy: '' },
-    recon: { fofa_key: '', hunter_api_key: '', proxy: '' },
+    recon: { hunter_api_key: '', proxy: '' },
     scan: { verify: '' },
     search: { tavily_keys: '' },
-    ioa: { url: '', token: '', node_name: '', space: '' },
+    ioa: { url: '', token: '', space: '' },
     agent: create(AgentConfigSchema),
     traffic: undefined,
     extensions: {},
@@ -170,13 +170,12 @@ function statusToForm(cs: ConfigView): ConfigFormState {
       providers: profiles,
     },
     cyberhub: { url: typeof cyberhub.url === 'string' ? cyberhub.url : '', key: '', mode: typeof cyberhub.mode === 'string' ? cyberhub.mode : '', proxy: typeof cyberhub.proxy === 'string' ? cyberhub.proxy : '', mitm: typeof cyberhub.mitm === 'boolean' ? cyberhub.mitm : undefined },
-    recon: { fofa_key: '', hunter_api_key: '', proxy: typeof recon.proxy === 'string' ? recon.proxy : '', limit: positiveInteger(typeof recon.limit === 'number' ? recon.limit : undefined) },
+    recon: { hunter_api_key: '', proxy: typeof recon.proxy === 'string' ? recon.proxy : '', limit: positiveInteger(typeof recon.limit === 'number' ? recon.limit : undefined) },
     scan: { verify: typeof scan.verify === 'string' ? scan.verify : '' },
     search: { tavily_keys: '' },
     ioa: {
       url: typeof ioaValues.url === 'string' ? ioaValues.url : '',
       token: '',
-      node_name: typeof ioaValues.node_name === 'string' ? ioaValues.node_name : '',
       space: typeof ioaValues.space === 'string' ? ioaValues.space : '',
     },
     agent: create(AgentConfigSchema, cs.agent ?? {}),
@@ -229,7 +228,7 @@ function sectionStatus(
       return [tag('Cyberhub', !!(cs?.extensions.cyberhub?.values?.url && cs?.extensions.cyberhub?.configuredSecrets.includes('key')))]
     case 'recon':
       return [
-        tag('FOFA', !!cs?.extensions.recon?.configuredSecrets.includes('fofa_key')),
+        tag('FOFA', !!cs?.extensions.gateway?.configuredSecrets.includes('fofa.key')),
         tag('Hunter', !!cs?.extensions.recon?.configuredSecrets.includes('hunter_api_key')),
       ]
     case 'search':
@@ -716,15 +715,23 @@ function CyberhubTab({ form, setForm, cs }: TabProps) {
 function ReconTab({ form, setForm, cs }: TabProps) {
   const { t } = useTranslation('config')
   const u = (k: string, v: string) => setForm((f) => ({ ...f, recon: { ...f.recon, [k]: v } }))
+  const fofa = (form.extensions.gateway?.fofa ?? {}) as JsonObject
+  const updateFofa = (key: string, value: string) => setForm(f => ({ ...f, extensions: {
+    ...f.extensions, gateway: { ...f.extensions.gateway, fofa: { ...fofa, [key]: value } },
+  } }))
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <Field label={t('fofaKey')}><Input type="password" value={form.recon.fofa_key} onChange={(e) => u('fofa_key', e.target.value)} placeholder={cs?.extensions.recon?.configuredSecrets.includes('fofa_key') ? t('configuredKeep') : t('fofaApiKey')} /></Field>
+      {cs?.extensions.gateway && <>
+        <Field label={t('fofaKey')}><Input type="password" value={typeof fofa.key === 'string' ? fofa.key : ''} onChange={(e) => updateFofa('key', e.target.value)} placeholder={cs.extensions.gateway.configuredSecrets.includes('fofa.key') ? t('configuredKeep') : t('fofaApiKey')} /></Field>
+        <Field label={`FOFA ${t('baseUrl')}`}><Input value={typeof fofa.base_url === 'string' ? fofa.base_url : ''} onChange={(e) => updateFofa('base_url', e.target.value)} placeholder="https://fofa.info" /></Field>
+      </>}
       <Field label={t('hunterApiKey')}><Input type="password" value={form.recon.hunter_api_key} onChange={(e) => u('hunter_api_key', e.target.value)} placeholder={cs?.extensions.recon?.configuredSecrets.includes('hunter_api_key') ? t('configuredKeep') : t('hex64')} /></Field>
       <Field label={t('reconProxy')}><Input value={form.recon.proxy} onChange={(e) => u('proxy', e.target.value)} placeholder="socks5://host:port" /></Field>
       <Field label={t('perQueryLimit')}>
         <Input type="number" value={form.recon.limit ?? ''} onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, recon: { ...f.recon, limit: v === '' ? undefined : parseInt(v, 10) } })) }} placeholder={t('unlimited')} />
       </Field>
       <ConnTest section="recon" form={form} />
+      {cs?.extensions.gateway && <ConnTest section="gateway.fofa" form={form} label="FOFA" />}
     </div>
   )
 }
@@ -764,7 +771,6 @@ function IOATab({ form, setForm, cs }: TabProps) {
     <div className="grid gap-3 sm:grid-cols-2">
       <Field label={t('ioaServerUrl')}><Input value={form.ioa.url} onChange={(e) => u('url', e.target.value)} placeholder="http://host:port" /></Field>
       <Field label={t('accessToken')}><Input type="password" value={form.ioa.token} onChange={(e) => u('token', e.target.value)} placeholder={cs?.extensions['ioa.client']?.configuredSecrets.includes('token') ? t('configuredKeep') : t('ioaAccessKey')} /></Field>
-      <Field label={t('nodeName')}><Input value={form.ioa.node_name} onChange={(e) => u('node_name', e.target.value)} placeholder={t('autoRegisterNode')} /></Field>
       <Field label={t('space')}><Input value={form.ioa.space} onChange={(e) => u('space', e.target.value)} placeholder="default" /></Field>
 		<ConnTest section="ioa.client" form={form} />
     </div>
@@ -774,17 +780,14 @@ function IOATab({ form, setForm, cs }: TabProps) {
 function GuardrailTab({ form, setForm, onConfigureJEV }: TabProps & { onConfigureJEV: () => void }) {
   const { t } = useTranslation('config')
   const jev = form.extensions.jev ?? {}
-  const policy = (form.extensions.guardrail?.jev ?? {}) as JsonObject
+  const policy = form.extensions.guardrail ?? {}
   const update = (key: string, value: string | boolean) => setForm(f => ({
     ...f, extensions: { ...f.extensions, jev: { ...f.extensions.jev, [key]: value } },
   }))
   const value = (key: string, fallback = '') => typeof jev[key] === 'string' ? jev[key] as string : fallback
   const policyValue = (key: string, fallback: string) => typeof policy[key] === 'string' ? policy[key] as string : fallback
   const updatePolicy = (key: string, value: string) => setForm(f => ({
-    ...f, extensions: { ...f.extensions, guardrail: {
-      ...f.extensions.guardrail,
-      jev: { ...(f.extensions.guardrail?.jev as JsonObject | undefined), [key]: value },
-    } },
+    ...f, extensions: { ...f.extensions, guardrail: { ...f.extensions.guardrail, [key]: value } },
   }))
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -869,10 +872,10 @@ function ProbePulse({ className }: { className?: string }) {
 }
 
 // ConnTest renders a "Test connection" button for a settings section and shows
-// one result row per external dependency probed (Recon returns FOFA + Hunter).
+// one result row per external dependency probed.
 // The whole form is sent so unsaved edits are tested; blank secrets fall back to
 // the stored values on the server.
-function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' | 'ioa.client' | 'jev'; form: ConfigFormState }) {
+function ConnTest({ section, form, label }: { section: string; form: ConfigFormState; label?: string }) {
   const { t } = useTranslation('config')
   const [testing, setTesting] = useState(false)
   const [checks, setChecks] = useState<ConnectionCheck[] | null>(null)
@@ -895,7 +898,7 @@ function ConnTest({ section, form }: { section: 'cyberhub' | 'recon' | 'search' 
     <div className="sm:col-span-2 space-y-2">
       <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={testing}>
         {testing ? <ProbePulse /> : <Zap className="h-4 w-4" />}
-        {testing ? t('testing') : t('testConnection')}
+        {label && `${label} · `}{testing ? t('testing') : t('testConnection')}
       </Button>
       {checks && (
         <div className="space-y-1">

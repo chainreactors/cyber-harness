@@ -12,7 +12,6 @@ import (
 
 func TestParseCLIReconCommandsAndFlags(t *testing.T) {
 	parsed, err := parseCLI([]string{
-		"--fofa-key", "FOFAKEY",
 		"--hunter-api-key", "HUNTERKEY",
 		"--recon-proxy", "socks5://127.0.0.1:1080",
 		"--recon-limit", "0",
@@ -30,14 +29,20 @@ func TestParseCLIReconCommandsAndFlags(t *testing.T) {
 	if !reflect.DeepEqual(parsed.ScannerArgs, wantArgs) {
 		t.Fatalf("scanner args = %#v, want %#v", parsed.ScannerArgs, wantArgs)
 	}
-	recon, err := passiveconfig.ReadRecon(&parsed.Option)
+	recon, err := passiveconfig.Read(&parsed.Option)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recon.FofaKey != "FOFAKEY" || recon.HunterAPIKey != "HUNTERKEY" || recon.Proxy != "socks5://127.0.0.1:1080" {
+	if recon.HunterAPIKey != "HUNTERKEY" || recon.Proxy != "socks5://127.0.0.1:1080" {
 		t.Fatalf("recon options = %#v", recon)
 	}
 	if recon.Limit == nil || *recon.Limit != 0 {
 		t.Fatalf("recon limit = %#v, want explicit 0", recon.Limit)
+	}
+}
+
+func TestParseCLIRejectsRemovedFofaFlag(t *testing.T) {
+	if _, err := parseCLI([]string{"--fofa-key", "obsolete", "passive", "-s", "fofa", "example.com"}, io.Discard); err == nil {
+		t.Fatal("removed --fofa-key accepted")
 	}
 }

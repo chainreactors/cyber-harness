@@ -20,12 +20,12 @@ import (
 	"github.com/projectdiscovery/uncover/sources/agent/zoomeye"
 )
 
-func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
+func (e *Uncover) agentFor(src string) (sources.Agent, error) {
 	switch src {
 	case "fofa":
-		return &richFofaAgent{}, nil
+		return &fofaAgent{}, nil
 	case "hunter":
-		return &richHunterAgent{}, nil
+		return &hunterAgent{}, nil
 	case "shodan":
 		return &shodan.Agent{}, nil
 	case "shodan-idb":

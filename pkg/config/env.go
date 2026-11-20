@@ -45,7 +45,7 @@ func ResolveRuntimeSnapshot(option *Option, snapshot *Snapshot) error {
 	}
 	explicit := explicitOptions(option)
 	loaded := Option{Sections: option.Sections}
-	if err := LoadConfigDocument(snapshot.RuntimeDocument(option.Sections), &loaded); err != nil {
+	if err := LoadConfigDocument(CloneDocument(snapshot.Document), &loaded); err != nil {
 		return err
 	}
 	option.Snapshot = snapshot

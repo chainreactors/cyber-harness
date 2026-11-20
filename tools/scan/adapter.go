@@ -28,7 +28,7 @@ func (c *Command) scanPorts(ctx context.Context, flags flags, input target, emit
 		ports = target.Ports
 	}
 	c.Logger.Infof("scan capability=%s target=%s ports=%s", capGogoPortscan, target.Target, ports)
-	resultCh, err := engine.GogoScanStream(ctx, c.engines.Gogo, engine.GogoScanOptions{
+	resultCh, err := engine.GogoScanStream(ctx, c.engines.Gogo, engine.GogoOptions{
 		Target:       target.Target,
 		Ports:        ports,
 		Threads:      flags.Threads,
@@ -58,7 +58,7 @@ func (c *Command) scanPorts(ctx context.Context, flags flags, input target, emit
 	}
 }
 
-func (c *Command) probeWeb(ctx context.Context, flags flags, input target, source string, opts engine.SprayCheckOptions, emit func(event)) {
+func (c *Command) probeWeb(ctx context.Context, flags flags, input target, source string, opts engine.SprayOptions, emit func(event)) {
 	target, ok := input.(webTarget)
 	if !ok || target.URL == "" {
 		return
@@ -106,7 +106,7 @@ func (c *Command) checkCredentials(ctx context.Context, flags flags, input targe
 		return
 	}
 
-	resultCh, err := engine.ZombieWeakpassStream(ctx, c.engines.Zombie, engine.ZombieWeakpassOptions{
+	resultCh, err := engine.ZombieWeakpassStream(ctx, c.engines.Zombie, engine.ZombieOptions{
 		Targets:   []sdkzombie.Target{target.Target},
 		Threads:   flags.ZombieThreads,
 		Timeout:   flags.Timeout,
@@ -142,7 +142,7 @@ func (c *Command) checkPOCs(ctx context.Context, flags flags, input target, emit
 	if len(target.Fingers) == 0 && !flags.BroadPOC {
 		return
 	}
-	resultCh, err := engine.NeutronExecuteStream(ctx, c.engines.Neutron, c.engines.Index, engine.NeutronExecuteOptions{
+	resultCh, err := engine.NeutronExecuteStream(ctx, c.engines.Neutron, c.engines.Index, engine.NeutronOptions{
 		Target:       target.Target,
 		Fingers:      target.Fingers,
 		MaxPerFinger: flags.MaxNeutronPerFP,

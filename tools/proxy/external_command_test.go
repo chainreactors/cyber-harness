@@ -11,13 +11,13 @@ import (
 )
 
 func TestProxyPassthroughExternalProgram(t *testing.T) {
-	resource := NewProxyHub(NewState(""), nil, t.TempDir(), false, nil)
+	resource := newHub(NewState(""), nil, t.TempDir(), false, nil)
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer resource.Close(context.Background())
-	command := New(resource.ProxyHub.State())
-	command.SetHub(resource.ProxyHub)
+	command := New(resource.Hub.State())
+	command.SetHub(resource.Hub)
 	command.SetCommandExecutor(func(ctx context.Context, argv []string, parent *coretool.Execution) (any, error) {
 		return coretool.RunCommand(ctx, nil, argv, parent)
 	})

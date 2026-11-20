@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (h *ProxyHub) ingestFiles(flow Flow, files [2]*os.File) {
+func (h *Hub) ingestFiles(flow Flow, files [2]*os.File) {
 	if h.store == nil {
 		return
 	}

@@ -167,7 +167,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 		return nil, err
 	}
 
-	opts := neutronExecuteOptions{
+	opts := options{
 		Templates:           loadedTemplates,
 		RestrictToTemplates: flags.RestrictTemplates || len(loadedTemplates) > 0,
 		Fingers:             expandCSV(flags.Fingers),

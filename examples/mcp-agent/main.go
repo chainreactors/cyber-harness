@@ -2,13 +2,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -27,11 +25,12 @@ import (
 	sessionext "github.com/chainreactors/cyber/exts/session"
 	terminalext "github.com/chainreactors/cyber/exts/terminal"
 	"github.com/chainreactors/cyber/pkg/harness"
+	mcptools "github.com/chainreactors/cyber/tools/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func main() {
-	configPath := flag.String("config", "", "MCP JSON config file (mcpServers)")
+	configPath := flag.String("config", "", "MCP JSON server map")
 	taskPath := flag.String("task", "", "UTF-8 task file")
 	directory := flag.String("dir", "", "isolated task working directory")
 	tracePath := flag.String("trace", "", "optional new AOP JSONL trace file")
@@ -71,14 +70,9 @@ func run(ctx context.Context, configPath, taskPath, directory, tracePath string,
 	if err != nil {
 		return err
 	}
-	var config mcpext.Config
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
+	config, err := mcptools.Parse(data)
+	if err != nil {
 		return err
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF || config.MCPServers == nil {
-		return fmt.Errorf("MCP config requires one JSON object with mcpServers")
 	}
 	task, err := os.ReadFile(taskPath)
 	if err != nil {

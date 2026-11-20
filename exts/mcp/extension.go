@@ -15,22 +15,18 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
-type Config struct {
-	MCPServers map[string]mcptools.ServerConfig `json:"mcpServers"`
-}
-
 type Extension struct {
 	mu          sync.Mutex
-	config      Config
+	config      map[string]mcptools.Config
 	connections []*mcptools.Connection
 	loaded      bool
 	closed      bool
 }
 
-func New(config Config) *Extension {
-	copy := Config{MCPServers: make(map[string]mcptools.ServerConfig, len(config.MCPServers))}
-	for name, server := range config.MCPServers {
-		copy.MCPServers[name] = server.Clone()
+func New(config map[string]mcptools.Config) *Extension {
+	copy := make(map[string]mcptools.Config, len(config))
+	for name, server := range config {
+		copy[name] = server.Clone()
 	}
 	return &Extension{config: copy}
 }
@@ -42,14 +38,14 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return fmt.Errorf("MCP extension already loaded or closed")
 	}
 	e.loaded = true
-	names := make([]string, 0, len(e.config.MCPServers))
-	for name := range e.config.MCPServers {
+	names := make([]string, 0, len(e.config))
+	for name := range e.config {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	// Validate the whole configuration before starting any server.
 	for _, name := range names {
-		if err := e.config.MCPServers[name].Validate(name); err != nil {
+		if err := e.config[name].Validate(name); err != nil {
 			return err
 		}
 		if interp.IsBuiltin(name) || syntax.IsKeyword(name) {
@@ -58,7 +54,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 	}
 	var commands []coretool.Command
 	for _, name := range names {
-		connection, err := mcptools.New(name, e.config.MCPServers[name])
+		connection, err := mcptools.New(name, e.config[name])
 		if err != nil {
 			return err
 		}

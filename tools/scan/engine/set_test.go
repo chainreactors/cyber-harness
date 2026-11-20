@@ -306,7 +306,7 @@ func TestZombieWithContextNilReceiver(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGogoScanStreamRejectsNilEngine(t *testing.T) {
-	_, err := GogoScanStream(context.Background(), nil, GogoScanOptions{
+	_, err := GogoScanStream(context.Background(), nil, GogoOptions{
 		Target: "127.0.0.1",
 		Ports:  "80",
 	})
@@ -316,7 +316,7 @@ func TestGogoScanStreamRejectsNilEngine(t *testing.T) {
 }
 
 func TestSprayCheckStreamRejectsNilEngine(t *testing.T) {
-	_, err := SprayCheckStream(context.Background(), nil, SprayCheckOptions{
+	_, err := SprayCheckStream(context.Background(), nil, SprayOptions{
 		URLs: []string{"http://127.0.0.1"},
 	})
 	if err == nil {
@@ -325,7 +325,7 @@ func TestSprayCheckStreamRejectsNilEngine(t *testing.T) {
 }
 
 func TestNeutronExecuteStreamRejectsNilEngine(t *testing.T) {
-	_, err := NeutronExecuteStream(context.Background(), nil, nil, NeutronExecuteOptions{
+	_, err := NeutronExecuteStream(context.Background(), nil, nil, NeutronOptions{
 		Target: "http://127.0.0.1",
 	})
 	if err == nil {
@@ -334,7 +334,7 @@ func TestNeutronExecuteStreamRejectsNilEngine(t *testing.T) {
 }
 
 func TestZombieWeakpassStreamRejectsNilEngine(t *testing.T) {
-	_, err := ZombieWeakpassStream(context.Background(), nil, ZombieWeakpassOptions{
+	_, err := ZombieWeakpassStream(context.Background(), nil, ZombieOptions{
 		Targets: []sdkzombie.Target{{IP: "127.0.0.1", Port: "22", Service: "ssh"}},
 	})
 	if err == nil {
@@ -357,7 +357,7 @@ func TestGogoScanStreamPassesContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	ch, err := GogoScanStream(ctx, eng, GogoScanOptions{
+	ch, err := GogoScanStream(ctx, eng, GogoOptions{
 		Target:  "127.0.0.1",
 		Ports:   "1",
 		Threads: 1,
@@ -380,7 +380,7 @@ func TestSprayCheckStreamPassesContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	ch, err := SprayCheckStream(ctx, eng, SprayCheckOptions{
+	ch, err := SprayCheckStream(ctx, eng, SprayOptions{
 		URLs:    []string{"http://127.0.0.1:1"},
 		Threads: 1,
 		Timeout: 1,
@@ -401,7 +401,7 @@ func TestZombieWeakpassStreamPassesContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	ch, err := ZombieWeakpassStream(ctx, eng, ZombieWeakpassOptions{
+	ch, err := ZombieWeakpassStream(ctx, eng, ZombieOptions{
 		Targets: []sdkzombie.Target{{IP: "127.0.0.1", Port: "1", Service: "ssh"}},
 		Threads: 1,
 		Timeout: 1,

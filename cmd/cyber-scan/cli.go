@@ -123,9 +123,6 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if err != nil {
 		return err
 	}
-	if err := applyIdentity(&option); err != nil {
-		return err
-	}
 	if cfgPath != "" && option.Debug {
 		fmt.Fprintf(stderr, "loaded config: %s\n", cfgPath)
 	}
@@ -428,21 +425,18 @@ var scannerKnownFlags = []knownFlag{
 		setExtension(o, scannerext.CyberhubConfigKey, "proxy", v)
 	}},
 	{names: []string{"--llm-proxy"}, arity: 1, apply: func(o *cfg.Option, v string) { o.LLMProxy = v }},
-	{names: []string{"--fofa-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
-		setExtension(o, passiveconfig.ReconConfigKey, "fofa_key", v)
-	}},
 	{names: []string{"--hunter-api-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
-		setExtension(o, passiveconfig.ReconConfigKey, "hunter_api_key", v)
+		setExtension(o, passiveconfig.ConfigKey, "hunter_api_key", v)
 	}},
 	{names: []string{"--tavily-key"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
-		setExtension(o, passiveconfig.ReconConfigKey, "tavily_key", v)
+		setExtension(o, passiveconfig.ConfigKey, "tavily_key", v)
 	}},
 	{names: []string{"--recon-proxy"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
-		setExtension(o, passiveconfig.ReconConfigKey, "proxy", v)
+		setExtension(o, passiveconfig.ConfigKey, "proxy", v)
 	}},
 	{names: []string{"--recon-limit"}, arity: 1, extension: true, apply: func(o *cfg.Option, v string) {
 		if n, e := strconv.Atoi(v); e == nil {
-			setExtension(o, passiveconfig.ReconConfigKey, "limit", n)
+			setExtension(o, passiveconfig.ConfigKey, "limit", n)
 		}
 	}},
 	{names: []string{"--heartbeat"}, arity: 1, apply: func(o *cfg.Option, v string) {

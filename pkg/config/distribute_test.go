@@ -1,10 +1,33 @@
 package config
 
 import (
+	"bytes"
 	"testing"
 
 	types "github.com/chainreactors/cyber/core/types"
 )
+
+func TestDistributeConfigUsesFlatSections(t *testing.T) {
+	input := []byte("gateway:\n  fofa:\n    key: secret\n  office:\n    kind: clash\n    url: https://example.test/subscription\n    enabled: false\n")
+	config, err := LoadDistributeConfigYAML(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := config.GetExtensions()["gateway"].AsMap()
+	if services["fofa"].(map[string]any)["key"] != "secret" || services["office"].(map[string]any)["enabled"] != false {
+		t.Fatalf("wire projection changed service configuration: %v", services)
+	}
+	output, err := MarshalDistributeConfigYAML(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(output, []byte("extensions:")) || !bytes.Contains(output, []byte("gateway:")) {
+		t.Fatalf("file projection introduced a wrapper: %s", output)
+	}
+	if _, err := LoadDistributeConfigYAML([]byte("extensions:\n  gateway:\n    fofa:\n      key: obsolete\n")); err == nil {
+		t.Fatal("transport loader accepted obsolete file format")
+	}
+}
 
 func TestNormalizeLLMConfigCanonicalizesProviderProtocol(t *testing.T) {
 	llm := &types.LLMConfig{Providers: []*types.LLMProviderConfig{

@@ -229,7 +229,7 @@ func (c *Client) exchange(ctx context.Context, body []byte) (response *Evaluatio
 			case <-timer.C:
 			}
 		}
-		// #nosec G704 -- The host selects Endpoint; production uses the fixed vendor URL, never model or tool input.
+		// #nosec G704 -- The host selects Endpoint from configuration, never model or tool input.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
 		if err != nil {
 			return nil, err

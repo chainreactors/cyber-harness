@@ -27,7 +27,7 @@ type Options struct {
 // Section declares the search configuration section.
 func Section() cfg.Section {
 	return cfg.Section{
-		Key: ConfigKey, Aliases: []string{ConfigKey},
+		Key:     ConfigKey,
 		New:     func() any { return &Options{TavilyKeys: DefaultTavilyKeys} },
 		Secrets: []string{"tavily_keys"},
 	}

@@ -195,20 +195,14 @@ func TestProfileMergeAndEmptyLLMEnvironment(t *testing.T) {
 	}
 }
 
-func TestUnavailableExtensionsArePreservedAndKnownFieldsValidated(t *testing.T) {
+func TestUnknownSectionsAndFieldsAreRejected(t *testing.T) {
 	c := isolatedContext(t)
 	path := filepath.Join(c.Directory, DefaultConfigName)
-	putConfig(t, path, "extensions:\n  other-product:\n    credential: hidden-secret\n")
-	o := resolvedFixture(t, c, "")
-	if len(o.Extensions) != 0 || len(o.Snapshot.Diagnostics) == 0 {
-		t.Fatal("unavailable extension not diagnosed")
-	}
-	if o.Snapshot.Document["extensions"] == nil {
-		t.Fatal("unavailable section lost from file snapshot")
-	}
-	putConfig(t, path, "llm:\n  unknown_field: invalid\n")
-	if _, err := ResolveRuntimeConfig(&Option{Context: c}); err == nil || !strings.Contains(err.Error(), "llm.unknown_field") {
-		t.Fatalf("missing field diagnostic: %v", err)
+	for _, document := range []string{"other-product:\n  credential: hidden-secret\n", "llm:\n  unknown_field: invalid\n"} {
+		putConfig(t, path, document)
+		if _, err := ResolveRuntimeConfig(&Option{Context: c}); err == nil {
+			t.Fatal("unknown configuration accepted")
+		}
 	}
 }
 

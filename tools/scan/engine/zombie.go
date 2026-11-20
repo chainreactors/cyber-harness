@@ -10,7 +10,7 @@ import (
 	"github.com/chainreactors/utils/parsers"
 )
 
-type ZombieWeakpassOptions struct {
+type ZombieOptions struct {
 	Targets   []sdkzombie.Target
 	Users     []string
 	Passwords []string
@@ -22,7 +22,7 @@ type ZombieWeakpassOptions struct {
 	OnStats   func(sdktypes.Stats)
 }
 
-func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts ZombieWeakpassOptions) (<-chan *parsers.ZombieResult, error) {
+func ZombieWeakpassStream(ctx context.Context, eng *sdkzombie.Engine, opts ZombieOptions) (<-chan *parsers.ZombieResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("zombie engine is not available")
 	}

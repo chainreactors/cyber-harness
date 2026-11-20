@@ -17,7 +17,7 @@ type CommandExecutor func(ctx context.Context, tokens []string, execution *coret
 
 type Command struct {
 	state       *State
-	hub         *ProxyHub
+	hub         *Hub
 	execCommand CommandExecutor
 }
 
@@ -25,7 +25,7 @@ func New(state *State) *Command {
 	return &Command{state: state}
 }
 
-func (c *Command) SetHub(hub *ProxyHub)                  { c.hub = hub }
+func (c *Command) SetHub(hub *Hub)                       { c.hub = hub }
 func (c *Command) SetCommandExecutor(fn CommandExecutor) { c.execCommand = fn }
 func (c *Command) Name() string                          { return "proxy" }
 
@@ -174,7 +174,7 @@ type autoFlags struct {
 	Strategy string `short:"s" long:"strategy" description:"Load balance strategy" default:"adaptive"`
 }
 
-func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
+func (c *Command) execAuto(ctx context.Context, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: proxy auto <subscription-url> [--type trojan,vless] [--name keyword] [--country HK,JP] [--strategy adaptive]")
 	}
@@ -188,40 +188,19 @@ func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 		return "", fmt.Errorf("usage: proxy auto <subscription-url> [options]")
 	}
 	subURL := remaining[0]
+	if f.Strategy == "" {
+		f.Strategy = "adaptive"
+	}
 
-	q := url.Values{}
-	q.Set("url", subURL)
-	q.Set("strategy", f.Strategy)
-	q.Set("ua", "clash-verge/v2.0.0")
-	if f.Type != "" {
-		q.Set("type", f.Type)
+	if err := c.state.Subscribe(ctx, SubscriptionConfig{URL: subURL, Strategy: f.Strategy, Type: f.Type, Name: f.Name, Country: f.Country}); err != nil {
+		return "", err
 	}
-	if f.Name != "" {
-		q.Set("name", f.Name)
-	}
-	if f.Country != "" {
-		q.Set("country", f.Country)
-	}
-	clashURL := "clash://?" + q.Encode()
-
-	sub, err := clash.FetchSubscriptionWithUA(subURL, "clash-verge/v2.0.0")
-	if err != nil {
-		return "", fmt.Errorf("fetch subscription: %w", err)
-	}
-	c.state.LoadSubscription(sub, subURL)
-
-	u, _ := url.Parse(clashURL)
-	dial, err := proxyclient.NewClient(u)
-	if err != nil {
-		return "", fmt.Errorf("create dialer: %w", err)
-	}
-	c.state.SetAutoDial(clashURL, dial)
-
-	supported := clash.SupportedNodes(sub)
+	nodes := c.state.Nodes()
+	supported := clash.SupportedNodes(&clash.Subscription{Nodes: nodes})
 	var sb strings.Builder
 	sb.WriteString("[proxy] auto mode enabled\n")
 	sb.WriteString(fmt.Sprintf("  Subscription: %s\n", subURL))
-	sb.WriteString(fmt.Sprintf("  Nodes: %d total, %d supported\n", len(sub.Nodes), len(supported)))
+	sb.WriteString(fmt.Sprintf("  Nodes: %d total, %d supported\n", len(nodes), len(supported)))
 	sb.WriteString(fmt.Sprintf("  Strategy: %s\n", f.Strategy))
 	if f.Type != "" {
 		sb.WriteString(fmt.Sprintf("  Type filter: %s\n", f.Type))
@@ -240,16 +219,14 @@ func (c *Command) execAuto(_ context.Context, args []string) (string, error) {
 // subscribe / list / switch / test / current / clear
 // ---------------------------------------------------------------------------
 
-func (c *Command) execSubscribe(_ context.Context, args []string) (string, error) {
+func (c *Command) execSubscribe(ctx context.Context, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("usage: proxy subscribe <clash-subscription-url>")
 	}
-	sub, err := clash.FetchSubscriptionWithUA(args[0], "clash-verge/v2.0.0")
-	if err != nil {
-		return "", fmt.Errorf("fetch subscription: %w", err)
+	if err := c.state.Subscribe(ctx, SubscriptionConfig{URL: args[0]}); err != nil {
+		return "", err
 	}
-	c.state.LoadSubscription(sub, args[0])
-	return c.formatNodeList(sub.Nodes, ""), nil
+	return c.formatNodeList(c.state.Nodes(), ""), nil
 }
 
 func (c *Command) execList() (string, error) {

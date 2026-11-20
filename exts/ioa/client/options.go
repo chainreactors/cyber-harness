@@ -29,10 +29,9 @@ func SetDefaults(url, space string) func() {
 }
 
 type Options struct {
-	URL      string `long:"ioa-url" config:"url" json:"url" description:"IOA endpoint (defaults to <server-url>/ioa for Web agents)"`
-	Token    string `long:"server-token" config:"token" json:"token" description:"Server credential" default-mask:"***"`
-	NodeName string `no-flag:"true" config:"node_name" json:"node_name"`
-	Space    string `long:"space" config:"space" json:"space" description:"Collaboration space"`
+	URL   string `long:"ioa-url" config:"url" json:"url" description:"IOA endpoint (defaults to <server-url>/ioa for Web agents)"`
+	Token string `long:"server-token" config:"token" json:"token" description:"Server credential" default-mask:"***"`
+	Space string `long:"space" config:"space" json:"space" description:"Collaboration space"`
 }
 
 func Section() cfg.Section {
@@ -65,9 +64,6 @@ func ReadOptions(option *cfg.Option) (Options, error) {
 		return Options{}, err
 	}
 	value := *decoded
-	if value.NodeName == "" {
-		value.NodeName = option.NodeName
-	}
 	if _, explicit := option.Extensions[ConfigKey]["url"]; !explicit && value.URL == "" && strings.TrimSpace(option.ServerURL) != "" {
 		if u, err := url.Parse(option.ServerURL); err == nil {
 			u.Path = strings.TrimRight(u.Path, "/") + "/ioa"
@@ -112,7 +108,7 @@ func ConfigFromOption(option *cfg.Option) (*service.Config, error) {
 		digest := sha256.Sum256([]byte(hostname + "\x00" + directory))
 		identity = activeIdentity(hex.EncodeToString(digest[:]))
 	}
-	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(value.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: identity}, nil
+	return &service.Config{URL: accessKeyURL(value.URL, value.Token), NodeID: option.NodeID, NodeName: cfg.ResolveNodeName(option.NodeName), Space: value.Space, RegisterCommands: true, AutoRegister: true, NodeMeta: map[string]any{"client": "cyber"}, Identity: identity}, nil
 }
 
 // accessKeyURL folds the configured credential into the endpoint as userinfo.

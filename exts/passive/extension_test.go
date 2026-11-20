@@ -18,7 +18,7 @@ func TestIndependentCommandAndDocsLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries = append(entries, New(passive.ReconOptions{}))
+	entries = append(entries, New(passive.Config{}))
 	var commands coretool.CommandExecutor
 	var fs *files.Files
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {

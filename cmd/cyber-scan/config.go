@@ -10,6 +10,7 @@ import (
 	"github.com/chainreactors/cyber/agent/provider"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/core/telemetry"
+	"github.com/chainreactors/cyber/exts/gateway"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
@@ -24,8 +25,10 @@ type appConfig struct {
 	DataDir           string
 	Provider          provider.StartupConfig
 	Scanner           scannerext.Config
-	Recon             passiveconfig.ReconOptions
+	Recon             passiveconfig.Recon
 	ReconCredentials  map[string]string
+	Gateway           cfg.Values
+	ProxyService      string
 	TavilyKeys        string
 	PlaywrightSession string
 	OptionalTools     []string
@@ -44,7 +47,7 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	if err != nil {
 		return config{}, err
 	}
-	recon, err := passiveconfig.ReadRecon(option)
+	recon, err := passiveconfig.Read(option)
 	if err != nil {
 		return config{}, err
 	}
@@ -59,6 +62,14 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 	ioaConfig, err := ioaclient.ConfigFromOption(option)
 	if err != nil {
 		return config{}, err
+	}
+	services, err := gateway.Read(option)
+	if err != nil {
+		return config{}, err
+	}
+	proxyService := ""
+	if hub.Proxy != "" && !strings.Contains(hub.Proxy, "://") {
+		proxyService, hub.Proxy = hub.Proxy, ""
 	}
 	return config{
 		Option: option, IOA: ioaConfig, Session: sessionConfig,
@@ -77,6 +88,7 @@ func configFromOption(option *cfg.Option, providerMode provider.StartupMode, ses
 				},
 			},
 			Recon: recon, ReconCredentials: passiveconfig.UncoverCredentials(envLookup(option)),
+			Gateway: services, ProxyService: proxyService,
 			TavilyKeys:        tavilyKeys(recon.TavilyKey, searchKeys),
 			PlaywrightSession: option.PlaywrightSession, OptionalTools: option.Tools,
 			MitmCapture: hub.Mitm, TrafficStorage: option.TrafficOptions,

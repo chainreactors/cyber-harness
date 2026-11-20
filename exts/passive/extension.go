@@ -16,11 +16,11 @@ import (
 var docs embed.FS
 
 type Extension struct {
-	options passive.ReconOptions
+	options passive.Config
 	files   *files.Files
 }
 
-func New(options passive.ReconOptions) *Extension { return &Extension{options: options} }
+func New(options passive.Config) *Extension { return &Extension{options: options} }
 func (e *Extension) Load(scope *extension.Scope) error {
 	logger, err := extension.Use[telemetry.Logger](scope)
 	if err != nil {
@@ -34,7 +34,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.files = filesCap
-	backend := passive.NewUncoverEngine(e.options, logger)
+	backend := passive.NewUncover(e.options)
 	logger.Infof("%s", telemetry.StartupOK("uncover", strings.Join(backend.Sources(), ",")))
 	if err = extension.Add(scope, passive.NewCommand(backend, logger)); err != nil {
 		return fmt.Errorf("register passive: %w", err)

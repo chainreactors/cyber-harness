@@ -11,7 +11,7 @@ import (
 
 func TestDistributedRuntimeDoesNotMutateHostFileState(t *testing.T) {
 	c := isolatedContext(t)
-	putConfig(t, c.UserFile(), "old_fixture:\n  name: local\nllm:\n  providers:\n    - id: local\n      provider: openai\n      model: local-model\n")
+	putConfig(t, c.UserFile(), "fixture:\n  name: local\nllm:\n  providers:\n    - id: local\n      provider: openai\n      model: local-model\n")
 	host := &Option{Context: c, Sections: fixtureSections(t), Explicit: map[string]bool{}}
 	if _, err := ResolveRuntimeConfig(host); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ agent:
 node:
   id: local-id
   name: local-name
-old_fixture:
+fixture:
   name: local-extension
   count: 8
 `)
@@ -200,7 +200,7 @@ old_fixture:
 
 func TestDistributedReplacementRetainsExplicitZeroAndExtensionCLI(t *testing.T) {
 	c := isolatedContext(t)
-	putConfig(t, c.UserFile(), "agent:\n  timeout: 77\nold_fixture:\n  count: 5\n")
+	putConfig(t, c.UserFile(), "agent:\n  timeout: 77\nfixture:\n  count: 5\n")
 	host := &Option{Context: c, Sections: fixtureSections(t), Explicit: map[string]bool{"timeout": true},
 		Extensions: Values{"fixture": {"count": 0, "enabled": false}},
 	}
