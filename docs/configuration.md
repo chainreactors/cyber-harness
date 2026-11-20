@@ -33,7 +33,7 @@ CLI > CYBER_*／集成专用环境变量 > 当前目录配置 > 用户配置
 
 文件中空的 LLM 协议、端点、模型、密钥字符串按未填写处理，允许低优先级来源补齐。显式 CLI 空值表示清空；`false`、`0`、空列表不会被当成缺省值。
 
-扩展配置直接使用同名顶层块，例如 `scan`、`search`、`recon`、`ioa.client`。解析、展示和保存统一使用这一格式，未注册的配置块和未知字段报错。FOFA、Clash 等服务的自动化配置使用 [gateway](developer/gateway.md)，字段直接写在服务名下。`gateway.fofa.base_url` 可将 passive 的 FOFA 查询及连接检查统一转向自有网关。
+扩展配置直接使用同名顶层块，例如 `scan`、`search`、`recon`、`ioa.client`。解析、展示和保存统一使用这一格式，未注册的配置块和未知字段报错。外部 API 的进程内接管使用 [gateway](developer/gateway.md)，字段直接写在服务名下。`gateway.<source>.base_url` 支持 passive 的全部 16 个来源及 Tavily、DuckDuckGo；`jev.base_url` 配置 TypeSafe 上游。FOFA、Hunter、Tavily 和 JEV 的连接检查使用相同配置地址。
 
 ## 模型 profiles
 
@@ -121,6 +121,7 @@ JEV 通过自然语言 Claim 学习可复用能力，后台编译 Agent 持续�
 
 ```yaml
 jev:
+  base_url: https://api.typesafe.ai  # 可替换为自有网关，追加 /v1/systemone
   api_key: ""  # 或 TYPESAFE_API_KEY
   model: jev-1.13.0
   timeout: 10s

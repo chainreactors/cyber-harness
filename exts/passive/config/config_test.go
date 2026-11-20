@@ -137,16 +137,16 @@ func TestHunterConnection(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/gateway/openApi/search" {
+					t.Errorf("Hunter probe ignored configured base_url: %s", r.URL.Path)
+				}
 				if r.URL.Query().Get("api-key") != "hunter-key" {
 					t.Error("connection did not use configured key")
 				}
 				fmt.Fprint(w, test.reply)
 			}))
 			defer server.Close()
-			previous := hunterSearchEndpoint
-			hunterSearchEndpoint = server.URL
-			t.Cleanup(func() { hunterSearchEndpoint = previous })
-			extensions, err := cfg.ValuesToProto(cfg.Values{ConfigKey: {"hunter_api_key": "hunter-key"}})
+			extensions, err := cfg.ValuesToProto(cfg.Values{"gateway": {"hunter": map[string]any{"key": "hunter-key", "base_url": server.URL + "/gateway"}}})
 			if err != nil {
 				t.Fatal(err)
 			}

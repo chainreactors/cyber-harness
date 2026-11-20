@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +22,12 @@ import (
 // custom agents for fofa/hunter to preserve fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
 type Uncover struct {
-	keys        sources.Keys
-	proxy       string
-	limit       int
-	fofaBaseURL string
+	keys     sources.Keys
+	proxy    string
+	limit    int
+	baseURLs map[string]string
+	disabled []string
+	secrets  []string
 }
 
 // NewUncover builds an engine from fully resolved Config. It does
@@ -51,16 +55,13 @@ func NewUncover(opts Config) *Uncover {
 	if limit <= 0 {
 		limit = 100
 	}
-	baseURL := opts.FofaBaseURL
-	if baseURL == "" {
-		baseURL = "https://fofa.info"
+	secrets := []string{opts.FofaKey, opts.HunterAPIKey}
+	for _, value := range opts.Credentials {
+		secrets = append(secrets, value)
 	}
-
 	return &Uncover{
-		keys:        keys,
-		proxy:       opts.Proxy,
-		limit:       limit,
-		fofaBaseURL: strings.TrimRight(baseURL, "/"),
+		keys: keys, proxy: opts.Proxy, limit: limit,
+		baseURLs: maps.Clone(opts.BaseURLs), disabled: slices.Clone(opts.Disabled), secrets: secrets,
 	}
 }
 
@@ -114,6 +115,7 @@ func (e *Uncover) Sources() []string {
 		{"criminalip", e.keys.CriminalIPToken != ""},
 		{"publicwww", e.keys.PublicwwwToken != ""},
 		{"hunterhow", e.keys.HunterHowToken != ""},
+		{"odin", e.keys.OdinToken != ""},
 		{"binaryedge", e.keys.BinaryEdgeToken != ""},
 		{"onyphe", e.keys.OnypheKey != ""},
 		{"driftnet", e.keys.DriftnetToken != ""},
@@ -121,7 +123,7 @@ func (e *Uncover) Sources() []string {
 	}
 	var out []string
 	for _, c := range checks {
-		if c.ok {
+		if c.ok && !slices.Contains(e.disabled, c.name) {
 			out = append(out, c.name)
 		}
 	}
@@ -130,6 +132,9 @@ func (e *Uncover) Sources() []string {
 
 // Query executes a single-source query and returns collected results.
 func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Result, error) {
+	if slices.Contains(e.disabled, src) {
+		return nil, fmt.Errorf("passive source %s is disabled", src)
+	}
 	agent, err := e.agentFor(src)
 	if err != nil {
 		return nil, err
@@ -139,6 +144,15 @@ func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Resul
 		return nil, fmt.Errorf("uncover session: %w", err)
 	}
 	defer session.RateLimits.Stop()
+	if baseURL := e.baseURLs[src]; baseURL != "" {
+		if err := redirect(session, baseURL); err != nil {
+			return nil, err
+		}
+	}
+	defer session.Client.HTTPClient.CloseIdleConnections()
+	if session.Client.HTTPClient2 != nil {
+		defer session.Client.HTTPClient2.CloseIdleConnections()
+	}
 	ch, err := agent.Query(ctx, session, &sources.Query{Query: query, Limit: e.limit})
 	if err != nil {
 		return nil, fmt.Errorf("uncover query %s: %w", src, err)
@@ -154,9 +168,10 @@ func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Resul
 				r.Error = &copy
 			}
 			message := r.Error.Error()
-			for _, key := range []string{e.keys.FofaKey, e.keys.HunterToken} {
+			for _, key := range e.secrets {
 				if key != "" {
 					message = strings.ReplaceAll(message, key, "<redacted>")
+					message = strings.ReplaceAll(message, url.QueryEscape(key), "<redacted>")
 				}
 			}
 			if message != r.Error.Error() {
@@ -174,11 +189,12 @@ func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Resul
 // --------------- FOFA ----------------------------------------------------------
 
 const (
+	fofaURL    = "https://fofa.info/api/v1/search/all"
 	fofaFields = "ip,port,host,domain,title,icp"
 	fofaSize   = 100
 )
 
-type fofaAgent struct{ endpoint string }
+type fofaAgent struct{}
 
 func (a *fofaAgent) Name() string { return "fofa" }
 
@@ -196,7 +212,7 @@ func (a *fofaAgent) Query(ctx context.Context, session *sources.Session, query *
 			}
 			b64q := base64.StdEncoding.EncodeToString([]byte(query.Query))
 			values := url.Values{"key": {session.Keys.FofaKey}, "qbase64": {b64q}, "fields": {fofaFields}, "page": {strconv.Itoa(page)}, "size": {strconv.Itoa(fofaSize)}, "full": {"false"}}
-			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, a.endpoint+"?"+values.Encode(), nil)
+			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, fofaURL+"?"+values.Encode(), nil)
 			if err != nil {
 				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
 				return

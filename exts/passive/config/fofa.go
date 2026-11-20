@@ -9,10 +9,9 @@ import (
 )
 
 type Fofa struct {
-	Key     string  `json:"key"`
-	BaseURL string  `json:"base_url"`
-	Proxy   *string `json:"proxy"`
-	Limit   *int    `json:"limit"`
+	cfg.API
+	Proxy *string `json:"proxy"`
+	Limit *int    `json:"limit"`
 }
 
 func FofaSection() cfg.Section {
@@ -30,9 +29,8 @@ func FofaSection() cfg.Section {
 			if strings.TrimSpace(config.Key) == "" {
 				return fmt.Errorf("key is required")
 			}
-			u, err := url.Parse(config.BaseURL)
-			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-				return fmt.Errorf("base_url must be an HTTP(S) base URL without credentials, query or fragment")
+			if err := cfg.ValidateBaseURL(config.BaseURL); err != nil {
+				return err
 			}
 			if config.Limit != nil && *config.Limit < 0 {
 				return fmt.Errorf("limit must not be negative")

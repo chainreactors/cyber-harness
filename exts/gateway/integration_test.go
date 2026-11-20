@@ -38,6 +38,20 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			fmt.Fprint(w, "socks5://127.0.0.1:1001#office\n")
 			return
 		}
+		if r.URL.Path == "/tenant/hunter/openApi/search" {
+			if r.URL.Query().Get("api-key") != "hunter-secret" {
+				t.Error("Hunter gateway key was not bound")
+			}
+			fmt.Fprint(w, `{"code":200,"data":{"total":1,"arr":[{"ip":"192.0.2.11","port":443}]}}`)
+			return
+		}
+		if r.URL.Path == "/tenant/shodan/shodan/host/search" {
+			if r.URL.Query().Get("key") != "shodan-secret" {
+				t.Error("Shodan gateway key was not bound")
+			}
+			fmt.Fprint(w, `{"total":1,"matches":[{"ip_str":"192.0.2.12","port":443}]}`)
+			return
+		}
 		if r.URL.Query().Get("key") != expectedKey.Load().(string) {
 			t.Error("query did not use the applied credential")
 		}
@@ -87,7 +101,7 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 	if err := passiveconfig.Declare(resources); err != nil {
 		t.Fatal(err)
 	}
-	if err := gateway.Declare(resources, passiveconfig.FofaSection(), proxyext.ClashSection()); err != nil {
+	if err := gateway.Declare(resources, append(passiveconfig.Sections(), proxyext.ClashSection())...); err != nil {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
@@ -101,8 +115,9 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			// existing wire boundary adds its extensions envelope.
 			input := &cfg.Option{Sections: sections}
 			document := fmt.Sprintf("gateway:\n  fofa:\n    key: %s\n    base_url: %s/tenant/fofa/\n    proxy: ''\n  office:\n    kind: clash\n    url: %s/subscription\n    refresh: '0s'\n    strategy: first\n", key, server.URL, server.URL)
+			document += fmt.Sprintf("  hunter:\n    key: hunter-secret\n    base_url: %s/tenant/hunter\n  shodan:\n    key: shodan-secret\n    base_url: %s/tenant/shodan\n", server.URL, server.URL)
 			if key == "disabled" {
-				document = "gateway:\n  fofa:\n    enabled: false\n"
+				document = "gateway:\n  fofa:\n    enabled: false\n  shodan-idb:\n    enabled: false\n"
 			}
 			if err := cfg.LoadConfigBytes([]byte(document), input); err != nil {
 				t.Fatal(err)
@@ -129,7 +144,8 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 		}
 		var commands coretool.CommandExecutor
 		entries := append([]extension.Extension{namespaces.New()}, base...)
-		entries = append(entries, gateway.New(values, query.Gateway(""), proxy.Gateway("")), query, extension.Func{LoadFunc: func(scope *extension.Scope) error {
+		bindings := append(query.Gateway(""), proxy.Gateway(""))
+		entries = append(entries, gateway.New(values, bindings...), query, extension.Func{LoadFunc: func(scope *extension.Scope) error {
 			var err error
 			commands, err = extension.Use[coretool.CommandExecutor](scope)
 			return err
@@ -151,6 +167,10 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "unknown source") {
 				t.Fatalf("disabled binding fell back to owner credentials: %v", err)
 			}
+			_, err = commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "shodan-idb", "192.0.2.1"}, Stdout: &output, Stderr: &output})
+			if err == nil || !strings.Contains(err.Error(), "unknown source") {
+				t.Fatalf("disabled keyless API remained available: %v", err)
+			}
 		default:
 			checks, err := sections.TestConnection(t.Context(), "gateway.fofa", &distributed, nil)
 			if err != nil || len(checks) != 1 || !checks[0].Ok || checks[0].Detail != "gateway-user" {
@@ -163,6 +183,13 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			_, err = commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "fofa", `domain="example.test"`}, Stdout: &output, Stderr: &output})
 			if err != nil || !strings.Contains(output.String(), `"title":"Asset"`) || strings.Contains(output.String(), "secret") {
 				t.Fatalf("original query command: %s err=%v", output.String(), err)
+			}
+			for source, want := range map[string]string{"hunter": "192.0.2.11", "shodan": "192.0.2.12"} {
+				output.Reset()
+				_, err = commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", source, "example.test"}, Stdout: &output, Stderr: &output})
+				if err != nil || !strings.Contains(output.String(), want) {
+					t.Fatalf("%s binding: %s err=%v", source, output.String(), err)
+				}
 			}
 			output.Reset()
 			_, err = commands.Execute(t.Context(), "proxy", &coretool.Execution{Args: []string{"list"}, Stdout: &output, Stderr: &output})

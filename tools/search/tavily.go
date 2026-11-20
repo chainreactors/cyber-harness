@@ -36,6 +36,7 @@ const (
 )
 
 type TavilySearch struct {
+	config     Config
 	client     *http.Client
 	backend    searchBackend
 	apiKey     string
@@ -44,12 +45,26 @@ type TavilySearch struct {
 	mu         sync.Mutex
 }
 
-func NewTavilySearch(builtinKeys string) *TavilySearch {
+// Config scopes upstream selection to this search client.
+type Config struct {
+	Keys          string
+	BaseURL       string
+	DDGBaseURL    string
+	DisableTavily bool
+	DisableDDG    bool
+	Proxy         string
+}
+
+func NewTavilySearch(config Config) *TavilySearch {
 	c := &TavilySearch{
+		config: config,
 		client: &http.Client{
 			Timeout:   searchTimeout,
-			Transport: proxyTransport(""),
+			Transport: proxyTransport(config.Proxy),
 		},
+	}
+	if config.BaseURL != "" || config.DDGBaseURL != "" {
+		c.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
 
 	var keys []string
@@ -69,7 +84,9 @@ func NewTavilySearch(builtinKeys string) *TavilySearch {
 		}
 	}
 
-	addKeys(builtinKeys)
+	if !config.DisableTavily {
+		addKeys(config.Keys)
+	}
 
 	if len(keys) > 0 {
 		c.backend = backendTavily
@@ -103,12 +120,6 @@ func proxyTransport(proxy string) *http.Transport {
 	return t
 }
 
-func (c *TavilySearch) SetProxy(proxyURLStr string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.client.Transport = proxyTransport(proxyURLStr)
-}
-
 func (c *TavilySearch) rotateKey() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -139,11 +150,13 @@ func (c *TavilySearch) Execute(ctx context.Context, args []string) (string, erro
 	switch c.backend {
 	case backendTavily:
 		startKey, key := c.currentAPIKey()
+		var failure error
 		for {
 			result, err := c.searchTavily(ctx, query, num, key)
 			if err == nil {
 				return result, nil
 			}
+			failure = err
 			if !isKeyExhausted(err) {
 				break
 			}
@@ -154,6 +167,9 @@ func (c *TavilySearch) Execute(ctx context.Context, args []string) (string, erro
 			if idx, key = c.currentAPIKey(); idx == startKey {
 				break
 			}
+		}
+		if c.config.BaseURL != "" || c.config.DisableDDG {
+			return "", failure
 		}
 		fallback, fbErr := c.searchDDG(ctx, query, num)
 		if fbErr != nil {
@@ -244,14 +260,18 @@ type tavilyResult struct {
 // doTavilyRequest issues a single Tavily search and decodes the response. Both
 // searchTavily (with DuckDuckGo fallback) and ProbeTavily (no fallback) share
 // this request/response plumbing; only the client and the result shaping differ.
-func doTavilyRequest(ctx context.Context, client *http.Client, apiKey string, reqBody tavilyRequest) (tavilyResponse, error) {
+func doTavilyRequest(ctx context.Context, client *http.Client, baseURL, apiKey string, reqBody tavilyRequest) (tavilyResponse, error) {
 	var out tavilyResponse
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return out, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tavilySearchURL, strings.NewReader(string(bodyBytes)))
+	endpoint := tavilySearchURL
+	if baseURL != "" {
+		endpoint = strings.TrimRight(baseURL, "/") + "/search"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyBytes)))
 	if err != nil {
 		return out, err
 	}
@@ -278,7 +298,7 @@ func doTavilyRequest(ctx context.Context, client *http.Client, apiKey string, re
 }
 
 func (c *TavilySearch) searchTavily(ctx context.Context, query string, num int, apiKey string) (string, error) {
-	resp, err := doTavilyRequest(ctx, c.client, apiKey, tavilyRequest{
+	resp, err := doTavilyRequest(ctx, c.client, c.config.BaseURL, apiKey, tavilyRequest{
 		Query:         query,
 		MaxResults:    num,
 		SearchDepth:   "basic",
@@ -295,15 +315,19 @@ func (c *TavilySearch) searchTavily(ctx context.Context, query string, num int, 
 // DuckDuckGo, so an invalid or exhausted key surfaces as an error instead of
 // being silently masked by the fallback. A non-empty proxy routes the request.
 // On success it returns a short human-readable detail (e.g. "1 result").
-func ProbeTavily(ctx context.Context, apiKey, proxy string) (string, error) {
+func ProbeTavily(ctx context.Context, apiKey, baseURL, proxy string) (string, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return "", fmt.Errorf("tavily api key is empty")
 	}
 
 	client := &http.Client{Timeout: searchTimeout, Transport: proxyTransport(proxy)}
+	if baseURL != "" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	defer client.CloseIdleConnections()
 
-	resp, err := doTavilyRequest(ctx, client, apiKey, tavilyRequest{
+	resp, err := doTavilyRequest(ctx, client, baseURL, apiKey, tavilyRequest{
 		Query:       "ping",
 		MaxResults:  1,
 		SearchDepth: "basic",
@@ -348,8 +372,15 @@ func formatTavilyResults(resp tavilyResponse, query string) string {
 // ---------------------------------------------------------------------------
 
 func (c *TavilySearch) searchDDG(ctx context.Context, query string, num int) (string, error) {
+	if c.config.DisableDDG {
+		return "", fmt.Errorf("DuckDuckGo is disabled")
+	}
 	form := url.Values{"q": {query}, "b": {""}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ddgSearchURL,
+	endpoint := ddgSearchURL
+	if c.config.DDGBaseURL != "" {
+		endpoint = strings.TrimRight(c.config.DDGBaseURL, "/") + "/html/"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err

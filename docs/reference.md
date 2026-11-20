@@ -79,6 +79,11 @@ gateway:
   fofa:
     base_url: https://gateway.example/fofa  # 省略时使用 https://fofa.info
     key: "<gateway-key>"
+  hunter:
+    base_url: https://gateway.example/hunter
+  tavily:
+    base_url: https://gateway.example/tavily
+    key: "<gateway-key>"
 
 # IOA 协作
 ioa.client:

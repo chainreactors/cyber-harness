@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/chainreactors/cyber/exts/gateway"
@@ -32,12 +33,28 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 	if reconErr == nil && recon.HunterAPIKey != "" {
 		selected = append(selected, passiveconfig.ConfigKey)
 	}
-	if services, err := gateway.Read(option); err == nil && len(services) > 0 {
-		selected = append(selected, "gateway.fofa")
-	}
 	searchKeys, searchErr := searchext.ReadKeys(option)
 	if (reconErr == nil && recon.TavilyKey != "") || (searchErr == nil && searchKeys != "") {
 		selected = append(selected, searchext.ConfigKey)
+	}
+	if services, err := gateway.Read(option); err == nil {
+		configured := map[string]bool{}
+		for name, fields := range services {
+			kind, _ := fields["kind"].(string)
+			if kind == "" {
+				kind = name
+			}
+			configured[kind] = true
+		}
+		if configured["fofa"] {
+			selected = append(selected, "gateway.fofa")
+		}
+		if configured["hunter"] && !slices.Contains(selected, passiveconfig.ConfigKey) {
+			selected = append(selected, passiveconfig.ConfigKey)
+		}
+		if configured["tavily"] && !slices.Contains(selected, searchext.ConfigKey) {
+			selected = append(selected, searchext.ConfigKey)
+		}
 	}
 	if client, err := ioaclient.ReadOptions(option); err == nil && client.URL != "" {
 		selected = append(selected, ioaclient.ConfigKey)

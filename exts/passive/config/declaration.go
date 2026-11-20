@@ -19,23 +19,32 @@ import (
 
 const connectionTimeout = 20 * time.Second
 
-var hunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
+const hunterBaseURL = "https://hunter.qianxin.com"
 
 func Declare(resources *resource.Registry) error {
 	if _, err := resource.Add[cfg.Section](resources, Section()); err != nil {
 		return err
 	}
-	_, err := resource.Add[cfg.Connection](resources, cfg.Connection{Section: ConfigKey, Test: testReconConnections}, cfg.Connection{Section: "gateway.fofa", Test: testFofaConnections})
+	_, err := resource.Add[cfg.Connection](resources,
+		cfg.Connection{Section: ConfigKey, Test: testReconConnections},
+		cfg.Connection{Section: "gateway.hunter", Test: testReconConnections},
+		cfg.Connection{Section: "gateway.fofa", Test: func(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+			checks, _ := testGatewayConnections(ctx, in, stored, "fofa")
+			return checks
+		}})
 	return err
 }
 
 func testReconConnections(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+	if checks, found := testGatewayConnections(ctx, in, stored, "hunter"); found {
+		return checks
+	}
 	inRecon, storedRecon := connectionSection(in, ConfigKey), connectionSection(stored, ConfigKey)
 	proxy := fallbackString(connectionString(inRecon, "proxy"), connectionString(storedRecon, "proxy"))
 	var checks []*types.ConnectionCheck
 	if hunterKey := fallbackString(connectionString(inRecon, "hunter_api_key"), connectionString(storedRecon, "hunter_api_key")); strings.TrimSpace(hunterKey) != "" {
 		checks = append(checks, connectionCheck("hunter", func() (string, error) {
-			return testHunterConnection(ctx, hunterKey, proxy)
+			return testHunterConnection(ctx, hunterKey, "", proxy)
 		}))
 	}
 	if len(checks) == 0 {
@@ -44,20 +53,25 @@ func testReconConnections(ctx context.Context, in, stored *types.DistributeConfi
 	return checks
 }
 
-func testFofaConnections(ctx context.Context, in, stored *types.DistributeConfig) []*types.ConnectionCheck {
+func testGatewayConnections(ctx context.Context, in, stored *types.DistributeConfig, source string) ([]*types.ConnectionCheck, bool) {
 	candidates := connectionSection(in, "gateway")
 	cached := connectionSection(stored, "gateway")
 	if candidates == nil {
 		candidates = cached
 	}
 	var checks []*types.ConnectionCheck
+	found := false
 	for name, raw := range candidates {
 		fields, _ := raw.(map[string]any)
 		kind := connectionString(fields, "kind")
 		if kind == "" {
 			kind = name
 		}
-		if kind != "fofa" || fields["enabled"] == false {
+		if kind != source {
+			continue
+		}
+		found = true
+		if fields["enabled"] == false {
 			continue
 		}
 		previous, _ := cached[name].(map[string]any)
@@ -79,14 +93,25 @@ func testFofaConnections(ctx context.Context, in, stored *types.DistributeConfig
 			}
 		}
 		checks = append(checks, connectionCheck(name, func() (string, error) {
-			value, err := FofaSection().Decode(config)
+			section := apiSection(source)
+			if source == "fofa" {
+				section = FofaSection()
+			}
+			value, err := section.Decode(config)
 			if err != nil {
 				return "", err
 			}
-			return testFofaConnection(ctx, *value.(*Fofa))
+			if source == "fofa" {
+				return testFofaConnection(ctx, *value.(*Fofa))
+			}
+			api := value.(*cfg.API)
+			recon, saved := connectionSection(in, ConfigKey), connectionSection(stored, ConfigKey)
+			key := fallbackString(api.Key, fallbackString(connectionString(recon, "hunter_api_key"), connectionString(saved, "hunter_api_key")))
+			proxy := fallbackString(connectionString(recon, "proxy"), connectionString(saved, "proxy"))
+			return testHunterConnection(ctx, key, api.BaseURL, proxy)
 		}))
 	}
-	return checks
+	return checks, found
 }
 
 func connectionSection(config *types.DistributeConfig, key string) map[string]any {
@@ -181,7 +206,7 @@ func testFofaConnection(ctx context.Context, config Fofa) (string, error) {
 	return who, nil
 }
 
-func testHunterConnection(ctx context.Context, key, proxy string) (string, error) {
+func testHunterConnection(ctx context.Context, key, baseURL, proxy string) (string, error) {
 	now := time.Now()
 	params := url.Values{}
 	params.Set("api-key", key)
@@ -191,7 +216,10 @@ func testHunterConnection(ctx context.Context, key, proxy string) (string, error
 	params.Set("is_web", "3")
 	params.Set("start_time", now.AddDate(0, 0, -1).Format("2006-01-02 15:04:05"))
 	params.Set("end_time", now.Format("2006-01-02 15:04:05"))
-	body, err := getConnectionJSON(ctx, hunterSearchEndpoint+"?"+params.Encode(), proxy)
+	if baseURL == "" {
+		baseURL = hunterBaseURL
+	}
+	body, err := getConnectionJSON(ctx, strings.TrimRight(baseURL, "/")+"/openApi/search?"+params.Encode(), proxy)
 	if err != nil {
 		return "", err
 	}

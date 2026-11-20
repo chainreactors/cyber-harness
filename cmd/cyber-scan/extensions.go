@@ -54,7 +54,10 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy *proxye
 		return nil, err
 	}
 	discovery, passive := discoveryExtensions(config)
-	extensions = append(extensions, gateway.New(config.Gateway, passive.Gateway(config.Recon.Service), proxy.Gateway(config.ProxyService)))
+	search := searchext.New(searchext.Options{TavilyKeys: config.TavilyKeys})
+	bindings := append(passive.Gateway(config.Recon.Service), proxy.Gateway(config.ProxyService))
+	bindings = append(bindings, search.Gateway()...)
+	extensions = append(extensions, gateway.New(config.Gateway, bindings...))
 	// The loop installation publishes agent.Loop before its consumers.
 	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenal)
 
@@ -65,7 +68,7 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy *proxye
 		extensions = append(extensions, discovery...)
 	}
 	if optionalToolEnabled(config.OptionalTools, "search") {
-		extensions = append(extensions, searchext.New(searchext.Options{TavilyKeys: config.TavilyKeys}))
+		extensions = append(extensions, search)
 	}
 	browser, err := browserExtension(config, workDir)
 	if err != nil {

@@ -62,7 +62,9 @@ func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cf
 	mustDeclare(jevext.Declare(resources))
 	mustDeclare(scannerext.Declare(resources))
 	mustDeclare(passiveconfig.Declare(resources))
-	mustDeclare(gateway.Declare(resources, passiveconfig.FofaSection(), proxyext.ClashSection()))
+	schemas := append(passiveconfig.Sections(), proxyext.ClashSection())
+	schemas = append(schemas, searchext.Sections()...)
+	mustDeclare(gateway.Declare(resources, schemas...))
 	mustDeclare(resourceAddReconFlags(resources))
 	mustDeclare(searchext.Declare(resources))
 	if agentOptions != nil {

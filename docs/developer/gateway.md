@@ -16,6 +16,16 @@ gateway:
   fofa:
     base_url: https://gateway.example/fofa
     key: "<key>"
+  hunter:
+    base_url: https://gateway.example/hunter
+    key: "<key>"
+  shodan:
+    base_url: https://gateway.example/shodan
+  tavily:
+    base_url: https://gateway.example/tavily
+    key: "<key>"
+  duckduckgo:
+    base_url: https://gateway.example/duckduckgo
   office:
     kind: clash
     url: "<subscription-url>"
@@ -23,11 +33,33 @@ gateway:
 
 cyberhub:
   proxy: office
+
+jev:
+  base_url: https://gateway.example/typesafe
 ```
 
-省略 `kind` 时使用实例名称，所以默认的 `fofa` 不必再写 `kind: fofa`。`enabled` 默认 true；false 表示关闭该绑定。相同类型有多个实例时必须明确选择：FOFA 使用 `recon.service`，Clash 使用 `cyberhub.proxy` 引用实例名。`cyberhub.proxy` 也继续接受原有代理 URL。选择仅属于宿主配置，不增加工具参数。
+省略 `kind` 时使用实例名称，所以默认的 `fofa` 不必再写 `kind: fofa`。`enabled` 默认 true；false 禁用对应来源，不回退到已有凭据。每种类型默认绑定一个实例；FOFA 通过 `recon.service`、Clash 通过 `cyberhub.proxy` 选择多实例，其他类型出现多个实例时报错。`cyberhub.proxy` 也接受代理 URL。选择仅属于宿主配置，不增加工具参数。
 
 FOFA 的地址和凭据统一配置在 `gateway` 的服务下，接受 `base_url`、`key`、出站 `proxy` 和 `limit`。`base_url` 可以指向自己的 FOFA 兼容网关；默认值为 `https://fofa.info`。查询和连接检查共用该地址，分别追加 `/api/v1/search/all` 与 `/api/v1/info/my`，保留已有路径前缀并处理末尾斜线。例如上面的查询地址为 `https://gateway.example/fofa/api/v1/search/all`。网关使用 FOFA 请求参数和响应结构；请求失败直接返回错误。
+
+## 外部 API 地址
+
+| 服务 | 配置入口 | 行为 |
+| --- | --- | --- |
+| passive 的 16 个来源 | `gateway.<source>.base_url` | 替换原始 API 的 origin，保留请求路径、查询参数、方法、请求体和鉴权；配置 URL 中的路径作为前缀 |
+| Tavily | `gateway.tavily.base_url` | 追加 `/search`，查询与连接检查共用地址 |
+| DuckDuckGo HTML 搜索 | `gateway.duckduckgo.base_url` | 追加 `/html/` |
+| JEV / TypeSafe | `jev.base_url` | 追加 `/v1/systemone`，加速、guardrail 和连接检查共用地址 |
+| LLM 与模型搜索 | `llm.providers[].base_url` | 已有配置，DeepSeek 等模型搜索复用所选 profile 地址 |
+| Cyberhub | `cyberhub.url` | 已有可配置资源服务地址 |
+| MCP、IOA、OTLP | MCP 服务的 `url`、`ioa.client.url`、`OTEL_EXPORTER_OTLP_ENDPOINT` | 已有服务端点配置，保留各自协议含义 |
+| Clash | `gateway.<name>.url` | 已有完整订阅 URL，无需拆成 base URL 与路径 |
+
+passive 来源为 `fofa`、`hunter`、`shodan`、`shodan-idb`、`censys`、`quake`、`zoomeye`、`netlas`、`criminalip`、`publicwww`、`hunterhow`、`odin`、`binaryedge`、`onyphe`、`driftnet`、`greynoise`。除 FOFA 外，`key` 可省略并使用宿主已有凭据；填写时覆盖该来源的主凭据。Censys 的组织 ID 仍由 `CENSYS_ORGANIZATION_ID` 提供。`shodan-idb` 与 DuckDuckGo 无需 key。
+
+测绘源使用每次查询独立的 transport 在内存中改写地址，同时覆盖 Uncover 的备用客户端与 Censys SDK；不修改进程全局客户端或依赖常量。配置地址可带路径前缀和末尾斜线。显式网关不跟随 HTTP 重定向；Tavily 自定义上游失败直接返回错误，不访问默认 DuckDuckGo 作为替代。
+
+当前仓库没有独立的 company API 客户端。扫描、浏览器、fetch、curl 的目标 URL 是调用输入；代理健康检查 URL 和工具资源下载属于各自功能，不作为业务 API 配置重写。
 
 Clash 默认 `refresh: 30m`、`strategy: adaptive`，也支持 `type`、`name`、`country` 过滤和独立的下载 `proxy`。`refresh: 0s` 仅拉取一次，空 `strategy` 仅加载节点。拉取成功后原子发布，失败保留旧快照；手动选定的节点不会被定时刷新切回自动模式。选定节点被移除或改变时保留旧快照并记录错误。已有 `proxy subscribe/auto` 和 traffic 协议也调用同一订阅实现。
 
@@ -35,11 +67,11 @@ Clash 默认 `refresh: 30m`、`strategy: adaptive`，也支持 `type`、`name`�
 
 ## 宿主接入
 
-服务类型复用 `config.Section`，不另建配置 DTO。声明时调用 `gateway.Declare(resources, schemas...)`，配置读取使用 `gateway.Read(option)`，实例集合直接复用 `config.Values`。
+服务类型复用 `config.Section`；只有地址和主凭据的 API 复用 `config.API`，FOFA 的限额、代理和 JEV 的模型等独立设置保留自己的 schema。声明时调用 `gateway.Declare(resources, schemas...)`，配置读取使用 `gateway.Read(option)`，实例集合直接复用 `config.Values`。
 
 运行时的 `gateway.Kind` 只有三个字段：`Config` 是 schema，`Use` 选择实例，`Load` 将解析结果交给现有所有者并返回资源句柄。未配置的类型不调用 Load；显式禁用传入 nil；多个实例未选择时拒绝加载。所有实例和选择先通过校验，再调用绑定，加载失败交给原有 Extension Set 回滚。
 
-cyber-scan 在 proxy 加载后、passive 加载前安装 gateway。FOFA 绑定配置 passive 的查询客户端，Clash 绑定向 proxy 发布节点和路由。gateway 不反向依赖具体服务；增加服务只需提供 schema、绑定与组合声明。
+cyber-scan 在 proxy 加载后、passive/search 加载前安装 gateway。`passive.Config.BaseURLs` 为不同测绘源保存独立上游；搜索绑定各自的 Tavily 与 DuckDuckGo 客户端，Clash 向 proxy 发布节点和路由。gateway 不反向依赖具体服务；增加服务只需提供 schema、绑定与组合声明。
 
 配置中心可以使用不链接具体类型的 `gateway.Section()` 转发配置。默认 Web Hub 已声明这个轻量 section：只公开实例名称、kind 和 enabled，其余字段视为敏感数据；执行节点用实际注册的 schema 严格校验。检查、配置写入和状态管理仍走宿主程序接口。
 

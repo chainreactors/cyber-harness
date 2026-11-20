@@ -28,7 +28,7 @@ func TestFofaUsesGatewayBaseURL(t *testing.T) {
 				fmt.Fprint(w, `{"error":false,"size":1,"results":[["192.0.2.1","443","https://example.test","example.test","Gateway asset",""]]}`)
 			}))
 			defer server.Close()
-			engine := passive.NewUncover(passive.Config{FofaKey: "gateway-key", FofaBaseURL: server.URL + prefix})
+			engine := passive.NewUncover(passive.Config{FofaKey: "gateway-key", BaseURLs: map[string]string{"fofa": server.URL + prefix}})
 			results, err := engine.Query(t.Context(), "fofa", `domain="example.test"`)
 			if err != nil || len(results) != 1 || results[0].IP != "192.0.2.1" {
 				t.Fatalf("gateway query: %v, %v", results, err)
@@ -40,7 +40,7 @@ func TestFofaUsesGatewayBaseURL(t *testing.T) {
 func TestFofaCommandCancellationIsNotEmptySuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
-	engine := passive.NewUncover(passive.Config{FofaKey: "local-secret", FofaBaseURL: server.URL})
+	engine := passive.NewUncover(passive.Config{FofaKey: "local-secret", BaseURLs: map[string]string{"fofa": server.URL}})
 	command := passive.New(engine)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
