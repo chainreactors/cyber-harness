@@ -89,4 +89,4 @@ cyber-scan 在 proxy 加载后、passive/search 加载前安装 gateway。`passi
 
 嵌入的配置字段直接展开，不增加结构体名称层。Guardrail 的规则直接写在 `guardrail.level`、`guardrail.on_error`、`guardrail.criteria`；MCP 直接使用服务名映射。模型 profiles、HTTP headers、规则 criteria 等有独立含义的集合保留自己的分组。
 
-Go 名称沿用包的上下文：`passive.Config`、`passive.Engine`、`passive.Uncover`、`proxy.Hub`、`proxy.Filter`、`mcp.Config`、`terminal.Options`。配置与每次执行选项、协议响应与命令输出、运行资源与借用接口仍保留不同类型；简化命名不合并这些合同。
+Go 名称沿用包的上下文：`passive.Config`、`passive.Engine`、`passive.Uncover`、`search.Client`、`proxy.Hub`、`proxy.Filter`、`mcp.Config`、`terminal.Options`。搜索客户端通过 `search.New(config)` 构造，来源相关的请求与解析分别放在 Tavily、DuckDuckGo、FOFA、Hunter 文件中；连接检查的结果和耗时采集复用 `config.Check`。配置与每次执行选项、协议响应与命令输出、运行资源与借用接口仍保留不同类型；简化命名不合并这些合同。

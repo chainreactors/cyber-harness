@@ -47,7 +47,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		backend.Keys = e.config.TavilyKeys
 	}
 	backend.Proxy = proxy
-	tavily := searchtools.NewTavilySearch(backend)
+	tavily := searchtools.New(backend)
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
 	fetchCommand := coretool.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),

@@ -32,6 +32,7 @@ func (e *Extension) Gateway(use string) gateway.Kind {
 			}
 			subscription, err := proxytool.NewSubscription(scope.Init(), scope.Lifetime(), e.resource.Hub.State(), *value.(*proxytool.SubscriptionConfig))
 			if err != nil {
+				// Do not register a typed-nil *Subscription as a resource handle.
 				return nil, err
 			}
 			return subscription, nil
