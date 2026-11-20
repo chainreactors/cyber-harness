@@ -20,10 +20,10 @@ import (
 // custom agents for fofa/hunter to preserve fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
 type Uncover struct {
-	keys    sources.Keys
-	proxy   string
-	limit   int
-	fofaURL string
+	keys        sources.Keys
+	proxy       string
+	limit       int
+	fofaBaseURL string
 }
 
 // NewUncover builds an engine from fully resolved Config. It does
@@ -51,12 +51,16 @@ func NewUncover(opts Config) *Uncover {
 	if limit <= 0 {
 		limit = 100
 	}
+	baseURL := opts.FofaBaseURL
+	if baseURL == "" {
+		baseURL = "https://fofa.info"
+	}
 
 	return &Uncover{
-		keys:    keys,
-		proxy:   opts.Proxy,
-		limit:   limit,
-		fofaURL: opts.FofaURL,
+		keys:        keys,
+		proxy:       opts.Proxy,
+		limit:       limit,
+		fofaBaseURL: strings.TrimRight(baseURL, "/"),
 	}
 }
 
@@ -170,7 +174,6 @@ func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Resul
 // --------------- FOFA ----------------------------------------------------------
 
 const (
-	fofaURL    = "https://fofa.info/api/v1/search/all"
 	fofaFields = "ip,port,host,domain,title,icp"
 	fofaSize   = 100
 )
@@ -192,12 +195,8 @@ func (a *fofaAgent) Query(ctx context.Context, session *sources.Session, query *
 				return
 			}
 			b64q := base64.StdEncoding.EncodeToString([]byte(query.Query))
-			endpoint := a.endpoint
-			if endpoint == "" {
-				endpoint = fofaURL
-			}
 			values := url.Values{"key": {session.Keys.FofaKey}, "qbase64": {b64q}, "fields": {fofaFields}, "page": {strconv.Itoa(page)}, "size": {strconv.Itoa(fofaSize)}, "full": {"false"}}
-			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, endpoint+"?"+values.Encode(), nil)
+			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, a.endpoint+"?"+values.Encode(), nil)
 			if err != nil {
 				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
 				return

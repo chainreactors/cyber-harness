@@ -233,35 +233,48 @@ func TestConnectionCyberhubAuthError(t *testing.T) {
 }
 
 func TestConnectionFofaSuccessAndStoredKeyFallback(t *testing.T) {
-	var gotKey string
+	var gotKey, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.URL.Query().Get("key")
+		gotPath = r.URL.Path
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": false, "username": "alice", "email": "a@b.c", "fofa_point": 4200,
 		})
 	}))
 	defer srv.Close()
-	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	// FOFA key left blank in the request: the stored secret must be used.
 	store := &fakeConfigStore{}
 	store.cfg = configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "stored-fofa"}})
+		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "stored-fofa", "base_url": srv.URL + "/stored/"}})
 	})
 
-	resp, err := testConn(context.Background(), store, "gateway.fofa", configWith(nil))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	c, ok := findCheck(resp, "fofa")
-	if !ok || !c.Ok {
-		t.Fatalf("expected fofa ok, got %+v", resp)
-	}
-	if gotKey != "stored-fofa" {
-		t.Fatalf("expected stored key, server saw %q", gotKey)
-	}
-	if !strings.Contains(c.Detail, "alice") {
-		t.Fatalf("expected username in detail, got %q", c.Detail)
+	for _, test := range []struct {
+		fields map[string]any
+		path   string
+	}{
+		{nil, "/stored/api/v1/info/my"},
+		{map[string]any{"key": ""}, "/stored/api/v1/info/my"},
+		{map[string]any{"key": "", "base_url": srv.URL + "/edited"}, "/edited/api/v1/info/my"},
+	} {
+		incoming := configWith(nil)
+		if test.fields != nil {
+			setConfigSection(incoming, "gateway", map[string]any{"fofa": test.fields})
+		}
+		resp, err := testConn(context.Background(), store, "gateway.fofa", incoming)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		c, ok := findCheck(resp, "fofa")
+		if !ok || !c.Ok {
+			t.Fatalf("expected fofa ok, got %+v", resp)
+		}
+		if gotKey != "stored-fofa" || gotPath != test.path {
+			t.Fatalf("expected stored key and configured base URL, server saw key=%q path=%q", gotKey, gotPath)
+		}
+		if !strings.Contains(c.Detail, "alice") {
+			t.Fatalf("expected username in detail, got %q", c.Detail)
+		}
 	}
 }
 
@@ -270,10 +283,9 @@ func TestConnectionFofaError(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": true, "errmsg": "[-700] account invalid"})
 	}))
 	defer srv.Close()
-	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
 
 	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "gateway.fofa", configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "bad"}})
+		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "bad", "base_url": srv.URL}})
 	}))
 	c, ok := findCheck(resp, "fofa")
 	if !ok || c.Ok {
@@ -284,43 +296,30 @@ func TestConnectionFofaError(t *testing.T) {
 	}
 }
 
-func TestConnectionHunterSuccess(t *testing.T) {
+func TestConnectionFofaRejectsInvalidGatewayConfig(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("api-key") == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code": 200, "message": "success", "data": map[string]any{"total": 7},
+		t.Error("invalid gateway configuration triggered a request")
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": false})
+	}))
+	defer srv.Close()
+	store := &fakeConfigStore{cfg: configWith(func(c *types.DistributeConfig) {
+		setConfigSection(c, "gateway", map[string]any{"fofa": map[string]any{"key": "stored-key", "base_url": srv.URL}})
+	})}
+	for _, fields := range []map[string]any{
+		{"base_url": "https://gateway.test?key=secret"},
+		{"key": 42},
+		{"url": srv.URL + "/search"},
+	} {
+		incoming := configWith(func(c *types.DistributeConfig) {
+			setConfigSection(c, "gateway", map[string]any{"fofa": fields})
 		})
-	}))
-	defer srv.Close()
-	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
-
-	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "recon", map[string]any{"hunter_api_key": "hk"})
-	}))
-	if c, ok := findCheck(resp, "hunter"); !ok || !c.Ok {
-		t.Fatalf("expected hunter ok, got %+v", resp)
-	}
-}
-
-func TestConnectionHunterError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 401, "message": "invalid api-key"})
-	}))
-	defer srv.Close()
-	t.Cleanup(passiveconfig.SetConnectionEndpoints(srv.URL, srv.URL))
-
-	resp, _ := testConn(context.Background(), &fakeConfigStore{}, "recon", configWith(func(c *types.DistributeConfig) {
-		setConfigSection(c, "recon", map[string]any{"hunter_api_key": "bad"})
-	}))
-	c, ok := findCheck(resp, "hunter")
-	if !ok || c.Ok {
-		t.Fatalf("expected hunter failure, got %+v", resp)
-	}
-	if !strings.Contains(c.Error, "invalid api-key") {
-		t.Fatalf("expected hunter message surfaced, got %q", c.Error)
+		resp, err := testConn(t.Context(), store, "gateway.fofa", incoming)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if check, ok := findCheck(resp, "fofa"); !ok || check.Ok || check.Error == "" {
+			t.Fatalf("invalid gateway config accepted: %v, %v", fields, resp)
+		}
 	}
 }
 

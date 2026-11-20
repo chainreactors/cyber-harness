@@ -74,6 +74,12 @@ cyberhub:
   proxy: ""           # scanner/工具出口代理：socks5://、trojan://、vless://、clash://
   mitm: true          # 记录工具流量（默认开）；false = 纯代理路由，不拦截/不抓包
 
+# FOFA API 网关
+gateway:
+  fofa:
+    base_url: https://gateway.example/fofa  # 省略时使用 https://fofa.info
+    key: "<gateway-key>"
+
 # IOA 协作
 ioa.client:
   url: ""

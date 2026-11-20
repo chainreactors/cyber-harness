@@ -33,7 +33,7 @@ CLI > CYBER_*／集成专用环境变量 > 当前目录配置 > 用户配置
 
 文件中空的 LLM 协议、端点、模型、密钥字符串按未填写处理，允许低优先级来源补齐。显式 CLI 空值表示清空；`false`、`0`、空列表不会被当成缺省值。
 
-扩展配置直接使用同名顶层块，例如 `scan`、`search`、`recon`、`ioa.client`。解析、展示和保存统一使用这一格式，未注册的配置块和未知字段报错。FOFA、Clash 等服务的自动化配置使用 [gateway](developer/gateway.md)，字段直接写在服务名下。
+扩展配置直接使用同名顶层块，例如 `scan`、`search`、`recon`、`ioa.client`。解析、展示和保存统一使用这一格式，未注册的配置块和未知字段报错。FOFA、Clash 等服务的自动化配置使用 [gateway](developer/gateway.md)，字段直接写在服务名下。`gateway.fofa.base_url` 可将 passive 的 FOFA 查询及连接检查统一转向自有网关。
 
 ## 模型 profiles
 

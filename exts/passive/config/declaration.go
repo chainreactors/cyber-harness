@@ -19,18 +19,7 @@ import (
 
 const connectionTimeout = 20 * time.Second
 
-var (
-	fofaInfoEndpoint     = "https://fofa.info/api/v1/info/my"
-	hunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
-)
-
-// SetConnectionEndpoints replaces the credential probe endpoints and returns a
-// restore function. Configure endpoints before starting connection checks.
-func SetConnectionEndpoints(fofa, hunter string) func() {
-	oldFofa, oldHunter := fofaInfoEndpoint, hunterSearchEndpoint
-	fofaInfoEndpoint, hunterSearchEndpoint = fofa, hunter
-	return func() { fofaInfoEndpoint, hunterSearchEndpoint = oldFofa, oldHunter }
-}
+var hunterSearchEndpoint = "https://hunter.qianxin.com/openApi/search"
 
 func Declare(resources *resource.Registry) error {
 	if _, err := resource.Add[cfg.Section](resources, Section()); err != nil {
@@ -72,9 +61,30 @@ func testFofaConnections(ctx context.Context, in, stored *types.DistributeConfig
 			continue
 		}
 		previous, _ := cached[name].(map[string]any)
-		key := fallbackString(connectionString(fields, "key"), connectionString(previous, "key"))
-		proxy := fallbackString(connectionString(fields, "proxy"), connectionString(previous, "proxy"))
-		checks = append(checks, connectionCheck(name, func() (string, error) { return testFofaConnection(ctx, key, proxy) }))
+		previousKind := connectionString(previous, "kind")
+		if previousKind == "" {
+			previousKind = name
+		}
+		config := cfg.CloneDocument(fields)
+		delete(config, "kind")
+		delete(config, "enabled")
+		if previousKind == kind {
+			if config["key"] == nil || config["key"] == "" {
+				config["key"] = previous["key"]
+			}
+			for _, field := range []string{"base_url", "proxy"} {
+				if _, exists := config[field]; !exists && previous[field] != nil {
+					config[field] = previous[field]
+				}
+			}
+		}
+		checks = append(checks, connectionCheck(name, func() (string, error) {
+			value, err := FofaSection().Decode(config)
+			if err != nil {
+				return "", err
+			}
+			return testFofaConnection(ctx, *value.(*Fofa))
+		}))
 	}
 	return checks
 }
@@ -132,8 +142,13 @@ func getConnectionJSON(ctx context.Context, endpoint, proxy string) ([]byte, err
 	return body, nil
 }
 
-func testFofaConnection(ctx context.Context, key, proxy string) (string, error) {
-	body, err := getConnectionJSON(ctx, fofaInfoEndpoint+"?key="+url.QueryEscape(key), proxy)
+func testFofaConnection(ctx context.Context, config Fofa) (string, error) {
+	proxy := ""
+	if config.Proxy != nil {
+		proxy = *config.Proxy
+	}
+	endpoint := strings.TrimRight(config.BaseURL, "/") + "/api/v1/info/my"
+	body, err := getConnectionJSON(ctx, endpoint+"?key="+url.QueryEscape(config.Key), proxy)
 	if err != nil {
 		return "", err
 	}

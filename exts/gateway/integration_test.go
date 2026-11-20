@@ -31,14 +31,26 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 	var expectedKey atomic.Value
 	expectedKey.Store("first-secret")
 	var requests atomic.Int32
+	var probes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/subscription" {
 			fmt.Fprint(w, "socks5://127.0.0.1:1001#office\n")
 			return
 		}
-		requests.Add(1)
 		if r.URL.Query().Get("key") != expectedKey.Load().(string) {
 			t.Error("query did not use the applied credential")
+		}
+		switch r.URL.Path {
+		case "/tenant/fofa/api/v1/info/my":
+			probes.Add(1)
+			fmt.Fprint(w, `{"error":false,"username":"gateway-user"}`)
+			return
+		case "/tenant/fofa/api/v1/search/all":
+			requests.Add(1)
+		default:
+			t.Errorf("request escaped the configured gateway prefix: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 		query, _ := base64.StdEncoding.DecodeString(r.URL.Query().Get("qbase64"))
 		if string(query) == "denied" {
@@ -68,6 +80,12 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 	if _, err := resource.Define[cfg.Section](resources, sections); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := resource.Define[cfg.Connection](resources, sections.ConnectionPoint()); err != nil {
+		t.Fatal(err)
+	}
+	if err := passiveconfig.Declare(resources); err != nil {
+		t.Fatal(err)
+	}
 	if err := gateway.Declare(resources, passiveconfig.FofaSection(), proxyext.ClashSection()); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +99,7 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 			// The external source provides ordinary flat YAML; only the
 			// existing wire boundary adds its extensions envelope.
 			input := &cfg.Option{Sections: sections}
-			document := fmt.Sprintf("gateway:\n  fofa:\n    key: %s\n    url: %s/search\n    proxy: ''\n  office:\n    kind: clash\n    url: %s/subscription\n    refresh: '0s'\n    strategy: first\n", key, server.URL, server.URL)
+			document := fmt.Sprintf("gateway:\n  fofa:\n    key: %s\n    base_url: %s/tenant/fofa/\n    proxy: ''\n  office:\n    kind: clash\n    url: %s/subscription\n    refresh: '0s'\n    strategy: first\n", key, server.URL, server.URL)
 			if key == "disabled" {
 				document = "gateway:\n  fofa:\n    enabled: false\n"
 			}
@@ -133,11 +151,15 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 				t.Fatalf("disabled binding fell back to owner credentials: %v", err)
 			}
 		default:
+			checks, err := sections.TestConnection(t.Context(), "gateway.fofa", &distributed, nil)
+			if err != nil || len(checks) != 1 || !checks[0].Ok || checks[0].Detail != "gateway-user" {
+				t.Fatalf("connection check did not use the configured gateway: %v %v", checks, err)
+			}
 			if !reflect.DeepEqual(catalog, commands.Names()) {
 				t.Fatalf("gateway changed command catalog: %v -> %v", catalog, commands.Names())
 			}
 			var output bytes.Buffer
-			_, err := commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "fofa", `domain="example.test"`}, Stdout: &output, Stderr: &output})
+			_, err = commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "fofa", `domain="example.test"`}, Stdout: &output, Stderr: &output})
 			if err != nil || !strings.Contains(output.String(), `"title":"Asset"`) || strings.Contains(output.String(), "secret") {
 				t.Fatalf("original query command: %s err=%v", output.String(), err)
 			}
@@ -171,6 +193,9 @@ func TestDistributedConfigUsesOriginalCommandsWithoutAgent(t *testing.T) {
 	}
 	if requests.Load() != 10 {
 		t.Fatalf("unexpected query count: %d", requests.Load())
+	}
+	if probes.Load() != 2 {
+		t.Fatalf("unexpected gateway connection check count: %d", probes.Load())
 	}
 	removed, err := cfg.ResolveDistributedRuntime(&types.DistributeConfig{}, host)
 	if err != nil {

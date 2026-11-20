@@ -18,7 +18,7 @@ func (e *Extension) Gateway(use string) gateway.Kind {
 				return nil, nil
 			}
 			config := value.(*passiveconfig.Fofa)
-			e.options.FofaKey, e.options.FofaURL = config.Key, config.URL
+			e.options.FofaKey, e.options.FofaBaseURL = config.Key, config.BaseURL
 			if config.Proxy != nil {
 				e.options.Proxy = *config.Proxy
 			}

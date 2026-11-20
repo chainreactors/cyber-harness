@@ -23,7 +23,7 @@ import (
 func (e *Uncover) agentFor(src string) (sources.Agent, error) {
 	switch src {
 	case "fofa":
-		return &fofaAgent{endpoint: e.fofaURL}, nil
+		return &fofaAgent{endpoint: e.fofaBaseURL + "/api/v1/search/all"}, nil
 	case "hunter":
 		return &hunterAgent{}, nil
 	case "shodan":

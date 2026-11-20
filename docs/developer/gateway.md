@@ -7,6 +7,7 @@
 ```yaml
 gateway:
   fofa:
+    base_url: https://gateway.example/fofa
     key: "<key>"
   office:
     kind: clash
@@ -19,7 +20,7 @@ cyberhub:
 
 省略 `kind` 时使用实例名称，所以默认的 `fofa` 不必再写 `kind: fofa`。`enabled` 默认 true；false 表示关闭该绑定。相同类型有多个实例时必须明确选择：FOFA 使用 `recon.service`，Clash 使用 `cyberhub.proxy` 引用实例名。`cyberhub.proxy` 也继续接受原有代理 URL。选择仅属于宿主配置，不增加工具参数。
 
-FOFA 的凭据统一配置在 `gateway` 的服务下，接受 `key`、可选的完整搜索接口 `url`、出站 `proxy` 和 `limit`。
+FOFA 的地址和凭据统一配置在 `gateway` 的服务下，接受 `base_url`、`key`、出站 `proxy` 和 `limit`。`base_url` 可以指向自己的 FOFA 兼容网关；默认值为 `https://fofa.info`。查询和连接检查共用该地址，分别追加 `/api/v1/search/all` 与 `/api/v1/info/my`，保留已有路径前缀并处理末尾斜线。例如上面的查询地址为 `https://gateway.example/fofa/api/v1/search/all`。网关使用 FOFA 请求参数和响应结构；请求失败直接返回错误。
 
 Clash 默认 `refresh: 30m`、`strategy: adaptive`，也支持 `type`、`name`、`country` 过滤和独立的下载 `proxy`。`refresh: 0s` 仅拉取一次，空 `strategy` 仅加载节点。拉取成功后原子发布，失败保留旧快照；手动选定的节点不会被定时刷新切回自动模式。选定节点被移除或改变时保留旧快照并记录错误。已有 `proxy subscribe/auto` 和 traffic 协议也调用同一订阅实现。
 

@@ -9,25 +9,30 @@ import (
 )
 
 type Fofa struct {
-	Key   string  `json:"key"`
-	URL   string  `json:"url"`
-	Proxy *string `json:"proxy"`
-	Limit *int    `json:"limit"`
+	Key     string  `json:"key"`
+	BaseURL string  `json:"base_url"`
+	Proxy   *string `json:"proxy"`
+	Limit   *int    `json:"limit"`
 }
 
 func FofaSection() cfg.Section {
 	return cfg.Section{
 		Key: "fofa", New: func() any { return &Fofa{} }, Secrets: []string{"key", "proxy"},
+		Normalize: func(value any) error {
+			config := value.(*Fofa)
+			if config.BaseURL == "" {
+				config.BaseURL = "https://fofa.info"
+			}
+			return nil
+		},
 		Validate: func(value any) error {
 			config := value.(*Fofa)
 			if strings.TrimSpace(config.Key) == "" {
 				return fmt.Errorf("key is required")
 			}
-			if config.URL != "" {
-				u, err := url.Parse(config.URL)
-				if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-					return fmt.Errorf("url must be an HTTP search endpoint without credentials or query")
-				}
+			u, err := url.Parse(config.BaseURL)
+			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+				return fmt.Errorf("base_url must be an HTTP(S) base URL without credentials, query or fragment")
 			}
 			if config.Limit != nil && *config.Limit < 0 {
 				return fmt.Errorf("limit must not be negative")
