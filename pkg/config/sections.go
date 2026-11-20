@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -21,11 +22,16 @@ type Values map[string]map[string]any
 
 // Section is an inert configuration declaration.
 type Section struct {
-	Key         string
-	Aliases     []string
-	New         func() any
-	Validate    func(any) error
-	Secrets     []string
+	Key string
+	// Aliases are additional root names; Key is always accepted at the root.
+	Aliases  []string
+	New      func() any
+	Validate func(any) error
+	Secrets  []string
+	// SecretPaths describes credentials in dynamic, named configuration maps.
+	SecretPaths func(map[string]any) []string
+	// Preserve handles schema-specific partial edits, before ordinary secrets.
+	Preserve    func(incoming, current map[string]any) map[string]any
 	Environment func(Sources) (overrides, fallbacks map[string]any, err error)
 	Normalize   func(any) error
 }
@@ -81,7 +87,8 @@ func (r *Sections) Add(sections ...Section) (resource.Handle, error) {
 	}
 	registered := make([]Section, 0, len(sections))
 	for _, section := range sections {
-		section.Aliases = append([]string(nil), section.Aliases...)
+		section.Aliases = append([]string{section.Key}, section.Aliases...)
+		section.Aliases = slices.Compact(section.Aliases)
 		section.Secrets = append([]string(nil), section.Secrets...)
 		r.declarations[section.Key] = section
 		for _, alias := range section.Aliases {
@@ -334,7 +341,7 @@ func (r *Sections) View(values Values) (Values, map[string][]string) {
 			delete(out, key)
 			continue
 		}
-		for _, path := range s.Secrets {
+		for _, path := range s.secretPaths(fields) {
 			parent, name := fieldParent(fields, path)
 			if parent == nil {
 				continue
@@ -346,6 +353,13 @@ func (r *Sections) View(values Values) (Values, map[string][]string) {
 		}
 	}
 	return out, configured
+}
+func (s Section) secretPaths(fields map[string]any) []string {
+	paths := slices.Clone(s.Secrets)
+	if s.SecretPaths != nil {
+		paths = append(paths, s.SecretPaths(fields)...)
+	}
+	return paths
 }
 func fieldParent(fields map[string]any, path string) (map[string]any, string) {
 	parts := strings.Split(path, ".")
@@ -361,7 +375,11 @@ func (r *Sections) Preserve(incoming, current Values) Values {
 	out := CloneValues(current)
 	for key, fields := range incoming {
 		next := CloneValues(Values{key: fields})[key]
-		for _, path := range r.declarations[key].Secrets {
+		section := r.declarations[key]
+		if section.Preserve != nil {
+			next = section.Preserve(next, CloneDocument(current[key]))
+		}
+		for _, path := range section.Secrets {
 			p, name := fieldParent(next, path)
 			old, oldName := fieldParent(current[key], path)
 			if old == nil {

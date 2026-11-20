@@ -41,7 +41,7 @@ type Options struct {
 }
 
 func Section() cfg.Section {
-	return cfg.Section{Key: ConfigKey, Aliases: []string{ConfigKey}, New: func() any { return &Options{MaxConcurrent: defaultMaxConcurrent} }, Validate: func(value any) error {
+	return cfg.Section{Key: ConfigKey, New: func() any { return &Options{MaxConcurrent: defaultMaxConcurrent} }, Validate: func(value any) error {
 		maximum := value.(*Options).MaxConcurrent
 		if maximum < 1 || maximum > maxConcurrentLimit {
 			return fmt.Errorf("max_concurrent must be between 1 and %d", maxConcurrentLimit)

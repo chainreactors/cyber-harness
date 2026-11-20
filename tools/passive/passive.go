@@ -99,13 +99,10 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 	}
 	if c.sources[src] {
 		result, err := c.runQuery(ctx, src, rest)
-		if err != nil {
-			return nil, err
-		}
 		if result != "" {
 			fmt.Fprint(execution.Stdout, result)
 		}
-		return nil, nil
+		return nil, err
 	}
 	return nil, fmt.Errorf("passive: unknown source %q (available: %v)", src, c.sourceList())
 }
@@ -128,16 +125,19 @@ func (c *Command) runQuery(ctx context.Context, src string, args []string) (stri
 		ctx, cancel = context.WithTimeout(ctx, queryTimeout)
 		defer cancel()
 	}
-	results, err := c.engine.QueryRaw(ctx, src, query)
-	if err != nil {
-		return "", fmt.Errorf("passive: %w", err)
+	results, queryErr := c.engine.QueryRaw(ctx, src, query)
+	if queryErr != nil {
+		queryErr = fmt.Errorf("passive: %w", queryErr)
+		if len(results) == 0 {
+			return "", queryErr
+		}
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(uncoverPython(src, results)); err != nil {
 		return buf.String(), fmt.Errorf("passive: encode: %w", err)
 	}
 	c.logger.Debugf("passive source=%s results=%d", src, len(results))
-	return buf.String(), nil
+	return buf.String(), queryErr
 }
 
 // --------------- arg parsing -------------------------------------------------

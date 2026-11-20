@@ -5,10 +5,12 @@ import (
 	"sync"
 
 	"github.com/chainreactors/cyber/core/resource"
+	"github.com/chainreactors/cyber/exts/gateway"
 	guardrailext "github.com/chainreactors/cyber/exts/guardrail"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	ioaserver "github.com/chainreactors/cyber/exts/ioa/server"
 	jevext "github.com/chainreactors/cyber/exts/jev"
+	proxyext "github.com/chainreactors/cyber/exts/proxy"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 
@@ -60,6 +62,7 @@ func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cf
 	mustDeclare(jevext.Declare(resources))
 	mustDeclare(scannerext.Declare(resources))
 	mustDeclare(passiveconfig.Declare(resources))
+	mustDeclare(gateway.Declare(resources, passiveconfig.FofaSection(), proxyext.ClashSection()))
 	mustDeclare(resourceAddReconFlags(resources))
 	mustDeclare(searchext.Declare(resources))
 	if agentOptions != nil {

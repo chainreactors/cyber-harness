@@ -23,9 +23,9 @@ import (
 func (e *UncoverEngine) agentFor(src string) (sources.Agent, error) {
 	switch src {
 	case "fofa":
-		return &richFofaAgent{}, nil
+		return &fofaAgent{endpoint: e.fofaURL}, nil
 	case "hunter":
-		return &richHunterAgent{}, nil
+		return &hunterAgent{}, nil
 	case "shodan":
 		return &shodan.Agent{}, nil
 	case "shodan-idb":

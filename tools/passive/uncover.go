@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,13 +17,14 @@ import (
 )
 
 // UncoverEngine wraps uncover's session and agent infrastructure. It uses
-// custom agents for fofa/hunter to preserve rich fields (title, icp, company,
+// custom agents for fofa/hunter to preserve fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
 type UncoverEngine struct {
-	keys   sources.Keys
-	proxy  string
-	limit  int
-	logger telemetry.Logger
+	keys    sources.Keys
+	proxy   string
+	limit   int
+	logger  telemetry.Logger
+	fofaURL string
 }
 
 // NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
@@ -55,10 +57,11 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	}
 
 	return &UncoverEngine{
-		keys:   keys,
-		proxy:  opts.IngressProxy,
-		limit:  limit,
-		logger: logger,
+		keys:    keys,
+		proxy:   opts.IngressProxy,
+		limit:   limit,
+		logger:  logger,
+		fofaURL: opts.FofaURL,
 	}
 }
 
@@ -136,35 +139,52 @@ func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sour
 	if err != nil {
 		return nil, fmt.Errorf("uncover session: %w", err)
 	}
+	defer session.RateLimits.Stop()
 	ch, err := agent.Query(ctx, session, &sources.Query{Query: query, Limit: e.limit})
 	if err != nil {
 		return nil, fmt.Errorf("uncover query %s: %w", src, err)
 	}
 	var results []sources.Result
+	var queryErr error
 	for r := range ch {
 		if r.Error != nil {
-			e.logger.Warnf("uncover source=%s error=%v", src, r.Error)
+			var urlErr *url.Error
+			if errors.As(r.Error, &urlErr) {
+				copy := *urlErr
+				copy.URL = "<redacted>"
+				r.Error = &copy
+			}
+			message := r.Error.Error()
+			for _, key := range []string{e.keys.FofaKey, e.keys.HunterToken} {
+				if key != "" {
+					message = strings.ReplaceAll(message, key, "<redacted>")
+				}
+			}
+			if message != r.Error.Error() {
+				r.Error = errors.New(message)
+			}
+			queryErr = errors.Join(queryErr, r.Error)
 			continue
 		}
 		r.Timestamp = time.Now().Unix()
 		results = append(results, r)
 	}
-	return results, nil
+	return results, errors.Join(queryErr, ctx.Err())
 }
 
-// --------------- rich FOFA agent ------------------------------------------------
+// --------------- FOFA ----------------------------------------------------------
 
 const (
-	fofaURL    = "https://fofa.info/api/v1/search/all?key=%s&qbase64=%s&fields=%s&page=%d&size=%d&full=%t"
+	fofaURL    = "https://fofa.info/api/v1/search/all"
 	fofaFields = "ip,port,host,domain,title,icp"
 	fofaSize   = 100
 )
 
-type richFofaAgent struct{}
+type fofaAgent struct{ endpoint string }
 
-func (a *richFofaAgent) Name() string { return "fofa" }
+func (a *fofaAgent) Name() string { return "fofa" }
 
-func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
+func (a *fofaAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
 	if session.Keys.FofaKey == "" {
 		return nil, errors.New("empty fofa key")
 	}
@@ -177,8 +197,12 @@ func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, que
 				return
 			}
 			b64q := base64.StdEncoding.EncodeToString([]byte(query.Query))
-			u := fmt.Sprintf(fofaURL, session.Keys.FofaKey, b64q, fofaFields, page, fofaSize, false)
-			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, u, nil)
+			endpoint := a.endpoint
+			if endpoint == "" {
+				endpoint = fofaURL
+			}
+			values := url.Values{"key": {session.Keys.FofaKey}, "qbase64": {b64q}, "fields": {fofaFields}, "page": {strconv.Itoa(page)}, "size": {strconv.Itoa(fofaSize)}, "full": {"false"}}
+			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, endpoint+"?"+values.Encode(), nil)
 			if err != nil {
 				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
 				return
@@ -186,6 +210,9 @@ func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, que
 			req.Header.Set("Accept", "application/json")
 			resp, err := session.Do(req, a.Name())
 			if err != nil {
+				if resp != nil {
+					resp.Body.Close()
+				}
 				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
 				return
 			}
@@ -210,7 +237,7 @@ func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, que
 				}
 			}
 			total += len(body.Results)
-			if body.Size == 0 || total >= query.Limit || len(body.Results) == 0 || total > body.Size {
+			if body.Size == 0 || total >= query.Limit || len(body.Results) == 0 || total >= body.Size {
 				return
 			}
 		}
@@ -225,7 +252,7 @@ type fofaResponse struct {
 	Size    int        `json:"size"`
 }
 
-// RawFofa is the rich per-result payload stored in Result.Raw.
+// RawFofa is the per-result payload stored in Result.Raw.
 type RawFofa struct {
 	IP     string `json:"ip"`
 	Port   string `json:"port"`
@@ -242,18 +269,18 @@ func pad(row []string, i int) string {
 	return ""
 }
 
-// --------------- rich Hunter agent ----------------------------------------------
+// --------------- Hunter --------------------------------------------------------
 
 const (
 	hunterURL  = "https://hunter.qianxin.com/openApi/search?api-key=%s&search=%s&page=%d&page_size=%d&is_web=%d&start_time=%s&end_time=%s"
 	hunterSize = 100
 )
 
-type richHunterAgent struct{}
+type hunterAgent struct{}
 
-func (a *richHunterAgent) Name() string { return "hunter" }
+func (a *hunterAgent) Name() string { return "hunter" }
 
-func (a *richHunterAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
+func (a *hunterAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
 	if session.Keys.HunterToken == "" {
 		return nil, errors.New("empty hunter keys")
 	}
@@ -275,6 +302,9 @@ func (a *richHunterAgent) Query(ctx context.Context, session *sources.Session, q
 			req.Header.Set("Accept", "application/json")
 			resp, err := session.Do(req, a.Name())
 			if err != nil {
+				if resp != nil {
+					resp.Body.Close()
+				}
 				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
 				return
 			}
@@ -342,7 +372,7 @@ type hunterComponent struct {
 	Version string `json:"version"`
 }
 
-// RawHunter is the rich per-result payload stored in Result.Raw.
+// RawHunter is the per-result payload stored in Result.Raw.
 type RawHunter struct {
 	IP      string `json:"ip"`
 	Port    string `json:"port"`

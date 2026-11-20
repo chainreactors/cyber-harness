@@ -317,7 +317,7 @@ func useProfile(host Host, option *cfg.Option, options useOptions, asJSON bool) 
 		doc["llm"] = llm
 	}
 	llm["active_profile"] = id
-	data, err = yaml.Marshal(doc)
+	data, err = yaml.Marshal(host.Sections.Flat(doc))
 	if err != nil {
 		return err
 	}

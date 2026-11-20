@@ -33,6 +33,8 @@ CLI > CYBER_*／集成专用环境变量 > 当前目录配置 > 用户配置
 
 文件中空的 LLM 协议、端点、模型、密钥字符串按未填写处理，允许低优先级来源补齐。显式 CLI 空值表示清空；`false`、`0`、空列表不会被当成缺省值。
 
+扩展配置直接使用同名顶层块，例如 `scan`、`search`、`recon`、`ioa.client`。旧 `extensions.<名称>` 写法仍兼容；展示和保存采用顶层形式。同一文件混用两种写法时，冲突字段会报错。FOFA、Clash 等服务的自动化配置使用 [gateway](developer/gateway.md)，字段直接写在服务名下，无需 `services` 或 `config` 包装。
+
 ## 模型 profiles
 
 ```yaml
@@ -97,14 +99,13 @@ IOA 客户端与服务端使用独立的扩展配置。在包含这些扩展的�
 ```yaml
 node:
   name: worker
-extensions:
-  ioa.client:
-    url: http://127.0.0.1:8765
-    token: server-access-key
-    space: team
-  ioa.server:
-    url: http://127.0.0.1:8765
-    token: server-access-key
+ioa.client:
+  url: http://127.0.0.1:8765
+  token: server-access-key
+  space: team
+ioa.server:
+  url: http://127.0.0.1:8765
+  token: server-access-key
 ```
 
 客户端 `url` 决定协作服务，`token` 是注册所用的服务凭据，`space` 默认为 `default`；未配置 URL 时，Web 节点从 `--server-url` 推导 `/ioa` 连接；没有 Web 地址时使用产品安装的进程内客户端。服务端配置独立 HTTP 服务的监听 URL 与 access key。Web 中的浏览器桥接由 Hub 宿主装配，操作见[Web 与协作](user/web.md#ioa-消息空间)。

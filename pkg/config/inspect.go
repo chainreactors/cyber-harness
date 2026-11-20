@@ -82,8 +82,8 @@ func optionDocument(option *Option) map[string]any {
 			if !ok {
 				continue
 			}
-			if decoded, err := option.Sections.Decode(alias, fields); err == nil {
-				if raw, err := json.Marshal(decoded); err == nil {
+			if option.Resolved != nil {
+				if raw, err := json.Marshal(option.Resolved.typed[alias]); err == nil {
 					var display map[string]any
 					if json.Unmarshal(raw, &display) == nil {
 						for key, value := range display {
@@ -99,7 +99,11 @@ func optionDocument(option *Option) map[string]any {
 			delete(extensions, alias)
 		}
 	}
-	out["extensions"] = extensions
+	if len(extensions) > 0 {
+		out["extensions"] = extensions
+	} else {
+		delete(out, "extensions")
+	}
 	return out
 }
 
@@ -182,9 +186,21 @@ func Redact(document map[string]any, sections *Sections) map[string]any {
 				continue
 			}
 			if m, ok := value.(map[string]any); ok {
-				for _, secret := range sections.declarations[key].Secrets {
+				for _, secret := range sections.declarations[key].secretPaths(m) {
 					parent, name := fieldParent(m, secret)
 					if v, ok := parent[name]; ok && v != "" {
+						parent[name] = "[redacted]"
+					}
+				}
+			}
+		}
+	}
+	if sections != nil {
+		for alias, key := range sections.aliases {
+			if fields, ok := out[alias].(map[string]any); ok {
+				for _, path := range sections.declarations[key].secretPaths(fields) {
+					parent, name := fieldParent(fields, path)
+					if value, ok := parent[name]; ok && value != nil && value != "" {
 						parent[name] = "[redacted]"
 					}
 				}

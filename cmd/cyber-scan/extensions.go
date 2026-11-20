@@ -10,9 +10,11 @@ import (
 	"github.com/chainreactors/cyber/core/extension"
 	loopext "github.com/chainreactors/cyber/exts/agent"
 	arsenalext "github.com/chainreactors/cyber/exts/arsenal"
+	"github.com/chainreactors/cyber/exts/gateway"
 	guardrailext "github.com/chainreactors/cyber/exts/guardrail"
 	okfext "github.com/chainreactors/cyber/exts/okf"
 	protonext "github.com/chainreactors/cyber/exts/proton"
+	proxyext "github.com/chainreactors/cyber/exts/proxy"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	subagentext "github.com/chainreactors/cyber/exts/subagent"
@@ -23,10 +25,9 @@ import (
 	"github.com/chainreactors/cyber/tools/scan"
 )
 
-// extensions returns the product's extensions in the order they must load. It
-// threads no capabilities: every extension borrows what it needs from the ones
-// ahead of it, so this reads as a membership decision and nothing else.
-func extensions(config appConfig, loop agent.Loop, workDir string, proxy extension.Extension, guardrailConfig guardrailext.Config) ([]extension.Extension, error) {
+// extensions returns the product's extensions in load order. Gateway binds
+// configuration to the existing owners before their consumers are loaded.
+func extensions(config appConfig, loop agent.Loop, workDir string, proxy *proxyext.Extension, guardrailConfig guardrailext.Config) ([]extension.Extension, error) {
 	config.DataDir = cfg.ResolveDataDir(config.DataDir)
 	config.Scanner.Resources.CacheDir = filepath.Join(config.DataDir, "cache")
 
@@ -52,15 +53,16 @@ func extensions(config appConfig, loop agent.Loop, workDir string, proxy extensi
 	if err != nil {
 		return nil, err
 	}
-	// The loop installation publishes agent.Loop, so it precedes every
-	// extension that runs against one.
+	discovery, passive := discoveryExtensions(config)
+	extensions = append(extensions, gateway.New(config.Gateway, passive.Gateway(config.Recon.Service), proxy.Gateway(config.ProxyService)))
+	// The loop installation publishes agent.Loop before its consumers.
 	extensions = append(extensions, okfext.New(prompt.MainSystem, scan.ScannerSystemTarget), loopext.New(loop), subagentext.New(), arsenal)
 
 	if !config.SkipEngines {
 		config.Scanner.Crawler = katana.Crawl
 		extensions = append(extensions, scannerext.New(config.Scanner, workDir), protonext.New(protonext.Config{Directory: workDir}))
 
-		extensions = append(extensions, discoveryExtensions(config)...)
+		extensions = append(extensions, discovery...)
 	}
 	if optionalToolEnabled(config.OptionalTools, "search") {
 		extensions = append(extensions, searchext.New(searchext.Options{TavilyKeys: config.TavilyKeys}))

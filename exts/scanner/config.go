@@ -22,7 +22,7 @@ type CyberhubOptions struct {
 // CYBER_CYBERHUB_* / CYBER_PROXY environment mapping.
 func CyberhubSection() cfg.Section {
 	return cfg.Section{
-		Key: CyberhubConfigKey, Aliases: []string{CyberhubConfigKey},
+		Key: CyberhubConfigKey,
 		New: func() any {
 			return &CyberhubOptions{
 				URL: DefaultCyberhubURL, Key: DefaultCyberhubKey,

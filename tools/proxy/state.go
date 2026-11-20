@@ -23,6 +23,7 @@ type State struct {
 	originalProxy string
 	subscription  *clash.Subscription
 	subscribeURL  string
+	revision      uint64
 	activeNode    *clash.ProxyNode
 	activeURL     string
 	autoURL       string           // clash:// URL for auto mode
@@ -45,6 +46,7 @@ func (s *State) LoadSubscription(sub *clash.Subscription, subscribeURL string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscription = sub
+	s.revision++
 	s.subscribeURL = subscribeURL
 	s.activeNode = nil
 	s.activeURL = ""
@@ -108,6 +110,7 @@ func (s *State) SetAutoDial(clashURL string, dial proxyclient.Dial) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoURL = clashURL
+	s.revision++
 	s.autoDial = dial
 	s.singleDial = nil
 	s.activeNode = nil
@@ -129,6 +132,7 @@ func (s *State) SetProxyURL(rawURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.singleDial = d
+	s.revision++
 	s.activeURL = rawURL
 	s.activeNode = nil
 	s.autoURL = ""
@@ -174,6 +178,7 @@ func (s *State) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscription = nil
+	s.revision++
 	s.subscribeURL = ""
 	s.activeNode = nil
 	s.activeURL = ""

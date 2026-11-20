@@ -10,6 +10,7 @@ import (
 
 	"github.com/chainreactors/cyber/agent/provider"
 	types "github.com/chainreactors/cyber/core/types"
+	"github.com/chainreactors/cyber/exts/gateway"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	webservice "github.com/chainreactors/cyber/pkg/web/service"
 	"google.golang.org/protobuf/proto"
@@ -26,10 +27,17 @@ type ConfigCodec struct {
 	PreserveValues func(cfg.Values, cfg.Values)
 }
 
-// SharedConfigCodec exposes shared settings. Product extension sections stay
-// in the source file and are resolved by the independent execution nodes.
+// SharedConfigCodec exposes shared settings and forwards opaque gateway
+// configuration. Concrete service schemas belong to the execution nodes.
 func SharedConfigCodec() ConfigCodec {
 	sections := cfg.NewSections()
+	services, err := gateway.Section()
+	if err != nil {
+		panic(err)
+	}
+	if _, err := sections.Add(services); err != nil {
+		panic(err)
+	}
 	sections.Seal()
 	return ConfigCodec{
 		Sections: sections,
@@ -241,7 +249,7 @@ func (s *FileConfigStore) PrepareDistributeConfig(ctx context.Context, incoming 
 	if err := cfg.ResolveRuntimeSnapshot(&runtimeOption, candidate); err != nil {
 		return nil, err
 	}
-	next, err := yaml.Marshal(patched)
+	next, err := yaml.Marshal(sections.Flat(patched))
 	if err != nil {
 		return nil, err
 	}
