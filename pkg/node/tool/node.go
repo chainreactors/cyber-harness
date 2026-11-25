@@ -4,6 +4,7 @@ package toolnode
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,6 +36,18 @@ const (
 	websocketPongTimeout = 90 * time.Second
 )
 
+// Identity identifies the process and one accepted connection.
+type Identity struct {
+	InstanceID string
+	Nonce      string
+}
+
+// NamespaceSession owns connection-local work, never host resources.
+type NamespaceSession interface {
+	Cancel(string)
+	Close(context.Context) error
+}
+
 type Config struct {
 	Metadata  map[string]any
 	ServerURL string
@@ -50,8 +63,14 @@ type Config struct {
 	// connection. The profile-owned extensions remain loaded across reconnects;
 	// the connection-owned mux only owns registration admission and draining.
 	RegisterNamespaces func(*aop.NamespaceMux) error
-	Logger             telemetry.Logger
-	Dialer             *websocket.Dialer
+	// OpenNamespaces runs after AgentAccepted and before inbound dispatch.
+	OpenNamespaces func(*aop.NamespaceMux, *CallHandler, Identity) (NamespaceSession, error)
+	// ConnectionMetadata adds identity-bound values to AgentHello.
+	ConnectionMetadata func(Identity) map[string]any
+	// ShouldRetry can reject reconnection after a terminal connection error.
+	ShouldRetry func(error) bool
+	Logger      telemetry.Logger
+	Dialer      *websocket.Dialer
 }
 
 // Run connects an Agent-free tool.Executor to the hub and serves until ctx
@@ -95,6 +114,9 @@ func Run(ctx context.Context, cfg Config) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if cfg.ShouldRetry != nil && !cfg.ShouldRetry(err) {
+			return err
+		}
 		delay := retryDelay(attempt)
 		cfg.Logger.Warnf("tool node connection lost, retrying in %s: %v", delay, err)
 		timer := time.NewTimer(delay)
@@ -114,6 +136,13 @@ func retryDelay(attempt int) time.Duration {
 		attempt = 5
 	}
 	return time.Duration(1<<attempt) * 250 * time.Millisecond
+}
+
+// EnrollmentError carries the hub's rejection code for retry policy decisions.
+type EnrollmentError struct{ Code, Message string }
+
+func (e *EnrollmentError) Error() string {
+	return fmt.Sprintf("AOP enrollment rejected: %s: %s", e.Code, e.Message)
 }
 
 func runConnection(ctx context.Context, cfg Config, instanceID string) error {
@@ -156,12 +185,13 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	}()
 	namespaces := aop.NewNamespaceMux(connectionCtx)
 	defer func() { _ = namespaces.Close(context.Background()) }()
+	identity := Identity{InstanceID: instanceID, Nonce: rand.Text()}
 	if cfg.RegisterNamespaces != nil {
 		if err := cfg.RegisterNamespaces(namespaces); err != nil {
 			return fmt.Errorf("register tool node namespaces: %w", err)
 		}
 	}
-	hello, err := hello(cfg, instanceID)
+	hello, err := hello(cfg, identity)
 	if err != nil {
 		return err
 	}
@@ -182,7 +212,7 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 		return fmt.Errorf("expected AOP enrollment response")
 	}
 	if rejected := accepted.GetProtocolError(); rejected != nil {
-		return fmt.Errorf("AOP enrollment rejected: %s: %s", rejected.GetCode(), rejected.GetMessage())
+		return &EnrollmentError{Code: rejected.GetCode(), Message: rejected.GetMessage()}
 	}
 	if accepted.GetAgentAccepted() == nil {
 		return fmt.Errorf("expected AOP agent acceptance")
@@ -197,18 +227,39 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	defer stop()
 	send := func(id string, message proto.Message) { _ = connection.Send(aop.Reply(id, message)) }
 	calls := &CallHandler{Executor: cfg.Executor, Progress: cfg.Progress, Emitter: cfg.ID, Logger: cfg.Logger, Send: send, Publish: cfg.Events.Publish}
+	var namespaceSession NamespaceSession
+	var unsubscribe []func()
+	defer func() {
+		cancel()
+		calls.Close()
+		for _, stop := range unsubscribe {
+			stop()
+		}
+		if namespaceSession != nil {
+			_ = namespaceSession.Close(context.Background())
+		}
+	}()
+	if cfg.OpenNamespaces != nil {
+		namespaceSession, err = cfg.OpenNamespaces(namespaces, calls, identity)
+		if err != nil {
+			return fmt.Errorf("open tool node namespaces: %w", err)
+		}
+	}
 	if err := namespaces.Register(&toolpb.ProtocolMessage{}, calls.Handle); err != nil {
 		return err
 	}
 	if cfg.Progress != nil {
 		sub := cfg.Progress.Subscribe(calls.ForwardProgress)
-		defer sub.Cancel()
+		unsubscribe = append(unsubscribe, sub.Cancel)
 	}
 	sub := cfg.Events.Observe(calls.Forward)
-	defer sub.Cancel()
-	defer func() { cancel(); calls.Close() }()
+	unsubscribe = append(unsubscribe, sub.Cancel)
 	return connection.Run(func(_ context.Context, envelope *aop.Envelope, reply aop.SendFunc) error {
-		if calls.Cancel(envelope) {
+		if target, canceling := cancelOperationTarget(envelope); canceling {
+			calls.Cancel(envelope)
+			if namespaceSession != nil {
+				namespaceSession.Cancel(target)
+			}
 			return nil
 		}
 		handled, err := namespaces.Dispatch(envelope, reply)
@@ -221,7 +272,18 @@ func runConnection(ctx context.Context, cfg Config, instanceID string) error {
 	})
 }
 
-func hello(cfg Config, instanceID string) (*aop.AgentHello, error) {
+func cancelOperationTarget(envelope *aop.Envelope) (string, bool) {
+	if envelope == nil || envelope.Payload == nil || !envelope.Payload.MessageIs(&aop.ProtocolMessage{}) {
+		return "", false
+	}
+	value := new(aop.ProtocolMessage)
+	if envelope.Payload.UnmarshalTo(value) != nil || value.GetCancelOperation() == nil {
+		return "", false
+	}
+	return value.GetCancelOperation().GetTargetId(), true
+}
+
+func hello(cfg Config, identity Identity) (*aop.AgentHello, error) {
 	hostname, _ := os.Hostname()
 	workDir, _ := os.Getwd()
 	username := ""
@@ -232,7 +294,12 @@ func hello(cfg Config, instanceID string) (*aop.AgentHello, error) {
 	for key, value := range cfg.Metadata {
 		values[key] = value
 	}
-	values["version"], values["mode"], values["instance_id"] = cfg.Version, "tool", instanceID
+	if cfg.ConnectionMetadata != nil {
+		for key, value := range cfg.ConnectionMetadata(identity) {
+			values[key] = value
+		}
+	}
+	values["version"], values["mode"], values["instance_id"] = cfg.Version, "tool", identity.InstanceID
 	metadata, err := structpb.NewStruct(values)
 	if err != nil {
 		return nil, err
