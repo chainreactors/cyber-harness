@@ -45,7 +45,7 @@ func TestProcessHooksFollowActualCompletion(t *testing.T) {
 	defer startSub.Close(context.Background())
 	defer completeSub.Close(context.Background())
 
-	execution, err := bash.Start(t.Context(), "wait_for_test", BashExecOptions{})
+	execution, err := bash.Start(t.Context(), "wait_for_test", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestProcessHooksFollowActualCompletion(t *testing.T) {
 		t.Fatalf("after-exit: %+v", after)
 	}
 	bash.Close()
-	if _, err := bash.Start(t.Context(), "wait_for_test", BashExecOptions{}); !errors.Is(err, coretool.ErrUnavailable) {
+	if _, err := bash.Start(t.Context(), "wait_for_test", Options{}); !errors.Is(err, coretool.ErrUnavailable) {
 		t.Fatalf("start after Close: %v", err)
 	}
 }
@@ -86,7 +86,7 @@ func TestFailedStartCompletesProcessHook(t *testing.T) {
 		completed <- event
 		return struct{}{}, nil
 	})
-	if _, err := bash.Start(t.Context(), "", BashExecOptions{}); !errors.Is(err, operation.ErrStartFailed) {
+	if _, err := bash.Start(t.Context(), "", Options{}); !errors.Is(err, operation.ErrStartFailed) {
 		t.Fatalf("accepted empty command: %v", err)
 	}
 	before, after := <-starting, <-completed
@@ -106,7 +106,7 @@ func TestProcessStartedPolicyCanCancelOnlyCurrentExecution(t *testing.T) {
 		}
 		return toolhooks.Cancellation{}, nil
 	})
-	if _, err := bash.Start(t.Context(), "cancel-me", BashExecOptions{}); !errors.Is(err, want) {
+	if _, err := bash.Start(t.Context(), "cancel-me", Options{}); !errors.Is(err, want) {
 		t.Fatalf("cancellation = %v", err)
 	}
 }

@@ -17,7 +17,7 @@ import (
 // validated extensions.record.max_concurrent, wrote it into init output and
 // showed it in settings, while no extension could exist to read it.
 func TestRecordSectionTracksTheRecordExtension(t *testing.T) {
-	declared := slices.Contains(defaultSections().Aliases(), "record")
+	declared := slices.Contains(defaultSections().Keys(), "record")
 	if declared != recordExtensionLinked {
 		t.Fatalf("record section declared=%v but the extension linked=%v", declared, recordExtensionLinked)
 	}

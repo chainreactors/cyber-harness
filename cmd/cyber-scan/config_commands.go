@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"slices"
 	"time"
 
-	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
-
+	"github.com/chainreactors/cyber/exts/gateway"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
+	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
@@ -28,13 +29,32 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 	if hub, err := scannerext.ReadCyberhub(option); err == nil && hub.URL != "" {
 		selected = append(selected, scannerext.CyberhubConfigKey)
 	}
-	recon, reconErr := passiveconfig.ReadRecon(option)
-	if reconErr == nil && (recon.FofaKey != "" || recon.HunterAPIKey != "") {
-		selected = append(selected, passiveconfig.ReconConfigKey)
+	recon, reconErr := passiveconfig.Read(option)
+	if reconErr == nil && recon.HunterAPIKey != "" {
+		selected = append(selected, passiveconfig.ConfigKey)
 	}
 	searchKeys, searchErr := searchext.ReadKeys(option)
 	if (reconErr == nil && recon.TavilyKey != "") || (searchErr == nil && searchKeys != "") {
 		selected = append(selected, searchext.ConfigKey)
+	}
+	if services, err := gateway.Read(option); err == nil {
+		configured := map[string]bool{}
+		for name, fields := range services {
+			kind, _ := fields["kind"].(string)
+			if kind == "" {
+				kind = name
+			}
+			configured[kind] = true
+		}
+		if configured["fofa"] {
+			selected = append(selected, "gateway.fofa")
+		}
+		if configured["hunter"] && !slices.Contains(selected, passiveconfig.ConfigKey) {
+			selected = append(selected, passiveconfig.ConfigKey)
+		}
+		if configured["tavily"] && !slices.Contains(selected, searchext.ConfigKey) {
+			selected = append(selected, searchext.ConfigKey)
+		}
 	}
 	if client, err := ioaclient.ReadOptions(option); err == nil && client.URL != "" {
 		selected = append(selected, ioaclient.ConfigKey)

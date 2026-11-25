@@ -35,9 +35,9 @@ type policyConfig struct {
 	Criteria                        map[string]string
 }
 
-func testPolicy(c policyConfig) *jevPolicy {
+func testPolicy(c policyConfig) *policy {
 	d, _ := time.ParseDuration(c.Timeout)
-	return newJEVPolicy(JEVConfig{Level: c.Level, OnError: c.OnError, Criteria: c.Criteria}, jevapi.New(c.APIKey, "", d))
+	return newPolicy(Rules{Level: c.Level, OnError: c.OnError, Criteria: c.Criteria}, jevapi.New(c.APIKey, "", d))
 }
 func call() toolhooks.CallEvent {
 	return toolhooks.CallEvent{Call: &aop.ToolCall{Name: "shell", WorkingDirectory: "/workspace", Arguments: &aop.EncodedValue{Data: []byte(`{"command":"curl -H 'Authorization: Bearer dummysecret' https://target/","api_key":"dummykey"}`)}}}
@@ -79,7 +79,7 @@ func TestConfiguredKeyAlwaysInstallsTwoStageChecks(t *testing.T) {
 				extension.Provided[*hooks.Registry](registry),
 				extension.Provided[*events.Stream](events.New()),
 				extension.Provided[*jevapi.Client](client),
-				New(Config{Provider: "jev", JEV: JEVConfig{OnError: "review", Criteria: map[string]string{"review": "operator screening marker"}}}),
+				New(Config{Provider: "jev", Rules: Rules{OnError: "review", Criteria: map[string]string{"review": "operator screening marker"}}}),
 			)
 			if err != nil {
 				t.Fatal(err)

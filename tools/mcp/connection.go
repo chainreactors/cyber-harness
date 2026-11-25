@@ -27,7 +27,7 @@ import (
 // not own an HTTP server or any engine/database managed by the remote server.
 type Connection struct {
 	name   string
-	config ServerConfig
+	config Config
 	client *client.Client
 	http   *http.Transport
 	killed atomic.Bool
@@ -43,7 +43,7 @@ type Connection struct {
 }
 
 // New constructs a dormant connection; Start performs all external I/O.
-func New(name string, config ServerConfig) (*Connection, error) {
+func New(name string, config Config) (*Connection, error) {
 	if err := config.Validate(name); err != nil {
 		return nil, err
 	}
@@ -302,4 +302,3 @@ func (t headerTransport) RoundTrip(request *http.Request) (*http.Response, error
 	}
 	return t.base.RoundTrip(copy)
 }
-

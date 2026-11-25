@@ -14,7 +14,7 @@ import (
 )
 
 func TestWebSearchFailureReturnsModelFeedback(t *testing.T) {
-	backend := NewTavilySearch("")
+	backend := New(Config{})
 	backend.client = &http.Client{Transport: searchFailureTransport{}}
 	web := NewWebSearchTool(func(context.Context, string, int) (string, error) {
 		return "", fmt.Errorf("no completed web_search_call")
@@ -50,8 +50,7 @@ func TestWebSearchUnverifiedProviderFallsBack(t *testing.T) {
 		fmt.Fprint(w, `<a class="result__a" href="https://go.dev/dl/">Go downloads</a>`)
 	}))
 	defer server.Close()
-	backend := NewTavilySearch("")
-	backend.client = &http.Client{Transport: redirectSearchTransport{server.URL}}
+	backend := New(Config{DDGBaseURL: server.URL})
 	web := NewWebSearchTool(func(context.Context, string, int) (string, error) {
 		return "", fmt.Errorf("no completed web_search_call")
 	}, backend)
@@ -61,21 +60,9 @@ func TestWebSearchUnverifiedProviderFallsBack(t *testing.T) {
 	}
 }
 
-type redirectSearchTransport struct{ target string }
-
-func (tr redirectSearchTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	clone := r.Clone(r.Context())
-	u, err := http.NewRequest(r.Method, tr.target, r.Body)
-	if err != nil {
-		return nil, err
-	}
-	clone.URL = u.URL
-	return http.DefaultTransport.RoundTrip(clone)
-}
-
 func TestSearchCancellationStopsFallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	web := NewWebSearchTool(func(context.Context, string, int) (string, error) { cancel(); return "", context.Canceled }, NewTavilySearch(""))
+	web := NewWebSearchTool(func(context.Context, string, int) (string, error) { cancel(); return "", context.Canceled }, New(Config{}))
 	_, err := web.Execute(ctx, `{"query":"Go"}`)
 	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "fallback search") {
 		t.Fatalf("err=%v", err)

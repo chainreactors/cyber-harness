@@ -75,7 +75,7 @@ func newAdapterTestBash(t *testing.T) (*BashTool, *coretool.CommandRegistry, *ad
 func runAdapterCommand(t *testing.T, bash *BashTool, ctx context.Context, command string, workDir string) (proc.Info, string) {
 	t.Helper()
 	var output strings.Builder
-	execution, err := bash.RunForeground(ctx, command, BashExecOptions{
+	execution, err := bash.RunForeground(ctx, command, Options{
 		WorkDir:  workDir,
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
@@ -130,7 +130,7 @@ func TestForegroundPreservesExplicitStdin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	var output bytes.Buffer
-	execution, err := bash.RunForeground(ctx, "memory_upper", BashExecOptions{
+	execution, err := bash.RunForeground(ctx, "memory_upper", Options{
 		Stdin: strings.NewReader("provided input"), Stdout: &output,
 	})
 	if err != nil || ctx.Err() != nil {
@@ -195,7 +195,7 @@ func TestInterpreterPreservesNativeCommandValues(t *testing.T) {
 	bash.SetCommandRegistry(registry)
 	t.Cleanup(bash.Close)
 	var out bytes.Buffer
-	execution, err := bash.RunForeground(t.Context(), `native-args '' 'two words' '|' '>' '&&' '$HOME' 'a\nb'`, BashExecOptions{Stdout: &out})
+	execution, err := bash.RunForeground(t.Context(), `native-args '' 'two words' '|' '>' '&&' '$HOME' 'a\nb'`, Options{Stdout: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestInterpreterPreservesNativeCommandValues(t *testing.T) {
 	if f, ok := execution.Details.(func() int); !ok || f() != 42 {
 		t.Fatalf("command details lost: %T", execution.Details)
 	}
-	result, err := bash.RunForegroundTool(t.Context(), "native-bytes | native-copy > bytes.bin; NATIVE_LOCAL='two words' native-env", BashExecOptions{})
+	result, err := bash.RunForegroundTool(t.Context(), "native-bytes | native-copy > bytes.bin; NATIVE_LOCAL='two words' native-env", Options{})
 	if err != nil || result.IsError {
 		t.Fatalf("composed native commands: result=%v err=%v", result, err)
 	}
@@ -236,7 +236,7 @@ func TestShellCommandRedirectionAndInvocationContext(t *testing.T) {
 
 func TestInterpreterCloseCancelsCommand(t *testing.T) {
 	bash, _, state := newAdapterTestBash(t)
-	execution, err := bash.Start(t.Context(), "memory_wait && memory_echo unreachable", BashExecOptions{})
+	execution, err := bash.Start(t.Context(), "memory_wait && memory_echo unreachable", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

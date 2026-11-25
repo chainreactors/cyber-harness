@@ -57,8 +57,8 @@ func TestFlowStoreRejectsIndexRecordsWithoutBodyOwnership(t *testing.T) {
 
 func TestDefaultStorageKeepsOnlyPreviewWithoutCaptureDirectory(t *testing.T) {
 	dir := t.TempDir()
-	resource := NewProxyHub(nil, nil, dir, true, nil)
-	hub := resource.ProxyHub
+	resource := newHub(nil, nil, dir, true, nil)
+	hub := resource.Hub
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestFileConsumerOwnsChunksAndClosesBeforePublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
+	hub := newHub(nil, store, "", true, nil).Hub
 	hub.storage.BodyMaxBytes = 8
 	stream := &bodyStream{}
 	body, err := hub.captureBody(stream)

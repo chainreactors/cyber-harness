@@ -34,10 +34,10 @@ const (
 	completionRetryInterval = 10 * time.Millisecond
 )
 
-// BashExecOptions controls one foreground execution without mutating the
+// Options controls one foreground execution without mutating the
 // BashTool defaults. Runner/WebAgent transports use this entry point while the
 // agent-facing Execute method applies the explicit wait/background contract.
-type BashExecOptions struct {
+type Options struct {
 	interactive bool
 	keepStdin   bool
 	route       coretool.Egress
@@ -225,7 +225,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*aop.ToolResu
 		return coretool.TextResult("ok"), nil
 	}
 	if progress := operation.InvocationFromContext(ctx).Progress; progress != nil {
-		options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, ""), OnOutput: progress}
+		options := Options{WorkDir: operation.WorkDirFromContext(ctx, ""), OnOutput: progress}
 		if args.TimeoutSpecified() {
 			options.Timeout = time.Duration(args.Timeout) * time.Second
 			options.TimeoutSet = true
@@ -233,7 +233,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*aop.ToolResu
 		return t.RunForegroundTool(ctx, command, options)
 	}
 
-	options := BashExecOptions{WorkDir: operation.WorkDirFromContext(ctx, ""), keepStdin: args.Wait > 0}
+	options := Options{WorkDir: operation.WorkDirFromContext(ctx, ""), keepStdin: args.Wait > 0}
 	if args.TimeoutSpecified() {
 		options.Timeout = time.Duration(args.Timeout) * time.Second
 		options.TimeoutSet = true
@@ -249,7 +249,7 @@ func (t *BashTool) Execute(ctx context.Context, arguments string) (*aop.ToolResu
 // router used by the bash agent tool, streams raw output, and waits for the
 // final session state. Non-zero exits are represented by Info.ExitStatus() rather
 // than returned as transport errors.
-func (t *BashTool) RunForeground(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
+func (t *BashTool) RunForeground(ctx context.Context, command string, options Options) (*coretool.Execution, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
@@ -320,7 +320,7 @@ func (t *BashTool) RunForeground(ctx context.Context, command string, options Ba
 // collected ToolResult (bounded text and media), streaming raw
 // output through options.OnOutput. Transports that must remain foreground
 // (AOP tool.call) use this instead of Execute.
-func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options BashExecOptions) (*aop.ToolResult, error) {
+func (t *BashTool) RunForegroundTool(ctx context.Context, command string, options Options) (*aop.ToolResult, error) {
 	if t.maxTimeout > 0 && options.Timeout > t.maxTimeout {
 		return nil, fmt.Errorf("foreground bash timeout %s exceeds runner ceiling %s", options.Timeout, t.maxTimeout)
 	}
@@ -333,7 +333,7 @@ func (t *BashTool) RunForegroundTool(ctx context.Context, command string, option
 }
 
 // start creates one managed interpreter session for a shell script.
-func (t *BashTool) start(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
+func (t *BashTool) start(ctx context.Context, command string, options Options) (*coretool.Execution, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}

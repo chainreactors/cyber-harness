@@ -145,7 +145,7 @@ func TestInteractionModeConfiguration(t *testing.T) {
 			t.Fatal("invalid interaction mode accepted")
 		}
 	}
-	if _, err := (Config{JEV: JEVConfig{OnError: "record"}}).timeout(); err == nil {
+	if _, err := (Config{Rules: Rules{OnError: "record"}}).timeout(); err == nil {
 		t.Fatal("unavailable judgments cannot be configured as successful admission")
 	}
 }

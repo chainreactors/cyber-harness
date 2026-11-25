@@ -23,6 +23,7 @@ type State struct {
 	originalProxy string
 	subscription  *clash.Subscription
 	subscribeURL  string
+	revision      uint64
 	activeNode    *clash.ProxyNode
 	activeURL     string
 	autoURL       string           // clash:// URL for auto mode
@@ -30,7 +31,7 @@ type State struct {
 	singleDial    proxyclient.Dial // pre-built dial for a single persistent proxy URL
 
 	// chain is the composed egress dial for the current selection, republished
-	// on every state change. ProxyHub's upstream reads it on each connection so
+	// on every state change. Hub's upstream reads it on each connection so
 	// switching nodes takes effect live without touching in-flight children.
 	chain atomic.Pointer[proxyclient.Dial]
 }
@@ -45,6 +46,7 @@ func (s *State) LoadSubscription(sub *clash.Subscription, subscribeURL string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscription = sub
+	s.revision++
 	s.subscribeURL = subscribeURL
 	s.activeNode = nil
 	s.activeURL = ""
@@ -108,6 +110,7 @@ func (s *State) SetAutoDial(clashURL string, dial proxyclient.Dial) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.autoURL = clashURL
+	s.revision++
 	s.autoDial = dial
 	s.singleDial = nil
 	s.activeNode = nil
@@ -129,6 +132,7 @@ func (s *State) SetProxyURL(rawURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.singleDial = d
+	s.revision++
 	s.activeURL = rawURL
 	s.activeNode = nil
 	s.autoURL = ""
@@ -174,6 +178,7 @@ func (s *State) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subscription = nil
+	s.revision++
 	s.subscribeURL = ""
 	s.activeNode = nil
 	s.activeURL = ""

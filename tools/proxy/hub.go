@@ -20,7 +20,7 @@ import (
 	mitmproxy "github.com/chainreactors/utils/mitmproxy/proxy"
 )
 
-// ProxyHub is the runner-level MITM proxy capability that every tool routes
+// Hub is the runner-level MITM proxy capability that every tool routes
 // through. It is the STABLE front hop: its local address is injected once into
 // child process env and in-process HTTP clients and never changes. The DYNAMIC
 // back hop — the actual egress proxy chain — lives in State and is swapped live
@@ -30,7 +30,7 @@ import (
 //
 // hub.dial is installed as mitmproxy Options.Dialer so it covers plain HTTP as
 // well as HTTPS/CONNECT (see the local mitmproxy fork patch adding that field).
-type ProxyHub struct {
+type Hub struct {
 	state        *State
 	store        *FlowStore
 	caRootPath   string
@@ -58,7 +58,7 @@ type ProxyHub struct {
 	recording atomic.Bool
 	decrypt   atomic.Bool
 	filterMu  sync.RWMutex
-	filter    QueryOpts
+	filter    Filter
 	authMu    sync.RWMutex
 	auth      func(*http.Request) error
 
@@ -68,25 +68,25 @@ type ProxyHub struct {
 
 // State returns the live egress selection capability. Lifecycle remains owned
 // by the proxy extension; policy tools may use this handle to change routing.
-func (h *ProxyHub) State() *State {
+func (h *Hub) State() *State {
 	if h == nil {
 		return nil
 	}
 	return h.state
 }
 
-// Resource owns a ProxyHub's listener and flow store. Extensions retain the
-// Resource and publish only ProxyHub, whose public API contains no lifecycle
+// Resource owns a Hub's listener and flow store. Extensions retain the
+// Resource and publish only Hub, whose public API contains no lifecycle
 // operations.
 type Resource struct {
-	ProxyHub *ProxyHub
+	Hub *Hub
 }
 
 // Keep proxy-side buffering bounded. Bodies at or above this threshold are
 // captured through the body stream and written to disk incrementally.
 const hubStreamLargeBodies = 64 * 1024
 
-// NewProxyHub uses caller-owned State and takes ownership of FlowStore. Query
+// newHub uses caller-owned State and takes ownership of FlowStore. Query
 // consumers share that store; Shutdown drains and closes it. A nil store
 // creates a private store with the same ownership contract.
 //
@@ -97,11 +97,11 @@ const hubStreamLargeBodies = 64 * 1024
 //     CA needed. Routing still works; nothing is decrypted or stored.
 //
 // Start must be called before use.
-func NewProxyHub(state *State, store *FlowStore, caRootPath string, capture bool, registry *hooks.Registry) *Resource {
+func newHub(state *State, store *FlowStore, caRootPath string, capture bool, registry *hooks.Registry) *Resource {
 	if store == nil {
 		store = NewFlowStore(10000)
 	}
-	h := &ProxyHub{
+	h := &Hub{
 		state: state, store: store, caRootPath: caRootPath, hooks: registry,
 		correlations: make(map[string]*correlationLease),
 		bodySlots:    make(chan struct{}, 16), shutdownDone: make(chan struct{}),
@@ -111,16 +111,16 @@ func NewProxyHub(state *State, store *FlowStore, caRootPath string, capture bool
 	h.caPath = filepath.Join(caRootPath, "mitmproxy-ca-cert.pem")
 	h.recording.Store(capture)
 	h.decrypt.Store(capture)
-	return &Resource{ProxyHub: h}
+	return &Resource{Hub: h}
 }
 
 // Start activates the hub. Lifecycle ownership belongs to the extension that
 // constructed it; the raw proxy resource has no dependency on the host.
 func (r *Resource) Start(ctx context.Context) error {
-	if r == nil || r.ProxyHub == nil {
+	if r == nil || r.Hub == nil {
 		return fmt.Errorf("proxy resource is required")
 	}
-	h := r.ProxyHub
+	h := r.Hub
 	if ctx == nil {
 		return fmt.Errorf("proxy hub start context is required")
 	}
@@ -148,7 +148,7 @@ func (r *Resource) Start(ctx context.Context) error {
 
 // Capturing reports whether the hub currently records traffic (mitm on) or only
 // relays.
-func (h *ProxyHub) Capturing() bool { return h.recording.Load() }
+func (h *Hub) Capturing() bool { return h.recording.Load() }
 
 // SetProxyAuth installs an optional, instance-scoped ingress policy. It runs
 // before HTTP forwarding or CONNECT tunneling, including in relay mode. A
@@ -156,13 +156,13 @@ func (h *ProxyHub) Capturing() bool { return h.recording.Load() }
 // The callback must be safe for concurrent requests. Passing nil allows all
 // requests, which is the default. Changes apply to subsequent requests, not
 // traffic inside an already established CONNECT tunnel.
-func (h *ProxyHub) SetProxyAuth(authorize func(*http.Request) error) {
+func (h *Hub) SetProxyAuth(authorize func(*http.Request) error) {
 	h.authMu.Lock()
 	defer h.authMu.Unlock()
 	h.auth = authorize
 }
 
-func (h *ProxyHub) authorize(_ http.ResponseWriter, req *http.Request) (bool, error) {
+func (h *Hub) authorize(_ http.ResponseWriter, req *http.Request) (bool, error) {
 	h.authMu.RLock()
 	check := h.auth
 	h.authMu.RUnlock()
@@ -177,7 +177,7 @@ func (h *ProxyHub) authorize(_ http.ResponseWriter, req *http.Request) (bool, er
 // gates storage; decryptHTTPS gates HTTPS MITM interception, which
 // only affects connections opened after the change because a child's CA trust
 // is fixed at spawn time.
-func (h *ProxyHub) SetCapture(record, decryptHTTPS bool) {
+func (h *Hub) SetCapture(record, decryptHTTPS bool) {
 	h.recording.Store(record)
 	h.decrypt.Store(decryptHTTPS)
 }
@@ -185,17 +185,17 @@ func (h *ProxyHub) SetCapture(record, decryptHTTPS bool) {
 // SetCaptureFilter applies the existing traffic FlowFilter before a flow is
 // stored. It deliberately lives on the hub so filtering avoids unnecessary
 // memory and disk work.
-func (h *ProxyHub) SetCaptureFilter(filter *traffic.FlowFilter) {
+func (h *Hub) SetCaptureFilter(filter *traffic.FlowFilter) {
 	h.filterMu.Lock()
 	defer h.filterMu.Unlock()
 	if filter == nil {
-		h.filter = QueryOpts{}
+		h.filter = Filter{}
 		return
 	}
-	h.filter = QueryOpts{Host: filter.GetHost(), Status: filter.GetStatus(), CType: filter.GetType()}
+	h.filter = Filter{Host: filter.GetHost(), Status: filter.GetStatus(), CType: filter.GetType()}
 }
 
-func (h *ProxyHub) captureMatches(flow Flow) bool {
+func (h *Hub) captureMatches(flow Flow) bool {
 	h.filterMu.RLock()
 	f := h.filter
 	h.filterMu.RUnlock()
@@ -211,14 +211,14 @@ func (h *ProxyHub) captureMatches(flow Flow) bool {
 	return true
 }
 
-func (h *ProxyHub) captureHostAllowed(host string) bool {
+func (h *Hub) captureHostAllowed(host string) bool {
 	h.filterMu.RLock()
 	hostFilter := h.filter.Host
 	h.filterMu.RUnlock()
 	return hostFilter == "" || strings.Contains(strings.ToLower(host), strings.ToLower(hostFilter))
 }
 
-func (h *ProxyHub) captureResponseAllowed(status int, contentType string) bool {
+func (h *Hub) captureResponseAllowed(status int, contentType string) bool {
 	h.filterMu.RLock()
 	f := h.filter
 	h.filterMu.RUnlock()
@@ -226,7 +226,7 @@ func (h *ProxyHub) captureResponseAllowed(status int, contentType string) bool {
 		(f.CType == "" || strings.Contains(strings.ToLower(contentType), strings.ToLower(f.CType)))
 }
 
-func (h *ProxyHub) start(caRootPath string) error {
+func (h *Hub) start(caRootPath string) error {
 	if caRootPath != "" {
 		if err := os.MkdirAll(caRootPath, 0o755); err != nil {
 			return fmt.Errorf("proxy hub: create CA dir: %w", err)
@@ -277,7 +277,7 @@ func (h *ProxyHub) start(caRootPath string) error {
 
 // dial is the stable indirection: it reads the current egress chain from State
 // on every connection, so `proxy switch/auto/clear` swaps the upstream live.
-func (h *ProxyHub) dial(ctx context.Context, network, address string) (net.Conn, error) {
+func (h *Hub) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	if token := mitmproxy.ProxyAuthUser(ctx); strings.HasPrefix(token, routeTokenPrefix) {
 		h.correlationMu.RLock()
 		lease := h.correlations[token]
@@ -299,7 +299,7 @@ func (h *ProxyHub) dial(ctx context.Context, network, address string) (net.Conn,
 
 // exportCA writes the proxy's root CA to caPath in PEM so external tools can be
 // pointed at it via CURL_CA_BUNDLE / SSL_CERT_FILE / NODE_EXTRA_CA_CERTS.
-func (h *ProxyHub) exportCA(server *mitmproxy.Proxy) error {
+func (h *Hub) exportCA(server *mitmproxy.Proxy) error {
 	if h.caPath == "" {
 		return nil
 	}
@@ -316,7 +316,7 @@ func (h *ProxyHub) exportCA(server *mitmproxy.Proxy) error {
 
 // ProxyURL is the stable http:// address injected into children and in-process
 // clients. Empty until Start succeeds.
-func (h *ProxyHub) ProxyURL() string {
+func (h *Hub) ProxyURL() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.addr == "" {
@@ -330,7 +330,7 @@ func (h *ProxyHub) ProxyURL() string {
 // capture and decrypt are both on: a child must trust the hub's CA exactly when
 // the hub forges certificates for it, and must not when HTTPS is tunneled (a
 // CA-only bundle would then fail to validate the real server certificate).
-func (h *ProxyHub) CAPath() string {
+func (h *Hub) CAPath() string {
 	if !(h.recording.Load() && h.decrypt.Load()) {
 		return ""
 	}
@@ -342,10 +342,10 @@ func (h *ProxyHub) CAPath() string {
 // Close stops the listener. Safe to call on a never-started hub. Cleanup
 // keeps its ownership after a caller timeout, and a later call can wait again.
 func (r *Resource) Close(ctx context.Context) error {
-	if r == nil || r.ProxyHub == nil {
+	if r == nil || r.Hub == nil {
 		return nil
 	}
-	h := r.ProxyHub
+	h := r.Hub
 	if ctx == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
@@ -379,7 +379,7 @@ func (r *Resource) Close(ctx context.Context) error {
 
 // Blocking filesystem calls retain their cleanup owner after the caller's
 // deadline. Neither the caller nor a late MITM callback waits for file I/O.
-func (h *ProxyHub) shutdown(ctx context.Context) error {
+func (h *Hub) shutdown(ctx context.Context) error {
 	h.mu.Lock()
 	server := h.server
 	h.server = nil

@@ -18,7 +18,6 @@ import (
 
 	"github.com/chainreactors/cyber/agent"
 	"github.com/chainreactors/cyber/agent/provider"
-	jevapi "github.com/chainreactors/cyber/agent/provider/jev"
 	agentsession "github.com/chainreactors/cyber/agent/session"
 	"github.com/chainreactors/cyber/aop"
 	jevext "github.com/chainreactors/cyber/exts/jev"
@@ -30,7 +29,7 @@ import (
 type profileJEVTransport struct{}
 
 func (profileJEVTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.String() != jevapi.Endpoint {
+	if r.URL.String() != "https://gateway.test/tenant/v1/systemone" {
 		return nil, fmt.Errorf("fixture rejects external request")
 	}
 	var request struct {
@@ -144,7 +143,7 @@ func TestJEVProfileStreamingCompilationRuntimeAndProtocolEvents(t *testing.T) {
 	directory := t.TempDir()
 	c := minimalConfig(&agentsession.Config{})
 	c.Base.DataDir = t.TempDir()
-	c.Option.Extensions = cfg.Values{"jev": {"mode": "auto", "api_key": "fixture", "directory": directory}, "guardrail": {"provider": "none"}}
+	c.Option.Extensions = cfg.Values{"jev": {"mode": "auto", "base_url": "https://gateway.test/tenant/", "api_key": "fixture", "directory": directory}, "guardrail": {"provider": "none"}}
 	p, err := buildCyberScanProfile(c)
 	if err != nil {
 		t.Fatal(err)

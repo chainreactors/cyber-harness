@@ -163,7 +163,7 @@ func (s *FlowStore) addFiles(f Flow, files [2]*os.File) Flow {
 	return f
 }
 
-func (s *FlowStore) Query(opts QueryOpts) []Flow {
+func (s *FlowStore) Query(opts Filter) []Flow {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]Flow, 0, s.size)

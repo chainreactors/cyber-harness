@@ -11,7 +11,7 @@ import (
 
 // dispatchTraffic installs one connection-owned namespace and returns every
 // synchronous reply to msg.
-func dispatchTraffic(t *testing.T, hub *ProxyHub, msg *traffic.ProtocolMessage) []*traffic.ProtocolMessage {
+func dispatchTraffic(t *testing.T, hub *Hub, msg *traffic.ProtocolMessage) []*traffic.ProtocolMessage {
 	t.Helper()
 	mux := aop.NewNamespaceMux(t.Context())
 	defer mux.Close(context.Background())

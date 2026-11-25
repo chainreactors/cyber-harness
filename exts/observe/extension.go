@@ -244,7 +244,7 @@ func (e *Extension) fileAccess(ctx context.Context, event toolhooks.FileEvent) (
 }
 
 func (e *Extension) flowCompleted(ctx context.Context, event toolhooks.FlowEvent) (struct{}, error) {
-	// ProxyHub gives this boundary an owned, hydrated copy after FlowStore commit.
+	// Hub gives this boundary an owned, hydrated copy after FlowStore commit.
 	e.emit(ctx, event.Flow, event.Operation)
 	return struct{}{}, nil
 }

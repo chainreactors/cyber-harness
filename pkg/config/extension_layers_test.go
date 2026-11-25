@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,7 +14,7 @@ func TestLayeredExtensionDeclarationContract(t *testing.T) {
 			sections := NewSections()
 			validations := 0
 			_, err := sections.Add(Section{
-				Key: "fixture", Aliases: []string{"old_fixture"}, Secrets: []string{"auth.token"},
+				Key: "fixture", Secrets: []string{"auth.token"},
 				New: func() any { return &fixtureOptions{Name: "default", Count: 3, Enabled: true} },
 				Environment: func(s Sources) (map[string]any, map[string]any, error) {
 					var overrides, fallbacks map[string]any
@@ -47,8 +46,8 @@ func TestLayeredExtensionDeclarationContract(t *testing.T) {
 				wantName, wantCount = "fallback", 5
 			}
 			if mode == "files" || mode == "environment" || mode == "cli" {
-				putConfig(t, c.UserFile(), "old_fixture:\n  name: user\n  count: 7\n  auth:\n    token: inherited-secret\n")
-				putConfig(t, filepath.Join(c.Directory, DefaultConfigName), "extensions:\n  fixture:\n    name: ' project '\n    count: 0\n    enabled: false\n")
+				putConfig(t, c.UserFile(), "fixture:\n  name: user\n  count: 7\n  auth:\n    token: inherited-secret\n")
+				putConfig(t, filepath.Join(c.Directory, DefaultConfigName), "fixture:\n  name: ' project '\n  count: 0\n  enabled: false\n")
 				wantName, wantCount, wantEnabled = "project", 0, false
 			}
 			if mode == "environment" || mode == "cli" {
@@ -90,10 +89,10 @@ func TestLayeredExtensionDeclarationContract(t *testing.T) {
 
 func TestLayeredExtensionRejectsInvalidDeclarations(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown field":  "extensions:\n  fixture:\n    typo: true\n",
-		"invalid type":   "extensions:\n  fixture:\n    count: wrong\n",
-		"invalid value":  "extensions:\n  fixture:\n    count: -1\n",
-		"alias conflict": "old_fixture:\n  count: 2\nextensions:\n  fixture:\n    count: 3\n",
+		"unknown field":     "fixture:\n  typo: true\n",
+		"invalid type":      "fixture:\n  count: wrong\n",
+		"invalid value":     "fixture:\n  count: -1\n",
+		"duplicate section": "fixture:\n  count: 2\nfixture:\n  count: 3\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := isolatedContext(t)
@@ -109,28 +108,24 @@ func TestLayeredExtensionRejectsInvalidDeclarations(t *testing.T) {
 	}
 }
 
-func TestLayeredExtensionEditsPreserveUnavailableConfiguration(t *testing.T) {
+func TestLayeredExtensionEditsPreserveInheritedSecrets(t *testing.T) {
 	c := isolatedContext(t)
-	putConfig(t, c.UserFile(), "old_fixture:\n  name: user\n  auth:\n    token: user-secret\n")
+	putConfig(t, c.UserFile(), "fixture:\n  name: user\n  auth:\n    token: user-secret\n")
 	project := filepath.Join(c.Directory, DefaultConfigName)
-	putConfig(t, project, "extensions:\n  fixture:\n    count: 0\n  unavailable:\n    credential: private\n    rules: [one, two]\n")
+	putConfig(t, project, "fixture:\n  count: 0\n")
 	sections := fixtureSections(t)
 	s, err := LoadSnapshot(c, "", sections)
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := s.RuntimeDocument(sections)
+	before := CloneDocument(s.Document)
 	after := CloneDocument(before)
-	after["extensions"].(map[string]any)["fixture"].(map[string]any)["name"] = "edited"
+	after["fixture"].(map[string]any)["name"] = "edited"
 	patched, err := s.ApplyChanges(before, after)
 	if err != nil {
 		t.Fatal(err)
 	}
-	extensions := patched["extensions"].(map[string]any)
-	if !reflect.DeepEqual(extensions["unavailable"], s.TargetDocument()["extensions"].(map[string]any)["unavailable"]) {
-		t.Fatal("edit changed unavailable extension")
-	}
-	if strings.Contains(fmt.Sprint(patched), "user-secret") || extensions["fixture"].(map[string]any)["name"] != "edited" {
+	if strings.Contains(fmt.Sprint(patched), "user-secret") || patched["fixture"].(map[string]any)["name"] != "edited" {
 		t.Fatal("edit copied inherited credentials or lost the change")
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 const GogoTempLogFile = ".sock.lock"
 
-type GogoScanOptions struct {
+type GogoOptions struct {
 	Target       string
 	Ports        string
 	Threads      int
@@ -25,7 +25,7 @@ type GogoScanOptions struct {
 	OnStats      func(sdktypes.Stats)
 }
 
-func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoScanOptions) (<-chan *parsers.GOGOResult, error) {
+func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoOptions) (<-chan *parsers.GOGOResult, error) {
 	if eng == nil {
 		return nil, fmt.Errorf("gogo engine is not available")
 	}
@@ -55,7 +55,7 @@ func GogoScanStream(ctx context.Context, eng *gogo.Engine, opts GogoScanOptions)
 	}, CleanupGogoTempFiles), nil
 }
 
-func buildGogoRunnerOption(opts GogoScanOptions) *gogopkg.RunnerOption {
+func buildGogoRunnerOption(opts GogoOptions) *gogopkg.RunnerOption {
 	runOpt := *gogopkg.DefaultRunnerOption
 	if opts.Timeout > 0 {
 		runOpt.Delay = opts.Timeout

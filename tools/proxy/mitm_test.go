@@ -54,7 +54,7 @@ func TestLargeResponseIsStreamedToBodyFileAndHydratedOnGet(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	var flows []Flow
 	for time.Now().Before(deadline) {
-		flows = hub.store.Query(QueryOpts{})
+		flows = hub.store.Query(Filter{})
 		if len(flows) > 0 {
 			break
 		}
@@ -259,7 +259,7 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
+	hub := newHub(nil, store, "", true, nil).Hub
 	hub.storage.BodyMaxBytes = 4
 	state := &captureState{
 		hub: hub,
@@ -286,11 +286,11 @@ func TestCaptureReportsBodyTruncation(t *testing.T) {
 func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(*ProxyHub)
+		setup func(*Hub)
 		file  string
 	}{
-		{name: "recording disabled", setup: func(h *ProxyHub) { h.SetCapture(false, false) }, file: "disabled.resp"},
-		{name: "capture filter", setup: func(h *ProxyHub) { h.SetCaptureFilter(&traffic.FlowFilter{Host: "keep.test"}) }, file: "filtered.resp"},
+		{name: "recording disabled", setup: func(h *Hub) { h.SetCapture(false, false) }, file: "disabled.resp"},
+		{name: "capture filter", setup: func(h *Hub) { h.SetCaptureFilter(&traffic.FlowFilter{Host: "keep.test"}) }, file: "filtered.resp"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -300,7 +300,7 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			hub := NewProxyHub(nil, store, "", true, nil).ProxyHub
+			hub := newHub(nil, store, "", true, nil).Hub
 			tc.setup(hub)
 			path := filepath.Join(dir, "body", tc.file)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -328,11 +328,11 @@ func TestIngestRejectRemovesBodyFiles(t *testing.T) {
 	}
 }
 
-// newCapturingHub wraps a store in a recording ProxyHub so a bare captureAddon
+// newCapturingHub wraps a store in a recording Hub so a bare captureAddon
 // can route flows through hub.ingestFiles in tests without starting the hub's
 // own listener (the test attaches the addon to its own proxy).
-func newCapturingHub(store *FlowStore) *ProxyHub {
-	return NewProxyHub(nil, store, "", true, nil).ProxyHub
+func newCapturingHub(store *FlowStore) *Hub {
+	return newHub(nil, store, "", true, nil).Hub
 }
 
 // startMITMProxy creates a MITM proxy with a captureAddon and returns its address.
@@ -720,7 +720,7 @@ func BenchmarkFlowStore_Query(b *testing.B) {
 			Host: fmt.Sprintf("host%d.example", i%10),
 		})
 	}
-	opts := QueryOpts{Host: "host5", Status: "2xx", Last: 20}
+	opts := Filter{Host: "host5", Status: "2xx", Last: 20}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		store.Query(opts)

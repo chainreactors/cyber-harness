@@ -2,35 +2,32 @@ package passive
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
+	"maps"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/chainreactors/cyber/core/telemetry"
 	"github.com/projectdiscovery/uncover/sources"
 )
 
-// UncoverEngine wraps uncover's session and agent infrastructure. It uses
-// custom agents for fofa/hunter to preserve rich fields (title, icp, company,
+// Uncover wraps uncover's session and agent infrastructure. It uses
+// custom agents for fofa/hunter to preserve fields (title, icp, company,
 // etc.) and stock uncover agents for other sources.
-type UncoverEngine struct {
-	keys   sources.Keys
-	proxy  string
-	limit  int
-	logger telemetry.Logger
+type Uncover struct {
+	keys     sources.Keys
+	proxy    string
+	limit    int
+	baseURLs map[string]string
+	disabled []string
+	secrets  []string
 }
 
-// NewUncoverEngine builds an engine from fully resolved ReconOptions. It does
+// NewUncover builds an engine from fully resolved Config. It does
 // not read process environment variables; pkg/config owns that boundary.
-func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine {
-	if logger == nil {
-		logger = telemetry.NopLogger()
-	}
+func NewUncover(opts Config) *Uncover {
 	p := &sources.Provider{}
 
 	if opts.FofaKey != "" {
@@ -53,12 +50,13 @@ func NewUncoverEngine(opts ReconOptions, logger telemetry.Logger) *UncoverEngine
 	if limit <= 0 {
 		limit = 100
 	}
-
-	return &UncoverEngine{
-		keys:   keys,
-		proxy:  opts.IngressProxy,
-		limit:  limit,
-		logger: logger,
+	secrets := []string{opts.FofaKey, opts.HunterAPIKey}
+	for _, value := range opts.Credentials {
+		secrets = append(secrets, value)
+	}
+	return &Uncover{
+		keys: keys, proxy: opts.Proxy, limit: limit,
+		baseURLs: maps.Clone(opts.BaseURLs), disabled: slices.Clone(opts.Disabled), secrets: secrets,
 	}
 }
 
@@ -95,7 +93,7 @@ func applyCredentials(p *sources.Provider, values map[string]string) {
 }
 
 // Sources returns the list of sources that have valid credentials.
-func (e *UncoverEngine) Sources() []string {
+func (e *Uncover) Sources() []string {
 	type check struct {
 		name string
 		ok   bool
@@ -112,6 +110,7 @@ func (e *UncoverEngine) Sources() []string {
 		{"criminalip", e.keys.CriminalIPToken != ""},
 		{"publicwww", e.keys.PublicwwwToken != ""},
 		{"hunterhow", e.keys.HunterHowToken != ""},
+		{"odin", e.keys.OdinToken != ""},
 		{"binaryedge", e.keys.BinaryEdgeToken != ""},
 		{"onyphe", e.keys.OnypheKey != ""},
 		{"driftnet", e.keys.DriftnetToken != ""},
@@ -119,15 +118,18 @@ func (e *UncoverEngine) Sources() []string {
 	}
 	var out []string
 	for _, c := range checks {
-		if c.ok {
+		if c.ok && !slices.Contains(e.disabled, c.name) {
 			out = append(out, c.name)
 		}
 	}
 	return out
 }
 
-// QueryRaw executes a single-source query and returns collected results.
-func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sources.Result, error) {
+// Query executes a single-source query and returns collected results.
+func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Result, error) {
+	if slices.Contains(e.disabled, src) {
+		return nil, fmt.Errorf("passive source %s is disabled", src)
+	}
 	agent, err := e.agentFor(src)
 	if err != nil {
 		return nil, err
@@ -136,233 +138,45 @@ func (e *UncoverEngine) QueryRaw(ctx context.Context, src, query string) ([]sour
 	if err != nil {
 		return nil, fmt.Errorf("uncover session: %w", err)
 	}
+	defer session.RateLimits.Stop()
+	if baseURL := e.baseURLs[src]; baseURL != "" {
+		if err := redirect(session, baseURL); err != nil {
+			return nil, err
+		}
+	}
+	defer session.Client.HTTPClient.CloseIdleConnections()
+	if session.Client.HTTPClient2 != nil {
+		defer session.Client.HTTPClient2.CloseIdleConnections()
+	}
 	ch, err := agent.Query(ctx, session, &sources.Query{Query: query, Limit: e.limit})
 	if err != nil {
 		return nil, fmt.Errorf("uncover query %s: %w", src, err)
 	}
 	var results []sources.Result
+	var queryErr error
 	for r := range ch {
 		if r.Error != nil {
-			e.logger.Warnf("uncover source=%s error=%v", src, r.Error)
+			var urlErr *url.Error
+			if errors.As(r.Error, &urlErr) {
+				copy := *urlErr
+				copy.URL = "<redacted>"
+				r.Error = &copy
+			}
+			message := r.Error.Error()
+			for _, key := range e.secrets {
+				if key != "" {
+					message = strings.ReplaceAll(message, key, "<redacted>")
+					message = strings.ReplaceAll(message, url.QueryEscape(key), "<redacted>")
+				}
+			}
+			if message != r.Error.Error() {
+				r.Error = errors.New(message)
+			}
+			queryErr = errors.Join(queryErr, r.Error)
 			continue
 		}
 		r.Timestamp = time.Now().Unix()
 		results = append(results, r)
 	}
-	return results, nil
-}
-
-// --------------- rich FOFA agent ------------------------------------------------
-
-const (
-	fofaURL    = "https://fofa.info/api/v1/search/all?key=%s&qbase64=%s&fields=%s&page=%d&size=%d&full=%t"
-	fofaFields = "ip,port,host,domain,title,icp"
-	fofaSize   = 100
-)
-
-type richFofaAgent struct{}
-
-func (a *richFofaAgent) Name() string { return "fofa" }
-
-func (a *richFofaAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
-	if session.Keys.FofaKey == "" {
-		return nil, errors.New("empty fofa key")
-	}
-	results := make(chan sources.Result)
-	telemetry.SafeGo("uncover-fofa", func() {
-		defer close(results)
-		var total int
-		for page := 1; ; page++ {
-			if ctx.Err() != nil {
-				return
-			}
-			b64q := base64.StdEncoding.EncodeToString([]byte(query.Query))
-			u := fmt.Sprintf(fofaURL, session.Keys.FofaKey, b64q, fofaFields, page, fofaSize, false)
-			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, u, nil)
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			req.Header.Set("Accept", "application/json")
-			resp, err := session.Do(req, a.Name())
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			var body fofaResponse
-			err = json.NewDecoder(resp.Body).Decode(&body)
-			resp.Body.Close()
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			if body.Error {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: fmt.Errorf("fofa: %s", body.ErrMsg)})
-				return
-			}
-			for _, row := range body.Results {
-				raw := RawFofa{pad(row, 0), pad(row, 1), pad(row, 2), pad(row, 3), pad(row, 4), pad(row, 5)}
-				rawBytes, _ := json.Marshal(raw)
-				port, _ := strconv.Atoi(raw.Port)
-				r := sources.Result{Source: a.Name(), IP: raw.IP, Port: port, Host: raw.Host, Raw: rawBytes}
-				if !sources.SendResult(ctx, results, r) {
-					return
-				}
-			}
-			total += len(body.Results)
-			if body.Size == 0 || total >= query.Limit || len(body.Results) == 0 || total > body.Size {
-				return
-			}
-		}
-	})
-	return results, nil
-}
-
-type fofaResponse struct {
-	Error   bool       `json:"error"`
-	ErrMsg  string     `json:"errmsg"`
-	Results [][]string `json:"results"`
-	Size    int        `json:"size"`
-}
-
-// RawFofa is the rich per-result payload stored in Result.Raw.
-type RawFofa struct {
-	IP     string `json:"ip"`
-	Port   string `json:"port"`
-	Host   string `json:"host"`
-	Domain string `json:"domain"`
-	Title  string `json:"title"`
-	ICP    string `json:"icp"`
-}
-
-func pad(row []string, i int) string {
-	if i < len(row) {
-		return row[i]
-	}
-	return ""
-}
-
-// --------------- rich Hunter agent ----------------------------------------------
-
-const (
-	hunterURL  = "https://hunter.qianxin.com/openApi/search?api-key=%s&search=%s&page=%d&page_size=%d&is_web=%d&start_time=%s&end_time=%s"
-	hunterSize = 100
-)
-
-type richHunterAgent struct{}
-
-func (a *richHunterAgent) Name() string { return "hunter" }
-
-func (a *richHunterAgent) Query(ctx context.Context, session *sources.Session, query *sources.Query) (chan sources.Result, error) {
-	if session.Keys.HunterToken == "" {
-		return nil, errors.New("empty hunter keys")
-	}
-	results := make(chan sources.Result)
-	telemetry.SafeGo("uncover-hunter", func() {
-		defer close(results)
-		var total int
-		for page := 1; ; page++ {
-			if ctx.Err() != nil {
-				return
-			}
-			b64q := base64.URLEncoding.EncodeToString([]byte(query.Query))
-			u := fmt.Sprintf(hunterURL, session.Keys.HunterToken, b64q, page, hunterSize, 0, "", "")
-			req, err := sources.NewHTTPRequest(ctx, http.MethodGet, u, nil)
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			req.Header.Set("Accept", "application/json")
-			resp, err := session.Do(req, a.Name())
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			var body hunterResponse
-			err = json.NewDecoder(resp.Body).Decode(&body)
-			resp.Body.Close()
-			if err != nil {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: err})
-				return
-			}
-			if body.Code != http.StatusOK {
-				sources.SendResult(ctx, results, sources.Result{Source: a.Name(), Error: fmt.Errorf("hunter: code=%d msg=%s", body.Code, body.Msg)})
-				return
-			}
-			for _, item := range body.Data.Arr {
-				raw := RawHunter{
-					IP:      item.IP,
-					Port:    strconv.Itoa(item.Port),
-					URL:     item.URL,
-					Domain:  item.Domain,
-					Title:   item.WebTitle,
-					ICP:     item.Number,
-					Status:  strconv.Itoa(item.StatusCode),
-					Company: item.Company,
-					Frame:   joinComponents(item.Component),
-				}
-				rawBytes, _ := json.Marshal(raw)
-				r := sources.Result{Source: a.Name(), IP: item.IP, Port: item.Port, Host: item.Domain, Raw: rawBytes}
-				if !sources.SendResult(ctx, results, r) {
-					return
-				}
-			}
-			total += len(body.Data.Arr)
-			if body.Data.Total == 0 || total >= query.Limit || len(body.Data.Arr) == 0 {
-				return
-			}
-		}
-	})
-	return results, nil
-}
-
-type hunterResponse struct {
-	Code int `json:"code"`
-	Data struct {
-		Total int              `json:"total"`
-		Arr   []hunterDataItem `json:"arr"`
-	} `json:"data"`
-	Msg string `json:"msg"`
-}
-
-type hunterDataItem struct {
-	IP         string            `json:"ip"`
-	Port       int               `json:"port"`
-	Domain     string            `json:"domain"`
-	URL        string            `json:"url"`
-	WebTitle   string            `json:"web_title"`
-	Number     string            `json:"number"`
-	StatusCode int               `json:"status_code"`
-	Company    string            `json:"company"`
-	Component  []hunterComponent `json:"component"`
-}
-
-type hunterComponent struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-// RawHunter is the rich per-result payload stored in Result.Raw.
-type RawHunter struct {
-	IP      string `json:"ip"`
-	Port    string `json:"port"`
-	URL     string `json:"url"`
-	Domain  string `json:"domain"`
-	Title   string `json:"title"`
-	ICP     string `json:"icp"`
-	Status  string `json:"status"`
-	Company string `json:"company"`
-	Frame   string `json:"frame"`
-}
-
-func joinComponents(cs []hunterComponent) string {
-	parts := make([]string, 0, len(cs))
-	for _, c := range cs {
-		if c.Version != "" {
-			parts = append(parts, c.Name+"/"+c.Version)
-		} else {
-			parts = append(parts, c.Name)
-		}
-	}
-	return strings.Join(parts, ",")
+	return results, errors.Join(queryErr, ctx.Err())
 }

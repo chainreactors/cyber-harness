@@ -19,7 +19,7 @@ import (
 // NewHub constructs inert proxy infrastructure. originalProxy is the hub's
 // default upstream, so tool → hub → configured proxy remains stable after Load.
 //
-// capture selects the hub mode (see NewProxyHub): true records traffic (mitm
+// capture selects the hub mode (see newHub): true records traffic (mitm
 // on), false is a pure routing relay (mitm off). Routing works in both, so
 // `proxy` keeps managing egress either way; only capture is gated.
 func NewHub(workDir, originalProxy string, capture bool, registry *hooks.Registry, storage ...cfg.TrafficOptions) (*Resource, error) {
@@ -45,8 +45,8 @@ func NewHub(workDir, originalProxy string, capture bool, registry *hooks.Registr
 
 	store := NewFlowStoreWithLimits(10000, config.BodyRetentionBytes)
 	caRoot := filepath.Join(workDir, ".cyber", "mitm")
-	hub := NewProxyHub(state, store, caRoot, capture, registry)
-	hub.ProxyHub.storage = config
+	hub := newHub(state, store, caRoot, capture, registry)
+	hub.Hub.storage = config
 
 	return hub, nil
 }
@@ -75,11 +75,11 @@ const routeTokenPrefix = "cyber-route-"
 // Egress returns an opaque correlation lease for one real execution. The token
 // is transport-only and cannot leak call/session identity through proxy auth.
 // release must run when the actual HTTP owner or process exits.
-func (h *ProxyHub) Egress(ctx context.Context) (string, string, func()) {
+func (h *Hub) Egress(ctx context.Context) (string, string, func()) {
 	return h.egress(ctx, nil)
 }
 
-func (h *ProxyHub) egress(ctx context.Context, dial proxyclient.Dial) (string, string, func()) {
+func (h *Hub) egress(ctx context.Context, dial proxyclient.Dial) (string, string, func()) {
 	if h == nil {
 		return "", "", func() {}
 	}
@@ -119,7 +119,7 @@ func (h *ProxyHub) egress(ctx context.Context, dial proxyclient.Dial) (string, s
 	return egressURL(base, token), h.CAPath(), release
 }
 
-func (h *ProxyHub) resolveCorrelation(token string) resolvedCorrelation {
+func (h *Hub) resolveCorrelation(token string) resolvedCorrelation {
 	if h != nil && token != "" {
 		h.correlationMu.RLock()
 		lease, ok := h.correlations[token]

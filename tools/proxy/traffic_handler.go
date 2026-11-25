@@ -3,14 +3,11 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"sync/atomic"
 
 	aop "github.com/chainreactors/cyber/aop"
 	traffic "github.com/chainreactors/cyber/aop/traffic"
-	"github.com/chainreactors/proxyclient"
-	"github.com/chainreactors/proxyclient/extra/clash"
 	protobuf "google.golang.org/protobuf/proto"
 )
 
@@ -19,12 +16,12 @@ import (
 // and answers Query with a State snapshot or recorded flows. Live completed
 // flows are published only by the observe extension as typed AOP events.
 type trafficHandler struct {
-	hub *ProxyHub
+	hub *Hub
 }
 
 // TrafficNamespace declares the proxy control surface for the profile's typed
 // namespace catalog.
-func TrafficNamespace(hub *ProxyHub) (aop.Binding, error) {
+func TrafficNamespace(hub *Hub) (aop.Binding, error) {
 	if hub == nil || hub.store == nil || hub.state == nil {
 		return aop.Binding{}, fmt.Errorf("traffic namespace requires a proxy hub")
 	}
@@ -53,7 +50,7 @@ func (h *trafficHandler) handle(ctx context.Context, env *aop.Envelope, pm *traf
 func (h *trafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope, cfg *traffic.Configure, send aop.SendFunc) error {
 	var errMsg string
 	if rc := cfg.GetRouting(); rc != nil {
-		if err := applyRouting(h.hub.state, rc); err != nil {
+		if err := applyRouting(ctx, h.hub.state, rc); err != nil {
 			errMsg = err.Error()
 		}
 	}
@@ -67,7 +64,7 @@ func (h *trafficHandler) handleConfigure(ctx context.Context, env *aop.Envelope,
 
 func (h *trafficHandler) handleQuery(env *aop.Envelope, q *traffic.Query, send aop.SendFunc) error {
 	if q.GetFlows() {
-		for _, f := range h.hub.store.Query(queryOptsFromFilter(q.GetFilter())) {
+		for _, f := range h.hub.store.Query(flowFilter(q.GetFilter())) {
 			flow := f
 			if err := h.sendFlow(env.Id, send, flow); err != nil {
 				return err
@@ -129,7 +126,7 @@ func (h *trafficHandler) snapshot(errMsg string) *traffic.State {
 
 // applyRouting steers the egress chain per the routing config. UNSPECIFIED
 // leaves routing untouched so a capture-only Configure does not disturb it.
-func applyRouting(state *State, rc *traffic.RoutingConfig) error {
+func applyRouting(ctx context.Context, state *State, rc *traffic.RoutingConfig) error {
 	switch rc.GetMode() {
 	case traffic.RoutingMode_ROUTING_MODE_UNSPECIFIED:
 		return nil
@@ -142,14 +139,13 @@ func applyRouting(state *State, rc *traffic.RoutingConfig) error {
 		}
 		return state.SetProxyURL(rc.GetUrl())
 	case traffic.RoutingMode_ROUTING_MODE_SUBSCRIBE:
-		sub, err := clash.FetchSubscriptionWithUA(rc.GetUrl(), clashSubscriptionUA)
-		if err != nil {
-			return fmt.Errorf("fetch subscription: %w", err)
-		}
-		state.LoadSubscription(sub, rc.GetUrl())
-		return nil
+		return state.Subscribe(ctx, SubscriptionConfig{URL: rc.GetUrl()})
 	case traffic.RoutingMode_ROUTING_MODE_AUTO:
-		return applyAutoRouting(state, rc)
+		strategy := rc.GetStrategy()
+		if strategy == "" {
+			strategy = "adaptive"
+		}
+		return state.Subscribe(ctx, SubscriptionConfig{URL: rc.GetUrl(), Strategy: strategy, Type: rc.GetType(), Name: rc.GetName(), Country: rc.GetCountry()})
 	case traffic.RoutingMode_ROUTING_MODE_SWITCH:
 		return state.Switch(rc.GetSelector())
 	default:
@@ -157,53 +153,11 @@ func applyRouting(state *State, rc *traffic.RoutingConfig) error {
 	}
 }
 
-// applyAutoRouting mirrors the `proxy auto` verb: fetch the subscription and
-// install an adaptive load-balancing clash dial as the persistent egress.
-func applyAutoRouting(state *State, rc *traffic.RoutingConfig) error {
-	if rc.GetUrl() == "" {
-		return fmt.Errorf("routing auto requires url")
-	}
-	sub, err := clash.FetchSubscriptionWithUA(rc.GetUrl(), clashSubscriptionUA)
-	if err != nil {
-		return fmt.Errorf("fetch subscription: %w", err)
-	}
-	state.LoadSubscription(sub, rc.GetUrl())
-
-	q := url.Values{}
-	q.Set("url", rc.GetUrl())
-	q.Set("ua", clashSubscriptionUA)
-	strategy := rc.GetStrategy()
-	if strategy == "" {
-		strategy = "adaptive"
-	}
-	q.Set("strategy", strategy)
-	if rc.GetType() != "" {
-		q.Set("type", rc.GetType())
-	}
-	if rc.GetName() != "" {
-		q.Set("name", rc.GetName())
-	}
-	if rc.GetCountry() != "" {
-		q.Set("country", rc.GetCountry())
-	}
-	clashURL := "clash://?" + q.Encode()
-	u, err := url.Parse(clashURL)
-	if err != nil {
-		return fmt.Errorf("build clash url: %w", err)
-	}
-	dial, err := proxyclient.NewClient(u)
-	if err != nil {
-		return fmt.Errorf("create dialer: %w", err)
-	}
-	state.SetAutoDial(clashURL, dial)
-	return nil
-}
-
-func queryOptsFromFilter(f *traffic.FlowFilter) QueryOpts {
+func flowFilter(f *traffic.FlowFilter) Filter {
 	if f == nil {
-		return QueryOpts{}
+		return Filter{}
 	}
-	return QueryOpts{
+	return Filter{
 		Host:   f.GetHost(),
 		Status: f.GetStatus(),
 		CType:  f.GetType(),

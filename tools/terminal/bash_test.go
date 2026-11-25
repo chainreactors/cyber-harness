@@ -75,7 +75,7 @@ func TestLargeShellOutputRemainsReadableAfterBufferEviction(t *testing.T) {
 	bash := NewBashTool(dir, 10, nil)
 	defer bash.Close()
 	full := "FIRST " + strings.Repeat("中", 1<<20) + " LAST"
-	result, err := bash.RunForegroundTool(t.Context(), "printf '%s' '"+full+"'", BashExecOptions{})
+	result, err := bash.RunForegroundTool(t.Context(), "printf '%s' '"+full+"'", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestBashExecOptionsAreIsolatedAcrossConcurrentCalls(t *testing.T) {
 			defer wg.Done()
 			// Keep the short-lived shell alive until the PTY reader is scheduled;
 			// this test exercises concurrent option isolation, not PTY drain timing.
-			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$CYBER_RUN_VALUE"; pwd; sleep 0.05`, BashExecOptions{
+			results[i], errs[i] = bash.RunForeground(context.Background(), `printf '%s\n' "$CYBER_RUN_VALUE"; pwd; sleep 0.05`, Options{
 				WorkDir: dirs[i],
 				Env:     map[string]string{"CYBER_RUN_VALUE": fmt.Sprintf("value-%d", i)},
 				OnOutput: func(data []byte) {
@@ -522,7 +522,7 @@ func TestBashRunForegroundHonorsInvocationWorkDir(t *testing.T) {
 
 	var output bytes.Buffer
 	ctx := operation.ContextWithInvocation(context.Background(), operation.Invocation{WorkDir: invocationDir})
-	_, err := bash.RunForeground(ctx, "pwd", BashExecOptions{
+	_, err := bash.RunForeground(ctx, "pwd", Options{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {
@@ -551,7 +551,7 @@ func TestConcurrentPseudoCommandsDoNotShareOutputWriter(t *testing.T) {
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
-			_, errs[i] = bash.RunForeground(context.Background(), name, BashExecOptions{
+			_, errs[i] = bash.RunForeground(context.Background(), name, Options{
 				OnOutput: func(data []byte) { _, _ = outputs[i].Write(data) },
 			})
 		}(i, name)
@@ -581,7 +581,7 @@ func TestBuiltinExecutionReturnsDetails(t *testing.T) {
 	bash.SetCommandRegistry(registry)
 	defer bash.Close()
 
-	execution, err := bash.RunForeground(context.Background(), "details", BashExecOptions{})
+	execution, err := bash.RunForeground(context.Background(), "details", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestShellToBuiltinUsesExecutionStdin(t *testing.T) {
 	defer bash.Close()
 
 	var output bytes.Buffer
-	_, err := bash.RunForeground(context.Background(), "printf 'hello stdin' | consume", BashExecOptions{
+	_, err := bash.RunForeground(context.Background(), "printf 'hello stdin' | consume", Options{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {
@@ -633,7 +633,7 @@ func TestBashRunForegroundStreams(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	var stream bytes.Buffer
-	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), `printf first; sleep 0.2; printf second`, Options{
 		OnOutput: func(data []byte) { _, _ = stream.Write(data) },
 	})
 	if err != nil {
@@ -780,7 +780,7 @@ func TestBashRunTimeoutStopsSession(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	started := time.Now()
-	result, err := bash.RunForeground(context.Background(), "sleep 5", BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), "sleep 5", Options{
 		Timeout: 100 * time.Millisecond,
 	})
 	if err != nil {
@@ -802,7 +802,7 @@ func TestBashRunReportsNonZeroExit(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	var output bytes.Buffer
-	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, BashExecOptions{
+	result, err := bash.RunForeground(context.Background(), `printf failure; exit 7`, Options{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {
@@ -939,7 +939,7 @@ func TestCommentOnlyForegroundHasOutputWithoutTerminalState(t *testing.T) {
 	bash := NewBashTool(t.TempDir(), 5, nil)
 	defer bash.Close()
 	var output strings.Builder
-	execution, err := bash.RunForeground(t.Context(), "# local comment", BashExecOptions{
+	execution, err := bash.RunForeground(t.Context(), "# local comment", Options{
 		OnOutput: func(data []byte) { _, _ = output.Write(data) },
 	})
 	if err != nil {

@@ -137,7 +137,7 @@ func TestBashGluedCommandCancellation(t *testing.T) {
 	bash, _, state := newAdapterTestBash(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	execution, err := bash.Start(ctx, "memory_wait ignored;memory_echo unreachable", BashExecOptions{})
+	execution, err := bash.Start(ctx, "memory_wait ignored;memory_echo unreachable", Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,8 +11,8 @@ import (
 )
 
 type WebSearchTool struct {
-	search func(context.Context, string, int) (string, error)
-	tavily *TavilySearch
+	search  func(context.Context, string, int) (string, error)
+	backend *Client
 }
 
 type webSearchArgs struct {
@@ -20,8 +20,8 @@ type webSearchArgs struct {
 	Num   int    `json:"num,omitempty"  jsonschema:"description=Max results 1-10 (default 5),minimum=1,maximum=10"`
 }
 
-func NewWebSearchTool(search func(context.Context, string, int) (string, error), tavily *TavilySearch) *WebSearchTool {
-	return &WebSearchTool{search: search, tavily: tavily}
+func NewWebSearchTool(search func(context.Context, string, int) (string, error), backend *Client) *WebSearchTool {
+	return &WebSearchTool{search: search, backend: backend}
 }
 
 func (t *WebSearchTool) Name() string { return "web_search" }
@@ -64,8 +64,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, arguments string) (*aop.Too
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(append(failures, err)...)
 	}
-	if t.tavily != nil {
-		result, err := t.tavily.Execute(ctx, []string{args.Query, "--num", fmt.Sprint(num)})
+	if t.backend != nil {
+		result, err := t.backend.Execute(ctx, []string{args.Query, "--num", fmt.Sprint(num)})
 		if err == nil {
 			return coretool.TextResult(result), nil
 		}

@@ -14,7 +14,7 @@ import (
 func TestDoctorRejectsInvalidScannerConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "invalid.yaml")
-	if err := os.WriteFile(path, []byte("extensions:\n  scan:\n    verify: invalid\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("scan:\n  verify: invalid\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	host := configuration.Host{

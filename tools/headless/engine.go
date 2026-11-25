@@ -21,15 +21,15 @@ type Engine struct {
 	mu       sync.Mutex
 
 	// Options
-	options HeadlessOptions
+	options Options
 
 	// HTTP client for hijack LoadResponse (lazy-initialized).
 	httpClient     *http.Client
 	httpClientOnce sync.Once
 }
 
-// HeadlessOptions configures the headless engine.
-type HeadlessOptions struct {
+// Options configures the headless engine.
+type Options struct {
 	Proxy         string
 	UserAgent     string
 	Headers       map[string]string
@@ -38,11 +38,11 @@ type HeadlessOptions struct {
 	DisableCookie bool
 }
 
-// EngineOption configures Engine creation.
-type EngineOption func(*Engine)
+// Option configures Engine creation.
+type Option func(*Engine)
 
 // WithBrowser injects an existing go-rod browser.
-func WithBrowser(b *rod.Browser) EngineOption {
+func WithBrowser(b *rod.Browser) Option {
 	return func(e *Engine) {
 		e.browser = b
 		e.external = true
@@ -50,27 +50,27 @@ func WithBrowser(b *rod.Browser) EngineOption {
 }
 
 // WithProxy sets the proxy server URL.
-func WithProxy(proxy string) EngineOption {
+func WithProxy(proxy string) Option {
 	return func(e *Engine) { e.options.Proxy = proxy }
 }
 
 // WithUserAgent sets the default user-agent.
-func WithUserAgent(ua string) EngineOption {
+func WithUserAgent(ua string) Option {
 	return func(e *Engine) { e.options.UserAgent = ua }
 }
 
 // WithHeaders sets default extra HTTP headers.
-func WithHeaders(h map[string]string) EngineOption {
+func WithHeaders(h map[string]string) Option {
 	return func(e *Engine) { e.options.Headers = h }
 }
 
 // WithOptions sets the full options struct.
-func WithOptions(opts HeadlessOptions) EngineOption {
+func WithOptions(opts Options) Option {
 	return func(e *Engine) { e.options = opts }
 }
 
 // NewEngine creates a headless browser engine.
-func NewEngine(opts ...EngineOption) *Engine {
+func NewEngine(opts ...Option) *Engine {
 	e := &Engine{}
 	for _, o := range opts {
 		o(e)

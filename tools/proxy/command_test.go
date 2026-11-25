@@ -140,12 +140,12 @@ func TestPassthroughNoExecutor(t *testing.T) {
 func TestPassthroughSetsAndRevertsProxy(t *testing.T) {
 	state := NewState("socks5://127.0.0.1:1080")
 	cmd := New(state)
-	resource := NewProxyHub(state, nil, t.TempDir(), false, nil)
+	resource := newHub(state, nil, t.TempDir(), false, nil)
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer resource.Close(context.Background())
-	cmd.SetHub(resource.ProxyHub)
+	cmd.SetHub(resource.Hub)
 	base := state.dialPtr()
 
 	var childRoute string

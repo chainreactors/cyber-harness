@@ -18,6 +18,7 @@ type Extension struct {
 	config        Options
 	executionOnly bool
 	search        *modelSearch
+	backend       searchtools.Config
 }
 
 func New(config Options) *Extension { return &Extension{config: config} }
@@ -41,10 +42,12 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		}
 	}
 	proxy, proxyCA := endpoint.ProxyURL(), endpoint.CAPath()
-	tavily := searchtools.NewTavilySearch(e.config.TavilyKeys)
-	if proxy != "" {
-		tavily.SetProxy(proxy)
+	backend := e.backend
+	if backend.Keys == "" {
+		backend.Keys = e.config.TavilyKeys
 	}
+	backend.Proxy = proxy
+	tavily := searchtools.New(backend)
 	fetch := searchtools.NewFetchCommand().WithProxy(proxy).WithProxyCA(proxyCA)
 	fetchCommand := coretool.Command{
 		Name: fetch.Name(), Usage: fetch.Usage(),

@@ -23,7 +23,7 @@ type bodyFile struct {
 	err         error
 }
 
-func (h *ProxyHub) captureBody(stream *bodyStream) (*bodyFile, error) {
+func (h *Hub) captureBody(stream *bodyStream) (*bodyFile, error) {
 	if h.stopping.Load() {
 		return nil, errors.New("traffic: capture is stopping")
 	}

@@ -46,7 +46,7 @@ func (e *Extension) Load(scope *extension.Scope) error {
 		return err
 	}
 	e.resource = resource
-	hub := resource.ProxyHub
+	hub := resource.Hub
 
 	binding, err := proxytool.TrafficNamespace(hub)
 	if err != nil {

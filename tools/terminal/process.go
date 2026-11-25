@@ -17,7 +17,7 @@ import (
 // Start is the real managed-process boundary. Its completion notification is
 // emitted on actual process exit, even when the Bash tool has already returned
 // a background status to its caller.
-func (t *BashTool) Start(ctx context.Context, command string, options BashExecOptions) (*coretool.Execution, error) {
+func (t *BashTool) Start(ctx context.Context, command string, options Options) (*coretool.Execution, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

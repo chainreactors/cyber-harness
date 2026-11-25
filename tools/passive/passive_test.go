@@ -9,11 +9,11 @@ import (
 )
 
 func TestUncoverPythonFofaShape(t *testing.T) {
-	raw, _ := json.Marshal(RawFofa{
+	raw, _ := json.Marshal(Fofa{
 		IP: "192.0.2.4", Port: "443", Host: "https://example.com",
 		Domain: "example.com", Title: "Example", ICP: "ICP1",
 	})
-	b, err := json.Marshal(uncoverPython("fofa", []sources.Result{{
+	b, err := json.Marshal(rows("fofa", []sources.Result{{
 		Source: "fofa", IP: "192.0.2.4", Port: 443, Host: "example.com", Raw: raw,
 	}}))
 	if err != nil {
@@ -37,12 +37,12 @@ func TestUncoverPythonFofaShape(t *testing.T) {
 }
 
 func TestUncoverPythonHunterShape(t *testing.T) {
-	raw, _ := json.Marshal(RawHunter{
+	raw, _ := json.Marshal(Hunter{
 		IP: "192.0.2.4", Port: "443", URL: "http://example.com:443",
 		Domain: "example.com", Status: "200", Company: "Example Inc",
 		Frame: "nginx,spring", Title: "Example", ICP: "ICP1",
 	})
-	b, err := json.Marshal(uncoverPython("hunter", []sources.Result{{
+	b, err := json.Marshal(rows("hunter", []sources.Result{{
 		Source: "hunter", IP: "192.0.2.4", Port: 443, Host: "example.com", Raw: raw,
 	}}))
 	if err != nil {
@@ -66,7 +66,7 @@ func TestUncoverPythonHunterShape(t *testing.T) {
 }
 
 func TestUncoverPythonGenericShape(t *testing.T) {
-	b, err := json.Marshal(uncoverPython("shodan", []sources.Result{{
+	b, err := json.Marshal(rows("shodan", []sources.Result{{
 		Source: "shodan", IP: "198.51.100.8", Port: 80, Host: "example.org",
 		Url: "http://example.org:80",
 	}}))

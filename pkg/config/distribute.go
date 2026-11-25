@@ -24,7 +24,20 @@ func LoadDistributeConfigYAML(data []byte) (*types.DistributeConfig, error) {
 // the canonical proto representation. Applications whose configuration is wider
 // than the proto drop their own keys before calling this.
 func LoadDistributeConfigDocument(raw map[string]any) (*types.DistributeConfig, error) {
-	jsonData, err := json.Marshal(raw)
+	document := CloneDocument(raw)
+	extensions := map[string]any{}
+	for key, value := range document {
+		switch key {
+		case "llm", "agent", "node", "traffic":
+		case "extensions":
+			return nil, fmt.Errorf("unknown configuration field extensions")
+		default:
+			extensions[key] = value
+			delete(document, key)
+		}
+	}
+	document["extensions"] = extensions
+	jsonData, err := json.Marshal(document)
 	if err != nil {
 		return nil, fmt.Errorf("convert yaml to json: %w", err)
 	}
@@ -48,16 +61,15 @@ func MarshalDistributeConfigYAML(pb *types.DistributeConfig) ([]byte, error) {
 // DistributeConfigDocument projects the transport config directly into the
 // document consumed by the existing option decoder and file editor.
 func DistributeConfigDocument(pb *types.DistributeConfig) map[string]any {
-	document := map[string]any{"extensions": map[string]any{}}
+	document := map[string]any{}
 	if pb == nil {
 		return document
 	}
-	extensions := document["extensions"].(map[string]any)
 	for key, value := range pb.Extensions {
 		if value == nil {
-			extensions[key] = nil
+			document[key] = nil
 		} else {
-			extensions[key] = value.AsMap()
+			document[key] = value.AsMap()
 		}
 	}
 	if llm := pb.Llm; llm != nil {

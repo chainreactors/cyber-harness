@@ -16,17 +16,17 @@ import (
 
 func TestProxyDetachedTmuxRetainsRoute(t *testing.T) {
 	state := NewState("")
-	resource := NewProxyHub(state, nil, t.TempDir(), false, nil)
+	resource := newHub(state, nil, t.TempDir(), false, nil)
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer resource.Close(context.Background())
 	bash := terminal.NewBashTool(t.TempDir(), 30, nil).WithEnvironment(map[string]string{"PROXY_SESSION_CHILD": "1"})
-	bash.SetEgressResolver(resource.ProxyHub.Egress)
+	bash.SetEgressResolver(resource.Hub.Egress)
 	defer bash.Close()
 	tmux := terminal.NewTmuxCommand(bash)
 	command := New(state)
-	command.SetHub(resource.ProxyHub)
+	command.SetHub(resource.Hub)
 	command.SetCommandExecutor(func(ctx context.Context, argv []string, execution *coretool.Execution) (any, error) {
 		if argv[0] != "tmux" {
 			return nil, fmt.Errorf("unexpected command %q", argv[0])
@@ -65,9 +65,9 @@ func TestProxyDetachedTmuxRetainsRoute(t *testing.T) {
 	if output := bash.Manager().PeekOrEmpty(sessions[0].ID, 10); !strings.Contains(output, "@127.0.0.1:") {
 		t.Fatalf("detached child did not inherit route: %q", output)
 	}
-	resource.ProxyHub.correlationMu.RLock()
-	active := len(resource.ProxyHub.correlations)
-	resource.ProxyHub.correlationMu.RUnlock()
+	resource.Hub.correlationMu.RLock()
+	active := len(resource.Hub.correlations)
+	resource.Hub.correlationMu.RUnlock()
 	if active != 1 {
 		t.Fatalf("live route leases = %d, want 1", active)
 	}
@@ -77,9 +77,9 @@ func TestProxyDetachedTmuxRetainsRoute(t *testing.T) {
 	<-bash.Manager().Done(sessions[0].ID)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		resource.ProxyHub.correlationMu.RLock()
-		active = len(resource.ProxyHub.correlations)
-		resource.ProxyHub.correlationMu.RUnlock()
+		resource.Hub.correlationMu.RLock()
+		active = len(resource.Hub.correlations)
+		resource.Hub.correlationMu.RUnlock()
 		if active == 0 {
 			return
 		}

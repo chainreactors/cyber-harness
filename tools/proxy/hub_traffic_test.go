@@ -17,7 +17,7 @@ import (
 )
 
 // hubClient builds an HTTP client through an opaque operation-correlation lease.
-func hubClient(t *testing.T, hub *ProxyHub, callID string) *http.Client {
+func hubClient(t *testing.T, hub *Hub, callID string) *http.Client {
 	t.Helper()
 	ctx := operation.ContextWithInvocation(t.Context(), operation.Invocation{CallID: callID})
 	ctx, cancel := operation.Begin(ctx, "test", "http")
@@ -47,19 +47,19 @@ func waitForFlows(t *testing.T, store *FlowStore, want int) []Flow {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if flows := store.Query(QueryOpts{}); len(flows) >= want {
+		if flows := store.Query(Filter{}); len(flows) >= want {
 			return flows
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	return store.Query(QueryOpts{})
+	return store.Query(Filter{})
 }
 
-func startHub(t *testing.T, capture bool) *ProxyHub {
+func startHub(t *testing.T, capture bool) *Hub {
 	t.Helper()
 	caRoot := t.TempDir()
-	resource := NewProxyHub(NewState(""), NewFlowStore(1000), caRoot, capture, nil)
-	hub := resource.ProxyHub
+	resource := newHub(NewState(""), NewFlowStore(1000), caRoot, capture, nil)
+	hub := resource.Hub
 	hub.storage = cfg.TrafficOptions{BodyStorage: "disk"}
 	if err := resource.Start(t.Context()); err != nil {
 		t.Fatalf("start hub: %v", err)
@@ -136,7 +136,7 @@ func TestFlowStoreReloadsMetadataIndexWithoutHydratingBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	flows := second.Query(QueryOpts{})
+	flows := second.Query(Filter{})
 	if len(flows) != 1 || flows[0].Operation.GetCallId() != "call-1" {
 		t.Fatalf("reloaded flows = %#v", flows)
 	}

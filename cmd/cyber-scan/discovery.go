@@ -8,14 +8,14 @@ import (
 	"github.com/chainreactors/cyber/tools/passive"
 )
 
-func discoveryExtensions(config appConfig) []extension.Extension {
-	return []extension.Extension{katanaext.New(), passiveext.New(passive.ReconOptions{
-		FofaKey:      config.Recon.FofaKey,
+func discoveryExtensions(config appConfig) ([]extension.Extension, *passiveext.Extension) {
+	feature := passiveext.New(passive.Config{
 		HunterAPIKey: config.Recon.HunterAPIKey,
-		IngressProxy: config.Recon.Proxy,
+		Proxy:        config.Recon.Proxy,
 		Limit:        intValue(config.Recon.Limit),
 		Credentials:  config.ReconCredentials,
-	})}
+	})
+	return []extension.Extension{katanaext.New(), feature}, feature
 }
 
 func discoveryNames() []string { return []string{"katana", "passive"} }

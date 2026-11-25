@@ -15,8 +15,8 @@ var environmentPaths = map[string]string{
 	"CYBER_BASE_URL": "llm.base_url", "LLM_BASE_URL": "llm.base_url", "OPENAI_BASE_URL": "llm.base_url", "ANTHROPIC_BASE_URL": "llm.base_url",
 	"CYBER_API_KEY": "llm.api_key", "LLM_API_KEY": "llm.api_key", "OPENAI_API_KEY": "llm.api_key", "ANTHROPIC_API_KEY": "llm.api_key",
 	"CYBER_LLM_PROXY": "llm.proxy", "CYBER_DATA_DIR": "misc.data_dir",
-	"CYBER_CYBERHUB_URL": "extensions.cyberhub.url", "CYBER_CYBERHUB_KEY": "extensions.cyberhub.key", "CYBER_CYBERHUB_MODE": "extensions.cyberhub.mode", "CYBER_PROXY": "extensions.cyberhub.proxy",
-	"FOFA_KEY": "extensions.recon.fofa_key", "HUNTER_API_KEY": "extensions.recon.hunter_api_key", "RECON_PROXY": "extensions.recon.proxy", "TAVILY_API_KEY": "extensions.recon.tavily_key",
+	"CYBER_CYBERHUB_URL": "cyberhub.url", "CYBER_CYBERHUB_KEY": "cyberhub.key", "CYBER_CYBERHUB_MODE": "cyberhub.mode", "CYBER_PROXY": "cyberhub.proxy",
+	"HUNTER_API_KEY": "recon.hunter_api_key", "RECON_PROXY": "recon.proxy", "TAVILY_API_KEY": "recon.tavily_key",
 }
 
 func sourceLookup(option *Option, lookup envLookup) envLookup {
@@ -69,37 +69,24 @@ func optionDocument(option *Option) map[string]any {
 		return out
 	}
 	out := walk(reflect.ValueOf(option).Elem())
-	extensions := map[string]any{}
-	for key, value := range option.Extensions {
-		extensions[key] = CloneDocument(value)
-	}
-	// Sections that own a root YAML alias display at the root, where their
-	// hand-written form lives. Display the decoded section: schema defaults and
-	// empty fields are part of the section, nil pointers stay hidden.
-	if option.Sections != nil {
-		for _, alias := range option.Sections.Aliases() {
-			fields, ok := extensions[alias].(map[string]any)
-			if !ok {
-				continue
-			}
-			if decoded, err := option.Sections.Decode(alias, fields); err == nil {
-				if raw, err := json.Marshal(decoded); err == nil {
-					var display map[string]any
-					if json.Unmarshal(raw, &display) == nil {
-						for key, value := range display {
-							if value == nil {
-								delete(display, key)
-							}
+	delete(out, "extensions")
+	for key, values := range option.Extensions {
+		fields := CloneDocument(values)
+		if option.Resolved != nil {
+			if raw, err := json.Marshal(option.Resolved.typed[key]); err == nil {
+				var display map[string]any
+				if json.Unmarshal(raw, &display) == nil {
+					for name, value := range display {
+						if value == nil {
+							delete(display, name)
 						}
-						fields = display
 					}
+					fields = display
 				}
 			}
-			out[alias] = fields
-			delete(extensions, alias)
 		}
+		out[key] = fields
 	}
-	out["extensions"] = extensions
 	return out
 }
 
@@ -175,16 +162,12 @@ func Redact(document map[string]any, sections *Sections) map[string]any {
 		}
 	}
 	scrub(out)
-	if exts, ok := out["extensions"].(map[string]any); ok {
-		for key, value := range exts {
-			if !sections.Has(key) {
-				exts[key] = "[unavailable in this host]"
-				continue
-			}
-			if m, ok := value.(map[string]any); ok {
-				for _, secret := range sections.declarations[key].Secrets {
-					parent, name := fieldParent(m, secret)
-					if v, ok := parent[name]; ok && v != "" {
+	if sections != nil {
+		for key, section := range sections.declarations {
+			if fields, ok := out[key].(map[string]any); ok {
+				for _, path := range section.secretPaths(fields) {
+					parent, name := fieldParent(fields, path)
+					if value, ok := parent[name]; ok && value != nil && value != "" {
 						parent[name] = "[redacted]"
 					}
 				}

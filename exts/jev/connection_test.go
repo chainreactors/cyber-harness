@@ -3,12 +3,37 @@ package jev
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/chainreactors/cyber/core/types"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func TestConnectionUsesConfiguredBaseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tenant/v1/systemone" || r.Header.Get("Authorization") != "Bearer gateway-key" {
+			t.Errorf("unexpected JEV upstream request: %s %v", r.URL, r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"answers":{"action":{"type":"choice","choice":"record"}}}`)
+	}))
+	defer server.Close()
+	fields, err := structpb.NewStruct(map[string]any{"base_url": server.URL + "/tenant/", "api_key": "gateway-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := testConnection(t.Context(), &types.DistributeConfig{Extensions: map[string]*structpb.Struct{ConfigKey: fields}}, nil)
+	if len(checks) != 1 || !checks[0].Ok {
+		t.Fatalf("JEV gateway probe: %v", checks)
+	}
+	for _, baseURL := range []string{"https://key@example.test", "https://example.test?secret=value"} {
+		if _, err := configSection.Decode(map[string]any{"base_url": baseURL}); err == nil {
+			t.Fatalf("invalid base_url accepted: %s", baseURL)
+		}
+	}
+}
 
 type probeTransport func(*http.Request) (*http.Response, error)
 
