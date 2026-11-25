@@ -19,6 +19,7 @@ func FofaSection() cfg.Section {
 		Key: "fofa", New: func() any { return &Fofa{} }, Secrets: []string{"key", "proxy"},
 		Normalize: func(value any) error {
 			config := value.(*Fofa)
+			config.Key = strings.TrimSpace(config.Key)
 			if config.BaseURL == "" {
 				config.BaseURL = "https://fofa.info"
 			}

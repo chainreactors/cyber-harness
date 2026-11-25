@@ -162,14 +162,10 @@ func TestInProcessRoutingUsesOriginalCommandsWithoutAgent(t *testing.T) {
 		case "":
 			catalog = commands.Names()
 		case "disabled":
-			var output bytes.Buffer
-			_, err := commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "fofa", "fail"}, Stdout: &output, Stderr: &output})
-			if err == nil || !strings.Contains(err.Error(), "unknown source") {
-				t.Fatalf("disabled binding fell back to owner credentials: %v", err)
-			}
-			_, err = commands.Execute(t.Context(), "passive", &coretool.Execution{Args: []string{"-s", "shodan-idb", "192.0.2.1"}, Stdout: &output, Stderr: &output})
-			if err == nil || !strings.Contains(err.Error(), "unknown source") {
-				t.Fatalf("disabled keyless API remained available: %v", err)
+			// Disabled services behave as unconfigured ones: with no source
+			// left, the owner registers neither the command nor its docs.
+			if commands.Has("passive") {
+				t.Fatalf("disabled sources still registered passive: %v", commands.Names())
 			}
 		default:
 			checks, err := sections.TestConnection(t.Context(), "gateway.fofa", &distributed, nil)

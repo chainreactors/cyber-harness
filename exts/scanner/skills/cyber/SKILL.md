@@ -50,7 +50,7 @@ Each scanner's detailed flags live in an OKF 0.2 tool concept under `cyber://ski
 
 Available only when they appear in the runtime pseudo-command list:
 
-- `passive`: domain/ICP seed → IPs, CIDRs, domains via cyberspace search (FOFA/Hunter/Shodan/etc.)
+- `passive`: domain/ICP seed → IPs, CIDRs, domains via the configured cyberspace search sources. `passive -h` lists the sources available now; use only those. Reference: `cyber://skills/passive/passive.md`.
 - `katana`: deep web crawling with full parameter discovery
 - `playwright`: headless Chromium browser for JS-rendered pages, screenshots, network capture, and interactive verification. Reference: `cyber://skills/runtime/playwright.md`. Key commands: `playwright goto <url>`, `playwright screenshot <url>`, `playwright open <url> --session s1`, `playwright discover s1`, `playwright close s1`.
 

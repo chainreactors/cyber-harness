@@ -1,8 +1,11 @@
 package passive
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/projectdiscovery/uncover/sources"
@@ -161,4 +164,50 @@ func TestLooksLikeIPOrCIDR(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUsageListsOnlyAvailableSources(t *testing.T) {
+	help := usage([]string{"fofa"})
+	if !strings.Contains(help, "Available now: fofa\n") || !strings.Contains(help, "-s fofa ") {
+		t.Fatalf("fofa help:\n%s", help)
+	}
+	for _, source := range []string{"hunter", "shodan", "shodan-idb"} {
+		if strings.Contains(help, source) {
+			t.Fatalf("help names unavailable source %q:\n%s", source, help)
+		}
+	}
+	if help = usage(nil); strings.Contains(help, "-s fofa") || strings.Contains(help, ReferenceURI) {
+		t.Fatalf("help without sources claims availability or an unmounted reference:\n%s", help)
+	}
+	if help = usage([]string{"shodan-idb"}); !strings.Contains(help, "shodan-idb accepts ONLY ip/cidr") {
+		t.Fatalf("shodan-idb help lost its query restriction:\n%s", help)
+	}
+}
+
+func TestShodanIDBQueryErrorSuggestsOnlyAvailableSources(t *testing.T) {
+	alone := New(&sourcesEngine{sources: []string{"shodan-idb"}})
+	_, err := alone.runQuery(t.Context(), "shodan-idb", []string{"example.com"})
+	if err == nil || strings.Contains(err.Error(), "use shodan-idb") || !strings.Contains(err.Error(), "pass an IP or CIDR") {
+		t.Fatalf("lone shodan-idb error = %v", err)
+	}
+	paired := New(&sourcesEngine{sources: []string{"fofa", "shodan-idb"}})
+	_, err = paired.runQuery(t.Context(), "shodan-idb", []string{"example.com"})
+	if err == nil || !strings.Contains(err.Error(), "other available sources, each with its own query language: fofa") {
+		t.Fatalf("paired shodan-idb error = %v", err)
+	}
+}
+
+func TestQuickReferenceNamesSourcesAndReference(t *testing.T) {
+	quick := New(&sourcesEngine{sources: []string{"fofa"}}).QuickReference()
+	if !strings.Contains(quick, "Sources available now: fofa\n") || !strings.Contains(quick, ReferenceURI) {
+		t.Fatalf("quick reference:\n%s", quick)
+	}
+}
+
+// sourcesEngine reports fixed sources and fails any query that reaches it.
+type sourcesEngine struct{ sources []string }
+
+func (e *sourcesEngine) Sources() []string { return e.sources }
+func (e *sourcesEngine) Query(context.Context, string, string) ([]sources.Result, error) {
+	return nil, errors.New("query reached the engine")
 }

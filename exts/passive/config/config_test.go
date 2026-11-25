@@ -109,3 +109,14 @@ func TestFofaBaseURLConfiguration(t *testing.T) {
 		t.Fatal("obsolete full endpoint configuration accepted")
 	}
 }
+
+func TestSectionsTrimKeys(t *testing.T) {
+	value, err := FofaSection().Decode(map[string]any{"key": " fofa-key "})
+	if err != nil || value.(*Fofa).Key != "fofa-key" {
+		t.Fatalf("fofa key = %#v err=%v", value, err)
+	}
+	value, err = apiSection("hunter").Decode(map[string]any{"key": "   "})
+	if err != nil || value.(*cfg.API).Key != "" {
+		t.Fatalf("blank hunter key = %#v err=%v", value, err)
+	}
+}

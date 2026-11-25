@@ -55,7 +55,7 @@ FOFA 的地址和凭据统一配置在 `gateway` 的服务下，接受 `base_url
 | MCP、IOA、OTLP | MCP 服务的 `url`、`ioa.client.url`、`OTEL_EXPORTER_OTLP_ENDPOINT` | 已有服务端点配置，保留各自协议含义 |
 | Clash | `gateway.<name>.url` | 已有完整订阅 URL，无需拆成 base URL 与路径 |
 
-passive 来源为 `fofa`、`hunter`、`shodan`、`shodan-idb`、`censys`、`quake`、`zoomeye`、`netlas`、`criminalip`、`publicwww`、`hunterhow`、`odin`、`binaryedge`、`onyphe`、`driftnet`、`greynoise`。除 FOFA 外，`key` 可省略并使用宿主已有凭据；填写时覆盖该来源的主凭据。Censys 的组织 ID 仍由 `CENSYS_ORGANIZATION_ID` 提供。`shodan-idb` 与 DuckDuckGo 无需 key。
+passive 来源为 `fofa`、`hunter`、`shodan`、`shodan-idb`、`censys`、`quake`、`zoomeye`、`netlas`、`criminalip`、`publicwww`、`hunterhow`、`odin`、`binaryedge`、`onyphe`、`driftnet`、`greynoise`。除 FOFA 外，`key` 可省略并使用宿主已有凭据；填写时覆盖该来源的主凭据。Censys 的组织 ID 仍由 `CENSYS_ORGANIZATION_ID` 提供。`shodan-idb` 与 DuckDuckGo 无需 key；`shodan-idb` 默认不可用，需写出 `gateway.shodan-idb`（例如 `enabled: true`）才会加入可用来源。没有任何可用来源时，passive 不注册命令，也不挂载 `cyber://skills/passive/` 文档；`enabled: false` 与未配置相同。
 
 测绘源使用每次查询独立的 transport 在内存中改写地址，同时覆盖 Uncover 的备用客户端与 Censys SDK；不修改进程全局客户端或依赖常量。配置地址可带路径前缀和末尾斜线。显式网关不跟随 HTTP 重定向；Tavily 自定义上游失败直接返回错误，不访问默认 DuckDuckGo 作为替代。
 

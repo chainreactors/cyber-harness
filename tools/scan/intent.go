@@ -40,8 +40,13 @@ func ScannerSkillName(command string) string {
 
 // ScannerConceptURI returns the OKF tool concept URI for a scanner command.
 func ScannerConceptURI(command string) string {
-	if ScannerSkillName(command) == "" {
+	switch ScannerSkillName(command) {
+	case "":
 		return ""
+	case "passive":
+		// Owned and served by the passive extension only when configured; the
+		// literal avoids linking uncover into scan.
+		return "cyber://skills/passive/passive.md"
 	}
 	return "cyber://skills/cyber/okf/easm/" + command + ".md"
 }

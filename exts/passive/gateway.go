@@ -20,6 +20,7 @@ func (e *Extension) Gateway(use string) []gateway.Kind {
 	}
 	e.options.Credentials = maps.Clone(e.options.Credentials)
 	e.options.Disabled = slices.Clone(e.options.Disabled)
+	e.options.Keyless = slices.Clone(e.options.Keyless)
 	if e.options.Credentials == nil {
 		e.options.Credentials = map[string]string{}
 	}
@@ -47,6 +48,10 @@ func (e *Extension) Gateway(use string) []gateway.Kind {
 				}
 			} else {
 				api = *value.(*cfg.API)
+				if passiveconfig.Credential(name) == "" {
+					// A keyless source is available only when configured.
+					e.options.Keyless = append(e.options.Keyless, name)
+				}
 			}
 			e.options.BaseURLs[name] = api.BaseURL
 			if api.Key != "" {

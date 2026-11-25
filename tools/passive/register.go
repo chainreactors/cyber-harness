@@ -8,8 +8,8 @@ import (
 func NewCommand(backend Engine, logger telemetry.Logger) coretool.Command {
 	impl := New(backend).WithLogger(logger)
 	return coretool.Command{
-		Name: impl.Name(), Usage: impl.Usage(),
-		DescriptionPath: "cyber://skills/passive/passive.md",
+		Name: impl.Name(), Usage: impl.Usage(), QuickReference: impl.QuickReference(),
+		DescriptionPath: ReferenceURI,
 		Run:             impl.Run,
 	}
 }

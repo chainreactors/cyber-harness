@@ -116,9 +116,60 @@ type shellHost interface {
 	Shell() (coretool.CommandExecutor, *terminaltool.BashTool)
 }
 
+// loadedScannerUsage returns the usage of a command registered by the host
+// configuration, or the unavailable error when its owner did not register it.
+func loadedScannerUsage(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, name string, logger telemetry.Logger) (_ string, runErr error) {
+	if newProfile == nil {
+		return "", fmt.Errorf("profile constructor is required")
+	}
+	defer telemetry.SuppressGlobalNonErrors()()
+	p, err := newProfile(profile.Request{Option: option, ProviderMode: provider.StartupDisabled, Logger: telemetry.ErrorOnlyLogger(logger)})
+	if err != nil {
+		return "", fmt.Errorf("construct scanner profile: %w", err)
+	}
+	if p == nil {
+		return "", fmt.Errorf("profile constructor returned nil")
+	}
+	finish := profile.CloseOnce(ctx, p.Close)
+	defer func() { runErr = finish(runErr) }()
+	if err := p.Load(ctx); err != nil {
+		return "", fmt.Errorf("load scanner profile: %w", err)
+	}
+	host, ok := p.(shellHost)
+	if !ok {
+		return "", fmt.Errorf("profile does not expose a command surface")
+	}
+	registry, _ := host.Shell()
+	if registry == nil {
+		return "", fmt.Errorf("command registry is not available")
+	}
+	command, ok := registry.Get(name)
+	if !ok {
+		return "", unavailableScannerError(name)
+	}
+	return command.Usage, nil
+}
+
+// unavailableScannerError reports a built-in command its owner did not
+// register, for example passive without any configured source.
+func unavailableScannerError(name string) error {
+	return fmt.Errorf("%s is not available: its required configuration or resources are missing", name)
+}
+
 func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) (profile.Profile, error), option *cfg.Option, rest []string, logger telemetry.Logger, outputTask *taskcli.Output) (runErr error) {
 	if cfg.IsScannerHelpRequest(rest) {
-		if usage, ok := productScannerUsage(rest[0]); ok {
+		usage, ok := productScannerUsage(rest[0])
+		if !ok && productScannerAvailable(rest[0]) {
+			// Configuration decides this command's help (passive lists its
+			// configured sources): load the command catalog only, without
+			// a model, agent, or event stream, whatever --ai or -o say.
+			var err error
+			if usage, err = loadedScannerUsage(ctx, newProfile, option, rest[0], logger); err != nil {
+				return err
+			}
+			ok = true
+		}
+		if ok {
 			_, err := fmt.Fprint(outputTask.Stdout(), usage)
 			if err != nil {
 				return err
@@ -135,6 +186,13 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 	}
 	if option.AI || mode.Agent {
 		mode.Provider = provider.StartupRequired
+		// A configuration-gated command is checked from the command catalog
+		// first, so a missing source is reported before any model starts.
+		if _, static := productScannerUsage(scannerArgs[0]); !static && productScannerAvailable(scannerArgs[0]) {
+			if _, err := loadedScannerUsage(ctx, newProfile, option, scannerArgs[0], logger); err != nil {
+				return err
+			}
+		}
 	}
 	scannerLogger := logger
 	if !directScannerDebugEnabled(option, scannerArgs) {
@@ -173,15 +231,9 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 	}
 	_, providerConfig := providers.Current()
 	cfg.ApplyResolvedProviderOptions(option, providerConfig)
-	application, err := p.Events()
-	if err != nil {
-		return err
-	}
-
-	outputTask.Observe(application)
-
 	// A host without a session runtime still runs commands: the registry and
-	// the tool are capabilities its graph publishes either way.
+	// the tool are capabilities its graph publishes either way. Check them
+	// before observing events, so failures take the startup-error path.
 	host, ok := p.(shellHost)
 	if !ok {
 		return fmt.Errorf("profile does not expose a command surface")
@@ -191,8 +243,17 @@ func runDirectScannerMode(ctx context.Context, newProfile func(profile.Request) 
 		return fmt.Errorf("bash tool is not registered")
 	}
 	if !registry.Has(scannerArgs[0]) {
+		if productScannerAvailable(scannerArgs[0]) {
+			return unavailableScannerError(scannerArgs[0])
+		}
 		return fmt.Errorf("unknown subcommand: %s", scannerArgs[0])
 	}
+	application, err := p.Events()
+	if err != nil {
+		return err
+	}
+
+	outputTask.Observe(application)
 	if option.Debug && scannerCommandSupportsDebug(scannerArgs[0]) && !toolargs.BoolFlagEnabled(scannerArgs[1:], "--debug") {
 		scannerArgs = append(scannerArgs, "--debug")
 	}

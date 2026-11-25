@@ -10,7 +10,7 @@ This bundle organizes Cyber's external attack surface scanning documentation as 
 - [zombie](zombie.md) — weak credential checks
 - [neutron](neutron.md) — template-based POC execution
 - [proton](proton.md) — sensitive information / secrets scanning
-- [passive](passive.md) — cyberspace asset discovery via uncover
+- [passive](cyber://skills/passive/passive.md) — cyberspace asset discovery via the configured uncover sources (only when `passive` is a runtime pseudo-command)
 - [playwright](cyber:/skills/runtime/playwright.md) — headless browser automation
 - [scan](scan.md) — multi-stage orchestration pipeline
 - [curl](curl.md) — browser-naturalized HTTP requests and evidence capture

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,29 +59,59 @@ func (c *Command) WithLogger(l telemetry.Logger) *Command {
 
 func (c *Command) Name() string { return "passive" }
 
-// Usage describes passive flags before a backend has been configured.
-func Usage() string { return usage(nil) }
-
 func (c *Command) Usage() string { return usage(c.sourceList()) }
 
+// sourceExamples show the native query syntax of sources that have one worth
+// illustrating. Usage prints only the examples of available sources.
+var sourceExamples = map[string]string{
+	"fofa":       `passive -s fofa 'domain="example.com"'`,
+	"hunter":     `passive -s hunter 'domain.suffix="example.com"'`,
+	"shodan":     `passive -s shodan 'org:"Example"'`,
+	"shodan-idb": `passive -s shodan-idb '192.0.2.4'`,
+}
+
 func usage(avail []string) string {
-	availStr := "none configured"
+	availStr := "decided by host configuration; run inside a configured session"
+	reference := ""
 	if len(avail) > 0 {
 		availStr = strings.Join(avail, ", ")
+		// The reference is mounted only together with a registered command.
+		reference = "\n\nReference: " + ReferenceURI
+	}
+	var examples, notes strings.Builder
+	for _, source := range avail {
+		if example, ok := sourceExamples[source]; ok {
+			examples.WriteString("\n  " + example)
+		}
+	}
+	if examples.Len() == 0 {
+		examples.WriteString("\n  passive -s <source> '<source-native query>'")
+	}
+	if slices.Contains(avail, "shodan-idb") {
+		notes.WriteString("\n                Note: shodan-idb accepts ONLY ip/cidr queries.")
+	}
+	if slices.Contains(avail, "hunter") {
+		notes.WriteString("\n                Note: hunter blocks overseas IPs; route it through the host proxy.")
 	}
 	return fmt.Sprintf(`passive - cyberspace passive recon (uncover)
 
-Usage:
-  passive -s fofa 'domain="example.com"'
-  passive -s hunter 'domain.suffix="example.com"'
-  passive -s shodan-idb '192.0.2.4'
+Usage:%s
 
 Options:
   -s <source>   Data source (required).
-                Available now: %s
-                Note: shodan-idb accepts ONLY ip/cidr queries.
-  -h            Show this help`, availStr)
+                Available now: %s%s
+  -h            Show this help%s`, examples.String(), availStr, notes.String(), reference)
 }
+
+// QuickReference is the system-prompt entry of a registered command; it names
+// the sources available now and the command's own reference document.
+func (c *Command) QuickReference() string {
+	return fmt.Sprintf("### passive — cyberspace passive recon (uncover)\n  passive -s <source> '<source-native query>'   Sources available now: %s\n  Reference: %s",
+		strings.Join(c.sourceList(), ", "), ReferenceURI)
+}
+
+// ReferenceURI is the playbook the passive extension mounts with the command.
+const ReferenceURI = "cyber://skills/passive/passive.md"
 
 func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any, err error) {
 	defer telemetry.RecoverAsError("passive", &err)
@@ -90,7 +121,7 @@ func (c *Command) Run(ctx context.Context, execution *coretool.Execution) (_ any
 		return nil, err
 	}
 	if help {
-		fmt.Fprint(execution.Stdout, c.Usage())
+		fmt.Fprintln(execution.Stdout, c.Usage())
 		return nil, nil
 	}
 	if c.sources[src] {
@@ -114,7 +145,16 @@ func (c *Command) runQuery(ctx context.Context, src string, args []string) (stri
 		return "", err
 	}
 	if src == "shodan-idb" && !looksLikeIPOrCIDR(query) {
-		return "", fmt.Errorf("passive: shodan-idb only accepts IP or CIDR queries (got %q). Use fofa or hunter for domain/keyword queries", query)
+		var others []string
+		for _, source := range c.sourceList() {
+			if source != src {
+				others = append(others, source)
+			}
+		}
+		if len(others) == 0 {
+			return "", fmt.Errorf("passive: shodan-idb only accepts IP or CIDR queries (got %q); pass an IP or CIDR, or ask the host to configure a source for domain/keyword queries", query)
+		}
+		return "", fmt.Errorf("passive: shodan-idb only accepts IP or CIDR queries (got %q); other available sources, each with its own query language: %s", query, strings.Join(others, ", "))
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -175,7 +215,7 @@ func parseQueryArgs(args []string) (query string, err error) {
 		query = a
 	}
 	if query == "" {
-		err = fmt.Errorf("passive: missing query (e.g. passive -s fofa 'domain=\"example.com\"')")
+		err = fmt.Errorf("passive: missing query; pass one source-native query string (see passive -h)")
 	}
 	return
 }

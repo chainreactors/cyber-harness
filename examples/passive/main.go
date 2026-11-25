@@ -30,7 +30,9 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	feature := passiveext.New(passive.Config{})
+	// passive registers only with a configured source. A keyless source is
+	// enabled explicitly here; loading it sends no request.
+	feature := passiveext.New(passive.Config{Keyless: []string{"shodan-idb"}})
 	entries = append(entries, feature)
 	var commands coretool.CommandExecutor
 	entries = append(entries, extension.Func{LoadFunc: func(scope *extension.Scope) error {

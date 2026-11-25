@@ -74,7 +74,7 @@ Default output is one URL per line. Use `-jsonl` for structured JSON with reques
 ## Related concepts
 
 - Run Katana after the [scan pipeline](scan.md), [spray](spray.md), or
-  [passive discovery](passive.md) identifies web targets.
+  [passive discovery](cyber://skills/passive/passive.md) identifies web targets.
 - Katana complements Spray by preserving parameters; use
   [playwright](cyber:/skills/runtime/playwright.md) when discovered routes require JavaScript or
   interactive validation.
