@@ -22,7 +22,7 @@ cyber-scan [全局参数] <subcommand> [子命令参数]
 | `neutron` | scanner | 模板化 POC 检测 |
 | `proton` | scanner | 敏感信息扫描（API 密钥、令牌、凭证、密码），支持管道输入 |
 | `katana` | scanner | Web 爬虫 |
-| `passive` | scanner | 网络空间搜索 FOFA/Hunter |
+| `passive` | scanner | 网络空间搜索（仅在至少配置一个来源时注册） |
 | `arsenal` | tool mgr | 安全工具包管理（install/update/remove） |
 | `cyberhub` | query | 查询已加载的指纹和 POC 模板 |
 | `ioa serve` | service | 启动 IOA HTTP server |
@@ -392,7 +392,7 @@ cyber-scan passive -s hunter 'domain.suffix="example.com"'
 | --- | --- | --- |
 | `fofa` | `gateway.fofa.key` | — |
 | `hunter` | `--hunter-api-key` | `HUNTER_API_KEY` |
-| `shodan-idb` | 无需 API key | — |
+| `shodan-idb` | 无需 API key，需在 `gateway.shodan-idb` 显式启用 | — |
 
 ---
 

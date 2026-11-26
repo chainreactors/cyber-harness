@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	cfg "github.com/chainreactors/cyber/pkg/config"
 )
@@ -31,7 +32,11 @@ func Sections() []cfg.Section {
 }
 
 func apiSection(name string) cfg.Section {
-	return cfg.Section{Key: name, New: func() any { return &cfg.API{} }, Secrets: []string{"key"}, Validate: func(value any) error {
+	return cfg.Section{Key: name, New: func() any { return &cfg.API{} }, Secrets: []string{"key"}, Normalize: func(value any) error {
+		// A blank optional key is omitted: the host credential still applies.
+		value.(*cfg.API).Key = strings.TrimSpace(value.(*cfg.API).Key)
+		return nil
+	}, Validate: func(value any) error {
 		api := value.(*cfg.API)
 		if api.Key != "" && apiKeys[name] == "" {
 			return fmt.Errorf("%s does not use an API key", name)

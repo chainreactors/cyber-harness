@@ -1,7 +1,7 @@
 ---
 type: Tool Playbook
 title: passive
-description: Use passive to expand domains/ICPs into cyberspace assets like IPs, URLs, ports via uncover (FOFA, Hunter, Shodan, Censys, etc.). Run before active scanners (gogo, spray, katana).
+description: Use passive to expand domains/ICPs into cyberspace assets like IPs, URLs, ports via the configured uncover sources. Run before active scanners (gogo, spray, katana).
 tags: [easm, recon]
 status: stable
 generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
@@ -9,36 +9,19 @@ generated: { by: process:okf-maintain, at: 2026-08-02T11:46:25Z }
 
 # Passive
 
-`passive` is an cyber command backed by `uncover` for cyberspace search. Pick a source with `-s`.
+`passive` is a cyber command backed by `uncover` for cyberspace search. Pick a source with `-s`.
 
 ## Sources
 
-### Cyberspace Recon (uncover)
-
-| Source       | Provider    | Credential                                            |
-| ------------ | ----------- | ----------------------------------------------------- |
-| `fofa`       | FOFA        | configured by host                                   |
-| `hunter`     | Hunter      | `recon.hunter_api_key` or env `HUNTER_API_KEY`         |
-| `shodan`     | Shodan      | env `SHODAN_API_KEY`                                   |
-| `shodan-idb` | Shodan IDB  | none                                                   |
-| `censys`     | Censys      | env `CENSYS_API_TOKEN` + `CENSYS_ORGANIZATION_ID`      |
-| `quake`      | Quake       | env `QUAKE_TOKEN`                                      |
-| `zoomeye`    | ZoomEye     | env `ZOOMEYE_API_KEY`                                  |
-| `netlas`     | Netlas      | env `NETLAS_API_KEY`                                   |
-| `criminalip` | CriminalIP  | env `CRIMINALIP_API_KEY`                               |
-| `publicwww`  | PublicWWW   | env `PUBLICWWW_API_KEY`                                |
-| `hunterhow`  | HunterHow   | env `HUNTERHOW_API_KEY`                                |
-| `binaryedge` | BinaryEdge  | env `BINARYEDGE_API_KEY`                               |
-| `onyphe`     | Onyphe      | env `ONYPHE_API_KEY`                                   |
-| `driftnet`   | Driftnet    | env `DRIFTNET_API_KEY`                                 |
-| `greynoise`  | GreyNoise   | env `GREYNOISE_API_KEY`                                |
-
-Sources without credentials are silently skipped at init.
-Credentials are supplied by the host before tools are loaded.
+Only sources configured by the host are available. Run `passive -h` first: its
+`Available now:` line is the complete list of sources for this session, and its
+usage examples show their native query syntax. Do not try a source that is not
+listed there; credentials and source enablement belong to the host configuration,
+not to command arguments.
 
 ## When to Use
 
-- **Domain/ICP → IPs, URLs, ports**: use a cyberspace source (`fofa`, `hunter`, `shodan`, etc.)
+- **Domain/ICP → IPs, URLs, ports**: query an available cyberspace source.
 - Feed output into `gogo`, `spray`, `katana`, or `neutron` for active scanning.
 
 Skip `passive` when the user already provided concrete IPs or private ranges.
@@ -46,48 +29,32 @@ Skip `passive` when the user already provided concrete IPs or private ranges.
 ## Usage
 
 ```bash
-passive -s fofa 'domain="example.com"'
-passive -s fofa 'icp="浙ICP备16020926号"'
-passive -s hunter 'domain.suffix="example.com"'
-passive -s shodan 'org:"Example"'
+passive -h
+passive -s <source> '<source-native query>'
 ```
 
-The positional argument is the source-native query string.
+The positional argument is a single source-native query string; quote it as one
+shell word. Each source keeps its own query language.
 
 ## Output
 
-### FOFA
-
-JSON array with rich fields:
-
-```json
-[{"ip":"192.0.2.4","port":"443","url":"https://example.com","domain":"example.com","title":"Example","icp":"..."}]
-```
-
-### Hunter
-
-JSON array with extra fields: `status`, `company`, `frame`:
+A JSON array of assets. Every row carries `ip`, `port`, and `url`; rows also carry
+`host` or `domain`, and sources with richer data add fields such as `title`, `icp`,
+`status`, `company`, `frame`, or `source`.
 
 ```json
-[{"ip":"192.0.2.4","port":"443","url":"https://example.com","domain":"example.com","status":"200","company":"Example Inc","frame":"nginx","title":"Example","icp":"..."}]
-```
-
-### Other sources (shodan, censys, etc.)
-
-Generic JSON array:
-
-```json
-[{"ip":"192.0.2.4","port":"80","url":"http://example.com","host":"example.com","source":"shodan"}]
+[{"ip":"192.0.2.4","port":"443","url":"https://example.com","domain":"example.com","title":"Example"}]
 ```
 
 ## Typical Pipeline
 
-1. `passive -s fofa 'icp="京ICP备xxx号"'` → get IPs/URLs
+1. `passive -s <source> '<query for the target domain or ICP>'` → get IPs/URLs
 2. `gogo` / `spray` / `katana` → active scan discovered assets
 
 ## Notes
 
-- Hunter blocks overseas IPs; use `recon.proxy=socks5://...` for Hunter from abroad.
+- Some sources restrict query shapes or regions; `passive -h` notes the known
+  restrictions, and errors name the available alternatives.
 - ICP data may lag reality; treat domain mapping as leads, not authoritative.
 
 ## Related concepts

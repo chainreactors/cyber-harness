@@ -34,7 +34,7 @@ Notes:
 
 ## Related concepts
 
-- Spray probes web services discovered by [gogo](gogo.md), [passive](passive.md),
+- Spray probes web services discovered by [gogo](gogo.md), [passive](cyber://skills/passive/passive.md),
   or the [scan pipeline](scan.md).
 - Use [katana](katana.md) for deeper parameter-aware crawling and
   [playwright](cyber:/skills/runtime/playwright.md) for rendered, interactive application behavior.

@@ -22,6 +22,7 @@ type Uncover struct {
 	limit    int
 	baseURLs map[string]string
 	disabled []string
+	keyless  []string
 	secrets  []string
 }
 
@@ -30,6 +31,9 @@ type Uncover struct {
 func NewUncover(opts Config) *Uncover {
 	p := &sources.Provider{}
 
+	// Blank keys are not credentials, like the provider values below.
+	opts.FofaKey = strings.TrimSpace(opts.FofaKey)
+	opts.HunterAPIKey = strings.TrimSpace(opts.HunterAPIKey)
 	if opts.FofaKey != "" {
 		p.Fofa = append(p.Fofa, opts.FofaKey)
 	}
@@ -56,7 +60,8 @@ func NewUncover(opts Config) *Uncover {
 	}
 	return &Uncover{
 		keys: keys, proxy: opts.Proxy, limit: limit,
-		baseURLs: maps.Clone(opts.BaseURLs), disabled: slices.Clone(opts.Disabled), secrets: secrets,
+		baseURLs: maps.Clone(opts.BaseURLs), disabled: slices.Clone(opts.Disabled),
+		keyless: slices.Clone(opts.Keyless), secrets: secrets,
 	}
 }
 
@@ -92,7 +97,8 @@ func applyCredentials(p *sources.Provider, values map[string]string) {
 	appendPair(&p.Google, "GOOGLE_API_KEY", "GOOGLE_API_CX")
 }
 
-// Sources returns the list of sources that have valid credentials.
+// Sources returns the configured sources: those with credentials, plus keyless
+// sources the host enabled explicitly. Nothing is available by default.
 func (e *Uncover) Sources() []string {
 	type check struct {
 		name string
@@ -102,7 +108,7 @@ func (e *Uncover) Sources() []string {
 		{"fofa", e.keys.FofaKey != ""},
 		{"hunter", e.keys.HunterToken != ""},
 		{"shodan", e.keys.Shodan != ""},
-		{"shodan-idb", true},
+		{"shodan-idb", slices.Contains(e.keyless, "shodan-idb")},
 		{"censys", e.keys.CensysToken != ""},
 		{"quake", e.keys.QuakeToken != ""},
 		{"zoomeye", e.keys.ZoomEyeToken != ""},
@@ -127,8 +133,8 @@ func (e *Uncover) Sources() []string {
 
 // Query executes a single-source query and returns collected results.
 func (e *Uncover) Query(ctx context.Context, src, query string) ([]sources.Result, error) {
-	if slices.Contains(e.disabled, src) {
-		return nil, fmt.Errorf("passive source %s is disabled", src)
+	if !slices.Contains(e.Sources(), src) {
+		return nil, fmt.Errorf("passive source %s is not configured", src)
 	}
 	agent, err := e.agentFor(src)
 	if err != nil {

@@ -69,7 +69,7 @@ func renderCommands(_ context.Context, input prompt.Context) (string, error) {
 	if strings.TrimSpace(input.Agent.CommandDocs) == "" {
 		return "", nil
 	}
-	return "## Pseudo-Commands (IMPORTANT: use the bash tool)\n\nPseudo-commands are NOT system binaries - they are built into the bash tool. Call the bash tool with the pseudo-command as the \"command\" parameter.\n\nExample: bash {\"command\": \"scan -i 192.168.1.0/24 --mode quick\"}\n\nAvailable pseudo-commands:\n" + input.Agent.CommandDocs + "\nNOTE: `scan` already runs gogo -> spray -> zombie -> neutron as a pipeline. Use individual commands only when you need a single stage or fine-grained control. Do not run spray separately and then scan.\n\nRead the corresponding tool concept for detailed usage: `cyber://skills/cyber/okf/easm/<command>.md`.", nil
+	return "## Pseudo-Commands (IMPORTANT: use the bash tool)\n\nPseudo-commands are NOT system binaries - they are built into the bash tool. Call the bash tool with the pseudo-command as the \"command\" parameter.\n\nExample: bash {\"command\": \"scan -i 192.168.1.0/24 --mode quick\"}\n\nAvailable pseudo-commands:\n" + input.Agent.CommandDocs + "\nNOTE: `scan` already runs gogo -> spray -> zombie -> neutron as a pipeline. Use individual commands only when you need a single stage or fine-grained control. Do not run spray separately and then scan.\n\nRead the corresponding tool concept for detailed usage: the reference named in the command's entry above, otherwise `cyber://skills/cyber/okf/easm/<command>.md`.", nil
 }
 
 func renderScannerConstraints(_ context.Context, input prompt.Context) (string, error) {

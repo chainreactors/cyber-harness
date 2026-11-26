@@ -34,7 +34,7 @@ func TestEveryPassiveAPIUsesConfiguredBaseURL(t *testing.T) {
 				credentials[name] = "private-key"
 			}
 			engine := passive.NewUncover(passive.Config{
-				FofaKey: "private-key", HunterAPIKey: "private-key", Credentials: credentials,
+				FofaKey: "private-key", HunterAPIKey: "private-key", Credentials: credentials, Keyless: []string{"shodan-idb"},
 				BaseURLs: map[string]string{section.Key: server.URL + "/tenant/" + section.Key + "/"},
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -74,7 +74,7 @@ func TestPassiveGatewayDoesNotFollowRedirect(t *testing.T) {
 	defer other.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, http.StatusFound) }))
 	defer server.Close()
-	engine := passive.NewUncover(passive.Config{BaseURLs: map[string]string{"shodan-idb": server.URL}})
+	engine := passive.NewUncover(passive.Config{Keyless: []string{"shodan-idb"}, BaseURLs: map[string]string{"shodan-idb": server.URL}})
 	if _, err := engine.Query(t.Context(), "shodan-idb", "192.0.2.1"); err == nil || escaped.Load() != 0 {
 		t.Fatalf("redirect escaped upstream: err=%v calls=%d", err, escaped.Load())
 	}
