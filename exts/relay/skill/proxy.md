@@ -112,7 +112,7 @@ whitelist, which these calls cannot change.
 
 - `503 PROXY_TUNNEL_DISABLED`: the tunnel is off; proxies are unavailable.
   `400 PROXY_UNAVAILABLE`: this relay has no proxy pool; stop and report.
-- `400 PROXY_GEO_INVALID`: bad location filter; fix it as the hint says.
+- `400 PROXY_GEO_INVALID`: bad location filter; check the message/hint for which field failed validation and fix the filter.
 - `400 PROXY_SWITCH_UNSUPPORTED`: the upstream cannot give this session a
   different IP. Do not retry the switch; use a new session id instead.
 - `400 INVALID_SESSION_ID` / `INVALID_LEASE_ID`: fix the id.

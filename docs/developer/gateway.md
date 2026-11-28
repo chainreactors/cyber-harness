@@ -80,7 +80,7 @@ gateway:
 - **SDK**：`tools/relay/api.gen.go` 由 cyber-relay 的 `docs/openapi.json` 生成，包括类型、每个接口一个 `Client` 方法，以及 `relay` 命令的接口表。覆盖除 `/v1/keys*`（子 key 管理）外的 22 个数据面接口；手写部分只有 `client.go`（连接、鉴权、错误）和 `command.go`（按接口表解析参数）。
 - **spec 不入库**：cyber-relay 是私有仓库。`go generate ./tools/relay` 用 `gh api` 拉取 `doc.go` 中 `-ref` 指定提交的 spec 到 `tools/relay/testdata/openapi.json`（git 忽略），再重新生成代码。本地有 spec 时 `go test ./tools/relay` 校验 `api.gen.go` 与之一致，没有时跳过。跟进新版本：改 `-ref`，重新生成，跑测试。
 - **命令**：`relay <operation>`，子命令名取自 `operationId`（如 `search-assets`），参数名即 API 字段名，`relay <operation> -h` 打印 spec 中的字段说明。`acquire-proxy` 返回的 `tunnel_url` 原样输出，其中的 key 是 relay 下发给本机的 key，不是上游供应商的凭据。
-- **按配置加载**：`exts/relay` 在 gateway 之后加载，只有 `gateway.relay` 存在且未禁用时才注册 `relay` 命令、挂载 `cyber://skills/relay/` 并贡献 `cyber-relay` skill；`enabled: false` 与未配置相同。连接检查调用不消耗上游额度的 `explain-search`，`401` 视为失败，`403` 说明 key 有效但未开放资产测绘 scope。
+- **按配置加载**：`exts/relay` 在 gateway 之后加载，只有 `gateway.relay` 存在且未禁用时才注册 `relay` 命令、挂载 `cyber://skills/relay/` 并贡献 `cyber-relay` skill；`enabled: false` 与未配置相同。连接检查调用不消耗上游额度的 `explain-search`，`401` 及其他非 scope 类 `403`（如 `IP_NOT_ALLOWED`）均视为失败，仅错误码为 `SCOPE_DENIED` / `INSUFFICIENT_SCOPE` 的 `403` 说明 key 有效但未开放资产测绘 scope。
 
 ## 宿主接入
 

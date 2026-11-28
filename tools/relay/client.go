@@ -17,6 +17,7 @@ import (
 const (
 	// A captcha solve may take the relay's full 150-second limit.
 	defaultTimeout = 180 * time.Second
+	maxRequest     = 4 << 20
 	maxResponse    = 16 << 20
 )
 
@@ -103,6 +104,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		data, err := json.Marshal(in)
 		if err != nil {
 			return fmt.Errorf("relay: encode request: %w", err)
+		}
+		if len(data) > maxRequest {
+			return fmt.Errorf("relay %s %s: request exceeds %d bytes", method, path, maxRequest)
 		}
 		body = bytes.NewReader(data)
 	}

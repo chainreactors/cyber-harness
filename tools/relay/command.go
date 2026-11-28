@@ -240,7 +240,7 @@ func parse(op *operation, dir string, args []string) (path []string, body, param
 		name = strings.ReplaceAll(name, "-", "_")
 		if name == "body" && body != nil {
 			if !inline {
-				if i+1 >= len(args) {
+				if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 					return nil, nil, nil, fmt.Errorf("--body requires a value")
 				}
 				i++
@@ -258,7 +258,7 @@ func parse(op *operation, dir string, args []string) (path []string, body, param
 			if isBool(*f) {
 				value = "true"
 			} else {
-				if i+1 >= len(args) {
+				if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 					return nil, nil, nil, fmt.Errorf("--%s requires a value", flagName(name))
 				}
 				i++
@@ -270,7 +270,7 @@ func parse(op *operation, dir string, args []string) (path []string, body, param
 	if hasBody {
 		data := []byte(rawBody)
 		if file, ok := strings.CutPrefix(rawBody, "@"); ok {
-			if data, err = os.ReadFile(resolve(dir, file)); err != nil {
+			if data, err = readFileBounded(resolve(dir, file), maxRequest); err != nil {
 				return nil, nil, nil, fmt.Errorf("--body: %w", err)
 			}
 		}
@@ -313,7 +313,7 @@ func parse(op *operation, dir string, args []string) (path []string, body, param
 		}
 		key := f.In + ":" + f.Name
 		if !cleared[key] {
-			if v := structField(target, f.Name); v.Kind() == reflect.Slice {
+			if v := structField(target, f.Name); v.Kind() == reflect.Slice || v.Kind() == reflect.Map {
 				v.SetZero()
 			}
 			cleared[key] = true
@@ -346,6 +346,22 @@ func resolve(dir, file string) string {
 	return filepath.Join(dir, file)
 }
 
+func readFileBounded(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("file exceeds %d bytes", max)
+	}
+	return data, nil
+}
+
 // structField finds the field of *target whose JSON name is name.
 func structField(target any, name string) reflect.Value {
 	v := reflect.ValueOf(target).Elem()
@@ -362,7 +378,8 @@ func set(target any, f field, raw, dir string) error {
 	v := structField(target, f.Name)
 	invalid := func(err error) error { return fmt.Errorf("--%s: %w", flagName(f.Name), err) }
 	if file, ok := strings.CutPrefix(raw, "@"); ok && isImage(f) {
-		data, err := os.ReadFile(resolve(dir, file))
+		// Base64 expands 3 bytes into 4; bound the raw file to fit maxRequest.
+		data, err := readFileBounded(resolve(dir, file), (maxRequest*3)/4)
 		if err != nil {
 			return invalid(err)
 		}

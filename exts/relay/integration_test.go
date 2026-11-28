@@ -5,11 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-
 	"github.com/chainreactors/cyber/agent/provider"
 	"github.com/chainreactors/cyber/agent/skills"
 	"github.com/chainreactors/cyber/core/extension"
@@ -23,6 +18,11 @@ import (
 	cfg "github.com/chainreactors/cyber/pkg/config"
 	"github.com/chainreactors/cyber/pkg/harness"
 	"github.com/chainreactors/cyber/tools/files"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
 )
 
 const key = "cr_sub_integration"
@@ -191,13 +191,17 @@ func TestConfiguredRelayLoadsSkillAndCommand(t *testing.T) {
 }
 
 func TestConnectionCheckGuardsSecretsAnd403Codes(t *testing.T) {
+	var mu sync.Mutex
 	var status int
 	var body string
 	var seenAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		seenAuth = r.Header.Get("Authorization")
-		w.WriteHeader(status)
-		fmt.Fprint(w, body)
+		st, bd := status, body
+		mu.Unlock()
+		w.WriteHeader(st)
+		fmt.Fprint(w, bd)
 	}))
 	t.Cleanup(server.Close)
 	sections := sections(t)
@@ -207,7 +211,10 @@ func TestConnectionCheckGuardsSecretsAnd403Codes(t *testing.T) {
 	stored := &types.DistributeConfig{}
 	var err error
 	if stored.Extensions, err = cfg.ValuesToProto(cfg.Values{
-		"gateway": {"fofa": map[string]any{"base_url": "https://fofa.test", "key": "fofa_secret"}},
+		"gateway": {
+			"fofa":  map[string]any{"base_url": "https://fofa.test", "key": "fofa_secret"},
+			"relay": map[string]any{"base_url": "https://old-relay.test", "key": key},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -218,11 +225,55 @@ func TestConnectionCheckGuardsSecretsAnd403Codes(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks, err := sections.TestConnection(t.Context(), "gateway.relay", incoming, stored)
-	if err != nil || len(checks) != 1 || checks[0].Ok || seenAuth != "" {
-		t.Fatalf("cross-kind key preservation check: checks=%v err=%v seenAuth=%q", checks, err, seenAuth)
+	mu.Lock()
+	gotAuth := seenAuth
+	mu.Unlock()
+	if err != nil || len(checks) != 1 || checks[0].Ok || gotAuth != "" {
+		t.Fatalf("cross-kind key preservation check: checks=%v err=%v seenAuth=%q", checks, err, gotAuth)
 	}
 
-	// Only SCOPE_DENIED / INSUFFICIENT_SCOPE 403 proves the key is authenticated.
+	// Changing base_url with an empty key must not send the stored relay key to
+	// the new endpoint.
+	changedURL := &types.DistributeConfig{}
+	if changedURL.Extensions, err = cfg.ValuesToProto(cfg.Values{
+		"gateway": {"relay": map[string]any{"base_url": server.URL}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	checks, err = sections.TestConnection(t.Context(), "gateway.relay", changedURL, stored)
+	mu.Lock()
+	gotAuth = seenAuth
+	mu.Unlock()
+	if err != nil || len(checks) != 1 || checks[0].Ok || gotAuth != "" {
+		t.Fatalf("changed base_url leaked stored key: checks=%v err=%v seenAuth=%q", checks, err, gotAuth)
+	}
+
+	// Invalid metadata and multiple enabled relay instances must fail before probing.
+	for name, gw := range map[string]map[string]any{
+		"non-bool enabled": {
+			"relay": map[string]any{"base_url": server.URL, "key": key, "enabled": "false"},
+		},
+		"invalid kind": {
+			"relay": map[string]any{"base_url": server.URL, "key": key, "kind": 123},
+		},
+		"multiple relay instances": {
+			"relay":  map[string]any{"base_url": server.URL, "key": key},
+			"backup": map[string]any{"kind": "relay", "base_url": server.URL, "key": key},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			doc := &types.DistributeConfig{}
+			if doc.Extensions, err = cfg.ValuesToProto(cfg.Values{"gateway": gw}); err != nil {
+				t.Fatal(err)
+			}
+			checks, err := sections.TestConnection(t.Context(), "gateway.relay", doc, nil)
+			if err != nil || len(checks) != 1 || checks[0].Ok {
+				t.Fatalf("%s: checks=%v err=%v", name, checks, err)
+			}
+		})
+	}
+
+	// Only valid explain responses or SCOPE_DENIED/INSUFFICIENT_SCOPE 403 pass.
 	probe := &types.DistributeConfig{}
 	if probe.Extensions, err = cfg.ValuesToProto(cfg.Values{
 		"gateway": {"relay": map[string]any{"base_url": server.URL, "key": key}},
@@ -235,13 +286,17 @@ func TestConnectionCheckGuardsSecretsAnd403Codes(t *testing.T) {
 		body   string
 		wantOK bool
 	}{
+		{"valid explain", http.StatusOK, `{"query":"ip=\"1.1.1.1\"","supported":false}`, true},
+		{"generic empty json", http.StatusOK, `{}`, false},
 		{"scope denied", http.StatusForbidden, `{"error":{"code":"SCOPE_DENIED","message":"no scope"}}`, true},
 		{"insufficient scope", http.StatusForbidden, `{"error":{"code":"INSUFFICIENT_SCOPE","message":"no scope"}}`, true},
 		{"ip not allowed", http.StatusForbidden, `{"error":{"code":"IP_NOT_ALLOWED","message":"blocked"}}`, false},
 		{"non-relay 403", http.StatusForbidden, `<html>403 Forbidden</html>`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			mu.Lock()
 			status, body = tc.status, tc.body
+			mu.Unlock()
 			checks, err := sections.TestConnection(t.Context(), "gateway.relay", probe, nil)
 			if err != nil || len(checks) != 1 || checks[0].Ok != tc.wantOK {
 				t.Fatalf("%s: checks=%v err=%v", tc.name, checks, err)

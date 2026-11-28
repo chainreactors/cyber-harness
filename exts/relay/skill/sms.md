@@ -75,7 +75,7 @@ filters or options no backend in the group supports is
 - `400 MISSING_PROJECT` / `INVALID_PROJECT` / `SMS_PROJECT_INVALID`: the
   project is empty, altered or unknown; run `relay list-sms-projects` again.
 - `400 SMS_FILTER_INVALID`: the message names the filter value to fix.
-- `400 REQUEST_REJECTED`: the upstream refused the request; follow the hint
+- `400 REQUEST_REJECTED`: the upstream refused the request; check the message/hint for details
   (usually try without filters, or report that the project has no numbers
   right now).
 - `504 UPSTREAM_TIMEOUT` on acquire: the relay did not try another backend; a number may have been taken and charged

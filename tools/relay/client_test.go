@@ -212,6 +212,7 @@ func TestCommandFlags(t *testing.T) {
 		{[]string{"lookup-host", "1.2.3.4", "--format", "flat"}, func(r recorded) bool { return r.query["format"][0] == "flat" }},
 		{[]string{"remove-proxy-whitelist", "1.2.3.4", "5.6.7.0/24"}, func(r recorded) bool { return fmt.Sprint(r.body["ips"]) == "[1.2.3.4 5.6.7.0/24]" }},
 		{[]string{"remove-proxy-whitelist", "--body", `{"ips":["1.1.1.1"]}`, "--ips", "2.2.2.2"}, func(r recorded) bool { return fmt.Sprint(r.body["ips"]) == "[2.2.2.2]" }},
+		{[]string{"search-web", "q", "--body", `{"options":{"a":"1","b":"2"}}`, "--options", "c=3"}, func(r recorded) bool { return fmt.Sprint(r.body["options"]) == "map[c:3]" }},
 		{[]string{"search-web", "--", "docker", "--network", "host", "-h"}, func(r recorded) bool { return r.body["query"] == "docker --network host -h" }},
 		{[]string{"list-sms-projects", "--search", "-h"}, func(r recorded) bool { return r.query["search"][0] == "-h" }},
 	}
@@ -241,9 +242,22 @@ func TestCommandFlags(t *testing.T) {
 		{"acquire-proxy", "--body", `{"region":"global"}{"country":"US"}`},
 		{"acquire-proxy", "--body", `{"region":"global"}}`},
 		{"acquire-proxy", "--body", ""},
+		{"search-web", "--query", "--cache=false"},
 	} {
 		if _, err := runCommand(t, client, dir, args...); err == nil {
 			t.Errorf("relay %v accepted", args)
+		}
+	}
+	big := filepath.Join(dir, "big.bin")
+	if err := os.WriteFile(big, make([]byte, maxRequest+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"acquire-proxy", "--body", "@" + big},
+		{"solve-captcha", "image_text", "--image", "@" + big},
+	} {
+		if _, err := runCommand(t, client, dir, args...); err == nil {
+			t.Errorf("relay %v accepted oversized file", args)
 		}
 	}
 }
