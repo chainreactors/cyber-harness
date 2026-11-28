@@ -54,6 +54,7 @@ FOFA 的地址和凭据统一配置在 `gateway` 的服务下，接受 `base_url
 | Cyberhub | `cyberhub.url` | 已有可配置资源服务地址 |
 | MCP、IOA、OTLP | MCP 服务的 `url`、`ioa.client.url`、`OTEL_EXPORTER_OTLP_ENDPOINT` | 已有服务端点配置，保留各自协议含义 |
 | Clash | `gateway.<name>.url` | 已有完整订阅 URL，无需拆成 base URL 与路径 |
+| Cyber Relay | `gateway.relay` | 独立能力：`relay` 命令与 `cyber-relay` skill，见下节 |
 
 passive 来源为 `fofa`、`hunter`、`shodan`、`shodan-idb`、`censys`、`quake`、`zoomeye`、`netlas`、`criminalip`、`publicwww`、`hunterhow`、`odin`、`binaryedge`、`onyphe`、`driftnet`、`greynoise`。除 FOFA 外，`key` 可省略并使用宿主已有凭据；填写时覆盖该来源的主凭据。Censys 的组织 ID 仍由 `CENSYS_ORGANIZATION_ID` 提供。`shodan-idb` 与 DuckDuckGo 无需 key；`shodan-idb` 默认不可用，需写出 `gateway.shodan-idb`（例如 `enabled: true`）才会加入可用来源。没有任何可用来源时，passive 不注册命令，也不挂载 `cyber://skills/passive/` 文档；`enabled: false` 与未配置相同。
 
@@ -64,6 +65,22 @@ passive 来源为 `fofa`、`hunter`、`shodan`、`shodan-idb`、`censys`、`quak
 Clash 默认 `refresh: 30m`、`strategy: adaptive`，也支持 `type`、`name`、`country` 过滤和独立的下载 `proxy`。`refresh: 0s` 仅拉取一次，空 `strategy` 仅加载节点。拉取成功后原子发布，失败保留旧快照；手动选定的节点不会被定时刷新切回自动模式。选定节点被移除或改变时保留旧快照并记录错误。已有 `proxy subscribe/auto` 和 traffic 协议也调用同一订阅实现。
 
 订阅下载使用独立 HTTP 客户端和配置的下载出口，默认遵循宿主代理环境，不依赖订阅产生的节点。刷新串行执行；停止或替换配置后旧结果不能继续发布，关闭会取消并等待刷新结束。部分依赖的健康检查和地理筛选在取消后可能仍需完成；关闭超时会保留资源供重试。
+
+## Cyber Relay
+
+Cyber Relay 用自己的 DSL、路径和 Bearer 鉴权统一多个付费服务，不是原生协议兼容的上游，所以作为一个独立能力接入，不改写 passive、web_search 或 proxy：
+
+```yaml
+gateway:
+  relay:
+    base_url: https://relay.example
+    key: "<cr_sub_…>"   # 建议使用只开放所需 scope 与额度的子 key
+```
+
+- **SDK**：`tools/relay/api.gen.go` 由 cyber-relay 的 `docs/openapi.json` 生成，包括类型、每个接口一个 `Client` 方法，以及 `relay` 命令的接口表。覆盖除 `/v1/keys*`（子 key 管理）外的 22 个数据面接口；手写部分只有 `client.go`（连接、鉴权、错误）和 `command.go`（按接口表解析参数）。
+- **spec 不入库**：cyber-relay 是私有仓库。`go generate ./tools/relay` 用 `gh api` 拉取 `doc.go` 中 `-ref` 指定提交的 spec 到 `tools/relay/testdata/openapi.json`（git 忽略），再重新生成代码。本地有 spec 时 `go test ./tools/relay` 校验 `api.gen.go` 与之一致，没有时跳过。跟进新版本：改 `-ref`，重新生成，跑测试。
+- **命令**：`relay <operation>`，子命令名取自 `operationId`（如 `search-assets`），参数名即 API 字段名，`relay <operation> -h` 打印 spec 中的字段说明。`acquire-proxy` 返回的 `tunnel_url` 原样输出，其中的 key 是 relay 下发给本机的 key，不是上游供应商的凭据。
+- **按配置加载**：`exts/relay` 在 gateway 之后加载，只有 `gateway.relay` 存在且未禁用时才注册 `relay` 命令、挂载 `cyber://skills/relay/` 并贡献 `cyber-relay` skill；`enabled: false` 与未配置相同。连接检查调用不消耗上游额度的 `explain-search`，`401` 视为失败，`403` 说明 key 有效但未开放资产测绘 scope。
 
 ## 宿主接入
 
