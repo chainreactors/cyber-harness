@@ -87,3 +87,7 @@ cyber.yaml
 /docs/validation/jev-browser-takeover-*.json
 /cmd/web/static/*
 !/cmd/web/static/.gitkeep
+
+# cyber-relay data-plane reference, fetched by `go generate ./tools/relay`
+# (cyber-relay is private; the SDK test checks against it when present).
+tools/relay/testdata/openapi.json

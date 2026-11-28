@@ -160,6 +160,7 @@ var installationRules = map[string][]installationRule{
 	"tools/zombie":      {{"exts/scanner", []string{"New*"}}},
 	"tools/katana":      {{"exts/katana", []string{"New*"}}},
 	"tools/passive":     {{"exts/passive", []string{"New*"}}},
+	"tools/relay":       {{"exts/relay", []string{"New*"}}},
 	"tools/scan":        {{"exts/scanner", []string{"New"}}},
 	"tools/scan/engine": {{"exts/scanner", []string{"InitWithOptions"}}},
 	"tools/cyberhub":    {{"exts/scanner", []string{"NewCyberhubSearch"}}},

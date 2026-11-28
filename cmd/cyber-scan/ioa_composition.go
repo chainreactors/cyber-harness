@@ -11,6 +11,7 @@ import (
 	ioaserver "github.com/chainreactors/cyber/exts/ioa/server"
 	jevext "github.com/chainreactors/cyber/exts/jev"
 	proxyext "github.com/chainreactors/cyber/exts/proxy"
+	relayext "github.com/chainreactors/cyber/exts/relay"
 	hostcli "github.com/chainreactors/cyber/pkg/cli"
 	cfg "github.com/chainreactors/cyber/pkg/config"
 
@@ -62,9 +63,10 @@ func declareResources(cli *hostcli.Registry, agentOptions *cfg.AgentOptions) *cf
 	mustDeclare(jevext.Declare(resources))
 	mustDeclare(scannerext.Declare(resources))
 	mustDeclare(passiveconfig.Declare(resources))
-	schemas := append(passiveconfig.Sections(), proxyext.ClashSection())
+	schemas := append(passiveconfig.Sections(), proxyext.ClashSection(), relayext.Section())
 	schemas = append(schemas, searchext.Sections()...)
 	mustDeclare(gateway.Declare(resources, schemas...))
+	mustDeclare(relayext.Declare(resources))
 	mustDeclare(resourceAddReconFlags(resources))
 	mustDeclare(searchext.Declare(resources))
 	if agentOptions != nil {

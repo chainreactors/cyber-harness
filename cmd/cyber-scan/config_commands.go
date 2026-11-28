@@ -8,6 +8,7 @@ import (
 	"github.com/chainreactors/cyber/exts/gateway"
 	ioaclient "github.com/chainreactors/cyber/exts/ioa/client"
 	passiveconfig "github.com/chainreactors/cyber/exts/passive/config"
+	relayext "github.com/chainreactors/cyber/exts/relay"
 	scannerext "github.com/chainreactors/cyber/exts/scanner"
 	searchext "github.com/chainreactors/cyber/exts/search"
 	"github.com/chainreactors/cyber/pkg/cli/configuration"
@@ -48,6 +49,9 @@ func configChecks(ctx context.Context, option *cfg.Option, online bool) []config
 		}
 		if configured["fofa"] {
 			selected = append(selected, "gateway.fofa")
+		}
+		if configured[relayext.Kind] {
+			selected = append(selected, "gateway."+relayext.Kind)
 		}
 		if configured["hunter"] && !slices.Contains(selected, passiveconfig.ConfigKey) {
 			selected = append(selected, passiveconfig.ConfigKey)
